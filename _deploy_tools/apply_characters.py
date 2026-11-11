@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+apply_characters.py
+===================
+Aplica a Substituicao Universal de Slots (Universal Slot Replacement) para os
+protagonistas do Grand Theft Auto V:
+  - Michael De Santa (player_zero) -> Shinano Eternal Reunion
+  - Franklin Clinton (player_one)  -> Shinano Casual / Uniforme
+  - Trevor Philips   (player_two)  -> Miltina Maid
+
+Suporta selecao de personagem individual ou todos simultaneamente.
+Substitui todas as malhas de tronco (uppr) pelo modelo completo da waifu,
+todas as texturas (uppr_diff) pelo atlas 2K correspondente, e todas as outras
+partes do corpo humano (cabeca, cabelo, barba, pernas, pes, maos, acessorios)
+por drawables dummy invisiveis (head_000_r.ydd de 629 bytes), eliminando
+completamente clipping e sobreposicao de partes dos personagens vanilla.
+
+Regras de Implementacao:
+  - Zero variaveis de uma ou duas letras.
+  - Zero emojis (mensagens formatadas com marcadores ASCII padronizados).
+  - Tratamento rigoroso de erros e excecoes.
+  - Multiplataforma (Windows e Linux/WSL).
+"""
+
+import argparse
+import os
+import shutil
+import sys
+from pathlib import Path
+
+# Adiciona o diretorio atual ao sys.path para importar vrc2gtav_paths
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import vrc2gtav_paths as project_paths
+except ImportError:
+    from common_tools import vrc2gtav_paths as project_paths
+
+PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
+STAGING_DIRECTORY = project_paths.get_staging_dir()
+DUMMY_YDD_FILE_PATH = (
+    PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "head_000_r.ydd"
+)
+
+# Registro central de configuracao dos personagens disponiveis
+CHARACTER_REGISTRY = {
+    "player_zero": {
+        "display_name": "Michael De Santa -> Shinano Eternal Reunion",
+        "model_ydd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "2_Michael_Shinano_EternalReunion"
+            / "4_exported_models"
+            / "uppr_000_u.ydd"
+        ),
+        "texture_ytd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "2_Michael_Shinano_EternalReunion"
+            / "3_textures_gtav"
+            / "test_er.ytd"
+        ),
+    },
+    "player_one": {
+        "display_name": "Franklin Clinton -> Shinano Casual",
+        "model_ydd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "1_Franklin_Shinano_Casual"
+            / "4_exported_models"
+            / "uppr_008_u.ydd"
+        ),
+        "texture_ytd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "1_Franklin_Shinano_Casual"
+            / "3_textures_gtav"
+            / "shinano_franklin_2k.ytd"
+        ),
+    },
+    "player_two": {
+        "display_name": "Trevor Philips -> Miltina Maid",
+        "model_ydd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "3_Trevor_Miltina_Maid"
+            / "4_exported_models"
+            / "uppr_000_u.ydd"
+        ),
+        "texture_ytd_path": (
+            PROJECT_ROOT_DIRECTORY
+            / "3_Trevor_Miltina_Maid"
+            / "3_textures_gtav"
+            / "miltina_maid.ytd"
+        ),
+    },
+}
+
+STAGING_TARGET_DIRECTORIES = [
+    STAGING_DIRECTORY / "mppatches_extracted",
+    STAGING_DIRECTORY / "streamedpeds_players_extracted",
+]
+
+VANILLA_BODY_SLOT_PREFIXES = [
+    "accs",
+    "berd",
+    "decl",
+    "feet",
+    "hair",
+    "hand",
+    "head",
+    "jbib",
+    "lowr",
+    "task",
+    "teef",
+]
+
+
+def patch_single_character_directory(
+    character_identifier: str,
+    character_configuration: dict,
+    target_ped_directory: Path,
+) -> dict:
+    """
+    Substitui os arquivos dentro da pasta extraida do personagem (player_zero, player_one ou player_two).
+    """
+    if not target_ped_directory.is_dir():
+        return {
+            "uppr_models": 0,
+            "textures": 0,
+            "dummies": 0,
+            "untouched": 0,
+        }
+
+    source_model_path = character_configuration["model_ydd_path"]
+    source_texture_path = character_configuration["texture_ytd_path"]
+
+    statistics_counter = {
+        "uppr_models": 0,
+        "textures": 0,
+        "dummies": 0,
+        "untouched": 0,
+    }
+
+    all_directory_filenames = sorted(os.listdir(target_ped_directory))
+    for current_filename in all_directory_filenames:
+        target_file_path = target_ped_directory / current_filename
+        if not target_file_path.is_file():
+            continue
+
+        filename_prefix = current_filename.split("_")[0].lower()
+        filename_extension = target_file_path.suffix.lower()
+
+        try:
+            if filename_prefix == "uppr" and filename_extension == ".ydd":
+                shutil.copyfile(source_model_path, target_file_path)
+                statistics_counter["uppr_models"] += 1
+            elif (
+                filename_prefix == "uppr"
+                and "diff" in current_filename
+                and filename_extension == ".ytd"
+            ):
+                shutil.copyfile(source_texture_path, target_file_path)
+                statistics_counter["textures"] += 1
+            elif (
+                filename_extension == ".ydd"
+                and filename_prefix in VANILLA_BODY_SLOT_PREFIXES
+            ):
+                shutil.copyfile(DUMMY_YDD_FILE_PATH, target_file_path)
+                statistics_counter["dummies"] += 1
+            else:
+                statistics_counter["untouched"] += 1
+        except Exception as file_copy_exception:
+            print(
+                f"[ERRO] Falha ao substituir {target_file_path}: {file_copy_exception}"
+            )
+            raise
+
+    archive_context_name = target_ped_directory.parent.name
+    print(f"  [{character_identifier}] {archive_context_name}/{character_identifier}:")
+    print(f"      Modelos uppr substituidos:     {statistics_counter['uppr_models']}")
+    print(f"      Dicionarios de textura (.ytd): {statistics_counter['textures']}")
+    print(f"      Dummies instalados (629 B):    {statistics_counter['dummies']}")
+    print(f"      Arquivos intocados:            {statistics_counter['untouched']}")
+
+    return statistics_counter
+
+
+def apply_selected_characters(characters_to_apply: list) -> bool:
+    """
+    Executa a aplicacao para a lista de personagens informada.
+    """
+    print("=== APLICADOR UNIVERSAL DE AVATARES GTA V ===")
+    print(f"Raiz do Projeto: {PROJECT_ROOT_DIRECTORY}")
+    print(f"Staging RPF:     {STAGING_DIRECTORY}")
+
+    if not DUMMY_YDD_FILE_PATH.exists():
+        print(f"[ERRO] Dummy YDD nao encontrado em: {DUMMY_YDD_FILE_PATH}")
+        return False
+
+    for character_key in characters_to_apply:
+        if character_key not in CHARACTER_REGISTRY:
+            print(f"[ERRO] Personagem desconhecido: {character_key}")
+            return False
+
+        character_data = CHARACTER_REGISTRY[character_key]
+        print(f"\n--- Aplicando {character_data['display_name']} ({character_key}) ---")
+
+        if not character_data["model_ydd_path"].exists():
+            print(
+                f"[ERRO] Modelo YDD nao encontrado: {character_data['model_ydd_path']}"
+            )
+            return False
+
+        if not character_data["texture_ytd_path"].exists():
+            print(
+                f"[ERRO] Textura YTD nao encontrada: {character_data['texture_ytd_path']}"
+            )
+            return False
+
+        for staging_base_path in STAGING_TARGET_DIRECTORIES:
+            ped_subfolder_path = staging_base_path / character_key
+            patch_single_character_directory(
+                character_key, character_data, ped_subfolder_path
+            )
+
+    print("\n[SUCESSO] Personagens aplicados com sucesso nos diretorios de staging!")
+    return True
+
+
+def main():
+    argument_parser = argparse.ArgumentParser(
+        description="Aplica avatares VRChat nos slots de roupas do GTA V"
+    )
+    argument_parser.add_argument(
+        "--character",
+        choices=["player_zero", "player_one", "player_two", "all"],
+        default="all",
+        help="Personagem a aplicar (player_zero=Michael, player_one=Franklin, player_two=Trevor, all=Todos)",
+    )
+    parsed_arguments = argument_parser.parse_args()
+
+    if parsed_arguments.character == "all":
+        selected_characters_list = ["player_zero", "player_one", "player_two"]
+    else:
+        selected_characters_list = [parsed_arguments.character]
+
+    operation_success = apply_selected_characters(selected_characters_list)
+    if not operation_success:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,33 @@
+# ======================================================================
+# .gitignore - Projeto vrc2gtav
+# ======================================================================
+
+# Arquivos de Staging e Dumps Temporarios de RPFs do GTA V (12 GB de dumps base do jogo)
+staging/
+*_extracted/
+*.rpf
+*.bak
+*.tmp
+*~
+
+# Python e Ambientes Virtuais
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+
+# Arquivos de Sistema Operacional e IDEs
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Backups do Blender
+*.blend1
+*.blend2

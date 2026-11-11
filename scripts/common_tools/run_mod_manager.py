@@ -1,0 +1,493 @@
+#!/usr/bin/env python3
+"""
+run_mod_manager.py
+==================
+Script Mestre Orquestrador para Gestao e Implantação de Avatares VRChat no GTA V.
+
+Permite selecionar interativamente ou via linha de comando qual personagem
+atualizar (Michael, Franklin, Trevor ou Todos), controlando cada etapa do pipeline:
+  1. Geracao do Texture Atlas (2K DXT5) e dicionarios .ytd
+  2. Compilacao e rigging dos modelos 3D no Blender (Sollumz .ydd)
+  3. Substituicao universal de slots e instalacao de dummies (apply_characters)
+  4. Repacotamento e patch de RPFs no GTA V (repack_and_deploy_everything)
+
+Regras de Implementacao:
+  - Zero variaveis de uma ou duas letras.
+  - Zero emojis (mensagens formatadas com marcadores ASCII padronizados).
+  - Tratamento rigoroso de erros e excecoes em todas as etapas.
+  - Compatibilidade multiplataforma total (Windows nativo e Linux/WSL).
+"""
+
+import argparse
+import os
+import platform
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# Adiciona o diretorio de ferramentas comuns ao sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "common_tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "_deploy_tools"))
+try:
+    import vrc2gtav_paths as project_paths
+except ImportError:
+    from common_tools import vrc2gtav_paths as project_paths
+
+PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
+SCRIPTS_DIRECTORY = PROJECT_ROOT_DIRECTORY / "scripts"
+BLENDER_EXECUTABLE = project_paths.get_blender_exe()
+RAGE_CLI_TOOL = project_paths.get_rage_cli()
+GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
+UNITY_ASSETS_DIRECTORY = project_paths.get_vrc_assets_dir()
+
+# Configuracao descritiva e modular dos tres protagonistas
+CHARACTER_PIPELINE_REGISTRY = {
+    "michael": {
+        "character_key": "player_zero",
+        "display_name": "Michael De Santa -> Shinano Eternal Reunion",
+        "folder_name": "2_Michael_Shinano_EternalReunion",
+        "texture_script": (
+            SCRIPTS_DIRECTORY
+            / "Shinano_EternalReunion_Michael"
+            / "generate_er_atlas.py"
+        ),
+        "blender_script": (
+            SCRIPTS_DIRECTORY
+            / "Shinano_EternalReunion_Michael"
+            / "build_michael_er.py"
+        ),
+    },
+    "franklin": {
+        "character_key": "player_one",
+        "display_name": "Franklin Clinton -> Shinano Casual",
+        "folder_name": "1_Franklin_Shinano_Casual",
+        "texture_script": (
+            SCRIPTS_DIRECTORY
+            / "Shinano_Casual_Franklin"
+            / "generate_franklin_atlas.py"
+        ),
+        "blender_script": (
+            SCRIPTS_DIRECTORY
+            / "Shinano_Casual_Franklin"
+            / "build_franklin_avatar.py"
+        ),
+    },
+    "trevor": {
+        "character_key": "player_two",
+        "display_name": "Trevor Philips -> Miltina Maid",
+        "folder_name": "3_Trevor_Miltina_Maid",
+        "texture_script": (
+            SCRIPTS_DIRECTORY
+            / "Miltina_Maid_Trevor"
+            / "generate_miltina_atlas.py"
+        ),
+        "blender_script": (
+            SCRIPTS_DIRECTORY
+            / "Miltina_Maid_Trevor"
+            / "build_trevor_miltina.py"
+        ),
+    },
+}
+
+
+def print_section_header(section_title: str):
+    """Exibe um cabecalho formatado em ASCII sem emojis."""
+    separator_line = "=" * 70
+    print(f"\n{separator_line}")
+    print(f"  {section_title}")
+    print(f"{separator_line}\n")
+
+
+def execute_subcommand(command_arguments: list, task_description: str) -> bool:
+    """
+    Executa comandos do sistema de forma segura, transmitindo saida em tempo real
+    e tratando excecoes e codigos de saida com logs detalhados.
+    """
+    print(f"[INICIANDO] {task_description}...")
+    start_timestamp = time.time()
+    captured_output_lines = []
+
+    try:
+        process_execution = subprocess.Popen(
+            command_arguments,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+        )
+
+        for raw_output_line in process_execution.stdout:
+            stripped_line = raw_output_line.rstrip()
+            if not stripped_line:
+                continue
+            captured_output_lines.append(stripped_line)
+
+            # Transmite em tempo real linhas relevantes contendo marcadores de status
+            if any(
+                status_marker in stripped_line
+                for status_marker in [
+                    "[OK]",
+                    "[INFO]",
+                    "[SUCESSO]",
+                    "[AVISO]",
+                    "[ERRO]",
+                    "Exported",
+                    "Saved",
+                    "vertices",
+                    "Repacotando",
+                    "Patching",
+                    "Copiando",
+                    "Substituindo",
+                    "Compilando",
+                ]
+            ):
+                print(f"    {stripped_line}")
+
+        process_execution.wait()
+        elapsed_seconds = time.time() - start_timestamp
+
+        if process_execution.returncode != 0:
+            print(
+                f"[FALHA] {task_description} falhou apos {elapsed_seconds:.1f}s "
+                f"com codigo de retorno {process_execution.returncode}."
+            )
+            print("--- ULTIMAS LINHAS DA SAIDA ---")
+            for recent_line in captured_output_lines[-20:]:
+                print(f"    {recent_line}")
+            return False
+
+        print(f"[CONCLUIDO] {task_description} em {elapsed_seconds:.1f}s.")
+        return True
+
+    except Exception as unexpected_error:
+        print(f"[ERRO INESPERADO] {task_description}: {unexpected_error}")
+        return False
+
+
+def verify_system_prerequisites() -> bool:
+    """
+    Verifica a existencia de ferramentas e diretorios fundamentais antes de iniciar.
+    """
+    print_section_header("VERIFICACAO DE PRE-REQUISITOS DO SISTEMA")
+    verification_passed = True
+
+    # 1. Python e bibliotecas essenciais
+    try:
+        import PIL
+        import numpy
+        print("[OK] Bibliotecas Python (Pillow, NumPy) instaladas e funcionais.")
+    except ImportError as import_error:
+        print(f"[ERRO] Biblioteca Python ausente: {import_error}")
+        verification_passed = False
+
+    # 2. Executavel do Blender
+    if Path(BLENDER_EXECUTABLE).exists() or shutil.which(BLENDER_EXECUTABLE):
+        print(f"[OK] Executavel do Blender localizado: {BLENDER_EXECUTABLE}")
+    else:
+        print(f"[AVISO] Blender nao encontrado em '{BLENDER_EXECUTABLE}'. Ajuste BLENDER_EXE se necessario.")
+
+    # 3. RAGE CLI Tool
+    if Path(RAGE_CLI_TOOL).exists() or shutil.which(RAGE_CLI_TOOL):
+        print(f"[OK] RAGE CLI localizado: {RAGE_CLI_TOOL}")
+    else:
+        print(f"[ERRO] RAGE CLI nao encontrado em '{RAGE_CLI_TOOL}'. Ajuste RAGE_CLI.")
+        verification_passed = False
+
+    # 4. Assets do Unity (waifuv4)
+    if UNITY_ASSETS_DIRECTORY.exists():
+        print(f"[OK] Pasta de Assets Unity localizada: {UNITY_ASSETS_DIRECTORY}")
+    else:
+        print(f"[AVISO] Pasta de Assets Unity nao encontrada: {UNITY_ASSETS_DIRECTORY}")
+
+    # 5. Destino de Mods do GTA V
+    if GTAV_MODS_DIRECTORY.exists():
+        print(f"[OK] Pasta de mods do GTA V localizada: {GTAV_MODS_DIRECTORY}")
+    else:
+        print(f"[AVISO] Pasta de mods do GTA V nao encontrada: {GTAV_MODS_DIRECTORY}")
+
+    return verification_passed
+
+
+def execute_texture_generation(selected_character_keys: list) -> bool:
+    """Gera os texture atlases para os personagens selecionados."""
+    print_section_header("ETAPA 1: GERACAO DE TEXTURE ATLAS (2K DXT5)")
+    for character_key in selected_character_keys:
+        character_data = CHARACTER_PIPELINE_REGISTRY[character_key]
+        script_path = character_data["texture_script"]
+
+        if not script_path.exists():
+            print(f"[ERRO] Script de textura nao encontrado: {script_path}")
+            return False
+
+        command_list = [sys.executable, str(script_path)]
+        task_label = f"Gerando Atlas de Textura para {character_data['display_name']}"
+        success_status = execute_subcommand(command_list, task_label)
+        if not success_status:
+            return False
+
+    return True
+
+
+def execute_blender_build(selected_character_keys: list) -> bool:
+    """Compila os modelos 3D no Blender para os personagens selecionados."""
+    print_section_header("ETAPA 2: COMPILACAO DE MODELOS NO BLENDER (SOLLUMZ)")
+    is_windows_host = platform.system() == "Windows"
+
+    for character_key in selected_character_keys:
+        character_data = CHARACTER_PIPELINE_REGISTRY[character_key]
+        script_path = character_data["blender_script"]
+
+        if not script_path.exists():
+            print(f"[ERRO] Script Blender nao encontrado: {script_path}")
+            return False
+
+        if is_windows_host:
+            blender_command_list = [
+                BLENDER_EXECUTABLE,
+                "-b",
+                "-P",
+                str(script_path),
+            ]
+        else:
+            # No Linux/WSL, executamos o blender.exe via cmd.exe caso seja a instalacao Windows
+            if "blender.exe" in BLENDER_EXECUTABLE.lower():
+                windows_script_path = f"E:\\vrc2gtav\\scripts\\{script_path.parent.name}\\{script_path.name}"
+                blender_command_list = [
+                    "cmd.exe",
+                    "/c",
+                    f"{BLENDER_EXECUTABLE} -b -P {windows_script_path}",
+                ]
+            else:
+                blender_command_list = [
+                    BLENDER_EXECUTABLE,
+                    "-b",
+                    "-P",
+                    str(script_path),
+                ]
+
+        task_label = f"Compilando Modelo 3D para {character_data['display_name']}"
+        success_status = execute_subcommand(blender_command_list, task_label)
+        if not success_status:
+            return False
+
+    return True
+
+
+def execute_character_slot_patching(selected_character_keys: list) -> bool:
+    """Aplica as malhas compiladas e os dummies invisiveis nos slots do GTA V."""
+    print_section_header("ETAPA 3: APLICACAO UNIVERSAL DE SLOTS (ANTI-CLIPPING)")
+    apply_script_path = SCRIPTS_DIRECTORY / "common_tools" / "apply_characters.py"
+
+    if not apply_script_path.exists():
+        apply_script_path = PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "apply_characters.py"
+
+    if not apply_script_path.exists():
+        print(f"[ERRO] Script apply_characters.py nao encontrado: {apply_script_path}")
+        return False
+
+    # Mapeia chaves para os identificadores internos do jogo (player_zero, etc.)
+    ped_identifiers_list = [
+        CHARACTER_PIPELINE_REGISTRY[character_key]["character_key"]
+        for character_key in selected_character_keys
+    ]
+
+    for ped_identifier in ped_identifiers_list:
+        command_list = [
+            sys.executable,
+            str(apply_script_path),
+            "--character",
+            ped_identifier,
+        ]
+        task_label = f"Substituindo slots para o personagem {ped_identifier}"
+        success_status = execute_subcommand(command_list, task_label)
+        if not success_status:
+            return False
+
+    return True
+
+
+def execute_rpf_repack_and_deploy() -> bool:
+    """Repacota os arquivos RPF com cabeçalho OPEN e instala no GTA V."""
+    print_section_header("ETAPA 4: REPACOTAMENTO RPF E DEPLOY NO GTA V")
+    repack_script_path = (
+        SCRIPTS_DIRECTORY / "common_tools" / "repack_and_deploy_everything.py"
+    )
+    if not repack_script_path.exists():
+        repack_script_path = (
+            PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "repack_and_deploy_everything.py"
+        )
+
+    if not repack_script_path.exists():
+        print(
+            f"[ERRO] Script repack_and_deploy_everything.py nao encontrado: {repack_script_path}"
+        )
+        return False
+
+    command_list = [sys.executable, str(repack_script_path)]
+    task_label = "Repacotando RPFs e Instalando no Jogo"
+    return execute_subcommand(command_list, task_label)
+
+
+def run_interactive_menu():
+    """Exibe o menu interativo e solicita a escolha do usuario."""
+    separator_banner = "=" * 70
+    print(f"\n{separator_banner}")
+    print("         GERENCIADOR DE AVATARES VRChat PARA GTA V")
+    print(f"{separator_banner}")
+    print("Selecione qual personagem voce deseja trocar/atualizar:")
+    print("  [1] Michael (player_zero) -> Shinano Eternal Reunion")
+    print("  [2] Franklin (player_one) -> Shinano Casual / Uniforme")
+    print("  [3] Trevor   (player_two)  -> Miltina Maid")
+    print("  [4] Todos os 3 Personagens (Processo Completo)")
+    print("  [5] Apenas Repacotar e Instalar RPFs no GTA V (Deploy Only)")
+    print("  [0] Sair")
+    print(f"{'-' * 70}")
+
+    user_menu_choice = input("Digite a opcao desejada [0-5]: ").strip()
+
+    if user_menu_choice == "0":
+        print("[INFO] Operacao cancelada pelo usuario.")
+        sys.exit(0)
+
+    if user_menu_choice == "5":
+        execute_rpf_repack_and_deploy()
+        sys.exit(0)
+
+    choice_to_characters_mapping = {
+        "1": ["michael"],
+        "2": ["franklin"],
+        "3": ["trevor"],
+        "4": ["michael", "franklin", "trevor"],
+    }
+
+    if user_menu_choice not in choice_to_characters_mapping:
+        print("[ERRO] Opcao invalida informada.")
+        sys.exit(1)
+
+    selected_characters_list = choice_to_characters_mapping[user_menu_choice]
+
+    print("\nConfiguracao das etapas a serem executadas:")
+    prompt_build_textures = input("Deseja gerar os Texture Atlases (2K)? (s/n) [padrao: s]: ").strip().lower()
+    should_build_textures = prompt_build_textures != "n"
+
+    prompt_build_blender = input("Deseja compilar os modelos no Blender? (s/n) [padrao: s]: ").strip().lower()
+    should_build_blender = prompt_build_blender != "n"
+
+    prompt_apply_and_deploy = input("Deseja aplicar nos slots e instalar no GTA V? (s/n) [padrao: s]: ").strip().lower()
+    should_apply_and_deploy = prompt_apply_and_deploy != "n"
+
+    # Executa o pipeline configurado
+    if should_build_textures:
+        textures_success = execute_texture_generation(selected_characters_list)
+        if not textures_success:
+            print("\n[ERRO] Abortando pipeline devido a erro na geracao de texturas.")
+            sys.exit(1)
+
+    if should_build_blender:
+        blender_success = execute_blender_build(selected_characters_list)
+        if not blender_success:
+            print("\n[ERRO] Abortando pipeline devido a erro na compilacao do Blender.")
+            sys.exit(1)
+
+    if should_apply_and_deploy:
+        patch_success = execute_character_slot_patching(selected_characters_list)
+        if not patch_success:
+            print("\n[ERRO] Abortando pipeline devido a erro na aplicacao de slots.")
+            sys.exit(1)
+
+        deploy_success = execute_rpf_repack_and_deploy()
+        if not deploy_success:
+            print("\n[ERRO] Abortando pipeline devido a erro no repacotamento de RPFs.")
+            sys.exit(1)
+
+    print_section_header("PIPELINE CONCLUIDO COM TOTAL SUCESSO")
+    print("Os avatares estao prontos e instalados no seu GTA V.")
+
+
+def main():
+    argument_parser = argparse.ArgumentParser(
+        description="Gerenciador Mestre de Avatares VRChat para GTA V"
+    )
+    argument_parser.add_argument(
+        "--character",
+        choices=["michael", "franklin", "trevor", "all"],
+        default=None,
+        help="Personagem a processar (se omitido, abre o menu interativo)",
+    )
+    argument_parser.add_argument(
+        "--skip-textures",
+        action="store_true",
+        help="Pula a etapa de geracao de texture atlas",
+    )
+    argument_parser.add_argument(
+        "--skip-blender",
+        action="store_true",
+        help="Pula a etapa de compilacao no Blender",
+    )
+    argument_parser.add_argument(
+        "--skip-deploy",
+        action="store_true",
+        help="Pula a etapa de aplicacao nos slots e repacotamento de RPFs",
+    )
+    argument_parser.add_argument(
+        "--deploy-only",
+        action="store_true",
+        help="Executa apenas a aplicacao e o repacotamento final",
+    )
+    argument_parser.add_argument(
+        "--check-env",
+        action="store_true",
+        help="Apenas verifica os pre-requisitos do sistema e encerra",
+    )
+
+    parsed_arguments = argument_parser.parse_args()
+
+    # Se solicitada apenas a verificacao do ambiente
+    if parsed_arguments.check_env:
+        prerequisites_valid = verify_system_prerequisites()
+        sys.exit(0 if prerequisites_valid else 1)
+
+    # Modo Apenas Deploy
+    if parsed_arguments.deploy_only:
+        execute_rpf_repack_and_deploy()
+        sys.exit(0)
+
+    # Modo Interativo (quando nenhum personagem eh passado via CLI)
+    if parsed_arguments.character is None:
+        run_interactive_menu()
+        sys.exit(0)
+
+    # Modo Linha de Comando (CLI automatizado)
+    if parsed_arguments.character == "all":
+        selected_characters_list = ["michael", "franklin", "trevor"]
+    else:
+        selected_characters_list = [parsed_arguments.character]
+
+    verify_system_prerequisites()
+
+    if not parsed_arguments.skip_textures:
+        textures_status = execute_texture_generation(selected_characters_list)
+        if not textures_status:
+            sys.exit(1)
+
+    if not parsed_arguments.skip_blender:
+        blender_status = execute_blender_build(selected_characters_list)
+        if not blender_status:
+            sys.exit(1)
+
+    if not parsed_arguments.skip_deploy:
+        patch_status = execute_character_slot_patching(selected_characters_list)
+        if not patch_status:
+            sys.exit(1)
+
+        repack_status = execute_rpf_repack_and_deploy()
+        if not repack_status:
+            sys.exit(1)
+
+    print_section_header("PIPELINE AUTOMATIZADO CONCLUIDO COM SUCESSO")
+
+
+if __name__ == "__main__":
+    main()

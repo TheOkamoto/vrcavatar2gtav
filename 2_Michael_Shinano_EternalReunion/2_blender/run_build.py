@@ -1,0 +1,26 @@
+import subprocess
+import sys
+import time
+
+cmd = [
+    "powershell.exe",
+    "-ExecutionPolicy", "Bypass",
+    "-Command",
+    "& 'E:\\waifuv4\\BlenderTools\\blender-4.0.2-windows-x64\\blender.exe' -b -P E:\\gtav_mod_michael_er\\build_michael_er.py"
+]
+
+print("[INFO] Iniciando build do avatar no Blender...")
+start = time.time()
+res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+elapsed = time.time() - start
+
+print(f"[INFO] Processo concluido em {elapsed:.1f} segundos. Return code: {res.returncode}")
+print("--- STDOUT ---")
+for line in res.stdout.splitlines():
+    if any(k in line for k in ["[INFO]", "[SUCESSO]", "[ERRO]", "Error", "Saved", "Exported", "SKEL_ROOT", "vertices", "shape key"]):
+        print(line)
+
+if res.returncode != 0:
+    print("--- STDERR ---")
+    print(res.stderr[-2000:])
+    sys.exit(res.returncode)

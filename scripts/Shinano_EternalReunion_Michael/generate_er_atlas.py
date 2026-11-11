@@ -1,0 +1,416 @@
+#!/usr/bin/env python3
+"""
+generate_er_atlas.py
+====================
+Gera o Texture Atlas 4x2 unificado para a Shinano Eternal Reunion no GTA V,
+incorporando integralmente as propriedades do shader lilToon (Unity/VRChat):
+  1. Diffuse Atlas (shinano_er_atlas.png - 2048x1024, max 2K):
+     - Rosto/Pele: baking da tonalidade de pele quente pessego anime (_Color: 0.99, 0.92, 0.92),
+       maquiagem suave Shinano_face_makeup1.png (blush nas bochechas e labios rosados)
+       e composicao das camadas do shader MoonButterfly Eye:
+         * Camada 2 (_Main2ndTex): sky.png (iris azul ciano radiante)
+         * Camada 3 (_Main3rdTex): Cloud.jpg com mascara e alpha 0.434
+         * Realce (_HighlightTex): Eye-highlight.png (estrelas e brilhos cristalinos)
+     - Corpo/Pele: tonalidade de pele uniforme e aquecida para eliminar o aspecto palido.
+     - Cabelo Anime: coloracao azul eletrico vibrante e saturada,
+       com o interior das orelhas de gato tingido em ciano celeste pelo shader,
+       alem da sintese da aureola Angel Ring MatCap no topo.
+     - Trajes V3_UN1, V3_UN2, V3_UN3 e UN4 calibrados.
+  2. Specular Atlas (shinano_er_spec.png e shinano_black_spec.png):
+     - Metais Dourados (relogio UN4, oculos, fivelas, botoes, correntes): reflexo dourado reluzente.
+     - Olhos: acabamento vitreo anime com reflexo especular.
+     - Pele: acabamento fosco aveludado suave.
+  3. Normal Map Atlas (shinano_er_normal.png e shinano_flat_normal.png):
+     - Rosto e corpo com normais perfeitamente preservadas.
+  4. Compilacao automatica do dicionario de texturas .ytd via RAGE CLI.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+import numpy
+from PIL import Image
+
+# Resolucao dinamica de caminhos multiplataforma
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common_tools"))
+try:
+    import vrc2gtav_paths as project_paths
+except ImportError:
+    from common_tools import vrc2gtav_paths as project_paths
+
+SHINANO_ASSETS_DIR = project_paths.get_vrc_assets_dir()
+SHINANO_TEXTURE_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Shinano", "Texture")
+MOON_BUTTERFLY_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "MoonButterfly eye", "Sinano", "Texture")
+ER_TEX_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Vagrant Brand", "Eternal Reunion", "TEX")
+ER_MAIN_TEX_DIR = os.path.join(ER_TEX_DIR, "MainTEX")
+ER_MASKS_DIR = os.path.join(ER_TEX_DIR, "Masks")
+ER_NORMALS_DIR = os.path.join(ER_TEX_DIR, "Normal")
+HAIR_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Li-ne", "Neko Tied Bob hair")
+
+
+# Fontes principais de textura (Grid 4x2, celulas de 512x512 para total 2048x1024)
+MAIN_TEXTURE_SOURCES = {
+    "face": {
+        "diffuse_path": os.path.join(SHINANO_TEXTURE_DIR, "Color", "Eye", "Shinano_face_blue.png"),
+        "makeup_path": os.path.join(SHINANO_TEXTURE_DIR, "Make up", "Shinano_face_makeup1.png"),
+        "eye_sky_path": os.path.join(MOON_BUTTERFLY_DIR, "sky.png"),
+        "eye_cloud_path": os.path.join(MOON_BUTTERFLY_DIR, "Cloud.jpg"),
+        "eye_cloud_mask_path": os.path.join(MOON_BUTTERFLY_DIR, "無題157_20260711214118.png"),
+        "eye_highlight_path": os.path.join(MOON_BUTTERFLY_DIR, "Eye-highlight.png"),
+        "emission_mask": os.path.join(SHINANO_TEXTURE_DIR, "Mask", "Shinano_face_emission_mask.png"),
+        "grid_column": 0,
+        "grid_row": 1,  # Linha superior no Blender UV (v: 0.5 .. 1.0)
+    },
+    "body": {
+        "diffuse_path": os.path.join(SHINANO_TEXTURE_DIR, "Shinano_body.png"),
+        "grid_column": 1,
+        "grid_row": 1,
+    },
+    "un1": {
+        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN1.png"),
+        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN1_M.png"),
+        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN1_S.png"),
+        "normal_path": os.path.join(ER_NORMALS_DIR, "UN1_N.png"),
+        "grid_column": 2,
+        "grid_row": 1,
+    },
+    "un2": {
+        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN2.png"),
+        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN2_M.png"),
+        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN2_S.png"),
+        "normal_path": os.path.join(ER_NORMALS_DIR, "UN2_N.png"),
+        "grid_column": 3,
+        "grid_row": 1,
+    },
+    "un3": {
+        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN3.png"),
+        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN3_M.png"),
+        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN3_S.png"),
+        "normal_path": os.path.join(ER_NORMALS_DIR, "UN3_N.png"),
+        "grid_column": 0,
+        "grid_row": 0,  # Linha inferior no Blender UV (v: 0.0 .. 0.5)
+    },
+    "watch": {
+        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "UN4.png"),
+        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN4_M.png"),
+        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN4_S.png"),
+        "normal_path": os.path.join(ER_NORMALS_DIR, "UN4_N.png"),
+        "grid_column": 1,
+        "grid_row": 0,
+    },
+    "hair_main": {
+        "diffuse_path": os.path.join(HAIR_DIR, "_Mat", "Tex", "Blue.png"),
+        "light_mask": os.path.join(HAIR_DIR, "_Mat", "C", "Light Mask.png"),
+        "normal_path": os.path.join(HAIR_DIR, "_Mat", "C", "Normal map.png"),
+        "grid_column": 2,
+        "grid_row": 0,
+    },
+}
+
+# Sub-fontes da celula (coluna 3, linha 0) para os acessorios
+ACCESSORY_SUB_SOURCES = {
+    "pin_back": {
+        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "Blue.png"),
+        "sub_column": 1,
+        "sub_row": 1,
+    },
+    "silver_pins": {
+        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "c", "Pin Mat.png"),
+        "sub_column": 0,
+        "sub_row": 0,
+    },
+    "halo": {
+        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "c", "Accessories Mat.png"),
+        "sub_column": 0,
+        "sub_row": 1,
+    },
+}
+
+
+def apply_vibrant_hair_transform(image_rgba):
+    """
+    Transforma a textura do cabelo e acessorios em um tom azul anil/celeste vibrante,
+    saturado e luminoso, identico ao resultado do shader lilToon visto no VRChat.
+    Tambem tinge a pelugem interna branca das orelhas de gato em ciano radiante.
+    """
+    image_array = numpy.array(image_rgba, dtype=numpy.float32)
+    red_channel = image_array[:, :, 0]
+    green_channel = image_array[:, :, 1]
+    blue_channel = image_array[:, :, 2]
+    alpha_channel = image_array[:, :, 3]
+
+    # Luminancia ponderada original
+    luminance_channel = 0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel
+    normalized_luminance = numpy.clip(luminance_channel / 255.0, 0.0, 1.0)
+
+    # Curva de mapeamento tonal lilToon para azul eletrico vibrante
+    new_red_channel = numpy.clip(normalized_luminance * 90.0, 0, 255)
+    new_green_channel = numpy.clip(normalized_luminance * 175.0 + 15.0, 0, 255)
+    new_blue_channel = numpy.clip(numpy.power(normalized_luminance, 0.6) * 255.0 + 20.0, 0, 255)
+
+    transformed_array = numpy.stack(
+        [new_red_channel, new_green_channel, new_blue_channel, alpha_channel],
+        axis=-1,
+    ).astype(numpy.uint8)
+    return Image.fromarray(transformed_array, "RGBA")
+
+
+def build_liltoon_er_textures(output_directory, cell_dimension=512):
+    """
+    Constroi os mapas Diffuse, Specular e Normal do Texture Atlas 4x2
+    com resolucao maxima 2K (2048x1024), replicando com total fidelidade
+    os efeitos do shader lilToon e MoonButterfly Eye.
+    Tambem compila o dicionario .ytd para uso no GTA V.
+    """
+    total_columns = 4
+    total_rows = 2
+    canvas_width = total_columns * cell_dimension
+    canvas_height = total_rows * cell_dimension
+
+    output_path_obj = Path(output_directory)
+    output_path_obj.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Gerando Texture Atlas lilToon em: {output_directory} ({canvas_width}x{canvas_height})")
+
+    # Inicializa as matrizes dos 3 mapas
+    diffuse_array = numpy.full((canvas_height, canvas_width, 4), [128, 128, 128, 255], dtype=numpy.uint8)
+    specular_array = numpy.full((canvas_height, canvas_width, 4), [18, 16, 18, 40], dtype=numpy.uint8)
+    normal_array = numpy.full((canvas_height, canvas_width, 4), [128, 128, 255, 255], dtype=numpy.uint8)
+
+    # 1. Processa cada celula principal do grid 4x2
+    for source_key, source_info in MAIN_TEXTURE_SOURCES.items():
+        column_index = source_info["grid_column"]
+        row_index_blender = source_info["grid_row"]
+        pillow_row_index = 1 - row_index_blender
+
+        start_x = column_index * cell_dimension
+        end_x = start_x + cell_dimension
+        start_y = pillow_row_index * cell_dimension
+        end_y = start_y + cell_dimension
+
+        diffuse_path = source_info["diffuse_path"]
+        if not os.path.exists(diffuse_path):
+            raise FileNotFoundError(f"Textura obrigatoria nao encontrada: {diffuse_path}")
+
+        print(f"[INFO] Processando celula '{source_key}' ({column_index}, {row_index_blender})...")
+        cell_diffuse_image = Image.open(diffuse_path).convert("RGBA")
+
+        # 1A. Tratamento especial lilToon + MoonButterfly para Rosto e Olhos
+        if source_key == "face":
+            # Realiza a composicao em alta resolucao antes de redimensionar
+            face_highres = cell_diffuse_image.resize((1024, 1024), Image.Resampling.LANCZOS)
+            face_numpy_array = numpy.array(face_highres, dtype=numpy.float32)
+
+            # Aplica o tom de pele aquecido e delicado do lilToon (_Color: 0.99, 0.92, 0.92)
+            face_numpy_array[:, :, 0] = numpy.clip(face_numpy_array[:, :, 0] * 1.00, 0, 255)
+            face_numpy_array[:, :, 1] = numpy.clip(face_numpy_array[:, :, 1] * 0.94, 0, 255)
+            face_numpy_array[:, :, 2] = numpy.clip(face_numpy_array[:, :, 2] * 0.93, 0, 255)
+            composite_face = Image.fromarray(face_numpy_array.astype(numpy.uint8), "RGBA")
+
+            # Aplica maquiagem 1 (blush rosado nas bochechas e labios acetinados)
+            makeup_path = source_info.get("makeup_path")
+            if makeup_path and os.path.exists(makeup_path):
+                makeup_image = Image.open(makeup_path).convert("RGBA").resize((1024, 1024), Image.Resampling.LANCZOS)
+                composite_face.alpha_composite(makeup_image)
+
+            # Camada 2: MoonButterfly sky.png (iris azul ciano viva)
+            eye_sky_path = source_info.get("eye_sky_path")
+            if eye_sky_path and os.path.exists(eye_sky_path):
+                eye_sky_image = Image.open(eye_sky_path).convert("RGBA").resize((1024, 1024), Image.Resampling.LANCZOS)
+                composite_face.alpha_composite(eye_sky_image)
+
+            # Camada 3: MoonButterfly Cloud.jpg com mascara e opacidade 0.434
+            eye_cloud_path = source_info.get("eye_cloud_path")
+            eye_cloud_mask_path = source_info.get("eye_cloud_mask_path")
+            if eye_cloud_path and eye_cloud_mask_path and os.path.exists(eye_cloud_path) and os.path.exists(eye_cloud_mask_path):
+                cloud_image = Image.open(eye_cloud_path).convert("RGBA").resize((1024, 1024), Image.Resampling.LANCZOS)
+                cloud_mask_image = Image.open(eye_cloud_mask_path).convert("L").resize((1024, 1024), Image.Resampling.LANCZOS)
+                cloud_numpy_array = numpy.array(cloud_image, dtype=numpy.float32)
+                mask_numpy_array = (numpy.array(cloud_mask_image, dtype=numpy.float32) / 255.0) * 0.434
+                cloud_numpy_array[:, :, 3] = numpy.clip(mask_numpy_array * 255.0, 0, 255).astype(numpy.uint8)
+                cloud_composite = Image.fromarray(cloud_numpy_array.astype(numpy.uint8), "RGBA")
+                composite_face.alpha_composite(cloud_composite)
+
+            # Camada de Realce: MoonButterfly Eye-highlight.png (brilhos estelares)
+            eye_highlight_path = source_info.get("eye_highlight_path")
+            if eye_highlight_path and os.path.exists(eye_highlight_path):
+                highlight_image = Image.open(eye_highlight_path).convert("RGBA").resize((1024, 1024), Image.Resampling.LANCZOS)
+                composite_face.alpha_composite(highlight_image)
+
+            cell_diffuse_resized = composite_face.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+            cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
+
+            # Especularidade cornea/vitrea dos olhos
+            emission_mask_path = source_info.get("emission_mask")
+            if emission_mask_path and os.path.exists(emission_mask_path):
+                mask_image = Image.open(emission_mask_path).convert("L")
+                mask_resized = mask_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                mask_numpy_array = numpy.array(mask_resized, dtype=numpy.float32) / 255.0
+                eye_mask_boolean = mask_numpy_array > 0.20
+                specular_array[start_y:end_y, start_x:end_x][eye_mask_boolean] = [95, 110, 130, 200]
+
+        # 1B. Tratamento de pele para o Corpo
+        elif source_key == "body":
+            cell_diffuse_resized = cell_diffuse_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+            cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
+            cell_diffuse_numpy[:, :, 0] = numpy.clip(cell_diffuse_numpy[:, :, 0] * 1.01, 0, 255)
+            cell_diffuse_numpy[:, :, 1] = numpy.clip(cell_diffuse_numpy[:, :, 1] * 0.94, 0, 255)
+            cell_diffuse_numpy[:, :, 2] = numpy.clip(cell_diffuse_numpy[:, :, 2] * 0.93, 0, 255)
+
+        # 1C. Tratamento especial lilToon para o Cabelo Anime e Orelhas
+        elif source_key == "hair_main":
+            vibrant_hair_image = apply_vibrant_hair_transform(cell_diffuse_image)
+            cell_diffuse_resized = vibrant_hair_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+            cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
+
+            light_mask_path = source_info.get("light_mask")
+            if light_mask_path and os.path.exists(light_mask_path):
+                light_mask_image = Image.open(light_mask_path).convert("RGBA")
+                light_mask_resized = light_mask_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                light_mask_numpy = numpy.array(light_mask_resized, dtype=numpy.float32)
+
+                light_intensity = (light_mask_numpy[:, :, 0] / 255.0) * 0.40
+                cell_diffuse_numpy[:, :, 0] += light_intensity * 60.0
+                cell_diffuse_numpy[:, :, 1] += light_intensity * 75.0
+                cell_diffuse_numpy[:, :, 2] += light_intensity * 85.0
+
+                specular_array[start_y:end_y, start_x:end_x] = [30, 45, 60, 90]
+                hair_highlight_bool = light_intensity > 0.15
+                specular_array[start_y:end_y, start_x:end_x][hair_highlight_bool] = [80, 105, 135, 150]
+
+            normal_path = source_info.get("normal_path")
+            if normal_path and os.path.exists(normal_path):
+                hair_norm_image = Image.open(normal_path).convert("RGBA")
+                hair_norm_resized = hair_norm_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                normal_array[start_y:end_y, start_x:end_x] = numpy.array(hair_norm_resized)
+
+        # 1D. Tratamento para Metais Dourados e Tecidos
+        elif source_key in ("un1", "un2", "un3", "watch"):
+            cell_diffuse_resized = cell_diffuse_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+            cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
+
+            metallic_path = source_info.get("metallic_mask")
+            if metallic_path and os.path.exists(metallic_path):
+                metal_image = Image.open(metallic_path).convert("L")
+                metal_resized = metal_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                metal_numpy = numpy.array(metal_resized)
+                metal_mask_bool = metal_numpy > 50
+
+                if source_key == "watch":
+                    specular_array[start_y:end_y, start_x:end_x][metal_mask_bool] = [240, 205, 90, 255]
+                elif source_key == "un3":
+                    specular_array[start_y:end_y, start_x:end_x][metal_mask_bool] = [235, 200, 85, 250]
+                    leather_mask_bool = ~metal_mask_bool
+                    specular_array[start_y:end_y, start_x:end_x][leather_mask_bool] = [65, 60, 65, 130]
+                elif source_key == "un2":
+                    specular_array[start_y:end_y, start_x:end_x][metal_mask_bool] = [225, 195, 80, 240]
+                    leather_shoes_bool = (~metal_mask_bool) & (cell_diffuse_numpy[:, :, 0] < 50)
+                    specular_array[start_y:end_y, start_x:end_x][leather_shoes_bool] = [75, 75, 80, 150]
+                elif source_key == "un1":
+                    specular_array[start_y:end_y, start_x:end_x][metal_mask_bool] = [225, 195, 80, 240]
+
+            normal_path = source_info.get("normal_path")
+            if normal_path and os.path.exists(normal_path):
+                cloth_norm_image = Image.open(normal_path).convert("RGB")
+                cloth_norm_resized = cloth_norm_image.resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                norm_rgba = Image.new("RGBA", (cell_dimension, cell_dimension), (128, 128, 255, 255))
+                norm_rgba.paste(cloth_norm_resized, (0, 0))
+                normal_array[start_y:end_y, start_x:end_x] = numpy.array(norm_rgba)
+
+        # Copia a difusa final tratada para o canvas do Atlas
+        cell_diffuse_clipped = numpy.clip(cell_diffuse_numpy, 0, 255).astype(numpy.uint8)
+        diffuse_array[start_y:end_y, start_x:end_x] = cell_diffuse_clipped
+
+    # 2. Processa os acessorios na sub-celula (coluna 3, linha 0 no Blender)
+    cell_base_x = 3 * cell_dimension
+    cell_base_y = 1 * cell_dimension
+    sub_dimension = cell_dimension // 2
+
+    for accessory_key, accessory_info in ACCESSORY_SUB_SOURCES.items():
+        accessory_path = accessory_info["diffuse_path"]
+        if not os.path.exists(accessory_path):
+            raise FileNotFoundError(f"Acessorio nao encontrado: {accessory_path}")
+
+        print(f"[INFO] Processando acessorio '{accessory_key}'...")
+        accessory_image = Image.open(accessory_path).convert("RGBA")
+
+        if accessory_key == "pin_back":
+            accessory_image = apply_vibrant_hair_transform(accessory_image)
+
+        accessory_resized = accessory_image.resize((sub_dimension, sub_dimension), Image.Resampling.LANCZOS)
+        accessory_numpy = numpy.array(accessory_resized)
+
+        sub_col = accessory_info["sub_column"]
+        sub_row_blender = accessory_info["sub_row"]
+        pillow_sub_row = 1 - sub_row_blender
+
+        paste_sub_x = cell_base_x + (sub_col * sub_dimension)
+        paste_sub_y = cell_base_y + (pillow_sub_row * sub_dimension)
+
+        diffuse_array[paste_sub_y:paste_sub_y + sub_dimension, paste_sub_x:paste_sub_x + sub_dimension] = accessory_numpy
+
+        if accessory_key in ("silver_pins", "halo"):
+            specular_array[paste_sub_y:paste_sub_y + sub_dimension, paste_sub_x:paste_sub_x + sub_dimension] = [210, 215, 225, 240]
+        elif accessory_key == "pin_back":
+            specular_array[paste_sub_y:paste_sub_y + sub_dimension, paste_sub_x:paste_sub_x + sub_dimension] = [45, 60, 80, 110]
+
+    # 3. Salva todas as texturas em disco
+    diffuse_output_path = os.path.join(output_directory, "shinano_er_atlas.png")
+    specular_output_path = os.path.join(output_directory, "shinano_er_spec.png")
+    normal_output_path = os.path.join(output_directory, "shinano_er_normal.png")
+
+    Image.fromarray(diffuse_array).save(diffuse_output_path, "PNG")
+    Image.fromarray(specular_array).save(specular_output_path, "PNG")
+    Image.fromarray(normal_array).save(normal_output_path, "PNG")
+
+    legacy_spec_path = os.path.join(output_directory, "shinano_black_spec.png")
+    legacy_normal_path = os.path.join(output_directory, "shinano_flat_normal.png")
+    Image.fromarray(specular_array).save(legacy_spec_path, "PNG")
+    Image.fromarray(normal_array).save(legacy_normal_path, "PNG")
+
+    print("[SUCESSO] Mapas do Texture Atlas lilToon gerados com exito:")
+    print(f"  - Diffuse:  {diffuse_output_path}")
+    print(f"  - Specular: {specular_output_path} (e {legacy_spec_path})")
+    print(f"  - Normal:   {normal_output_path} (e {legacy_normal_path})")
+
+    # 4. Compilação do dicionário .ytd via RAGE CLI
+    rage_cli_path = project_paths.get_rage_cli()
+    textures_dir = Path(output_directory).parent
+    output_ytd_file = textures_dir / "test_er.ytd"
+    backup_ytd_file = textures_dir / "shinano_michael_er_2k.ytd"
+
+    print("\n[INFO] Compilando dicionario de textura .ytd do Michael (Eternal Reunion)...")
+    build_arguments = [
+        str(rage_cli_path),
+        "textures",
+        "build",
+        "-o",
+        str(output_ytd_file),
+        diffuse_output_path,
+        legacy_spec_path,
+        legacy_normal_path,
+    ]
+    process_result = subprocess.run(
+        build_arguments,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    shutil.copy2(output_ytd_file, backup_ytd_file)
+    print(f"[SUCESSO] Dicionario .ytd gerado com sucesso: {output_ytd_file}")
+    return True
+
+
+if __name__ == "__main__":
+    project_root_directory = project_paths.get_project_root()
+    target_output_directory = str(
+        project_root_directory
+        / "2_Michael_Shinano_EternalReunion"
+        / "3_textures_gtav"
+        / "textures_atlas"
+    )
+    if len(sys.argv) > 1:
+        target_output_directory = sys.argv[1]
+    build_liltoon_er_textures(target_output_directory)
