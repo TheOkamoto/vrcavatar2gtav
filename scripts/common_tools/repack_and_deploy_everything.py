@@ -57,6 +57,21 @@ TARGET_DLC_RPF_PATH = (
     / "dlc.rpf"
 )
 
+PATCHDAY4NG_EXTRACTED_DIR = STAGING_DIRECTORY / "patchday4ng_dlc_extracted"
+PATCHDAY4NG_INNER_RPF = (
+    PATCHDAY4NG_EXTRACTED_DIR / "x64" / "models" / "cdimages" / "patchday4ng.rpf"
+)
+PATCHDAY4NG_MODELS_DIR = STAGING_DIRECTORY / "patchday4ng_models_extracted"
+PATCHDAY4NG_DLC_RPF_FILE = STAGING_DIRECTORY / "patchday4ng_dlc.rpf"
+TARGET_PATCHDAY4NG_DLC_PATH = (
+    GTAV_MODS_DIRECTORY
+    / "update"
+    / "x64"
+    / "dlcpacks"
+    / "patchday4ng"
+    / "dlc.rpf"
+)
+
 STREAMEDPEDS_EXTRACTED_DIR = STAGING_DIRECTORY / "streamedpeds_players_extracted"
 STREAMEDPEDS_RPF_FILE = (
     STAGING_DIRECTORY
@@ -221,6 +236,41 @@ def main():
         print(f"\nInstalando dlc.rpf -> {TARGET_DLC_RPF_PATH}...")
         shutil.copy2(str(MPPATCHESNG_DLC_RPF_FILE), str(TARGET_DLC_RPF_PATH))
         print("dlc.rpf instalado com sucesso.")
+
+        # 3B. Repack e Deploy patchday4ng (se presente no staging)
+        if PATCHDAY4NG_EXTRACTED_DIR.exists() and PATCHDAY4NG_MODELS_DIR.exists():
+            if PATCHDAY4NG_INNER_RPF.exists():
+                PATCHDAY4NG_INNER_RPF.unlink()
+            execute_shell_command(
+                [
+                    RAGE_CLI_TOOL,
+                    "create",
+                    "-o",
+                    str(PATCHDAY4NG_INNER_RPF),
+                    str(PATCHDAY4NG_MODELS_DIR),
+                ],
+                "Repacotando patchday4ng.rpf",
+            )
+            patch_rpf7_open_and_zero_compressed(PATCHDAY4NG_INNER_RPF)
+
+            if PATCHDAY4NG_DLC_RPF_FILE.exists():
+                PATCHDAY4NG_DLC_RPF_FILE.unlink()
+            execute_shell_command(
+                [
+                    RAGE_CLI_TOOL,
+                    "create",
+                    "-o",
+                    str(PATCHDAY4NG_DLC_RPF_FILE),
+                    str(PATCHDAY4NG_EXTRACTED_DIR),
+                ],
+                "Repacotando patchday4ng dlc.rpf",
+            )
+            patch_rpf7_open_and_zero_compressed(PATCHDAY4NG_DLC_RPF_FILE)
+
+            TARGET_PATCHDAY4NG_DLC_PATH.parent.mkdir(parents=True, exist_ok=True)
+            print(f"\nInstalando patchday4ng/dlc.rpf -> {TARGET_PATCHDAY4NG_DLC_PATH}...")
+            shutil.copy2(str(PATCHDAY4NG_DLC_RPF_FILE), str(TARGET_PATCHDAY4NG_DLC_PATH))
+            print("patchday4ng/dlc.rpf instalado com sucesso.")
 
         # 4. Repack streamedpeds_players.rpf
         if STREAMEDPEDS_RPF_FILE.exists():

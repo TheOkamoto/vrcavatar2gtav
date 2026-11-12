@@ -93,6 +93,7 @@ CHARACTER_REGISTRY = {
 STAGING_TARGET_DIRECTORIES = [
     STAGING_DIRECTORY / "mppatches_extracted",
     STAGING_DIRECTORY / "streamedpeds_players_extracted",
+    STAGING_DIRECTORY / "patchday4ng_models_extracted",
 ]
 
 VANILLA_BODY_SLOT_PREFIXES = [
