@@ -458,10 +458,60 @@ def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=3000
     mesh_data.update()
 
 
+def apply_shape_key_weights_by_index(mesh_obj, weights_by_index, label):
+    """Aplica pesos de shape keys por indice 0-based (apos Basis) zerando os demais."""
+    if not mesh_obj or not mesh_obj.data.shape_keys:
+        raise RuntimeError(f"Malha '{label}' nao possui shape keys disponiveis.")
+
+    key_blocks = mesh_obj.data.shape_keys.key_blocks
+    for key_block in key_blocks[1:]:
+        key_block.value = 0.0
+
+    applied_count = 0
+    for zero_based_idx, weight_val in weights_by_index.items():
+        target_slot = zero_based_idx + 1
+        if target_slot >= len(key_blocks):
+            raise IndexError(
+                f"Shape key indice {zero_based_idx} fora do intervalo em '{mesh_obj.name}' "
+                f"(total disponivel: {len(key_blocks) - 1})."
+            )
+        key_blocks[target_slot].value = weight_val
+        applied_count += 1
+
+    print(f"[INFO] Aplicados {applied_count} shape keys por indice em '{mesh_obj.name}'.")
+
+
+def validate_build_inputs(cli_args):
+    """Valida existencia dos arquivos e parametros de entrada antes da compilacao."""
+    required_paths = [
+        ("Esqueleto GTA V (.yft)", cli_args.skeleton_yft),
+        ("FBX Base Shinano", cli_args.shinano_fbx),
+        ("FBX Roupas Eternal Reunion", cli_args.outfit_fbx),
+        ("FBX Pocket Watch", cli_args.watch_fbx),
+        ("FBX Cabelo Neko Tied Bob", cli_args.hair_fbx),
+        ("Animacao Facial (.anim)", cli_args.face_anim),
+    ]
+    for desc_label, file_path in required_paths:
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(f"{desc_label} nao encontrado em: {file_path}")
+
+    texture_dir = os.path.abspath(cli_args.texture_dir)
+    for tex_name in (cli_args.atlas_png, cli_args.normal_png, cli_args.spec_png):
+        tex_path = os.path.join(texture_dir, tex_name)
+        if not os.path.isfile(tex_path):
+            raise FileNotFoundError(f"Textura do atlas nao encontrada em: {tex_path}")
+
+    if not (1 <= cli_args.max_verts_per_chunk <= 65535):
+        raise ValueError(
+            f"--max-verts-per-chunk fora do limite uint16 (1..65535): {cli_args.max_verts_per_chunk}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pipeline Principal de Montagem e Exportacao
 # ---------------------------------------------------------------------------
 def build_shinano_er_for_gtav(cli_args):
+    validate_build_inputs(cli_args)
     addon_utils.enable("sollumz")
     from sollumz.sollumz_properties import SollumType
     from sollumz.tools.blenderhelper import create_empty_object
@@ -498,6 +548,10 @@ def build_shinano_er_for_gtav(cli_args):
         ped_armature = next(
             (obj_item for obj_item in bpy.data.objects if obj_item.type == "ARMATURE"),
             None,
+        )
+    if not ped_armature:
+        raise RuntimeError(
+            f"Esqueleto GTA V nao carregado de '{cli_args.skeleton_yft}'."
         )
 
     valid_gtav_bones = {
@@ -588,8 +642,9 @@ def build_shinano_er_for_gtav(cli_args):
     if arm_hair:
         imported_armatures.append(arm_hair)
 
-    # Rotaciona bracos para a A-pose do GTA V (-55 graus) nas armatures importadas
+    # Rotaciona bracos para a A-pose do GTA V (-55 graus) e ajusta escala do Neck (0.90) conforme Shinano.unity
     arm_angle_rad = -math.radians(abs(char_profile["arm_pose_degrees"]))
+    neck_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit) if arm_obj}
     for arm_obj in imported_armatures:
         bpy.context.view_layer.objects.active = arm_obj
         bpy.ops.object.mode_set(mode="POSE")
@@ -603,7 +658,18 @@ def build_shinano_er_for_gtav(cli_args):
                 pose_bone = arm_obj.pose.bones[right_arm_name]
                 pose_bone.rotation_mode = "XYZ"
                 pose_bone.rotation_euler = (arm_angle_rad, 0.0, 0.0)
+        if arm_obj in neck_scaled_armatures and "Neck" in arm_obj.pose.bones:
+            neck_pose_bone = arm_obj.pose.bones["Neck"]
+            neck_pose_bone.scale = (0.9, 0.9, 0.9)
         bpy.ops.object.mode_set(mode="OBJECT")
+
+    if not arm_hair or "Hair Root" not in arm_hair.data.bones:
+        raise RuntimeError(
+            "Osso 'Hair Root' nao encontrado na armature do cabelo Neko Tied Bob."
+        )
+    hair_root_rest_pos = (
+        arm_hair.matrix_world @ arm_hair.data.bones["Hair Root"].head_local
+    ).copy()
 
     # 4. Carrega normais originais do rosto do FBX da Shinano
     fbx_face_normals = load_fbx_face_loop_normals(cli_args.shinano_fbx)
@@ -621,94 +687,114 @@ def build_shinano_er_for_gtav(cli_args):
             if key_block:
                 key_block.value = shape_val
 
-    # 6. Aplica blendshapes de modelagem e encolhimento no Body_base
-    body_base_obj = bpy.data.objects.get("Body_base")
-    if body_base_obj and body_base_obj.data.shape_keys:
-        shrink_keys_to_activate = [
-            "Corset",
-            "Toe_heels",
-            "Toe_highheels",
-            "Shrink_Foot",
-            "Shrink_Ankle",
-            "Shrink_Lower_leg",
-            "Shrink_Knees",
-            "Shrink_Upper_leg1",
-            "Shrink_Upper_leg2",
-            "Shrink_Hip_all",
-            "Shrink_Hip1",
-            "Shrink_Hip2",
-            "Shrink_Hip3",
-            "Shrink_Hip4",
-            "Shrink_Spine_1",
-            "Shrink_Spine_2",
-            "Shrink_Chest1",
-            "Shrink_Chest2",
-        ]
-        for key_name in shrink_keys_to_activate:
-            shape_block = body_base_obj.data.shape_keys.key_blocks.get(key_name)
-            if shape_block:
-                shape_block.value = 1.0
-        # Busto conforme referencia da foto
-        bust_block = body_base_obj.data.shape_keys.key_blocks.get("Breasts_big")
-        if bust_block:
-            bust_block.value = 1.0
+    # 6. Aplica blendshapes de modelagem e encolhimento no Body_base (foto Unity + SMR 1762524570)
+    # 100%: Corset, Hip_big, Breasts_big, Nail_hand_Oval, Shrink_Upper_arm, Shrink_Elbow,
+    # Shrink_Chest1..2, Shrink_Breast1..2, Shrink_Spine_1..2, Shrink_Hip_all,
+    # Shrink_Upper_leg1..2, Shrink_Knees, Shrink_Lower_leg, Shrink_Ankle, Shrink_Foot.
+    # 0%: Neck1..3, Shoulder, Low_arm, wrist, hand, Hip1..4, Stocking1..3, Toe_heels, Toe_highheels.
+    body_base_weights = {
+        0: 1.0,
+        6: 1.0,
+        7: 1.0,
+        14: 1.0,
+        25: 1.0,
+        26: 1.0,
+        30: 1.0,
+        31: 1.0,
+        32: 1.0,
+        33: 1.0,
+        34: 1.0,
+        35: 1.0,
+        36: 1.0,
+        41: 1.0,
+        42: 1.0,
+        43: 1.0,
+        44: 1.0,
+        45: 1.0,
+        46: 1.0,
+    }
+    apply_shape_key_weights_by_index(
+        bpy.data.objects.get("Body_base"), body_base_weights, "Body_base"
+    )
 
-    # 6B. Aplica blendshapes do Neko Tied Bob hair conforme configuracao da cena Shinano.unity / MA Shinano.prefab
-    hair_shape_keys_config = {
-        "Bangs": {
-            "ALL Down": 0.85,    # Desce as mechas da franja sobre a testa e entre os olhos
-            "Down": 0.40,        # Alonga a ponta frontal
-            ">>Side Front": 1.0, # Ajusta as laterais da franja
-        },
+    # 6A. Aplica blendshapes de ajuste das roupas Eternal Reunion e Pocket Watch
+    outfit_shape_keys_by_index = {
+        "UN1_Shirt": {0: 1.0, 4: 1.0},
+        "UN1_Skirt": {4: 1.0, 5: 1.0},
+        "UN1_ChestRibbon": {0: 1.0},
+        "UN2_Corset": {1: 1.0, 2: 1.0},
+        "UN2_Stocking": {0: 1.0, 1: 1.0},
+        "UN3_WaistChain": {0: 1.0, 1: 1.0},
+        "Pocket Watch": {5: 1.0},
+    }
+    for outfit_mesh_name, outfit_weights in outfit_shape_keys_by_index.items():
+        apply_shape_key_weights_by_index(
+            bpy.data.objects.get(outfit_mesh_name), outfit_weights, outfit_mesh_name
+        )
+
+    # 6B. Aplica blendshapes do Neko Tied Bob hair por indice exato (Shinano.unity / MA Shinano.prefab)
+    hair_shape_keys_by_index = {
+        "Bangs": {9: 0.284, 17: 1.0, 22: 1.0},
+        "Side Bangs": {0: 1.0, 4: 1.0},
         "Side": {
-            "Volume Up": 1.0,
-            "Tail Out": 1.0,
-            "Tail Back": 0.136,
-            "Middle In": 0.642,
-            "Middle Back": 1.0,
-            "Big Ear": 0.603,
-            "Big Ear 2": 1.0,
-            "Big Ear 3": 1.0,
-            "Big Ear 4": 1.0,
-            "Big Ear 5": 1.0,
-            "Big Ear 6": 1.0,
-            "Eyelashes": 1.0,
+            5: 1.0,
+            28: 1.0,
+            31: 1.0,
+            34: 0.136,
+            35: 0.642,
+            37: 1.0,
+            40: 0.603,
+            41: 1.0,
+            42: 1.0,
+            43: 0.328,
+            44: 1.0,
+            45: 1.0,
         },
-        "Back": {
-            "Front": 1.0,
-            "Top Back": 0.47,
-            "Front 2": 0.072,
-        },
+        "Back": {8: 1.0, 12: 0.47, 13: 0.072},
         "Under Side": {
-            "Tail Back": 1.0,
-            "Front.E": 0.778,
-            "Rotation.E 2": 0.203,
-            "Front": 0.788,
-            "Top Back": 0.425,
-            "Top Out": 1.0,
-            "Top Side In": 0.317,
-            "Volume Down": 0.51,
+            8: 1.0,
+            17: 0.778,
+            22: 0.203,
+            28: 0.788,
+            33: 0.425,
+            34: 1.0,
+            39: 0.317,
+            43: 0.510,
         },
         "In Hair": {
-            "Front": 0.725,
-            "Back": 0.075,
-            "Out": 0.40,
-            "Tail In": 1.0,
-            "Top In": 1.0,
-            "Ear In": 1.0,
-            "circle": 1.0,
-            "Volume Down": 1.0,
-            "Up 2": 0.488,
+            4: 0.725,
+            5: 0.075,
+            6: 0.40,
+            10: 1.0,
+            11: 1.0,
+            15: 1.0,
+            16: 0.485,
+            17: 0.796,
+            19: 0.945,
+            20: 0.117,
+            21: 0.10,
+            22: 0.315,
+            23: 0.166,
+            24: 0.427,
+            25: 0.475,
+            29: 1.0,
+            30: 0.639,
+            31: 1.0,
+            32: 1.0,
+            33: 1.0,
+            37: 0.399,
+            38: 0.221,
+            40: 0.393,
+            42: 0.126,
+            44: 1.0,
+            45: 1.0,
+            47: 0.488,
         },
     }
-    for hair_mesh_key, shape_dict in hair_shape_keys_config.items():
-        hair_obj = bpy.data.objects.get(hair_mesh_key)
-        if hair_obj and hair_obj.data.shape_keys:
-            for sk_name, sk_val in shape_dict.items():
-                sk_block = hair_obj.data.shape_keys.key_blocks.get(sk_name)
-                if sk_block:
-                    sk_block.value = sk_val
-                    print(f"[INFO] Ativado shape key {sk_name}={sk_val} em {hair_mesh_key}")
+    for hair_mesh_name, hair_weights in hair_shape_keys_by_index.items():
+        apply_shape_key_weights_by_index(
+            bpy.data.objects.get(hair_mesh_name), hair_weights, hair_mesh_name
+        )
 
     bpy.context.view_layer.update()
 
@@ -793,11 +879,11 @@ def build_shinano_er_for_gtav(cli_args):
         kb_aa = orig_body_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
         basis = orig_body_obj.data.shape_keys.key_blocks.get("Basis")
         if kb_aa and basis:
-            for v in orig_body_obj.data.vertices:
-                dz = kb_aa.data[v.index].co.z - basis.data[v.index].co.z
-                if dz < -0.0005:
-                    w_val = min(0.35, max(0.0, (abs(dz) / 0.0075) * 0.35))
-                    body_jaw_weights[v.index] = w_val
+            for vert_item in orig_body_obj.data.vertices:
+                delta_z = kb_aa.data[vert_item.index].co.z - basis.data[vert_item.index].co.z
+                if delta_z < -0.0005:
+                    w_val = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
+                    body_jaw_weights[vert_item.index] = w_val
             print(f"[OK] {len(body_jaw_weights)} vertices mapeados para FACIAL_jaw no Body.")
 
     for mesh_name, mesh_cfg in ACTIVE_MESH_CONFIGS.items():
@@ -808,16 +894,13 @@ def build_shinano_er_for_gtav(cli_args):
 
         print(f"[INFO] Processando malha: {mesh_name} ({len(source_obj.data.vertices)} vertices)")
 
-        # Identifica vertices encolhidos por Corset / Shrink_* em Body_base
+        # Identifica vertices encolhidos pelas chaves Shrink_* ativas em Body_base
         shrunk_vertex_indices = set()
         if mesh_cfg["shrink_cull"] and source_obj.data.shape_keys:
             basis_block = source_obj.data.shape_keys.key_blocks[0]
             for key_block in source_obj.data.shape_keys.key_blocks[1:]:
-                # Corset, Toe_heels e Shrink_* encolhem a cintura, peito, pes e pernas sob a roupa
-                is_shrink_key = (
-                    key_block.name.lower().startswith("shrink_")
-                    or key_block.name.lower() in ("corset", "toe_heels", "toe_highheels")
-                )
+                # Culling estrito para chaves Shrink_* (cintura, seios, bracos superiores e pernas sob a roupa)
+                is_shrink_key = key_block.name.lower().startswith("shrink_")
                 if is_shrink_key and key_block.value > 0.5:
                     for vert_idx in range(len(source_obj.data.vertices)):
                         delta_vec = key_block.data[vert_idx].co - basis_block.data[vert_idx].co
@@ -897,10 +980,7 @@ def build_shinano_er_for_gtav(cli_args):
             bm_data.free()
             baked_mesh.update()
 
-        # Identifica malhas do Neko Tied Bob hair que necessitam de ajuste de altura
-        # O offset calibrado de 0.078000 (sweet spot) faz a franja descer 1.25 cm em relacao a versao original,
-        # cobrindo perfeitamente a testa e assentando suavemente sobre a armacao dos oculos e sobrancelhas,
-        # exatamente como na foto de referencia do VRChat, mantendo cobertura 100% solida sobre o topo da cabeca.
+        # Transformacao exata do Neko Tied Bob hair baseada na cena Shinano.unity (MA Shinano -> Hair Root)
         neko_hair_mesh_names = {
             "Bangs",
             "Top Back",
@@ -916,9 +996,9 @@ def build_shinano_er_for_gtav(cli_args):
             "_Pin.R",
             "_Pin.L2",
         }
-        offset_x = mesh_cfg.get("offset_x", -0.000656 if mesh_name in neko_hair_mesh_names else 0.0)
-        offset_y = mesh_cfg.get("offset_y", -0.002832 if mesh_name in neko_hair_mesh_names else 0.0)
-        offset_z = mesh_cfg.get("offset_z", 0.065000 if mesh_name in neko_hair_mesh_names else 0.0)
+        offset_x = mesh_cfg.get("offset_x", 0.0)
+        offset_y = mesh_cfg.get("offset_y", 0.0)
+        offset_z = mesh_cfg.get("offset_z", 0.0)
 
         # Ajuste de transformacao da boina (UN2_Beret) conforme cena Shinano.unity
         is_beret_mesh = (mesh_name == "UN2_Beret")
@@ -934,9 +1014,11 @@ def build_shinano_er_for_gtav(cli_args):
             # Mapeamento para Blender: dY_blender = +0.026549 (tras), dZ_blender = +0.013878 (cima)
             hat_pos_delta = mathutils.Vector((0.0, 0.02655, 0.01388))
 
-        # Ajuste de escala do cabelo e acessorios (1.10x centrado no osso Head) conforme Unity MA Shinano
+        # Posicao, escala (1.08696) e leve pitch (-0.001953 rad em X) do osso Hair Root no Unity
         is_neko_hair = (mesh_name in neko_hair_mesh_names)
-        head_pivot = mathutils.Vector((0.0, 0.0124, 1.1323))
+        neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
+        neko_hair_scale = 1.08696
+        neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
 
         # Escala e alinha altura ao esqueleto do Michael aplicando a matriz de mundo da fonte e offset
         for vert_item in baked_mesh.vertices:
@@ -945,10 +1027,9 @@ def build_shinano_er_for_gtav(cli_args):
                 rel_co = world_co - hat_pivot
                 world_co = hat_pivot + (hat_rot_matrix @ rel_co) + hat_pos_delta
             elif is_neko_hair:
-                # Aplica escala de 1.10x no cabelo e acessorios em torno do pivo da cabeca (Head),
-                # restaurando exatamente a proporcao do Modular Avatar / Unity (MA Shinano.prefab: 1.0927x ~ 1.10x)
-                rel_hair = world_co - head_pivot
-                world_co = head_pivot + (rel_hair * 1.10)
+                # Mapeia o cabelo do Hair Root em repouso do FBX para o MA Hair Root da cena Shinano.unity
+                rel_hair = (world_co - hair_root_rest_pos) * neko_hair_scale
+                world_co = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
 
             vert_item.co.x = (world_co.x + offset_x) * scale_factor
             vert_item.co.y = (world_co.y + offset_y) * scale_factor
@@ -1238,12 +1319,12 @@ def parse_blender_cli_args():
     )
     argument_parser.add_argument(
         "--skeleton-yft",
-        default="E:/gtav_mod_michael_er/player_zero.yft",
+        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/2_blender/player_zero.yft",
         help="Caminho do arquivo de esqueleto .yft",
     )
     argument_parser.add_argument(
         "--shinano-fbx",
-        default="E:/waifuv4/gtav_mod/test_public_staging/Shinano.fbx",
+        default="E:/waifuv4/Assets/Shinano/FBX/Shinano.fbx",
         help="Caminho do FBX base da Shinano (Body e Body_base)",
     )
     argument_parser.add_argument(
@@ -1268,7 +1349,7 @@ def parse_blender_cli_args():
     )
     argument_parser.add_argument(
         "--texture-dir",
-        default="E:/gtav_mod_michael_er/textures_atlas",
+        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas",
         help="Diretorio das texturas do Atlas 4x2",
     )
     argument_parser.add_argument(
@@ -1288,7 +1369,7 @@ def parse_blender_cli_args():
     )
     argument_parser.add_argument(
         "--output-dir",
-        default="E:/gtav_mod_michael_er/output",
+        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/4_exported_models",
         help="Diretorio de saida dos arquivos .ydd",
     )
     argument_parser.add_argument(

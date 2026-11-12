@@ -6,7 +6,7 @@ cmd = [
     "powershell.exe",
     "-ExecutionPolicy", "Bypass",
     "-Command",
-    "& 'E:\\waifuv4\\BlenderTools\\blender-4.0.2-windows-x64\\blender.exe' -b -P E:\\gtav_mod_michael_er\\build_michael_er.py"
+    "& 'E:\\waifuv4\\BlenderTools\\blender-4.0.2-windows-x64\\blender.exe' -b -P E:\\vrc2gtav\\scripts\\Shinano_EternalReunion_Michael\\build_michael_er.py"
 ]
 
 print("[INFO] Iniciando build do avatar no Blender...")
@@ -17,7 +17,7 @@ elapsed = time.time() - start
 print(f"[INFO] Processo concluido em {elapsed:.1f} segundos. Return code: {res.returncode}")
 print("--- STDOUT ---")
 for line in res.stdout.splitlines():
-    if any(k in line for k in ["[INFO]", "[SUCESSO]", "[ERRO]", "Error", "Saved", "Exported", "SKEL_ROOT", "vertices", "shape key"]):
+    if any(keyword in line for keyword in ["[INFO]", "[SUCESSO]", "[ERRO]", "Error", "Saved", "Exported", "SKEL_ROOT", "vertices", "shape key"]):
         print(line)
 
 if res.returncode != 0:
