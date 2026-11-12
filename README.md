@@ -44,7 +44,9 @@ vrc2gtav/
 │   ├── head_000_r.ydd         # O Dummy Mesh universal (629 bytes)
 │   ├── apply_all_characters.py # Aplica os 3 personagens em todos os slots de uma vez
 │   ├── repack_and_deploy_everything.py # Repacota RPFs e instala no GTA V
-│   └── vrc2gtav_paths.py      # Resolução dinâmica de caminhos (Win/Linux)
+│   └── vrc2gtav_paths.py      # Leitor do vrc2gtav.cfg + conversor Win/WSL
+│
+├── vrc2gtav.cfg               # Arquivo mestre INI com TODOS os caminhos (executaveis, FBX, RPFs, etc.)
 │
 └── scripts/                   # Central de scripts organizados por personagem
     ├── Shinano_Casual_Franklin/
@@ -55,17 +57,15 @@ vrc2gtav/
 
 ---
 
-## 2. Compatibilidade Multiplataforma (Zero Hardcoded Paths)
+## 2. Configuração Centralizada (`vrc2gtav.cfg`) & Multiplataforma
 
-Os scripts utilizam o módulo compartilhado [`vrc2gtav_paths.py`](file:///mnt/e/vrc2gtav/scripts/common_tools/vrc2gtav_paths.py) que resolve caminhos de forma dinâmica:
+Todos os caminhos configuráveis (executáveis como Blender, RAGE CLI, Python e FFmpeg; diretórios do Unity `waifuv4`, pasta de mods do GTA V, RPFs extraídos/instalados, `.fbx`, `.anim`, `.yft`, texturas e scripts) ficam centralizados no arquivo [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg).
 
-1. **Variáveis de Ambiente:** Podem ser sobrescritas a qualquer momento:
-   - `VRC2GTAV_ROOT`: Caminho raiz do projeto (`E:/vrc2gtav` ou `/mnt/e/vrc2gtav`).
-   - `VRC_ASSETS_DIR`: Caminho da pasta de assets do Unity (`waifuv4/Assets`).
-   - `GTAV_MODS_DIR`: Pasta de mods do jogo (`D:/GTAV/mods` ou `/mnt/d/GTAV/mods`).
-   - `RAGE_CLI`: Caminho do executável do `rage`.
-   - `BLENDER_EXE`: Caminho do executável do `blender.exe`.
-2. **Detecção Automática:** Caso as variáveis não estejam definidas, o sistema detecta se o script está rodando sob **Windows nativo** ou **Linux/WSL**, descobre a letra da unidade (`E:`, `D:`, `C:`) e utiliza `pathlib.Path` para garantir barras corretas em ambos os sistemas.
+O módulo [`vrc2gtav_paths.py`](file:///mnt/e/vrc2gtav/scripts/common_tools/vrc2gtav_paths.py) lê o [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg) (ou um caminho customizado via variável de ambiente `VRC2GTAV_CFG`) e converte automaticamente entre caminhos Windows (`E:/...`, `D:/...`) e Linux/WSL (`/mnt/e/...`, `/mnt/d/...`):
+
+1. **Para mover o projeto, o GTA V ou o Blender para outro disco/pasta:** edite apenas as seções `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg) — nenhum script `.py` precisa ser alterado.
+2. **Suporte Windows Nativo + WSL:** Ao invocar o Blender Windows a partir do Linux/WSL, `build_blender_command()` propaga `VRC2GTAV_CFG` e detecta automaticamente um socket `WSL_INTEROP` ativo.
+3. **Variáveis de Ambiente Opcionais:** `VRC2GTAV_CFG` (aponta para outro `.cfg`), `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
 
 ---
 
@@ -214,15 +214,16 @@ python3 scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
 ```
 
 ### Passo 2: Compilar os Modelos 3D no Blender
+Os wrappers abaixo lêem automaticamente o executável do Blender e os caminhos em `vrc2gtav.cfg`:
 ```bash
 # Franklin (player_one)
-cmd.exe /c "E:\waifuv4\BlenderTools\blender-4.0.2-windows-x64\blender.exe -b -P E:\vrc2gtav\scripts\Shinano_Casual_Franklin\build_franklin_avatar.py"
+python3 scripts/Shinano_Casual_Franklin/run_build_franklin.py
 
 # Michael (player_zero)
-cmd.exe /c "E:\waifuv4\BlenderTools\blender-4.0.2-windows-x64\blender.exe -b -P E:\vrc2gtav\scripts\Shinano_EternalReunion_Michael\build_michael_er.py"
+python3 scripts/Shinano_EternalReunion_Michael/run_build_er.py
 
 # Trevor (player_two)
-cmd.exe /c "E:\waifuv4\BlenderTools\blender-4.0.2-windows-x64\blender.exe -b -P E:\vrc2gtav\scripts\Miltina_Maid_Trevor\build_trevor_miltina.py"
+python3 scripts/Miltina_Maid_Trevor/run_pipeline.py
 ```
 
 ### Passo 3: Aplicar Personagens nos Diretórios de Staging

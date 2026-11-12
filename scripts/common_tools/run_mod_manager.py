@@ -34,59 +34,48 @@ try:
 except ImportError:
     from common_tools import vrc2gtav_paths as project_paths
 
+CONFIG_FILE_PATH = project_paths.find_project_config_file()
 PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
-SCRIPTS_DIRECTORY = PROJECT_ROOT_DIRECTORY / "scripts"
+SCRIPTS_DIRECTORY = project_paths.get_scripts_root_dir()
 BLENDER_EXECUTABLE = project_paths.get_blender_exe()
 RAGE_CLI_TOOL = project_paths.get_rage_cli()
+PYTHON_EXECUTABLE = project_paths.get_python_exe()
 GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
 UNITY_ASSETS_DIRECTORY = project_paths.get_vrc_assets_dir()
 
-# Configuracao descritiva e modular dos tres protagonistas
+APPLY_CHARACTERS_SCRIPT_PATH = project_paths.get_config_path(
+    "common_assets", "apply_characters_script"
+)
+REPACK_DEPLOY_SCRIPT_PATH = project_paths.get_config_path(
+    "common_assets", "repack_deploy_script"
+)
+
+MICHAEL_CFG = project_paths.get_character_paths("michael")
+FRANKLIN_CFG = project_paths.get_character_paths("franklin")
+TREVOR_CFG = project_paths.get_character_paths("trevor")
+
+# Configuracao descritiva e modular dos tres protagonistas via vrc2gtav.cfg
 CHARACTER_PIPELINE_REGISTRY = {
     "michael": {
-        "character_key": "player_zero",
+        "character_key": str(MICHAEL_CFG["ped_name"]),
         "display_name": "Michael De Santa -> Shinano Eternal Reunion",
-        "folder_name": "2_Michael_Shinano_EternalReunion",
-        "texture_script": (
-            SCRIPTS_DIRECTORY
-            / "Shinano_EternalReunion_Michael"
-            / "generate_er_atlas.py"
-        ),
-        "blender_script": (
-            SCRIPTS_DIRECTORY
-            / "Shinano_EternalReunion_Michael"
-            / "build_michael_er.py"
-        ),
+        "folder_name": MICHAEL_CFG["character_dir"].name,
+        "texture_script": MICHAEL_CFG["atlas_script"],
+        "blender_script": MICHAEL_CFG["blender_script"],
     },
     "franklin": {
-        "character_key": "player_one",
+        "character_key": str(FRANKLIN_CFG["ped_name"]),
         "display_name": "Franklin Clinton -> Shinano Casual",
-        "folder_name": "1_Franklin_Shinano_Casual",
-        "texture_script": (
-            SCRIPTS_DIRECTORY
-            / "Shinano_Casual_Franklin"
-            / "generate_franklin_atlas.py"
-        ),
-        "blender_script": (
-            SCRIPTS_DIRECTORY
-            / "Shinano_Casual_Franklin"
-            / "build_franklin_avatar.py"
-        ),
+        "folder_name": FRANKLIN_CFG["character_dir"].name,
+        "texture_script": FRANKLIN_CFG["atlas_script"],
+        "blender_script": FRANKLIN_CFG["blender_script"],
     },
     "trevor": {
-        "character_key": "player_two",
+        "character_key": str(TREVOR_CFG["ped_name"]),
         "display_name": "Trevor Philips -> Miltina Maid",
-        "folder_name": "3_Trevor_Miltina_Maid",
-        "texture_script": (
-            SCRIPTS_DIRECTORY
-            / "Miltina_Maid_Trevor"
-            / "generate_miltina_atlas.py"
-        ),
-        "blender_script": (
-            SCRIPTS_DIRECTORY
-            / "Miltina_Maid_Trevor"
-            / "build_trevor_miltina.py"
-        ),
+        "folder_name": TREVOR_CFG["character_dir"].name,
+        "texture_script": TREVOR_CFG["atlas_script"],
+        "blender_script": TREVOR_CFG["blender_script"],
     },
 }
 
@@ -99,7 +88,11 @@ def print_section_header(section_title: str):
     print(f"{separator_line}\n")
 
 
-def execute_subcommand(command_arguments: list, task_description: str) -> bool:
+def execute_subcommand(
+    command_arguments: list,
+    task_description: str,
+    custom_environment: dict = None,
+) -> bool:
     """
     Executa comandos do sistema de forma segura, transmitindo saida em tempo real
     e tratando excecoes e codigos de saida com logs detalhados.
@@ -111,11 +104,13 @@ def execute_subcommand(command_arguments: list, task_description: str) -> bool:
     try:
         process_execution = subprocess.Popen(
             command_arguments,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
             bufsize=1,
+            env=custom_environment,
         )
 
         for raw_output_line in process_execution.stdout:
@@ -173,26 +168,40 @@ def verify_system_prerequisites() -> bool:
     print_section_header("VERIFICACAO DE PRE-REQUISITOS DO SISTEMA")
     verification_passed = True
 
-    # 1. Python e bibliotecas essenciais
+    print(f"[OK] Configuracao .cfg carregada: {CONFIG_FILE_PATH}")
+
+    # 1. Python e bibliotecas essenciais (via executavel configurado em vrc2gtav.cfg)
+    print(f"[OK] Python configurado: {PYTHON_EXECUTABLE}")
     try:
-        import PIL
-        import numpy
-        print("[OK] Bibliotecas Python (Pillow, NumPy) instaladas e funcionais.")
-    except ImportError as import_error:
-        print(f"[ERRO] Biblioteca Python ausente: {import_error}")
+        dep_check = subprocess.run(
+            [PYTHON_EXECUTABLE, "-c", "import PIL, numpy"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if dep_check.returncode == 0:
+            print("[OK] Bibliotecas Python (Pillow, NumPy) instaladas e funcionais.")
+        else:
+            print(
+                f"[ERRO] Bibliotecas Python ausentes em {PYTHON_EXECUTABLE}: "
+                f"{dep_check.stderr.strip()}"
+            )
+            verification_passed = False
+    except Exception as python_check_error:
+        print(f"[ERRO] Falha ao validar ambiente Python ({PYTHON_EXECUTABLE}): {python_check_error}")
         verification_passed = False
 
     # 2. Executavel do Blender
     if Path(BLENDER_EXECUTABLE).exists() or shutil.which(BLENDER_EXECUTABLE):
         print(f"[OK] Executavel do Blender localizado: {BLENDER_EXECUTABLE}")
     else:
-        print(f"[AVISO] Blender nao encontrado em '{BLENDER_EXECUTABLE}'. Ajuste BLENDER_EXE se necessario.")
+        print(f"[AVISO] Blender nao encontrado em '{BLENDER_EXECUTABLE}'. Ajuste [executables] -> blender em vrc2gtav.cfg.")
 
     # 3. RAGE CLI Tool
     if Path(RAGE_CLI_TOOL).exists() or shutil.which(RAGE_CLI_TOOL):
         print(f"[OK] RAGE CLI localizado: {RAGE_CLI_TOOL}")
     else:
-        print(f"[ERRO] RAGE CLI nao encontrado em '{RAGE_CLI_TOOL}'. Ajuste RAGE_CLI.")
+        print(f"[ERRO] RAGE CLI nao encontrado em '{RAGE_CLI_TOOL}'. Ajuste [executables] -> rage em vrc2gtav.cfg.")
         verification_passed = False
 
     # 4. Assets do Unity (waifuv4)
@@ -221,7 +230,7 @@ def execute_texture_generation(selected_character_keys: list) -> bool:
             print(f"[ERRO] Script de textura nao encontrado: {script_path}")
             return False
 
-        command_list = [sys.executable, str(script_path)]
+        command_list = [PYTHON_EXECUTABLE, str(script_path)]
         task_label = f"Gerando Atlas de Textura para {character_data['display_name']}"
         success_status = execute_subcommand(command_list, task_label)
         if not success_status:
@@ -233,7 +242,6 @@ def execute_texture_generation(selected_character_keys: list) -> bool:
 def execute_blender_build(selected_character_keys: list) -> bool:
     """Compila os modelos 3D no Blender para os personagens selecionados."""
     print_section_header("ETAPA 2: COMPILACAO DE MODELOS NO BLENDER (SOLLUMZ)")
-    is_windows_host = platform.system() == "Windows"
 
     for character_key in selected_character_keys:
         character_data = CHARACTER_PIPELINE_REGISTRY[character_key]
@@ -243,32 +251,15 @@ def execute_blender_build(selected_character_keys: list) -> bool:
             print(f"[ERRO] Script Blender nao encontrado: {script_path}")
             return False
 
-        if is_windows_host:
-            blender_command_list = [
-                BLENDER_EXECUTABLE,
-                "-b",
-                "-P",
-                str(script_path),
-            ]
-        else:
-            # No Linux/WSL, executamos o blender.exe via cmd.exe caso seja a instalacao Windows
-            if "blender.exe" in BLENDER_EXECUTABLE.lower():
-                windows_script_path = f"E:\\vrc2gtav\\scripts\\{script_path.parent.name}\\{script_path.name}"
-                blender_command_list = [
-                    "cmd.exe",
-                    "/c",
-                    f"{BLENDER_EXECUTABLE} -b -P {windows_script_path}",
-                ]
-            else:
-                blender_command_list = [
-                    BLENDER_EXECUTABLE,
-                    "-b",
-                    "-P",
-                    str(script_path),
-                ]
-
+        blender_command_list, blender_env = project_paths.build_blender_command(
+            script_path
+        )
         task_label = f"Compilando Modelo 3D para {character_data['display_name']}"
-        success_status = execute_subcommand(blender_command_list, task_label)
+        success_status = execute_subcommand(
+            blender_command_list,
+            task_label,
+            custom_environment=blender_env,
+        )
         if not success_status:
             return False
 
@@ -278,10 +269,12 @@ def execute_blender_build(selected_character_keys: list) -> bool:
 def execute_character_slot_patching(selected_character_keys: list) -> bool:
     """Aplica as malhas compiladas e os dummies invisiveis nos slots do GTA V."""
     print_section_header("ETAPA 3: APLICACAO UNIVERSAL DE SLOTS (ANTI-CLIPPING)")
-    apply_script_path = SCRIPTS_DIRECTORY / "common_tools" / "apply_characters.py"
+    apply_script_path = APPLY_CHARACTERS_SCRIPT_PATH
 
     if not apply_script_path.exists():
-        apply_script_path = PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "apply_characters.py"
+        apply_script_path = (
+            PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "apply_characters.py"
+        )
 
     if not apply_script_path.exists():
         print(f"[ERRO] Script apply_characters.py nao encontrado: {apply_script_path}")
@@ -295,7 +288,7 @@ def execute_character_slot_patching(selected_character_keys: list) -> bool:
 
     for ped_identifier in ped_identifiers_list:
         command_list = [
-            sys.executable,
+            PYTHON_EXECUTABLE,
             str(apply_script_path),
             "--character",
             ped_identifier,
@@ -309,11 +302,9 @@ def execute_character_slot_patching(selected_character_keys: list) -> bool:
 
 
 def execute_rpf_repack_and_deploy() -> bool:
-    """Repacota os arquivos RPF com cabeçalho OPEN e instala no GTA V."""
+    """Repacota os arquivos RPF com cabecalho OPEN e instala no GTA V."""
     print_section_header("ETAPA 4: REPACOTAMENTO RPF E DEPLOY NO GTA V")
-    repack_script_path = (
-        SCRIPTS_DIRECTORY / "common_tools" / "repack_and_deploy_everything.py"
-    )
+    repack_script_path = REPACK_DEPLOY_SCRIPT_PATH
     if not repack_script_path.exists():
         repack_script_path = (
             PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "repack_and_deploy_everything.py"
@@ -325,7 +316,7 @@ def execute_rpf_repack_and_deploy() -> bool:
         )
         return False
 
-    command_list = [sys.executable, str(repack_script_path)]
+    command_list = [PYTHON_EXECUTABLE, str(repack_script_path)]
     task_label = "Repacotando RPFs e Instalando no Jogo"
     return execute_subcommand(command_list, task_label)
 

@@ -19,76 +19,54 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-import numpy as np
+import numpy as numpy_lib
 from PIL import Image
 
-# Resolucao dinamica de caminhos
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common_tools"))
-try:
-    import vrc2gtav_paths as project_paths
-except ImportError:
-    from common_tools import vrc2gtav_paths as project_paths
+# Resolucao dinamica de caminhos multiplataforma (compativel com ambos espelhos)
+_CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT_CANDIDATE = _CURRENT_SCRIPT_DIR.parent.parent
+for _tools_candidate in (
+    _CURRENT_SCRIPT_DIR.parent / "common_tools",
+    _REPO_ROOT_CANDIDATE / "scripts" / "common_tools",
+    _REPO_ROOT_CANDIDATE / "_deploy_tools",
+):
+    if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
+        sys.path.insert(0, str(_tools_candidate))
+
+import vrc2gtav_paths as project_paths
 
 
 def generate_miltina_texture_atlas() -> bool:
     """
-    Carrega as texturas originais do Unity (waifuv4), ajusta curvas de luminosidade,
-    aplica o tom azul safira no cabelo e compoe o atlas 2K (Diffuse, Specular, Normal).
+    Carrega as texturas originais definidas em vrc2gtav.cfg [trevor], ajusta curvas
+    de luminosidade, aplica o tom azul safira no cabelo e compoe o atlas 2K.
     """
     try:
-        unity_assets_directory = project_paths.get_vrc_assets_dir()
-        project_root_directory = project_paths.get_project_root()
-        output_directory = (
-            project_root_directory
-            / "3_Trevor_Miltina_Maid"
-            / "3_textures_gtav"
-        )
+        trevor_cfg = project_paths.get_character_paths("trevor")
+        output_directory = Path(trevor_cfg["textures_dir"])
         output_directory.mkdir(parents=True, exist_ok=True)
 
-        source_textures_directory = (
-            unity_assets_directory
-            / "DOLOSart"
-            / "1.Milltina"
-            / "Material"
-            / "Texture"
-        )
-        source_normals_directory = (
-            unity_assets_directory
-            / "DOLOSart"
-            / "1.Milltina"
-            / "Material"
-            / "Normal"
-        )
+        source_face_path = Path(trevor_cfg["tex_face"])
+        blue_eyes_path = Path(trevor_cfg["tex_eye_base"])
+        osakana_path = Path(trevor_cfg["tex_eye_highlight"])
+        source_body_path = Path(trevor_cfg["tex_body"])
+        source_costume_path = Path(trevor_cfg["tex_costume"])
+        source_hair_path = Path(trevor_cfg["tex_hair"])
+        costume_normal_path = Path(trevor_cfg["tex_costume_normal"])
 
-        if not source_textures_directory.exists():
+        if not source_face_path.exists():
             print(
-                f"[ERRO] Diretorio de texturas da Miltina nao encontrado: {source_textures_directory}"
+                f"[ERRO] Textura facial da Miltina nao encontrada: {source_face_path}"
             )
             return False
 
         atlas_dimension = 2048
         half_dimension = atlas_dimension // 2
 
-        print(
-            f"[INFO] Carregando texturas fonte de: {source_textures_directory}"
-        )
-        raw_face_image = Image.open(
-            source_textures_directory / "Milltina_Face.png"
-        ).convert("RGBA")
+        print(f"[INFO] Carregando texturas fonte de: {source_face_path.parent}")
+        raw_face_image = Image.open(source_face_path).convert("RGBA")
 
         # Composicao dos olhos azuis de anime
-        eyes_directory = (
-            unity_assets_directory
-            / "NAGIMA"
-            / "AWEyes_Texture"
-            / "Milltina_AWEyes"
-            / "Material"
-        )
-        blue_eyes_path = (
-            eyes_directory / "Texture" / "Milltina_AWEyes_Blue Sea.png"
-        )
-        osakana_path = eyes_directory / "Osakana" / "Milltina_AWEyes_Osakana.png"
-
         if blue_eyes_path.exists():
             print("[INFO] Compondo iris azul marinho anime nos olhos...")
             blue_eyes_image = Image.open(blue_eyes_path).convert("RGBA")
@@ -101,15 +79,9 @@ def generate_miltina_texture_atlas() -> bool:
                 raw_face_image, osakana_image
             )
 
-        body_image = Image.open(
-            source_textures_directory / "Milltina_Body.png"
-        ).convert("RGBA")
-        costume_image = Image.open(
-            source_textures_directory / "Milltina_Costume.png"
-        ).convert("RGBA")
-        hair_image = Image.open(
-            source_textures_directory / "Milltina_Hair.png"
-        ).convert("RGBA")
+        body_image = Image.open(source_body_path).convert("RGBA")
+        costume_image = Image.open(source_costume_path).convert("RGBA")
+        hair_image = Image.open(source_hair_path).convert("RGBA")
 
         # Redimensionamento preciso dos quadrantes para 1024x1024
         face_quadrant = raw_face_image.resize(
@@ -126,23 +98,23 @@ def generate_miltina_texture_atlas() -> bool:
         )
 
         # 1. Elevacao de Luminosidade Facial (evita sombreamento escuro da RAGE)
-        face_pixel_array = np.array(face_quadrant, dtype=np.float32)
+        face_pixel_array = numpy_lib.array(face_quadrant, dtype=numpy_lib.float32)
         normalized_face_pixels = face_pixel_array[:, :, :3] / 255.0
         lifted_face_pixels = (
-            np.power(normalized_face_pixels, 0.80) * 1.15
+            numpy_lib.power(normalized_face_pixels, 0.80) * 1.15
         )
-        face_pixel_array[:, :, :3] = np.clip(
+        face_pixel_array[:, :, :3] = numpy_lib.clip(
             lifted_face_pixels * 255.0, 0.0, 255.0
         )
-        face_quadrant = Image.fromarray(face_pixel_array.astype(np.uint8))
+        face_quadrant = Image.fromarray(face_pixel_array.astype(numpy_lib.uint8))
 
         # 2. Tintura do Cabelo em Azul Safira Vibrante
-        hair_pixel_array = np.array(hair_quadrant, dtype=np.float32)
-        blue_tint_vector = np.array([0.18, 0.44, 0.92], dtype=np.float32)
-        hair_pixel_array[:, :, :3] = np.clip(
+        hair_pixel_array = numpy_lib.array(hair_quadrant, dtype=numpy_lib.float32)
+        blue_tint_vector = numpy_lib.array([0.18, 0.44, 0.92], dtype=numpy_lib.float32)
+        hair_pixel_array[:, :, :3] = numpy_lib.clip(
             hair_pixel_array[:, :, :3] * blue_tint_vector * 1.25, 0.0, 255.0
         )
-        hair_quadrant = Image.fromarray(hair_pixel_array.astype(np.uint8))
+        hair_quadrant = Image.fromarray(hair_pixel_array.astype(numpy_lib.uint8))
 
         # 3. Montagem do Atlas Diffuse
         diffuse_atlas_image = Image.new(
@@ -153,7 +125,7 @@ def generate_miltina_texture_atlas() -> bool:
         diffuse_atlas_image.paste(costume_quadrant, (0, half_dimension))
         diffuse_atlas_image.paste(hair_quadrant, (half_dimension, half_dimension))
 
-        diffuse_output_path = output_directory / "miltina_atlas_2k.png"
+        diffuse_output_path = Path(trevor_cfg["atlas_png"])
         diffuse_atlas_image.save(diffuse_output_path, "PNG")
         print(f"[OK] Diffuse Atlas salvo em: {diffuse_output_path}")
 
@@ -178,7 +150,7 @@ def generate_miltina_texture_atlas() -> bool:
             hair_specular_quadrant, (half_dimension, half_dimension)
         )
 
-        specular_output_path = output_directory / "miltina_spec.png"
+        specular_output_path = Path(trevor_cfg["spec_png"])
         specular_atlas_image.save(specular_output_path, "PNG")
         print(f"[OK] Specular Atlas salvo em: {specular_output_path}")
 
@@ -186,7 +158,6 @@ def generate_miltina_texture_atlas() -> bool:
         normal_atlas_image = Image.new(
             "RGBA", (atlas_dimension, atlas_dimension), (128, 128, 255, 255)
         )
-        costume_normal_path = source_normals_directory / "Milltina_Costume_Normal.png"
         if costume_normal_path.exists():
             costume_normal_image = Image.open(costume_normal_path).convert("RGBA")
             costume_normal_quadrant = costume_normal_image.resize(
@@ -194,13 +165,13 @@ def generate_miltina_texture_atlas() -> bool:
             )
             normal_atlas_image.paste(costume_normal_quadrant, (0, half_dimension))
 
-        normal_output_path = output_directory / "miltina_normal.png"
+        normal_output_path = Path(trevor_cfg["normal_png"])
         normal_atlas_image.save(normal_output_path, "PNG")
         print(f"[OK] Normal Map Atlas salvo em: {normal_output_path}")
 
         # 6. Compilacao do dicionario de textura .ytd via RAGE CLI
         rage_cli_binary = project_paths.get_rage_cli()
-        output_ytd_file = output_directory / "miltina_maid.ytd"
+        output_ytd_file = Path(trevor_cfg["ytd_file"])
 
         # Respeita estritamente a ordem de Hash JOAAT
         texture_build_command = [

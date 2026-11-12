@@ -4,15 +4,26 @@ Replaces drawables and texture dictionaries across extracted mod directories.
 """
 
 import glob
-import os
 import shutil
+import sys
+from pathlib import Path
 
-DUMMY_YDD_PATH = "/mnt/e/waifuv4/gtav_mod/output/head_000_r.ydd"
-MILTINA_MODEL_YDD_PATH = "/mnt/e/gtav_mod_trevor_miltina/output/uppr_000_u.ydd"
-MILTINA_TEXTURE_YTD_PATH = "/mnt/e/gtav_mod_trevor_miltina/miltina_maid.ytd"
+_CURRENT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _CURRENT_DIR.parent.parent
+for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deploy_tools"):
+    if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
 
-MPPATCHES_P2_DIR = "/mnt/e/waifuv4/gtav_mod/mppatches_extracted/player_two"
-STREAMEDPEDS_P2_DIR = "/mnt/e/waifuv4/gtav_mod/streamedpeds_players_extracted/player_two"
+import vrc2gtav_paths as project_paths
+
+TREVOR_CFG = project_paths.get_character_paths("trevor")
+DUMMY_YDD_PATH = str(project_paths.get_dummy_ydd_path())
+MILTINA_MODEL_YDD_PATH = str(TREVOR_CFG["target_model_ydd"])
+MILTINA_TEXTURE_YTD_PATH = str(TREVOR_CFG["ytd_file"])
+
+MPPATCHES_P2_DIR = str(TREVOR_CFG["staging_mppatches_ped_dir"])
+STREAMEDPEDS_P2_DIR = str(TREVOR_CFG["staging_streamed_ped_dir"])
+PATCHDAY4_P2_DIR = str(TREVOR_CFG["staging_patchday4_ped_dir"])
 
 def patch_directory(target_dir, is_mppatches=False):
     print(f"=== Patching {target_dir} ===")
@@ -64,6 +75,8 @@ def main():
 
     patch_directory(MPPATCHES_P2_DIR, is_mppatches=True)
     patch_directory(STREAMEDPEDS_P2_DIR, is_mppatches=False)
+    if os.path.isdir(PATCHDAY4_P2_DIR):
+        patch_directory(PATCHDAY4_P2_DIR, is_mppatches=False)
     print("\nAll target directories successfully patched.")
 
 if __name__ == "__main__":

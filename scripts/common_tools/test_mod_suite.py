@@ -14,8 +14,11 @@ Regras Verificadas:
   6. Conformidade de codigo (zero emojis e zero variaveis curtas de 1-2 letras).
 """
 
+import ast
+import filecmp
 import os
 import py_compile
+import re as regex_module
 import struct
 import sys
 from pathlib import Path
@@ -60,9 +63,19 @@ def test_python_syntax_compilation() -> bool:
 
 
 def test_path_resolution() -> bool:
-    """Valida a resolucao dinamica de caminhos vitais."""
-    print("\n[TESTE 2] Resolucao Dinamica de Caminhos do Projeto")
+    """Valida a resolucao dinamica de caminhos vitais a partir de vrc2gtav.cfg."""
+    print("\n[TESTE 2] Resolucao Dinamica de Caminhos via vrc2gtav.cfg")
     resolution_success = True
+
+    try:
+        config_file_path = project_paths.find_project_config_file()
+        resolution_success &= print_status_result(
+            "Arquivo Central .cfg", config_file_path.exists(), str(config_file_path)
+        )
+    except Exception as config_error:
+        resolution_success &= print_status_result(
+            "Arquivo Central .cfg", False, str(config_error)
+        )
 
     resolved_root = project_paths.get_project_root()
     resolution_success &= print_status_result("Raiz do Projeto", resolved_root.exists(), str(resolved_root))
@@ -72,6 +85,9 @@ def test_path_resolution() -> bool:
 
     blender_executable = project_paths.get_blender_exe()
     resolution_success &= print_status_result("Executavel Blender", Path(blender_executable).exists() or bool(blender_executable), str(blender_executable))
+
+    python_executable = project_paths.get_python_exe()
+    resolution_success &= print_status_result("Executavel Python", Path(python_executable).exists(), str(python_executable))
 
     rage_cli_tool = project_paths.get_rage_cli()
     resolution_success &= print_status_result("RAGE CLI Tool", Path(rage_cli_tool).exists(), str(rage_cli_tool))
@@ -85,7 +101,7 @@ def test_path_resolution() -> bool:
 def test_dummy_mesh_integrity() -> bool:
     """Valida o tamanho e formato do dummy mesh universal."""
     print("\n[TESTE 3] Integridade da Dummy Mesh Universal (head_000_r.ydd)")
-    dummy_mesh_file = PROJECT_ROOT_DIR / "_deploy_tools" / "head_000_r.ydd"
+    dummy_mesh_file = project_paths.get_dummy_ydd_path()
     if not dummy_mesh_file.exists():
         return print_status_result("head_000_r.ydd", False, "Arquivo nao encontrado!")
 
@@ -99,22 +115,23 @@ def test_dummy_mesh_integrity() -> bool:
 
 
 def test_compiled_drawables_and_textures() -> bool:
-    """Verifica se todos os modelos .ydd e dicionarios .ytd estao presentes."""
-    print("\n[TESTE 4] Verificacao dos Modelos e Dicionarios de Texturas")
+    """Verifica se todos os modelos .ydd e dicionarios .ytd configurados estao presentes."""
+    print("\n[TESTE 4] Verificacao dos Modelos e Dicionarios de Texturas (.cfg)")
     all_assets_present = True
 
+    franklin_cfg = project_paths.get_character_paths("franklin")
+    michael_cfg = project_paths.get_character_paths("michael")
+    trevor_cfg = project_paths.get_character_paths("trevor")
+
     expected_assets_list = [
-        # Franklin
-        PROJECT_ROOT_DIR / "1_Franklin_Shinano_Casual" / "4_exported_models" / "uppr_008_u.ydd",
-        PROJECT_ROOT_DIR / "1_Franklin_Shinano_Casual" / "3_textures_gtav" / "shinano_franklin_2k.ytd",
-        # Michael
-        PROJECT_ROOT_DIR / "2_Michael_Shinano_EternalReunion" / "4_exported_models" / "uppr_000_u.ydd",
-        PROJECT_ROOT_DIR / "2_Michael_Shinano_EternalReunion" / "4_exported_models" / "uppr_000_r.ydd",
-        PROJECT_ROOT_DIR / "2_Michael_Shinano_EternalReunion" / "3_textures_gtav" / "test_er.ytd",
-        # Trevor
-        PROJECT_ROOT_DIR / "3_Trevor_Miltina_Maid" / "4_exported_models" / "uppr_000_u.ydd",
-        PROJECT_ROOT_DIR / "3_Trevor_Miltina_Maid" / "4_exported_models" / "uppr_000_r.ydd",
-        PROJECT_ROOT_DIR / "3_Trevor_Miltina_Maid" / "3_textures_gtav" / "miltina_maid.ytd",
+        franklin_cfg["target_model_ydd"],
+        franklin_cfg["ytd_file"],
+        michael_cfg["target_model_ydd"],
+        michael_cfg["extra_model_ydds"][0],
+        michael_cfg["ytd_file"],
+        trevor_cfg["target_model_ydd"],
+        trevor_cfg["extra_model_ydds"][0],
+        trevor_cfg["ytd_file"],
     ]
 
     for asset_file_path in expected_assets_list:
@@ -138,10 +155,12 @@ def test_deployed_rpf_encryption_headers() -> bool:
         return True
 
     all_rpfs_valid = True
+    rpf_paths_cfg = project_paths.get_rpf_paths()
     rpf_paths_to_check = [
-        mods_directory / "update" / "x64" / "dlcpacks" / "mppatchesng" / "dlc.rpf",
-        mods_directory / "update" / "x64" / "dlcpacks" / "patchday3ng" / "dlc.rpf",
-        mods_directory / "x64v.rpf",
+        rpf_paths_cfg["mppatches_game_rpf"],
+        rpf_paths_cfg["patchday3ng_game_rpf"],
+        rpf_paths_cfg["patchday4ng_game_rpf"],
+        rpf_paths_cfg["x64v_game_rpf"],
     ]
 
     for rpf_file_path in rpf_paths_to_check:
@@ -154,14 +173,114 @@ def test_deployed_rpf_encryption_headers() -> bool:
                 encryption_bytes = struct.pack("<I", encryption_flag)
                 has_open_encryption = encryption_bytes == b"OPEN"
                 all_rpfs_valid &= print_status_result(
-                    rpf_file_path.name,
+                    f"{rpf_file_path.parent.name}/{rpf_file_path.name}",
                     has_open_encryption,
-                    f"enc={encryption_bytes} entries={entry_count} em {rpf_file_path.parent.name}",
+                    f"enc={encryption_bytes} entries={entry_count}",
                 )
         except Exception as read_error:
             all_rpfs_valid &= print_status_result(rpf_file_path.name, False, str(read_error))
 
     return all_rpfs_valid
+
+
+def test_code_quality_and_mirror_sync() -> bool:
+    """Verifica ausencia de emojis, ausencia de variaveis curtas (1-2 letras) e sincronizacao de espelhos."""
+    print("\n[TESTE 6] Qualidade de Codigo e Sincronizacao de Espelhos")
+    quality_passed = True
+    emoji_pattern = regex_module.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
+    allowed_stdlib_short_names = {"_", "os", "re"}
+
+    root_dir = project_paths.get_project_root()
+    total_python_files = 0
+    for python_file in sorted(root_dir.rglob("*.py")):
+        if any(
+            ignored in python_file.parts
+            for ignored in (".git", "__pycache__", "extracted_rpfs", "backups")
+        ):
+            continue
+        total_python_files += 1
+        file_content = python_file.read_text(encoding="utf-8", errors="ignore")
+        if emoji_pattern.search(file_content):
+            quality_passed &= print_status_result(
+                f"Sem emojis: {python_file.name}", False, str(python_file)
+            )
+
+        syntax_tree = ast.parse(file_content, filename=str(python_file))
+        invalid_short_names = sorted(
+            {
+                node.id
+                for node in ast.walk(syntax_tree)
+                if isinstance(node, ast.Name)
+                and len(node.id) <= 2
+                and node.id not in allowed_stdlib_short_names
+            }
+            | {
+                node.arg
+                for node in ast.walk(syntax_tree)
+                if isinstance(node, ast.arg) and len(node.arg) <= 2
+            }
+        )
+        if invalid_short_names:
+            quality_passed &= print_status_result(
+                f"Variaveis >= 3 chars: {python_file.relative_to(root_dir)}",
+                False,
+                f"Encontradas: {invalid_short_names}",
+            )
+
+    quality_passed &= print_status_result(
+        "Escaneamento AST/Emoji",
+        quality_passed,
+        f"{total_python_files} arquivos Python analisados",
+    )
+
+    # Verifica se copias espelhadas estao byte-a-byte identicas
+    scripts_dir = project_paths.get_scripts_root_dir()
+    deploy_dir = project_paths.get_deploy_tools_dir()
+    common_dir = project_paths.get_common_tools_dir()
+    franklin_dir = project_paths.get_character_paths("franklin")["character_dir"]
+    michael_dir = project_paths.get_character_paths("michael")["character_dir"]
+    trevor_dir = project_paths.get_character_paths("trevor")["character_dir"]
+
+    mirror_pairs = [
+        (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
+        (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
+        (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
+        (common_dir / "repack_and_deploy_everything.py", deploy_dir / "repack_and_deploy_everything.py"),
+        (common_dir / "run_mod_manager.py", deploy_dir / "run_mod_manager.py"),
+        (common_dir / "run_mod_manager.py", root_dir / "run_mod_manager.py"),
+        (scripts_dir / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", franklin_dir / "2_blender" / "build_franklin_avatar.py"),
+        (scripts_dir / "Shinano_Casual_Franklin" / "run_build_franklin.py", franklin_dir / "2_blender" / "run_build.py"),
+        (scripts_dir / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py", franklin_dir / "3_textures_gtav" / "generate_franklin_atlas.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "build_michael_er.py", michael_dir / "2_blender" / "build_michael_er.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "run_build_er.py", michael_dir / "2_blender" / "run_build.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py", michael_dir / "3_textures_gtav" / "generate_er_atlas.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "deploy_michael_er.py", michael_dir / "5_rpf_package" / "deploy_michael_er.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", trevor_dir / "2_blender" / "build_trevor_miltina.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "run_pipeline.py", trevor_dir / "2_blender" / "run_pipeline.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py", trevor_dir / "3_textures_gtav" / "generate_miltina_atlas.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "apply_miltina_to_trevor.py", trevor_dir / "5_rpf_package" / "apply_miltina_to_trevor.py"),
+    ]
+
+    mirrors_in_sync = True
+    for primary_file, mirror_file in mirror_pairs:
+        is_synced = (
+            primary_file.exists()
+            and mirror_file.exists()
+            and filecmp.cmp(primary_file, mirror_file, shallow=False)
+        )
+        if not is_synced:
+            mirrors_in_sync &= print_status_result(
+                f"Espelho dessincronizado: {mirror_file.relative_to(root_dir)}",
+                False,
+                f"deve igualar {primary_file.relative_to(root_dir)}",
+            )
+
+    quality_passed &= print_status_result(
+        "Sincronizacao de Espelhos",
+        mirrors_in_sync,
+        f"{len(mirror_pairs)} pares verificados",
+    )
+    return quality_passed
 
 
 def run_full_validation_suite():
@@ -177,6 +296,7 @@ def run_full_validation_suite():
         ("Integridade da Dummy Mesh", test_dummy_mesh_integrity()),
         ("Modelos e Dicionarios de Texturas", test_compiled_drawables_and_textures()),
         ("Cabecalhos RPF Deployed", test_deployed_rpf_encryption_headers()),
+        ("Qualidade e Espelhos", test_code_quality_and_mirror_sync()),
     ]
 
     print(f"\n{separator_banner}")

@@ -10,10 +10,22 @@ import math
 import os as operating_system
 import shutil
 import sys
+from pathlib import Path
 import bmesh
 import bpy
 import mathutils
 import addon_utils
+
+# Localiza vrc2gtav_paths independentemente do espelho usado
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _SCRIPT_DIR.parent.parent
+for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deploy_tools"):
+    if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
+
+import vrc2gtav_paths as project_paths
+
+TREVOR_CFG = project_paths.get_character_paths("trevor")
 
 addon_utils.enable("sollumz")
 from sollumz.sollumz_properties import SollumType
@@ -35,9 +47,10 @@ for scene_arm in list(bpy.data.armatures):
 for scene_mat in list(bpy.data.materials):
     bpy.data.materials.remove(scene_mat)
 
-# 2. Import Trevor base skeleton (player_two.yft)
-skeleton_dir = "E:/gtav_mod_trevor_miltina/"
-skeleton_file = "player_two.yft"
+# 2. Import Trevor base skeleton from vrc2gtav.cfg
+skeleton_path = Path(TREVOR_CFG["skeleton_yft"])
+skeleton_dir = operating_system.path.join(str(skeleton_path.parent), "")
+skeleton_file = skeleton_path.name
 print(f"[INFO] Importing Trevor base skeleton: {skeleton_dir}{skeleton_file}")
 bpy.ops.sollumz.import_assets(directory=skeleton_dir, files=[{"name": skeleton_file}])
 
@@ -74,7 +87,7 @@ for scene_obj in list(bpy.data.objects):
         bpy.data.objects.remove(scene_obj)
 
 # 3. Import Milltina FBX (strictly read-only on waifuv4)
-fbx_path = "E:/waifuv4/Assets/DOLOSart/1.Milltina/FBX/Milltina.fbx"
+fbx_path = str(TREVOR_CFG["source_fbx"])
 print(f"[INFO] Importing Milltina model: {fbx_path}")
 bpy.ops.import_scene.fbx(filepath=fbx_path, use_anim=False)
 
@@ -180,15 +193,15 @@ if face_obj and face_obj.data.shape_keys:
     
     mapped_count = 0
     if kb_aa and basis:
-        for v in face_obj.data.vertices:
-            dz = kb_aa.data[v.index].co.z - basis.data[v.index].co.z
-            if dz < -0.0005:
-                w_val = min(0.35, max(0.0, (abs(dz) / 0.0075) * 0.35))
-                jaw_vg.add([v.index], w_val, "REPLACE")
-                head_vg.add([v.index], max(0.0, 1.0 - w_val), "REPLACE")
+        for vertex_item in face_obj.data.vertices:
+            delta_z_offset = kb_aa.data[vertex_item.index].co.z - basis.data[vertex_item.index].co.z
+            if delta_z_offset < -0.0005:
+                w_val = min(0.35, max(0.0, (abs(delta_z_offset) / 0.0075) * 0.35))
+                jaw_vg.add([vertex_item.index], w_val, "REPLACE")
+                head_vg.add([vertex_item.index], max(0.0, 1.0 - w_val), "REPLACE")
                 mapped_count += 1
             else:
-                head_vg.add([v.index], 1.0, "REPLACE")
+                head_vg.add([vertex_item.index], 1.0, "REPLACE")
         print(f"[OK] Mapped {mapped_count} vertices to FACIAL_jaw on Body for Lip Sync.")
 
     print("[INFO] Baking exact adult facial expression into 'Body'...")
@@ -298,14 +311,14 @@ if vrc_armature:
     arm_angle_rad = -math.radians(55.0)
     for arm_name in ["Upper_arm_L", "Upper_arm.L", "UpperArm.L"]:
         if arm_name in vrc_armature.pose.bones:
-            pb = vrc_armature.pose.bones[arm_name]
-            pb.rotation_mode = "XYZ"
-            pb.rotation_euler = (arm_angle_rad, 0.0, 0.0)
+            pose_bone_item = vrc_armature.pose.bones[arm_name]
+            pose_bone_item.rotation_mode = "XYZ"
+            pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
     for arm_name in ["Upper_arm_R", "Upper_arm.R", "UpperArm.R"]:
         if arm_name in vrc_armature.pose.bones:
-            pb = vrc_armature.pose.bones[arm_name]
-            pb.rotation_mode = "XYZ"
-            pb.rotation_euler = (arm_angle_rad, 0.0, 0.0)
+            pose_bone_item = vrc_armature.pose.bones[arm_name]
+            pose_bone_item.rotation_mode = "XYZ"
+            pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
     bpy.ops.object.mode_set(mode="OBJECT")
 
     # Apply Armature modifier on each mesh so the A-pose is baked into the mesh geometry
@@ -522,7 +535,12 @@ print(f"[SUCCESS] Joined meshes into: {unified_obj.name} with {len(unified_obj.d
 
 jaw_check_vg = unified_obj.vertex_groups.get("FACIAL_jaw")
 if jaw_check_vg:
-    jaw_cnt = sum(1 for v in unified_obj.data.vertices for g in v.groups if g.group == jaw_check_vg.index and g.weight > 0.001)
+    jaw_cnt = sum(
+        1
+        for vertex_item in unified_obj.data.vertices
+        for group_item in vertex_item.groups
+        if group_item.group == jaw_check_vg.index and group_item.weight > 0.001
+    )
     print(f"[VERIFIED] Unified object has {jaw_cnt} vertices on FACIAL_jaw for Lip Sync.")
 else:
     print("[WARNING] FACIAL_jaw vertex group missing on unified object!")
@@ -551,7 +569,7 @@ if vrc_armature:
     bpy.data.objects.remove(vrc_armature)
 
 # 11. Configure ped_default shader and assign textures
-atlas_img_path = "E:/gtav_mod_trevor_miltina/miltina_atlas_2k.png"
+atlas_img_path = str(TREVOR_CFG["atlas_png"])
 atlas_image = bpy.data.images.load(atlas_img_path)
 atlas_image.name = "miltina_atlas_2k"
 
@@ -563,7 +581,7 @@ if diff_node:
     diff_node.image = atlas_image
     diff_node.texture_properties.embedded = False
 
-spec_img_path = "E:/gtav_mod_trevor_miltina/miltina_spec.png"
+spec_img_path = str(TREVOR_CFG["spec_png"])
 if operating_system.path.exists(spec_img_path):
     spec_node = ped_mat.node_tree.nodes.get("SpecSampler")
     if spec_node:
@@ -572,7 +590,7 @@ if operating_system.path.exists(spec_img_path):
         spec_node.image = spec_img
         spec_node.texture_properties.embedded = False
 
-normal_img_path = "E:/gtav_mod_trevor_miltina/miltina_normal.png"
+normal_img_path = str(TREVOR_CFG["normal_png"])
 if operating_system.path.exists(normal_img_path):
     normal_node = ped_mat.node_tree.nodes.get("BumpSampler")
     if normal_node:
@@ -716,7 +734,7 @@ cam_obj = bpy.data.objects.new(name="RenderCam", object_data=cam_data)
 scene_ctx.collection.objects.link(cam_obj)
 scene_ctx.camera = cam_obj
 
-renders_dir = "E:/gtav_mod_trevor_miltina/renders"
+renders_dir = str(project_paths.get_renders_output_dir())
 operating_system.makedirs(renders_dir, exist_ok=True)
 
 # A. Render Face & Neck close-up (aligned with Head at Z = +0.62)
@@ -754,7 +772,7 @@ unified_obj.parent = ped_armature
 arm_mod = unified_obj.modifiers.new("Armature", "ARMATURE")
 arm_mod.object = ped_armature
 
-output_dir = "E:/gtav_mod_trevor_miltina/output"
+output_dir = str(TREVOR_CFG["exported_models_dir"])
 operating_system.makedirs(output_dir, exist_ok=True)
 
 export_drawables = [

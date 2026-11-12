@@ -25,30 +25,36 @@ except ImportError:
 
 ROOT = paths.get_project_root()
 STAGING = paths.get_staging_dir()
-DUMMY_YDD_PATH = ROOT / "_deploy_tools" / "head_000_r.ydd"
+DUMMY_YDD_PATH = paths.get_dummy_ydd_path()
 
-# Configurações de cada personagem
+RPF_PATHS_CFG = paths.get_rpf_paths()
+MICHAEL_CFG = paths.get_character_paths("michael")
+FRANKLIN_CFG = paths.get_character_paths("franklin")
+TREVOR_CFG = paths.get_character_paths("trevor")
+
+# Configuracoes de cada personagem via vrc2gtav.cfg
 CHARACTERS = {
-    "player_zero": {
+    str(MICHAEL_CFG["ped_name"]): {
         "name": "Michael De Santa -> Shinano Eternal Reunion",
-        "model_ydd": ROOT / "2_Michael_Shinano_EternalReunion" / "4_exported_models" / "uppr_000_u.ydd",
-        "texture_ytd": ROOT / "2_Michael_Shinano_EternalReunion" / "3_textures_gtav" / "test_er.ytd",
+        "model_ydd": MICHAEL_CFG["target_model_ydd"],
+        "texture_ytd": MICHAEL_CFG["ytd_file"],
     },
-    "player_one": {
+    str(FRANKLIN_CFG["ped_name"]): {
         "name": "Franklin Clinton -> Shinano Casual",
-        "model_ydd": ROOT / "1_Franklin_Shinano_Casual" / "4_exported_models" / "uppr_008_u.ydd",
-        "texture_ytd": ROOT / "1_Franklin_Shinano_Casual" / "3_textures_gtav" / "shinano_franklin_2k.ytd",
+        "model_ydd": FRANKLIN_CFG["target_model_ydd"],
+        "texture_ytd": FRANKLIN_CFG["ytd_file"],
     },
-    "player_two": {
+    str(TREVOR_CFG["ped_name"]): {
         "name": "Trevor Philips -> Miltina Maid",
-        "model_ydd": ROOT / "3_Trevor_Miltina_Maid" / "4_exported_models" / "uppr_000_u.ydd",
-        "texture_ytd": ROOT / "3_Trevor_Miltina_Maid" / "3_textures_gtav" / "miltina_maid.ytd",
-    }
+        "model_ydd": TREVOR_CFG["target_model_ydd"],
+        "texture_ytd": TREVOR_CFG["ytd_file"],
+    },
 }
 
 TARGET_DIRS = [
-    STAGING / "mppatches_extracted",
-    STAGING / "streamedpeds_players_extracted"
+    RPF_PATHS_CFG["mppatches_extracted"],
+    RPF_PATHS_CFG["streamedpeds_extracted"],
+    RPF_PATHS_CFG["patchday4ng_models_extracted"],
 ]
 
 def patch_character_in_dir(char_id, config, ped_dir):

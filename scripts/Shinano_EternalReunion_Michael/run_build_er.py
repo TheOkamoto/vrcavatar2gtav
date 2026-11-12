@@ -1,26 +1,41 @@
+#!/usr/bin/env python3
+"""
+run_build_er.py
+===============
+Executa a compilacao da Shinano Eternal Reunion (Michael) no Blender usando
+todos os caminhos configurados em vrc2gtav.cfg.
+"""
+
 import subprocess
 import sys
-import time
+from pathlib import Path
 
-cmd = [
-    "powershell.exe",
-    "-ExecutionPolicy", "Bypass",
-    "-Command",
-    "& 'E:\\waifuv4\\BlenderTools\\blender-4.0.2-windows-x64\\blender.exe' -b -P E:\\vrc2gtav\\scripts\\Shinano_EternalReunion_Michael\\build_michael_er.py"
-]
+CURRENT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CURRENT_DIR.parent.parent
+for tools_dir in (REPO_ROOT / "scripts" / "common_tools", REPO_ROOT / "_deploy_tools"):
+    if tools_dir.is_dir() and str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
 
-print("[INFO] Iniciando build do avatar no Blender...")
-start = time.time()
-res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-elapsed = time.time() - start
+import vrc2gtav_paths as project_paths
 
-print(f"[INFO] Processo concluido em {elapsed:.1f} segundos. Return code: {res.returncode}")
-print("--- STDOUT ---")
-for line in res.stdout.splitlines():
-    if any(keyword in line for keyword in ["[INFO]", "[SUCESSO]", "[ERRO]", "Error", "Saved", "Exported", "SKEL_ROOT", "vertices", "shape key"]):
-        print(line)
 
-if res.returncode != 0:
-    print("--- STDERR ---")
-    print(res.stderr[-2000:])
-    sys.exit(res.returncode)
+def main() -> int:
+    michael_cfg = project_paths.get_character_paths("michael")
+    blender_script = michael_cfg["blender_script"]
+    if not blender_script.exists():
+        print(f"[ERRO] Script Blender nao encontrado: {blender_script}")
+        return 1
+
+    blender_command, blender_env = project_paths.build_blender_command(blender_script)
+    print(f"[INFO] Executando Blender: {' '.join(blender_command)}")
+    result = subprocess.run(
+        blender_command,
+        stdin=subprocess.DEVNULL,
+        env=blender_env,
+        check=False,
+    )
+    return result.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

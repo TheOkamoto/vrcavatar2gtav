@@ -1,131 +1,139 @@
 #!/usr/bin/env python3
-# Run pipeline: Blender build & render + RAGE engine render for Miltina Maid
+"""
+run_pipeline.py
+===============
+Executa a pipeline completa de Miltina Maid (Trevor - player_two) utilizando
+exclusivamente os caminhos definidos em vrc2gtav.cfg:
+  1. Gera o texture atlas 2K e compila o .ytd
+  2. Executa build_trevor_miltina.py no Blender e gera preview renders
+  3. Renderiza preview no RAGE e copia capturas se o diretorio de artefatos existir
+  4. Aplica os arquivos nos slots do Trevor e executa o repack/deploy RPF
+"""
 
-import os
 import shutil
 import subprocess
 import sys
-import time
+from pathlib import Path
+from PIL import Image
 
-def execute_pipeline():
-    start_time = time.time()
-    work_dir = "/mnt/e/gtav_mod_trevor_miltina"
-    artifacts_dir = "/home/okamoto/.gemini/antigravity/brain/30b341d6-822d-4846-8de4-95dd5ff74215"
-    rage_tool = "/home/okamoto/.gemini/antigravity/scratch/gtav_tools/rage"
-    python_env = "/home/okamoto/.gemini/antigravity/scratch/vrc-avatar-to-gtav/.venv/bin/python3"
-    
-    # 0. Generate texture atlas and build .ytd
-    print("[INFO] Generating Miltina 2K texture atlas (bright face + sapphire blue hair) with correct JOAAT order...")
-    subprocess.run([python_env, os.path.join(work_dir, "build_textures_2k.py")], check=True)
-    
-    # 1. Execute Blender build & render
-    print("[INFO] Starting Blender execution...")
-    blender_command = [
-        "cmd.exe", "/c",
-        r"E:\waifuv4\BlenderTools\blender-4.0.2-windows-x64\blender.exe -b -P E:\gtav_mod_trevor_miltina\build_and_render_miltina.py"
-    ]
-    
-    proc = subprocess.run(blender_command, capture_output=True, encoding="cp932", errors="replace")
-    print("--- Blender Output ---")
-    for line in proc.stdout.splitlines():
-        if any(marker in line for marker in ["[INFO]", "[SUCCESS]", "[OK]", "Error", "Saved"]):
-            print("  ", line)
-            
-    if proc.returncode != 0:
-        print("[ERROR] Blender build failed!")
-        print(proc.stderr[-2000:])
-        sys.exit(proc.returncode)
-        
-    # Copy Blender renders to artifacts
-    renders_source = os.path.join(work_dir, "renders")
-    face_render_src = os.path.join(renders_source, "miltina_blender_face.png")
-    full_render_src = os.path.join(renders_source, "miltina_blender_full.png")
-    
-    if os.path.exists(face_render_src):
-        shutil.copy2(face_render_src, os.path.join(artifacts_dir, "miltina_blender_face.png"))
-        print(f"[OK] Copied face render to artifacts: miltina_blender_face.png")
-    if os.path.exists(full_render_src):
-        shutil.copy2(full_render_src, os.path.join(artifacts_dir, "miltina_blender_full.png"))
-        print(f"[OK] Copied full render to artifacts: miltina_blender_full.png")
+_CURRENT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _CURRENT_DIR.parent.parent
+for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deploy_tools"):
+    if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
 
-    # 1.1 Render Lip Sync Demo (closed, dialogue 8 deg, speech max 15 deg)
-    print("[INFO] Rendering Lip Sync poses in Blender (FACIAL_jaw rotation)...")
-    lipsync_command = [
-        "cmd.exe", "/c",
-        r"E:\waifuv4\BlenderTools\blender-4.0.2-windows-x64\blender.exe -b -P E:\gtav_mod_trevor_miltina\render_miltina_lipsync_demo.py"
-    ]
-    subprocess.run(lipsync_command, capture_output=True, encoding="cp932", errors="replace", check=True)
-    lipsync_dir = os.path.join(work_dir, "renders_lipsync_demo")
-    for filename in os.listdir(lipsync_dir):
-        if filename.endswith(".png"):
-            src_path = os.path.join(lipsync_dir, filename)
-            shutil.copy2(src_path, os.path.join(artifacts_dir, filename))
-            print(f"[OK] Copied lip sync render to artifacts: {filename}")
-        
-    # 2. Package into temporary RPF and execute RAGE screenshot
-    ydd_path = os.path.join(work_dir, "output", "uppr_000_u.ydd")
-    ytd_path = os.path.join(work_dir, "miltina_maid.ytd")
-    
-    if not os.path.exists(ydd_path):
-        print(f"[ERROR] YDD not found at: {ydd_path}")
-        sys.exit(1)
-        
-    rpf_stage_dir = os.path.join(work_dir, "rpf_stage")
-    os.makedirs(rpf_stage_dir, exist_ok=True)
-    shutil.copy2(ydd_path, os.path.join(rpf_stage_dir, "uppr_000_u.ydd"))
-    
-    rpf_output_path = os.path.join(work_dir, "miltina_preview.rpf")
-    print(f"[INFO] Creating preview RPF: {rpf_output_path}")
-    subprocess.run([rage_tool, "create", "-o", rpf_output_path, rpf_stage_dir], check=True)
-    
-    rage_render_dir = os.path.join(work_dir, "rage_renders")
-    os.makedirs(rage_render_dir, exist_ok=True)
-    
-    print("[INFO] Executing RAGE screenshot...")
-    screenshot_command = [
-        rage_tool, "screenshot",
-        "--ytd", ytd_path,
-        "--views", "front,45:0,iso",
-        "--grid",
-        "--size", "1024x1024",
-        "-o", rage_render_dir,
-        rpf_output_path,
-        "uppr_000_u.ydd"
-    ]
-    subprocess.run(screenshot_command, check=True)
-    
-    # Copy RAGE screenshots to artifacts
-    for filename in os.listdir(rage_render_dir):
-        if filename.endswith(".png"):
-            src_path = os.path.join(rage_render_dir, filename)
-            dest_name = f"miltina_rage_{filename}"
-            shutil.copy2(src_path, os.path.join(artifacts_dir, dest_name))
-            print(f"[OK] Copied RAGE render to artifacts: {dest_name}")
+import vrc2gtav_paths as project_paths
 
-    # Generate RAGE Head & Face close-up crop
-    front_screenshot = os.path.join(rage_render_dir, "uppr_000_u_front.png")
-    if os.path.exists(front_screenshot):
-        crop_dest = os.path.join(artifacts_dir, "miltina_rage_head_crop.png")
-        crop_cmd = [
-            "ffmpeg", "-y", "-i", front_screenshot,
-            "-filter:v", "crop=320:320:352:170",
-            crop_dest
-        ]
-        subprocess.run(crop_cmd, capture_output=True, check=True)
-        print(f"[OK] Generated RAGE face close-up: miltina_rage_head_crop.png")
 
-    # 3. Apply Miltina Maid to Trevor extracted mod directories
-    print("[INFO] Applying Miltina Maid to Trevor mod folders...")
-    subprocess.run([python_env, os.path.join(work_dir, "apply_miltina_to_trevor.py")], check=True)
+def main() -> int:
+    trevor_cfg = project_paths.get_character_paths("trevor")
+    python_exe = project_paths.get_python_exe()
+    rage_cli = project_paths.get_rage_cli()
+    artifacts_dir = project_paths.get_artifacts_dir()
+    renders_source = project_paths.get_renders_output_dir()
+    staging_dir = project_paths.get_staging_dir()
 
-    # 4. Repack into dlc.rpf and x64v.rpf with OPEN headers and deploy to GTAV/mods
-    print("[INFO] Repacking RPFs and deploying to /mnt/d/GTAV/mods/...")
-    repack_script = "/mnt/e/waifuv4/gtav_mod/repack_and_deploy_everything.py"
-    subprocess.run([python_env, repack_script], check=True)
-    print("[SUCCESS] All RPF archives repacked with OPEN header and deployed!")
-            
-    elapsed = time.time() - start_time
-    print(f"\n[COMPLETE] Full pipeline finished successfully in {elapsed:.1f} seconds.")
+    # 1. Gerar Atlas 2K e .ytd
+    print("[INFO] Gerando texture atlas 2K da Miltina...")
+    atlas_script = Path(trevor_cfg["atlas_script"])
+    if not atlas_script.exists():
+        print(f"[ERRO] Script de atlas nao encontrado: {atlas_script}")
+        return 1
+    subprocess.run([python_exe, str(atlas_script)], check=True)
+
+    # 2. Compilar modelo no Blender + renderizar previews
+    blender_script = Path(trevor_cfg["blender_script"])
+    if not blender_script.exists():
+        print(f"[ERRO] Script Blender nao encontrado: {blender_script}")
+        return 1
+    blender_cmd, blender_env = project_paths.build_blender_command(blender_script)
+    print("[INFO] Executando build e render no Blender...")
+    subprocess.run(
+        blender_cmd,
+        stdin=subprocess.DEVNULL,
+        env=blender_env,
+        check=True,
+    )
+
+    if artifacts_dir.is_dir():
+        for render_name in ("miltina_blender_face.png", "miltina_blender_full.png"):
+            source_render = renders_source / render_name
+            if source_render.exists():
+                shutil.copy2(source_render, artifacts_dir / render_name)
+                print(f"[OK] Render copiado para artifacts: {render_name}")
+
+    # 3. Preview no RAGE Engine (opcional se modelos e .ytd existirem)
+    ydd_path = Path(trevor_cfg["target_model_ydd"])
+    ytd_path = Path(trevor_cfg["ytd_file"])
+    if not ydd_path.exists() or not ytd_path.exists():
+        print(f"[ERRO] Arquivos compilados ausentes: {ydd_path} / {ytd_path}")
+        return 1
+
+    rpf_stage_dir = staging_dir / "miltina_preview_rpf_stage"
+    shutil.rmtree(rpf_stage_dir, ignore_errors=True)
+    rpf_stage_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ydd_path, rpf_stage_dir / ydd_path.name)
+    shutil.copy2(ytd_path, rpf_stage_dir / ytd_path.name)
+
+    rpf_output_path = Path(trevor_cfg["preview_rpf"])
+    subprocess.run(
+        [rage_cli, "create", "-o", str(rpf_output_path), str(rpf_stage_dir)],
+        check=True,
+    )
+
+    rage_render_dir = renders_source / "miltina_rage_renders"
+    rage_render_dir.mkdir(parents=True, exist_ok=True)
+    print("[INFO] Gerando preview de render no RAGE...")
+    subprocess.run(
+        [
+            rage_cli,
+            "render",
+            str(rpf_output_path),
+            "--all-angles",
+            "-o",
+            str(rage_render_dir),
+            ydd_path.name,
+        ],
+        check=True,
+    )
+
+    if artifacts_dir.is_dir():
+        for filename in rage_render_dir.iterdir():
+            if filename.suffix.lower() == ".png":
+                dest_name = f"miltina_rage_{filename.name}"
+                shutil.copy2(filename, artifacts_dir / dest_name)
+                print(f"[OK] Captura RAGE copiada para artifacts: {dest_name}")
+
+        front_screenshot = rage_render_dir / f"{ydd_path.stem}_front.png"
+        if front_screenshot.exists():
+            crop_dest = artifacts_dir / "miltina_rage_head_crop.png"
+            image_obj = Image.open(front_screenshot)
+            width_px, height_px = image_obj.size
+            cropped_img = image_obj.crop(
+                (int(width_px * 0.25), 0, int(width_px * 0.75), int(height_px * 0.42))
+            )
+            cropped_img.save(crop_dest)
+            print("[OK] Gerado recorte do rosto RAGE: miltina_rage_head_crop.png")
+
+    # 4. Aplicar modelo + texturas nos slots do Trevor e fazer deploy RPF
+    print("[INFO] Aplicando Miltina aos slots do Trevor...")
+    apply_characters_script = project_paths.get_config_path(
+        "common_assets", "apply_characters_script"
+    )
+    subprocess.run(
+        [python_exe, str(apply_characters_script), "--character", str(trevor_cfg["ped_name"])],
+        check=True,
+    )
+
+    print("[INFO] Repacotando RPFs e instalando no diretorio mods do GTA V...")
+    repack_script = project_paths.get_config_path(
+        "common_assets", "repack_deploy_script"
+    )
+    subprocess.run([python_exe, str(repack_script)], check=True)
+
+    print("[SUCESSO] Pipeline completa da Miltina finalizada com sucesso.")
+    return 0
+
 
 if __name__ == "__main__":
-    execute_pipeline()
+    sys.exit(main())

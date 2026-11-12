@@ -41,10 +41,23 @@ import re
 import struct
 import sys
 import zlib
+from pathlib import Path
 
 import addon_utils
 import bmesh
 import bpy
+
+# Configura sys.path para localizar vrc2gtav_paths independentemente de espelho
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT_CANDIDATE = _SCRIPT_DIR.parent.parent
+for _tools_candidate in (
+    _REPO_ROOT_CANDIDATE / "scripts" / "common_tools",
+    _REPO_ROOT_CANDIDATE / "_deploy_tools",
+):
+    if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
+        sys.path.insert(0, str(_tools_candidate))
+
+import vrc2gtav_paths as project_paths
 import mathutils
 
 
@@ -1308,6 +1321,8 @@ def parse_blender_cli_args():
     double_dash_index = raw_arguments.index("--") if "--" in raw_arguments else len(raw_arguments)
     custom_arguments = raw_arguments[double_dash_index + 1 :]
 
+    michael_cfg = project_paths.get_character_paths("michael")
+
     argument_parser = argparse.ArgumentParser(
         description="Compilador Shinano Eternal Reunion para GTA V Legacy"
     )
@@ -1319,57 +1334,57 @@ def parse_blender_cli_args():
     )
     argument_parser.add_argument(
         "--skeleton-yft",
-        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/2_blender/player_zero.yft",
+        default=str(michael_cfg["skeleton_yft"]),
         help="Caminho do arquivo de esqueleto .yft",
     )
     argument_parser.add_argument(
         "--shinano-fbx",
-        default="E:/waifuv4/Assets/Shinano/FBX/Shinano.fbx",
+        default=str(michael_cfg["fbx_shinano"]),
         help="Caminho do FBX base da Shinano (Body e Body_base)",
     )
     argument_parser.add_argument(
         "--outfit-fbx",
-        default="E:/waifuv4/Assets/Vagrant Brand/Eternal Reunion/Avatars/Shinano/FBX/ER_Shi.fbx",
+        default=str(michael_cfg["fbx_outfit"]),
         help="Caminho do FBX de roupas Eternal Reunion",
     )
     argument_parser.add_argument(
         "--watch-fbx",
-        default="E:/waifuv4/Assets/Vagrant Brand/Eternal Reunion/Pocket Watch/FBX/ER_PW.fbx",
+        default=str(michael_cfg["fbx_watch"]),
         help="Caminho do FBX do Relogio de Bolso",
     )
     argument_parser.add_argument(
         "--hair-fbx",
-        default="E:/waifuv4/Assets/Li-ne/Neko Tied Bob hair/_Fbx/Neko Tied Bob hair.fbx",
+        default=str(michael_cfg["fbx_hair"]),
         help="Caminho do FBX do Cabelo Neko Tied Bob hair",
     )
     argument_parser.add_argument(
         "--face-anim",
-        default="E:/waifuv4/Assets/ShinanoDefAdultNewv5.anim",
+        default=str(michael_cfg["face_anim"]),
         help="Caminho do arquivo .anim com expressoes faciais",
     )
     argument_parser.add_argument(
         "--texture-dir",
-        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas",
+        default=str(michael_cfg["textures_dir"]),
         help="Diretorio das texturas do Atlas 4x2",
     )
     argument_parser.add_argument(
         "--atlas-png",
-        default="shinano_er_atlas.png",
+        default=Path(michael_cfg["atlas_png"]).name,
         help="Nome do arquivo PNG do Texture Atlas",
     )
     argument_parser.add_argument(
         "--normal-png",
-        default="shinano_flat_normal.png",
+        default=Path(michael_cfg["normal_png"]).name,
         help="Nome do arquivo PNG do flat normal map",
     )
     argument_parser.add_argument(
         "--spec-png",
-        default="shinano_black_spec.png",
+        default=Path(michael_cfg["spec_png"]).name,
         help="Nome do arquivo PNG do black specular map",
     )
     argument_parser.add_argument(
         "--output-dir",
-        default="E:/vrc2gtav/2_Michael_Shinano_EternalReunion/4_exported_models",
+        default=str(michael_cfg["exported_models_dir"]),
         help="Diretorio de saida dos arquivos .ydd",
     )
     argument_parser.add_argument(

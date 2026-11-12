@@ -23,48 +23,63 @@ import shutil
 import struct
 import subprocess
 import sys
+from pathlib import Path
 
+_CURRENT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _CURRENT_DIR.parent.parent
+for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deploy_tools"):
+    if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
 
-RAGE_TOOL_PATH = "/home/okamoto/.gemini/antigravity/scratch/gtav_tools/rage"
-DUMMY_SOURCE_PATH = "/mnt/e/waifuv4/gtav_mod/clean_player_one/player_one/accs_000_u.ydd"
+import vrc2gtav_paths as project_paths
+
+MICHAEL_CFG = project_paths.get_character_paths("michael")
+FRANKLIN_CFG = project_paths.get_character_paths("franklin")
+RPF_PATHS_CFG = project_paths.get_rpf_paths()
+STAGING_DIR = project_paths.get_staging_dir()
+
+RAGE_TOOL_PATH = str(project_paths.get_rage_cli())
+DUMMY_SOURCE_PATH = str(project_paths.get_dummy_ydd_path())
 
 # Fontes do Michael (player_zero)
-MICHAEL_ER_DIR = "/mnt/e/gtav_mod_michael_er"
-MICHAEL_UPPR_U = os.path.join(MICHAEL_ER_DIR, "output", "uppr_000_u.ydd")
-MICHAEL_UPPR_R = os.path.join(MICHAEL_ER_DIR, "output", "uppr_000_r.ydd")
-MICHAEL_YTD = os.path.join(MICHAEL_ER_DIR, "test_er.ytd")
+MICHAEL_ER_DIR = str(MICHAEL_CFG["character_dir"])
+MICHAEL_UPPR_U = str(MICHAEL_CFG["target_model_ydd"])
+MICHAEL_UPPR_R = str(MICHAEL_CFG["extra_model_ydds"][0])
+MICHAEL_YTD = str(MICHAEL_CFG["ytd_file"])
 
 # Fontes do Franklin (player_one)
-FRANKLIN_DIR = "/mnt/e/gtav_mod_franklin"
-FRANKLIN_UPPR_U = os.path.join(FRANKLIN_DIR, "output", "uppr_008_u.ydd")
-FRANKLIN_YTD = os.path.join(FRANKLIN_DIR, "shinano_franklin_2k.ytd")
+FRANKLIN_DIR = str(FRANKLIN_CFG["character_dir"])
+FRANKLIN_UPPR_U = str(FRANKLIN_CFG["target_model_ydd"])
+FRANKLIN_YTD = str(FRANKLIN_CFG["ytd_file"])
 
 # Diretorios de trabalho em streamedpeds_players
-STREAMED_BASE_DIR = "/mnt/e/waifuv4/gtav_mod/streamedpeds_players_extracted"
-PLAYER_ZERO_DIR = os.path.join(STREAMED_BASE_DIR, "player_zero")
-PLAYER_ONE_DIR = os.path.join(STREAMED_BASE_DIR, "player_one")
+STREAMED_BASE_DIR = str(RPF_PATHS_CFG["streamedpeds_extracted"])
+PLAYER_ZERO_DIR = str(MICHAEL_CFG["staging_streamed_ped_dir"])
+PLAYER_ONE_DIR = str(FRANKLIN_CFG["staging_streamed_ped_dir"])
 
 # Arquivos RPF do x64v
-STREAMED_TARGET_RPF = "/mnt/e/waifuv4/gtav_mod/streamedpeds_players_shinano.rpf"
-X64V_EXTRACTED_DIR = "/mnt/e/waifuv4/gtav_mod/x64v_extracted"
-X64V_MODDED_RPF = "/mnt/e/waifuv4/gtav_mod/x64v_modded.rpf"
-GTAV_MODS_X64V_RPF = "/mnt/d/GTAV/mods/x64v.rpf"
+STREAMED_TARGET_RPF = str(STAGING_DIR / "streamedpeds_players_shinano.rpf")
+X64V_EXTRACTED_DIR = str(RPF_PATHS_CFG["x64v_extracted"])
+X64V_MODDED_RPF = str(RPF_PATHS_CFG["x64v_modded_rpf"])
+GTAV_MODS_X64V_RPF = str(RPF_PATHS_CFG["x64v_game_rpf"])
 
 # Diretorios e arquivos do DLC mppatchesng
-MPPATCHES_WORK_DIR = os.path.join(MICHAEL_ER_DIR, "mppatches_work")
+STAGING_MPPATCHES_SEED = str(RPF_PATHS_CFG["mppatches_extracted"])
+STAGING_MPPATCHESNG_SEED = str(RPF_PATHS_CFG["mppatches_dlc_extracted"])
+MPPATCHES_WORK_DIR = os.path.join(MICHAEL_ER_DIR, "5_rpf_package", "mppatches_work")
 MPPATCHES_EXTRACTED_DIR = os.path.join(MPPATCHES_WORK_DIR, "mppatches_extracted")
 MPPATCHESNG_EXTRACTED_DIR = os.path.join(MPPATCHES_WORK_DIR, "mppatchesng_extracted")
 MPPATCHES_TARGET_RPF = os.path.join(MPPATCHES_WORK_DIR, "mppatches.rpf")
 MPPATCHESNG_TARGET_RPF = os.path.join(MPPATCHES_WORK_DIR, "mppatchesng_dlc.rpf")
-GTAV_MODS_MPPATCHESNG_DLC_RPF = "/mnt/d/GTAV/mods/update/x64/dlcpacks/mppatchesng/dlc.rpf"
+GTAV_MODS_MPPATCHESNG_DLC_RPF = str(RPF_PATHS_CFG["mppatches_game_rpf"])
 
 # Diretorios e arquivos do DLC patchday3ng
-PATCHDAY3_WORK_DIR = os.path.join(FRANKLIN_DIR, "patchday3_work")
+PATCHDAY3_WORK_DIR = os.path.join(FRANKLIN_DIR, "5_rpf_package", "patchday3_work")
 PATCHDAY3_EXTRACTED_DIR = os.path.join(PATCHDAY3_WORK_DIR, "patchday3_extracted")
 PATCHDAY3NG_EXTRACTED_DIR = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng_extracted")
 PATCHDAY3_TARGET_RPF = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng.rpf")
 PATCHDAY3NG_TARGET_RPF = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng_dlc.rpf")
-GTAV_MODS_PATCHDAY3NG_DLC_RPF = "/mnt/d/GTAV/mods/update/x64/dlcpacks/patchday3ng/dlc.rpf"
+GTAV_MODS_PATCHDAY3NG_DLC_RPF = str(RPF_PATHS_CFG["patchday3ng_game_rpf"])
 
 
 def execute_shell_task(command_arguments, task_description):
@@ -221,40 +236,40 @@ def deploy_universal():
 
     execute_shell_task(
         [RAGE_TOOL_PATH, "verify", GTAV_MODS_X64V_RPF],
-        "Verificacao final de integridade em /mnt/d/GTAV/mods/x64v.rpf",
+        f"Verificacao final de integridade em {GTAV_MODS_X64V_RPF}",
     )
 
     # 5. Atualiza DLC mppatchesng
     print("\n[INFO] Atualizando DLC mppatchesng...")
     os.makedirs(MPPATCHES_WORK_DIR, exist_ok=True)
     if not os.path.exists(MPPATCHES_EXTRACTED_DIR):
-        shutil.copytree("/mnt/e/waifuv4/gtav_mod/mppatches_extracted", MPPATCHES_EXTRACTED_DIR)
+        shutil.copytree(STAGING_MPPATCHES_SEED, MPPATCHES_EXTRACTED_DIR)
     if not os.path.exists(MPPATCHESNG_EXTRACTED_DIR):
-        shutil.copytree("/mnt/e/waifuv4/gtav_mod/mppatchesng_extracted", MPPATCHESNG_EXTRACTED_DIR)
+        shutil.copytree(STAGING_MPPATCHESNG_SEED, MPPATCHESNG_EXTRACTED_DIR)
 
     # Atualiza Michael no mppatches
     pz_mp = os.path.join(MPPATCHES_EXTRACTED_DIR, "player_zero")
     if os.path.exists(pz_mp):
-        for f in os.listdir(pz_mp):
-            p = os.path.join(pz_mp, f)
-            if f.startswith("uppr_") and f.endswith(".ydd"):
-                shutil.copy2(MICHAEL_UPPR_U, p)
-            elif f.startswith("uppr_diff_") and f.endswith(".ytd"):
-                shutil.copy2(MICHAEL_YTD, p)
-            elif f.endswith(".ydd"):
-                shutil.copy2(DUMMY_SOURCE_PATH, p)
+        for entry_filename in os.listdir(pz_mp):
+            entry_filepath = os.path.join(pz_mp, entry_filename)
+            if entry_filename.startswith("uppr_") and entry_filename.endswith(".ydd"):
+                shutil.copy2(MICHAEL_UPPR_U, entry_filepath)
+            elif entry_filename.startswith("uppr_diff_") and entry_filename.endswith(".ytd"):
+                shutil.copy2(MICHAEL_YTD, entry_filepath)
+            elif entry_filename.endswith(".ydd"):
+                shutil.copy2(DUMMY_SOURCE_PATH, entry_filepath)
 
     # Atualiza Franklin no mppatches
     po_mp = os.path.join(MPPATCHES_EXTRACTED_DIR, "player_one")
     if os.path.exists(po_mp):
-        for f in os.listdir(po_mp):
-            p = os.path.join(po_mp, f)
-            if f.startswith("uppr_") and f.endswith(".ydd"):
-                shutil.copy2(FRANKLIN_UPPR_U, p)
-            elif f.startswith("uppr_diff_") and f.endswith(".ytd"):
-                shutil.copy2(FRANKLIN_YTD, p)
-            elif f.endswith(".ydd"):
-                shutil.copy2(DUMMY_SOURCE_PATH, p)
+        for entry_filename in os.listdir(po_mp):
+            entry_filepath = os.path.join(po_mp, entry_filename)
+            if entry_filename.startswith("uppr_") and entry_filename.endswith(".ydd"):
+                shutil.copy2(FRANKLIN_UPPR_U, entry_filepath)
+            elif entry_filename.startswith("uppr_diff_") and entry_filename.endswith(".ytd"):
+                shutil.copy2(FRANKLIN_YTD, entry_filepath)
+            elif entry_filename.endswith(".ydd"):
+                shutil.copy2(DUMMY_SOURCE_PATH, entry_filepath)
 
     execute_shell_task(
         [RAGE_TOOL_PATH, "create", "-o", MPPATCHES_TARGET_RPF, MPPATCHES_EXTRACTED_DIR, "-e", "open"],

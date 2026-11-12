@@ -36,53 +36,31 @@ except ImportError:
 RAGE_CLI_TOOL = project_paths.get_rage_cli()
 GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
 STAGING_DIRECTORY = project_paths.get_staging_dir()
+RPF_PATHS_CONFIG = project_paths.get_rpf_paths()
 
-MPPATCHES_EXTRACTED_DIR = STAGING_DIRECTORY / "mppatches_extracted"
+MPPATCHES_EXTRACTED_DIR = RPF_PATHS_CONFIG["mppatches_extracted"]
+MPPATCHESNG_EXTRACTED_DIR = RPF_PATHS_CONFIG["mppatches_dlc_extracted"]
 MPPATCHES_RPF_FILE = (
-    STAGING_DIRECTORY
-    / "mppatchesng_extracted"
-    / "x64"
-    / "models"
-    / "cdimages"
-    / "mppatches.rpf"
+    MPPATCHESNG_EXTRACTED_DIR / RPF_PATHS_CONFIG["mppatches_rpf_relative"]
 )
-MPPATCHESNG_EXTRACTED_DIR = STAGING_DIRECTORY / "mppatchesng_extracted"
-MPPATCHESNG_DLC_RPF_FILE = STAGING_DIRECTORY / "mppatchesng_dlc.rpf"
-TARGET_DLC_RPF_PATH = (
-    GTAV_MODS_DIRECTORY
-    / "update"
-    / "x64"
-    / "dlcpacks"
-    / "mppatchesng"
-    / "dlc.rpf"
-)
+MPPATCHESNG_DLC_RPF_FILE = RPF_PATHS_CONFIG["mppatches_modded_rpf"]
+TARGET_DLC_RPF_PATH = RPF_PATHS_CONFIG["mppatches_game_rpf"]
 
-PATCHDAY4NG_EXTRACTED_DIR = STAGING_DIRECTORY / "patchday4ng_dlc_extracted"
+PATCHDAY4NG_EXTRACTED_DIR = RPF_PATHS_CONFIG["patchday4ng_dlc_extracted"]
 PATCHDAY4NG_INNER_RPF = (
-    PATCHDAY4NG_EXTRACTED_DIR / "x64" / "models" / "cdimages" / "patchday4ng.rpf"
+    PATCHDAY4NG_EXTRACTED_DIR / RPF_PATHS_CONFIG["patchday4ng_rpf_relative"]
 )
-PATCHDAY4NG_MODELS_DIR = STAGING_DIRECTORY / "patchday4ng_models_extracted"
-PATCHDAY4NG_DLC_RPF_FILE = STAGING_DIRECTORY / "patchday4ng_dlc.rpf"
-TARGET_PATCHDAY4NG_DLC_PATH = (
-    GTAV_MODS_DIRECTORY
-    / "update"
-    / "x64"
-    / "dlcpacks"
-    / "patchday4ng"
-    / "dlc.rpf"
-)
+PATCHDAY4NG_MODELS_DIR = RPF_PATHS_CONFIG["patchday4ng_models_extracted"]
+PATCHDAY4NG_DLC_RPF_FILE = RPF_PATHS_CONFIG["patchday4ng_modded_rpf"]
+TARGET_PATCHDAY4NG_DLC_PATH = RPF_PATHS_CONFIG["patchday4ng_game_rpf"]
 
-STREAMEDPEDS_EXTRACTED_DIR = STAGING_DIRECTORY / "streamedpeds_players_extracted"
+STREAMEDPEDS_EXTRACTED_DIR = RPF_PATHS_CONFIG["streamedpeds_extracted"]
+X64V_EXTRACTED_DIR = RPF_PATHS_CONFIG["x64v_extracted"]
 STREAMEDPEDS_RPF_FILE = (
-    STAGING_DIRECTORY
-    / "x64v_extracted"
-    / "models"
-    / "cdimages"
-    / "streamedpeds_players.rpf"
+    X64V_EXTRACTED_DIR / RPF_PATHS_CONFIG["streamedpeds_rpf_relative"]
 )
-X64V_EXTRACTED_DIR = STAGING_DIRECTORY / "x64v_extracted"
-X64V_MODDED_RPF_FILE = STAGING_DIRECTORY / "x64v_modded.rpf"
-TARGET_X64V_RPF_PATH = GTAV_MODS_DIRECTORY / "x64v.rpf"
+X64V_MODDED_RPF_FILE = RPF_PATHS_CONFIG["x64v_modded_rpf"]
+TARGET_X64V_RPF_PATH = RPF_PATHS_CONFIG["x64v_game_rpf"]
 
 
 def patch_rpf7_open_and_zero_compressed(rpf_file_path: Path) -> int:

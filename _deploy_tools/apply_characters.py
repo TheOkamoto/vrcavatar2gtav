@@ -37,63 +37,36 @@ except ImportError:
 
 PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
 STAGING_DIRECTORY = project_paths.get_staging_dir()
-DUMMY_YDD_FILE_PATH = (
-    PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "head_000_r.ydd"
-)
+DUMMY_YDD_FILE_PATH = project_paths.get_dummy_ydd_path()
 
-# Registro central de configuracao dos personagens disponiveis
+RPF_PATHS_CONFIG = project_paths.get_rpf_paths()
+MICHAEL_CONFIG = project_paths.get_character_paths("michael")
+FRANKLIN_CONFIG = project_paths.get_character_paths("franklin")
+TREVOR_CONFIG = project_paths.get_character_paths("trevor")
+
+# Registro central de configuracao dos personagens disponiveis via vrc2gtav.cfg
 CHARACTER_REGISTRY = {
-    "player_zero": {
+    str(MICHAEL_CONFIG["ped_name"]): {
         "display_name": "Michael De Santa -> Shinano Eternal Reunion",
-        "model_ydd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "2_Michael_Shinano_EternalReunion"
-            / "4_exported_models"
-            / "uppr_000_u.ydd"
-        ),
-        "texture_ytd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "2_Michael_Shinano_EternalReunion"
-            / "3_textures_gtav"
-            / "test_er.ytd"
-        ),
+        "model_ydd_path": MICHAEL_CONFIG["target_model_ydd"],
+        "texture_ytd_path": MICHAEL_CONFIG["ytd_file"],
     },
-    "player_one": {
+    str(FRANKLIN_CONFIG["ped_name"]): {
         "display_name": "Franklin Clinton -> Shinano Casual",
-        "model_ydd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "1_Franklin_Shinano_Casual"
-            / "4_exported_models"
-            / "uppr_008_u.ydd"
-        ),
-        "texture_ytd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "1_Franklin_Shinano_Casual"
-            / "3_textures_gtav"
-            / "shinano_franklin_2k.ytd"
-        ),
+        "model_ydd_path": FRANKLIN_CONFIG["target_model_ydd"],
+        "texture_ytd_path": FRANKLIN_CONFIG["ytd_file"],
     },
-    "player_two": {
+    str(TREVOR_CONFIG["ped_name"]): {
         "display_name": "Trevor Philips -> Miltina Maid",
-        "model_ydd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "3_Trevor_Miltina_Maid"
-            / "4_exported_models"
-            / "uppr_000_u.ydd"
-        ),
-        "texture_ytd_path": (
-            PROJECT_ROOT_DIRECTORY
-            / "3_Trevor_Miltina_Maid"
-            / "3_textures_gtav"
-            / "miltina_maid.ytd"
-        ),
+        "model_ydd_path": TREVOR_CONFIG["target_model_ydd"],
+        "texture_ytd_path": TREVOR_CONFIG["ytd_file"],
     },
 }
 
 STAGING_TARGET_DIRECTORIES = [
-    STAGING_DIRECTORY / "mppatches_extracted",
-    STAGING_DIRECTORY / "streamedpeds_players_extracted",
-    STAGING_DIRECTORY / "patchday4ng_models_extracted",
+    RPF_PATHS_CONFIG["mppatches_extracted"],
+    RPF_PATHS_CONFIG["streamedpeds_extracted"],
+    RPF_PATHS_CONFIG["patchday4ng_models_extracted"],
 ]
 
 VANILLA_BODY_SLOT_PREFIXES = [

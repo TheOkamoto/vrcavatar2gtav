@@ -33,96 +33,103 @@ from pathlib import Path
 import numpy
 from PIL import Image
 
-# Resolucao dinamica de caminhos multiplataforma
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common_tools"))
-try:
-    import vrc2gtav_paths as project_paths
-except ImportError:
-    from common_tools import vrc2gtav_paths as project_paths
+# Resolucao dinamica de caminhos multiplataforma (compativel com ambos espelhos)
+_CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT_CANDIDATE = _CURRENT_SCRIPT_DIR.parent.parent
+for _tools_candidate in (
+    _CURRENT_SCRIPT_DIR.parent / "common_tools",
+    _REPO_ROOT_CANDIDATE / "scripts" / "common_tools",
+    _REPO_ROOT_CANDIDATE / "_deploy_tools",
+):
+    if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
+        sys.path.insert(0, str(_tools_candidate))
 
+import vrc2gtav_paths as project_paths
+
+MICHAEL_CFG = project_paths.get_character_paths("michael")
 SHINANO_ASSETS_DIR = project_paths.get_vrc_assets_dir()
-SHINANO_TEXTURE_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Shinano", "Texture")
-MOON_BUTTERFLY_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "MoonButterfly eye", "Sinano", "Texture")
-ER_TEX_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Vagrant Brand", "Eternal Reunion", "TEX")
-ER_MAIN_TEX_DIR = os.path.join(ER_TEX_DIR, "MainTEX")
-ER_MASKS_DIR = os.path.join(ER_TEX_DIR, "Masks")
-ER_NORMALS_DIR = os.path.join(ER_TEX_DIR, "Normal")
-HAIR_DIR = os.path.join(str(SHINANO_ASSETS_DIR), "Li-ne", "Neko Tied Bob hair")
+SHINANO_TEXTURE_DIR = str(MICHAEL_CFG["tex_shinano_dir"])
+MOON_BUTTERFLY_DIR = str(MICHAEL_CFG["tex_moon_butterfly_dir"])
+ER_TEX_DIR = str(MICHAEL_CFG["tex_er_dir"])
+ER_MAIN_TEX_DIR = str(MICHAEL_CFG["tex_er_main_dir"])
+ER_MASKS_DIR = str(MICHAEL_CFG["tex_er_masks_dir"])
+ER_NORMALS_DIR = str(MICHAEL_CFG["tex_er_normals_dir"])
+HAIR_DIR = str(MICHAEL_CFG["tex_hair_dir"])
 
 
-# Fontes principais de textura (Grid 4x2, celulas de 512x512 para total 2048x1024)
+# Fontes principais de textura carregadas via vrc2gtav.cfg [michael]
 MAIN_TEXTURE_SOURCES = {
     "face": {
-        "diffuse_path": os.path.join(SHINANO_TEXTURE_DIR, "Color", "Eye", "Shinano_face_blue.png"),
-        "makeup_path": os.path.join(SHINANO_TEXTURE_DIR, "Make up", "Shinano_face_makeup1.png"),
-        "eye_sky_path": os.path.join(MOON_BUTTERFLY_DIR, "sky.png"),
-        "eye_cloud_path": os.path.join(MOON_BUTTERFLY_DIR, "Cloud.jpg"),
-        "eye_cloud_mask_path": os.path.join(MOON_BUTTERFLY_DIR, "無題157_20260711214118.png"),
-        "eye_highlight_path": os.path.join(MOON_BUTTERFLY_DIR, "Eye-highlight.png"),
-        "emission_mask": os.path.join(SHINANO_TEXTURE_DIR, "Mask", "Shinano_face_emission_mask.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_face"]),
+        "makeup_path": str(MICHAEL_CFG["tex_makeup"]),
+        "eye_sky_path": str(MICHAEL_CFG["tex_eye_sky"]),
+        "eye_cloud_path": str(MICHAEL_CFG["tex_eye_cloud"]),
+        "eye_cloud_mask_path": str(MICHAEL_CFG["tex_eye_cloud_mask"]),
+        "eye_highlight_path": str(MICHAEL_CFG["tex_eye_highlight"]),
+        "emission_mask": str(MICHAEL_CFG["tex_face_emission"]),
         "grid_column": 0,
         "grid_row": 1,  # Linha superior no Blender UV (v: 0.5 .. 1.0)
     },
     "body": {
-        "diffuse_path": os.path.join(SHINANO_TEXTURE_DIR, "Shinano_body.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_body"]),
         "grid_column": 1,
         "grid_row": 1,
     },
     "un1": {
-        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN1.png"),
-        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN1_M.png"),
-        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN1_S.png"),
-        "normal_path": os.path.join(ER_NORMALS_DIR, "UN1_N.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_er_un1_diffuse"]),
+        "metallic_mask": str(MICHAEL_CFG["tex_er_un1_metallic"]),
+        "smoothness_mask": str(MICHAEL_CFG["tex_er_un1_smoothness"]),
+        "normal_path": str(MICHAEL_CFG["tex_er_un1_normal"]),
         "grid_column": 2,
         "grid_row": 1,
     },
     "un2": {
-        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN2.png"),
-        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN2_M.png"),
-        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN2_S.png"),
-        "normal_path": os.path.join(ER_NORMALS_DIR, "UN2_N.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_er_un2_diffuse"]),
+        "metallic_mask": str(MICHAEL_CFG["tex_er_un2_metallic"]),
+        "smoothness_mask": str(MICHAEL_CFG["tex_er_un2_smoothness"]),
+        "normal_path": str(MICHAEL_CFG["tex_er_un2_normal"]),
         "grid_column": 3,
         "grid_row": 1,
     },
     "un3": {
-        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "V3_UN3.png"),
-        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN3_M.png"),
-        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN3_S.png"),
-        "normal_path": os.path.join(ER_NORMALS_DIR, "UN3_N.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_er_un3_diffuse"]),
+        "metallic_mask": str(MICHAEL_CFG["tex_er_un3_metallic"]),
+        "smoothness_mask": str(MICHAEL_CFG["tex_er_un3_smoothness"]),
+        "normal_path": str(MICHAEL_CFG["tex_er_un3_normal"]),
         "grid_column": 0,
         "grid_row": 0,  # Linha inferior no Blender UV (v: 0.0 .. 0.5)
     },
     "watch": {
-        "diffuse_path": os.path.join(ER_MAIN_TEX_DIR, "UN4.png"),
-        "metallic_mask": os.path.join(ER_MASKS_DIR, "UN4_M.png"),
-        "smoothness_mask": os.path.join(ER_MASKS_DIR, "UN4_S.png"),
-        "normal_path": os.path.join(ER_NORMALS_DIR, "UN4_N.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_er_un4_diffuse"]),
+        "metallic_mask": str(MICHAEL_CFG["tex_er_un4_metallic"]),
+        "smoothness_mask": str(MICHAEL_CFG["tex_er_un4_smoothness"]),
+        "normal_path": str(MICHAEL_CFG["tex_er_un4_normal"]),
         "grid_column": 1,
         "grid_row": 0,
     },
     "hair_main": {
-        "diffuse_path": os.path.join(HAIR_DIR, "_Mat", "Tex", "Blue.png"),
-        "light_mask": os.path.join(HAIR_DIR, "_Mat", "C", "Light Mask.png"),
-        "normal_path": os.path.join(HAIR_DIR, "_Mat", "C", "Normal map.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_hair_diffuse"]),
+        "light_mask": str(MICHAEL_CFG["tex_hair_light_mask"]),
+        "normal_path": str(MICHAEL_CFG["tex_hair_normal"]),
         "grid_column": 2,
         "grid_row": 0,
     },
 }
 
-# Sub-fontes da celula (coluna 3, linha 0) para os acessorios
+# Sub-fontes da celula (coluna 3, linha 0) para os acessorios carregadas via vrc2gtav.cfg
 ACCESSORY_SUB_SOURCES = {
     "pin_back": {
-        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "Blue.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_hair_acc_blue"]),
         "sub_column": 1,
         "sub_row": 1,
     },
     "silver_pins": {
-        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "c", "Pin Mat.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_hair_acc_pin"]),
         "sub_column": 0,
         "sub_row": 0,
     },
     "halo": {
-        "diffuse_path": os.path.join(HAIR_DIR, "Accessories", "c", "Accessories Mat.png"),
+        "diffuse_path": str(MICHAEL_CFG["tex_hair_acc_mat"]),
         "sub_column": 0,
         "sub_row": 1,
     },
@@ -355,17 +362,27 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
         elif accessory_key == "pin_back":
             specular_array[paste_sub_y:paste_sub_y + sub_dimension, paste_sub_x:paste_sub_x + sub_dimension] = [45, 60, 80, 110]
 
-    # 3. Salva todas as texturas em disco
-    diffuse_output_path = os.path.join(output_directory, "shinano_er_atlas.png")
-    specular_output_path = os.path.join(output_directory, "shinano_er_spec.png")
-    normal_output_path = os.path.join(output_directory, "shinano_er_normal.png")
+    # 3. Salva todas as texturas em disco (nomes configurados via vrc2gtav.cfg)
+    diffuse_output_path = os.path.join(
+        output_directory, Path(MICHAEL_CFG["atlas_png"]).name
+    )
+    specular_output_path = os.path.join(
+        output_directory, Path(MICHAEL_CFG["er_spec_png"]).name
+    )
+    normal_output_path = os.path.join(
+        output_directory, Path(MICHAEL_CFG["er_normal_png"]).name
+    )
 
     Image.fromarray(diffuse_array).save(diffuse_output_path, "PNG")
     Image.fromarray(specular_array).save(specular_output_path, "PNG")
     Image.fromarray(normal_array).save(normal_output_path, "PNG")
 
-    legacy_spec_path = os.path.join(output_directory, "shinano_black_spec.png")
-    legacy_normal_path = os.path.join(output_directory, "shinano_flat_normal.png")
+    legacy_spec_path = os.path.join(
+        output_directory, Path(MICHAEL_CFG["spec_png"]).name
+    )
+    legacy_normal_path = os.path.join(
+        output_directory, Path(MICHAEL_CFG["normal_png"]).name
+    )
     Image.fromarray(specular_array).save(legacy_spec_path, "PNG")
     Image.fromarray(normal_array).save(legacy_normal_path, "PNG")
 
@@ -374,11 +391,10 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
     print(f"  - Specular: {specular_output_path} (e {legacy_spec_path})")
     print(f"  - Normal:   {normal_output_path} (e {legacy_normal_path})")
 
-    # 4. Compilação do dicionário .ytd via RAGE CLI
+    # 4. Compilacao do dicionario .ytd via RAGE CLI
     rage_cli_path = project_paths.get_rage_cli()
-    textures_dir = Path(output_directory).parent
-    output_ytd_file = textures_dir / "test_er.ytd"
-    backup_ytd_file = textures_dir / "shinano_michael_er_2k.ytd"
+    output_ytd_file = MICHAEL_CFG["ytd_file"]
+    backup_ytd_file = MICHAEL_CFG["ytd_backup_file"]
 
     print("\n[INFO] Compilando dicionario de textura .ytd do Michael (Eternal Reunion)...")
     build_arguments = [
@@ -404,13 +420,7 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
 
 
 if __name__ == "__main__":
-    project_root_directory = project_paths.get_project_root()
-    target_output_directory = str(
-        project_root_directory
-        / "2_Michael_Shinano_EternalReunion"
-        / "3_textures_gtav"
-        / "textures_atlas"
-    )
+    target_output_directory = str(MICHAEL_CFG["textures_dir"])
     if len(sys.argv) > 1:
         target_output_directory = sys.argv[1]
     build_liltoon_er_textures(target_output_directory)
