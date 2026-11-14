@@ -18,6 +18,7 @@ from pathlib import Path
 import addon_utils
 import bmesh
 import bpy
+import mathutils
 
 # Locate vrc2gtav_paths / vrc2gtav_i18n regardless of repository mirror
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -27,8 +28,18 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
         sys.path.insert(0, str(_tools_dir))
 
 import hand_skeleton_helper
+import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
+
+MILTINA_DEFAULT_HAIR_MESHES = {
+    "Milltina_hair_base",
+    "Milltina_hair_side",
+    "Milltina_hair_front",
+    "Milltina_hair_front_side",
+    "Milltina_hair_twintail",
+    "Milltina_cloth_hair_ribbon",
+}
 
 
 KEEP_MESH_NAMES = {
@@ -435,6 +446,45 @@ def build_trevor_miltina_avatar():
 
     print(i18n.translate("trevor.build.retained_meshes", count=len(meshes_to_keep)))
 
+    # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
+    unity_config = unity_scene_helper.load_unity_avatar_from_cfg(
+        trevor_cfg,
+        i18n_module=i18n,
+        character_hints=("milltina", "miltina"),
+    )
+    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
+        trevor_cfg.get("fbx_hair", ""),
+        unity_config=unity_config,
+    )
+    custom_hair_meshes = set()
+    custom_hair_armatures = []
+    if hair_mode == "custom":
+        custom_hair_fbx = str(trevor_cfg["fbx_hair"]).strip()
+        print(
+            i18n.translate(
+                "unity_scene.hair_custom_active", reason=hair_reason, path=custom_hair_fbx
+            )
+        )
+        for default_hair_obj in list(meshes_to_keep):
+            if default_hair_obj.name in MILTINA_DEFAULT_HAIR_MESHES:
+                meshes_to_keep.remove(default_hair_obj)
+                bpy.data.objects.remove(default_hair_obj)
+        pre_import_objs = set(bpy.data.objects)
+        bpy.ops.import_scene.fbx(filepath=custom_hair_fbx, use_anim=False)
+        for imported_obj in list(bpy.data.objects):
+            if imported_obj in pre_import_objs:
+                continue
+            if imported_obj.type == "ARMATURE":
+                custom_hair_armatures.append(imported_obj)
+            elif imported_obj.type == "MESH":
+                if "tail" in imported_obj.name.lower():
+                    bpy.data.objects.remove(imported_obj)
+                    continue
+                custom_hair_meshes.add(imported_obj)
+                meshes_to_keep.append(imported_obj)
+    else:
+        print(i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
+
     # 4. Bake facial expression & lip-sync jaw weights on Body
     face_obj = bpy.data.objects.get("Body")
     if face_obj and face_obj.data.shape_keys:
@@ -529,53 +579,75 @@ def build_trevor_miltina_avatar():
 
     print(i18n.translate("trevor.build.clothing_baked"))
 
-    # 6. Apply -55 degree arm rotation (T-pose -> GTA V Ped A-pose)
+    # 6. Apply -55 degree arm rotation (T-pose -> GTA V Ped A-pose) & Unity scales
+    armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
     if vrc_armature:
         print(i18n.translate("trevor.build.rotating_arms"))
-        bpy.context.view_layer.objects.active = vrc_armature
-        bpy.ops.object.mode_set(mode="POSE")
-        arm_angle_rad = -math.radians(55.0)
-        for arm_name in ["Upper_arm_L", "Upper_arm.L", "UpperArm.L"]:
-            if arm_name in vrc_armature.pose.bones:
-                pose_bone_item = vrc_armature.pose.bones[arm_name]
-                pose_bone_item.rotation_mode = "XYZ"
-                pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
-        for arm_name in ["Upper_arm_R", "Upper_arm.R", "UpperArm.R"]:
-            if arm_name in vrc_armature.pose.bones:
-                pose_bone_item = vrc_armature.pose.bones[arm_name]
-                pose_bone_item.rotation_mode = "XYZ"
-                pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
-        bpy.ops.object.mode_set(mode="OBJECT")
+        for rig_arm in [vrc_armature] + custom_hair_armatures:
+            rig_arm.scale = (
+                rig_arm.scale.x * armature_override_scale[0],
+                rig_arm.scale.y * armature_override_scale[1],
+                rig_arm.scale.z * armature_override_scale[2],
+            )
+            bpy.context.view_layer.objects.active = rig_arm
+            bpy.ops.object.mode_set(mode="POSE")
+            arm_angle_rad = -math.radians(55.0)
+            for arm_name in ["Upper_arm_L", "Upper_arm.L", "UpperArm.L"]:
+                if arm_name in rig_arm.pose.bones:
+                    pose_bone_item = rig_arm.pose.bones[arm_name]
+                    pose_bone_item.rotation_mode = "XYZ"
+                    pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
+            for arm_name in ["Upper_arm_R", "Upper_arm.R", "UpperArm.R"]:
+                if arm_name in rig_arm.pose.bones:
+                    pose_bone_item = rig_arm.pose.bones[arm_name]
+                    pose_bone_item.rotation_mode = "XYZ"
+                    pose_bone_item.rotation_euler = (arm_angle_rad, 0.0, 0.0)
+            applied_bones = unity_scene_helper.apply_unity_bone_scales_to_pose(
+                rig_arm, unity_config
+            )
+            bpy.ops.object.mode_set(mode="OBJECT")
+            if applied_bones and rig_arm == vrc_armature:
+                print(i18n.translate("unity_scene.applied_bones", count=len(applied_bones)))
+        bpy.context.view_layer.update()
 
-        for cloth_obj in meshes_to_keep:
-            bpy.context.view_layer.objects.active = cloth_obj
-            if cloth_obj.data.shape_keys:
-                bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
-            armature_modifier = cloth_obj.modifiers.get("Armature")
-            if armature_modifier:
-                bpy.ops.object.modifier_apply(modifier=armature_modifier.name)
-        print(i18n.translate("trevor.build.arms_rotated"))
-
-    # 7. Scale and align vertically to player_two.yft skeleton bounds
+    # Compute height mapping while live armatures and pose scales are active
     target_foot_z = -0.908
     target_head_z = 0.642
-    source_foot_z = -0.0345
-    source_head_z = 1.0232
-
-    uniform_scale = (target_head_z - target_foot_z) / (source_head_z - source_foot_z)
-    vertical_translation = target_foot_z - (source_foot_z * uniform_scale)
+    uniform_scale, vertical_translation = unity_scene_helper.compute_gtav_height_mapping(
+        bpy,
+        unity_config,
+        [mesh_obj.name for mesh_obj in meshes_to_keep],
+        ("Body", "Milltina_body", "Milltina_cloth_shoes"),
+        target_foot_z,
+        target_head_z,
+        -0.0345,
+        1.0232,
+    )
     print(
         i18n.translate(
             "trevor.build.scale_info", scale=uniform_scale, offset=vertical_translation
         )
     )
 
+    # Bake shape keys & armature pose deformations into vertices in world space
     for cloth_obj in meshes_to_keep:
+        world_xform = cloth_obj.matrix_world.copy()
+        bpy.context.view_layer.objects.active = cloth_obj
+        if cloth_obj.data.shape_keys:
+            bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
+        for mod_item in list(cloth_obj.modifiers):
+            if mod_item.type == "ARMATURE":
+                bpy.ops.object.modifier_apply(modifier=mod_item.name)
+        cloth_obj.parent = None
+        cloth_obj.matrix_world = mathutils.Matrix.Identity(4)
         for vert_item in cloth_obj.data.vertices:
-            vert_item.co.x = vert_item.co.x * uniform_scale
-            vert_item.co.y = vert_item.co.y * uniform_scale
-            vert_item.co.z = vert_item.co.z * uniform_scale + vertical_translation
+            world_coord = world_xform @ vert_item.co
+            vert_item.co.x = world_coord.x * uniform_scale
+            vert_item.co.y = world_coord.y * uniform_scale
+            vert_item.co.z = world_coord.z * uniform_scale + vertical_translation
         cloth_obj.data.update()
+    if vrc_armature:
+        print(i18n.translate("trevor.build.arms_rotated"))
 
     # 8. Remap UVs into the 2x2 quadrant Texture Atlas
     print(i18n.translate("trevor.build.remapping_uvs"))
@@ -590,7 +662,12 @@ def build_trevor_miltina_avatar():
             offset_u_val, offset_v_val = 0.0, 0.5
         elif obj_name == "Milltina_body":
             offset_u_val, offset_v_val = 0.5, 0.5
-        elif "hair" in obj_name.lower() or "ears" in obj_name.lower() or "horns" in obj_name.lower():
+        elif (
+            "hair" in obj_name.lower()
+            or "ears" in obj_name.lower()
+            or "horns" in obj_name.lower()
+            or cloth_obj in custom_hair_meshes
+        ):
             offset_u_val, offset_v_val = 0.5, 0.0
         else:
             offset_u_val, offset_v_val = 0.0, 0.0
@@ -637,7 +714,9 @@ def build_trevor_miltina_avatar():
                     ) or cloth_obj.vertex_groups.new(name=target_bone_name)
                     vert_group.add([vert_idx], weight_val / total_weight_sum, "ADD")
             else:
-                is_head_mesh = cloth_obj.name in HEAD_MESH_NAMES
+                is_head_mesh = (
+                    cloth_obj.name in HEAD_MESH_NAMES or cloth_obj in custom_hair_meshes
+                )
                 default_bone_name = "SKEL_Head" if is_head_mesh else "SKEL_Pelvis"
                 vert_group = cloth_obj.vertex_groups.get(
                     default_bone_name
@@ -707,6 +786,9 @@ def build_trevor_miltina_avatar():
         )
         print(i18n.translate("trevor.build.bones_relocated", count=relocated_arm_bones))
         bpy.data.objects.remove(vrc_armature)
+    for extra_hair_arm in custom_hair_armatures:
+        if extra_hair_arm.name in bpy.data.objects:
+            bpy.data.objects.remove(extra_hair_arm)
 
     # 11. Configure ped_default.sps shader and assign textures
     atlas_img_path = str(trevor_cfg["atlas_png"])
@@ -934,11 +1016,8 @@ def build_trevor_miltina_avatar():
 
 
 def extract_custom_blender_args():
-    """Return CLI arguments appearing after `--` (or `sys.argv[1:]` directly)."""
-    raw_arguments = sys.argv
-    if "--" in raw_arguments:
-        return raw_arguments[raw_arguments.index("--") + 1 :]
-    return raw_arguments[1:]
+    """Return CLI arguments appearing after `--` (or standalone Python args)."""
+    return project_paths.extract_custom_blender_args()
 
 
 def resolve_startup_language(custom_arguments) -> None:

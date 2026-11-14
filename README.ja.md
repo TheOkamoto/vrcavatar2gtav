@@ -56,6 +56,8 @@ vrc2gtav/
 │   ├── repack_and_deploy_everything.py # 進捗バー付き RPF 再パック & GTA V 導入
 │   ├── run_mod_manager.py     # マスターマネージャーのミラーコピー
 │   ├── setup_first_run.py     # 初回セットアップウィザード (vrc2gtav.cfg 作成 & バニラ展開)
+│   ├── texture_calibration_helper.py # シェーダー補正済みデフォルト髪・瞳フォールバック合成ヘルパー
+│   ├── unity_scene_helper.py  # .unity シーンスケール抽出 & デフォルト/カスタムヘアー解決ヘルパー
 │   ├── vrc2gtav_i18n.py       # システムロケール対応 3か国語エンジン (en / ja / pt)
 │   └── vrc2gtav_paths.py      # vrc2gtav.cfg リーダー + Windows/WSL パス自動変換
 │
@@ -96,6 +98,16 @@ vrc2gtav/
    - ベーススケルトン (`player_zero.yft`, `player_one.yft`, `player_two.yft`) を `*/2_blender/` と `staging/backup_vanilla_skeletons/` に配置します。
 2. **ドライブ・フォルダ移動時:** `vrc2gtav.cfg` の `[directories]`、`[executables]`、`[rpf_paths]`、`[franklin]`、`[michael]`、`[trevor]` セクションのみを編集すればよく、`.py` スクリプトの書き換えは不要です。
 3. **オプションの環境変数:** `VRC2GTAV_LANG`、`VRC2GTAV_CFG`、`VRC2GTAV_ROOT`、`VRC_ASSETS_DIR`、`GTAV_MODS_DIR`、`RAGE_CLI`、`BLENDER_EXE`。
+
+### デフォルト等倍スケール (`1.0`) と `.unity` シーンからの体型スケール自動抽出
+
+- **初期状態の標準比率 (`1.0`):** GitHub のクリーン構成（`vrc2gtav.cfg.example` で `unity_scene =` 空欄）では、身体・頭部・ボーン・小物のスケールはすべてハードコードなしの標準 `1.0` に保たれます。
+- **`.unity` シーン解析によるカスタマイズ反映:** `vrc2gtav.cfg` の `[franklin]`、`[michael]`、`[trevor]` に `unity_scene`（および必要に応じて `unity_avatar_name`）を指定すると、[`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) が `.unity` YAML 内の `GameObject`、`Transform`、`PrefabInstance` 上書き値、および `PhysBone` / Marshmallow スケール打ち消しを自動解析して GTA V モデルへ正確に反映します。
+
+### デフォルトヘアー & 瞳/メイクテクスチャの自動フォールバック
+
+- **Shinano (Franklin / Michael) および Miltina (Trevor):** カスタムヘアー (`fbx_hair`、例: *ねこタイドボブヘア*) やオプションの瞳・メイクパック (*MoonButterfly eye*, *AWEyes*) が未設定またはディスク上に存在しない場合でも、[`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) と [`texture_calibration_helper.py`](scripts/common_tools/texture_calibration_helper.py) がエラーを出さずにベースアバター標準のデフォルトヘアー (`Hair_base` / `Hair_bang` / `Hair_back` / `Hair_side` / `Other_ear` + `Shinano_hair.png`、`Milltina_hair_*` + 補正済み `Milltina_Hair.png`) と基本顔テクスチャへ自動フォールバックします。
+- **両アバターでのカスタムヘアー対応:** `vrc2gtav.cfg` で `fbx_hair`（および任意のテクスチャ）を指定すれば、**Shinano**・**Miltina** の両方でカスタムヘアーへシームレスに切り替えられます。
 
 ---
 
@@ -287,9 +299,9 @@ python3 scripts/common_tools/repack_and_deploy_everything.py
 | **ベースアバター & カジュアル衣装** | オリジナル3Dモデル「しなの」 (*Shinano*) | ポンデロニウム研究所 (`ponderogen`) | Michael, Franklin | [BOOTH](https://ponderogen.booth.pm/items/6106863) / [ショップ](https://ponderogen.booth.pm/) |
 | **ベースアバター & メイド服** | オリジナル3Dモデル『ミルティナ』 (*Milltina*) | DOLOS art (`dolosart`) | Trevor | [BOOTH](https://dolosart.booth.pm/items/6538026) / [ショップ](https://dolosart.booth.pm/) |
 | **ドレス・靴・小物一式** | 【15アバター対応】エターナル・リユニオン【MA対応】 (*Eternal Reunion* + *Pocket Watch*) | VAGRANT (`Vagrant Brand`) | Michael | [BOOTH](https://vagrant.booth.pm/items/5634313) / [ショップ](https://vagrant.booth.pm/) |
-| **ヘアー・猫耳・ヘアピン・ヘイロー** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael | [BOOTH](https://li-ne.booth.pm/items/7977491) / [ショップ](https://li-ne.booth.pm/) |
-| **アイテクスチャ (Shinano 用)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [ショップ](https://ha-oa.booth.pm/) |
-| **アイテクスチャ (Milltina 用)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [ショップ](https://nagikawamart.booth.pm/) |
+| **ヘアー・猫耳・ヘアピン・ヘイロー (任意)** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael *(未導入時は標準 Shinano ヘアーへ自動切替)* | [BOOTH](https://li-ne.booth.pm/items/7977491) / [ショップ](https://li-ne.booth.pm/) |
+| **アイテクスチャ (Shinano 用・任意)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin *(未導入時は `Shinano_face.png`)* | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [ショップ](https://ha-oa.booth.pm/) |
+| **アイテクスチャ (Milltina 用・任意)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor *(未導入時は `Milltina_Face.png`)* | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [ショップ](https://nagikawamart.booth.pm/) |
 
 ---
 

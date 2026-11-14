@@ -482,6 +482,11 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
+        (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
+        (
+            common_dir / "texture_calibration_helper.py",
+            deploy_dir / "texture_calibration_helper.py",
+        ),
         (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
         (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
         (
@@ -594,6 +599,180 @@ def test_source_templates_and_dummies() -> bool:
     return template_ok and gitignore_check and dummies_ok
 
 
+def test_unity_scene_and_fallbacks() -> bool:
+    """Validate Unity scene scale extraction, unit defaults, and hair/texture fallbacks."""
+    import tempfile
+    from PIL import Image as pil_image
+    import texture_calibration_helper as calibration_helper
+    import unity_scene_helper
+
+    print(f"\n=== {i18n.translate('tests.suite_unity')} ===")
+    suite_passed = True
+
+    empty_cfg = unity_scene_helper.extract_unity_avatar_config("")
+    missing_cfg = unity_scene_helper.extract_unity_avatar_config(
+        "/tmp/vrc2gtav_nonexistent_scene.unity"
+    )
+    empty_ok = (
+        not empty_cfg["loaded"]
+        and not missing_cfg["loaded"]
+        and empty_cfg["root_scale"] == (1.0, 1.0, 1.0)
+        and empty_cfg["armature_scale"] == (1.0, 1.0, 1.0)
+        and empty_cfg["bone_scales"] == {}
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.unity_empty_unit_scales"), empty_ok, "scale=1.0"
+    )
+
+    synthetic_unity_yaml = "\n".join(
+        [
+            "%YAML 1.1",
+            "%TAG !u! tag:unity3d.com,2011:",
+            "--- !u!1 &100",
+            "GameObject:",
+            "  m_Name: TestAvatar",
+            "  m_IsActive: 1",
+            "--- !u!4 &101",
+            "Transform:",
+            "  m_GameObject: {fileID: 100}",
+            "  m_LocalScale: {x: 1, y: 1, z: 1}",
+            "  m_Father: {fileID: 0}",
+            "--- !u!1 &200",
+            "GameObject:",
+            "  m_Name: Armature",
+            "  m_IsActive: 1",
+            "--- !u!4 &201",
+            "Transform:",
+            "  m_GameObject: {fileID: 200}",
+            "  m_LocalScale: {x: 1.125, y: 1.125, z: 1.125}",
+            "  m_Father: {fileID: 101}",
+            "--- !u!1 &300",
+            "GameObject:",
+            "  m_Name: Neck",
+            "  m_IsActive: 1",
+            "--- !u!4 &301",
+            "Transform:",
+            "  m_GameObject: {fileID: 300}",
+            "  m_LocalScale: {x: 0.9, y: 0.9, z: 0.9}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &400",
+            "GameObject:",
+            "  m_Name: lower_leg_L",
+            "  m_IsActive: 1",
+            "--- !u!4 &401",
+            "Transform:",
+            "  m_GameObject: {fileID: 400}",
+            "  m_LocalScale: {x: 1, y: 1.2, z: 1}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &500",
+            "GameObject:",
+            "  m_Name: Breast_1.L",
+            "  m_IsActive: 1",
+            "--- !u!4 &501",
+            "Transform:",
+            "  m_GameObject: {fileID: 500}",
+            "  m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &502",
+            "GameObject:",
+            "  m_Name: Breast_1.L",
+            "  m_IsActive: 1",
+            "--- !u!4 &503",
+            "Transform:",
+            "  m_GameObject: {fileID: 502}",
+            "  m_LocalScale: {x: 2.0, y: 2.0, z: 2.0}",
+            "  m_Father: {fileID: 501}",
+        ]
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        temp_root = Path(temp_dir_name)
+        scene_file = temp_root / "SyntheticAvatar.unity"
+        scene_file.write_text(synthetic_unity_yaml, encoding="utf-8")
+
+        parsed_cfg = unity_scene_helper.extract_unity_avatar_config(
+            scene_file, avatar_name="TestAvatar"
+        )
+        neck_scale = parsed_cfg["bone_scales"].get("Neck", (1.0, 1.0, 1.0))
+        leg_scale = parsed_cfg["bone_scales"].get("lower_leg_L", (1.0, 1.0, 1.0))
+        scene_ok = (
+            parsed_cfg["loaded"]
+            and abs(parsed_cfg["armature_scale"][0] - 1.125) < 1e-4
+            and abs(neck_scale[0] - 0.9) < 1e-4
+            and abs(leg_scale[1] - 1.2) < 1e-4
+            and "Breast_1.L" not in parsed_cfg["bone_scales"]
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.unity_extracts_scene_scales"),
+            scene_ok,
+            f"bones={len(parsed_cfg['bone_scales'])}",
+        )
+
+        hair_blank_mode, _ = unity_scene_helper.resolve_hair_mode("", parsed_cfg)
+        hair_missing_mode, _ = unity_scene_helper.resolve_hair_mode(
+            str(temp_root / "missing_hair.fbx"), parsed_cfg
+        )
+        hair_ok = hair_blank_mode == "default" and hair_missing_mode == "default"
+        suite_passed &= print_status_result(
+            i18n.translate("tests.unity_hair_fallback_mode"),
+            hair_ok,
+            f"{hair_blank_mode}/{hair_missing_mode}",
+        )
+
+        base_face_file = temp_root / "Shinano_face.png"
+        base_hair_file = temp_root / "Shinano_hair.png"
+        miltina_face_file = temp_root / "Milltina_Face.png"
+        miltina_hair_file = temp_root / "Milltina_Hair.png"
+        sample_img = pil_image.new("RGBA", (64, 64), (210, 200, 195, 255))
+        for sample_path in (
+            base_face_file,
+            base_hair_file,
+            miltina_face_file,
+            miltina_hair_file,
+        ):
+            sample_img.save(sample_path, "PNG")
+
+        shinano_face_out, missing_layers = (
+            calibration_helper.composite_shinano_face_with_fallback(
+                face_path=base_face_file,
+                target_size=64,
+                makeup_path=str(temp_root / "missing_makeup.png"),
+                eye_sky_path=str(temp_root / "missing_sky.png"),
+            )
+        )
+        shi_diff, shi_spec, shi_norm = calibration_helper.calibrate_shinano_default_hair(
+            base_hair_file, temp_root, 64
+        )
+        mil_diff, mil_spec, mil_norm = calibration_helper.calibrate_miltina_default_hair(
+            miltina_hair_file, temp_root, 64
+        )
+        mil_face_out, mil_eye_spec, used_custom_eyes = (
+            calibration_helper.composite_miltina_eyes_with_fallback(
+                pil_image.open(miltina_face_file),
+                str(temp_root / "missing_aw_eyes.png"),
+                str(temp_root / "missing_aw_hl.png"),
+            )
+        )
+        tex_ok = (
+            shinano_face_out.size == (64, 64)
+            and "makeup" in missing_layers
+            and shi_diff.size == (64, 64)
+            and shi_spec.size == (64, 64)
+            and shi_norm.size == (64, 64)
+            and mil_diff.size == (64, 64)
+            and mil_spec.size == (64, 64)
+            and mil_norm.size == (64, 64)
+            and mil_face_out.size == (64, 64)
+            and mil_eye_spec is None
+            and not used_custom_eyes
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.texture_fallback_ready"), tex_ok, "64x64 RGBA"
+        )
+
+    return suite_passed
+
+
 def run_source_only_validation_suite() -> bool:
     """Run source-only checks (syntax, templates, i18n, quality, and mirrors)."""
     separator_banner = "=" * 70
@@ -604,6 +783,7 @@ def run_source_only_validation_suite() -> bool:
     test_results_summary = [
         (i18n.translate("tests.suite_syntax"), test_python_syntax_compilation()),
         (i18n.translate("tests.suite_templates"), test_source_templates_and_dummies()),
+        (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -625,6 +805,7 @@ def run_full_validation_suite() -> bool:
         (i18n.translate("tests.suite_syntax"), test_python_syntax_compilation()),
         (i18n.translate("tests.suite_paths"), test_path_resolution()),
         (i18n.translate("tests.suite_dummies"), test_dummy_mesh_integrity()),
+        (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

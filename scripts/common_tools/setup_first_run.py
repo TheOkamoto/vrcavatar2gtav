@@ -313,6 +313,66 @@ def prompt_path_setting(
     return format_path_for_cfg(chosen_raw)
 
 
+def detect_character_unity_scene(
+    unity_assets_path_str: str,
+    name_hints: List[str],
+    current_value: str,
+    character_label: str,
+) -> Optional[str]:
+    """Optionally locate a matching .unity scene under unity_assets (non-fatal if absent)."""
+    if current_value.strip():
+        resolved_existing = project_paths.to_host_path(
+            current_value.strip(), project_root_dir=PROJECT_ROOT_HINT
+        )
+        if resolved_existing.is_file():
+            return current_value.strip()
+
+    assets_host = project_paths.to_host_path(
+        unity_assets_path_str.strip(), project_root_dir=PROJECT_ROOT_HINT
+    )
+    if not assets_host.is_dir():
+        print(project_i18n.translate("setup.unity_scene_optional", char=character_label))
+        return None
+
+    candidate_files: List[Path] = []
+    try:
+        for entry in os.scandir(assets_host):
+            if entry.is_file() and entry.name.lower().endswith(".unity"):
+                candidate_files.append(Path(entry.path))
+            elif entry.is_dir():
+                try:
+                    for nested in os.scandir(entry.path):
+                        if nested.is_file() and nested.name.lower().endswith(".unity"):
+                            candidate_files.append(Path(nested.path))
+                except OSError:
+                    continue
+    except OSError:
+        candidate_files = []
+
+    hint_tokens = [token.lower() for token in name_hints]
+    matched_scene: Optional[Path] = None
+    for candidate_path in sorted(candidate_files, key=lambda item: item.name.lower()):
+        lower_stem = candidate_path.stem.lower()
+        if any(token in lower_stem for token in hint_tokens):
+            matched_scene = candidate_path
+            break
+
+    if matched_scene is None:
+        print(project_i18n.translate("setup.unity_scene_optional", char=character_label))
+        return None
+
+    print(
+        project_i18n.translate(
+            "setup.unity_scene_detected", char=character_label, path=matched_scene
+        )
+    )
+    try:
+        relative_part = matched_scene.relative_to(assets_host).as_posix()
+        return f"${{directories:unity_assets}}/{relative_part}"
+    except ValueError:
+        return format_path_for_cfg(str(matched_scene))
+
+
 def configure_vrc2gtav_cfg(
     interactive: bool = True,
     gtav_root_override: Optional[str] = None,
@@ -404,20 +464,38 @@ def configure_vrc2gtav_cfg(
     else:
         chosen_python = current_python
 
-    update_cfg_values_in_place(
-        config_file_path,
-        {
-            "directories": {
-                "gtav_root": chosen_gtav_root,
-                "unity_assets": chosen_unity_assets,
-            },
-            "executables": {
-                "blender": chosen_blender,
-                "rage": chosen_rage,
-                "python": chosen_python,
-            },
+    cfg_updates = {
+        "directories": {
+            "gtav_root": chosen_gtav_root,
+            "unity_assets": chosen_unity_assets,
         },
-    )
+        "executables": {
+            "blender": chosen_blender,
+            "rage": chosen_rage,
+            "python": chosen_python,
+        },
+    }
+
+    for char_section, scene_hints in (
+        ("franklin", ["shinano"]),
+        ("michael", ["shinano"]),
+        ("trevor", ["milltina", "miltina"]),
+    ):
+        existing_scene_val = (
+            config_parser.get(char_section, "unity_scene", fallback="")
+            if config_parser.has_section(char_section)
+            else ""
+        )
+        detected_scene = detect_character_unity_scene(
+            chosen_unity_assets,
+            scene_hints,
+            existing_scene_val,
+            char_section,
+        )
+        if detected_scene:
+            cfg_updates.setdefault(char_section, {})["unity_scene"] = detected_scene
+
+    update_cfg_values_in_place(config_file_path, cfg_updates)
     print(project_i18n.translate("setup.saved_cfg", path=config_file_path))
     return config_file_path
 

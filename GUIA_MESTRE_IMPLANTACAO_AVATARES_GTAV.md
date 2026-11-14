@@ -34,7 +34,7 @@ vrc2gtav/
 │   ├── p_eyes_dummy.ydd                             # Malha prop dummy rígida invisível (slots p_eyes_*)
 │   ├── setup_first_run.py                           # Assistente First-Run (configuração + extração RPF)
 │   ├── repack_and_deploy_everything.py              # Empacotador RPF7 + correção de TOC + instalação
-│   └── ...                                          # Espelhos de hand_skeleton_helper, i18n, paths, apply_*
+│   └── ...                                          # Espelhos de unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
 │
 ├── scripts/                                         # Código-fonte canônico (Python em inglês + i18n)
 │   ├── common_tools/                                # Utilitários compartilhados, gerenciador e suíte de testes
@@ -65,6 +65,8 @@ Os caminhos de trabalho não são mais fixos em código. O módulo [`scripts/com
 2. **Variáveis de ambiente:** `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`, `VRC2GTAV_LANG`.
 3. **Arquivo local `vrc2gtav.cfg`:** criado a partir de [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) durante o First-Run (`setup_first_run.py`).
 4. **Detecção automática multiplataforma:** reconhece execução no **Windows** nativo ou no **Linux / WSL** (traduzindo letras de unidade como `D:/GTAV` ↔ `/mnt/d/GTAV` via `pathlib.Path`).
+5. **Escala padrão `1.0` e extração automática de `.unity` (`unity_scene_helper.py`):** No repositório limpo (`unity_scene =` vazio), todas as escalas corporais, de cabeça, ossos e acessórios permanecem em `1.0`. Ao informar `unity_scene` (e opcionalmente `unity_avatar_name`) em `[franklin]`, `[michael]` ou `[trevor]`, o extrator lê `Transform` / sobrescritas de `PrefabInstance` (cancelando multiplicadores de `PhysBone`/Marshmallow) e normaliza as proporções antes da realocação de braços e mãos.
+6. **Fallback automático de cabelo e rosto padrão (`texture_calibration_helper.py`):** Quando `fbx_hair` (*Neko Tied Bob hair*) ou texturas opcionais de olhos/maquiagem estão vazias ou ausentes no disco, ambos os avatares usam o cabelo padrão original (`Hair_*` / `Shinano_hair.png` na Shinano; `Milltina_hair_*` / `Milltina_Hair.png` calibrada na Miltina) e o rosto base (`Shinano_face.png`, `Milltina_Face.png`). Tanto a Shinano quanto a Miltina também aceitam `fbx_hair` customizado quando configurado.
 
 ### 2.2 Sistema Trilíngue (`en` / `ja` / `pt`)
 O catálogo central [`scripts/common_tools/vrc2gtav_i18n.py`](scripts/common_tools/vrc2gtav_i18n.py) fornece suporte completo em **inglês (`en`)**, **japonês (`ja`)** e **português (`pt`)**:
@@ -187,10 +189,10 @@ python run_mod_manager.py --check-env
 O arquivo [`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) verifica todo o projeto:
 
 ```bash
-# Modo completo (após First-Run, build e deploy): valida 7 suítes
+# Modo completo (após First-Run, build e deploy): valida 8 suítes
 python scripts/common_tools/test_mod_suite.py --lang pt
 
-# Modo apenas código-fonte (em clone limpo antes do First-Run): valida 4 suítes
+# Modo apenas código-fonte (em clone limpo antes do First-Run): valida 5 suítes
 python scripts/common_tools/test_mod_suite.py --source-only --lang pt
 ```
 

@@ -40,6 +40,8 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import texture_calibration_helper as calibration_helper
+import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
@@ -56,20 +58,30 @@ def resolve_startup_language() -> None:
 
 def build_texture_sources(michael_cfg):
     """Build primary grid cell and accessory sub-cell texture mappings from config."""
+    shinano_tex_dir = Path(michael_cfg["tex_shinano_dir"])
+    resolved_face = calibration_helper.resolve_existing_file(
+        michael_cfg.get("tex_face"),
+        [shinano_tex_dir / "Shinano_face.png"],
+    )
+    resolved_body = calibration_helper.resolve_existing_file(
+        michael_cfg.get("tex_body"),
+        [shinano_tex_dir / "Shinano_body.png"],
+    )
+
     main_sources = {
         "face": {
-            "diffuse_path": str(michael_cfg["tex_face"]),
-            "makeup_path": str(michael_cfg["tex_makeup"]),
-            "eye_sky_path": str(michael_cfg["tex_eye_sky"]),
-            "eye_cloud_path": str(michael_cfg["tex_eye_cloud"]),
-            "eye_cloud_mask_path": str(michael_cfg["tex_eye_cloud_mask"]),
-            "eye_highlight_path": str(michael_cfg["tex_eye_highlight"]),
-            "emission_mask": str(michael_cfg["tex_face_emission"]),
+            "diffuse_path": str(resolved_face or michael_cfg.get("tex_face", "")),
+            "makeup_path": str(michael_cfg.get("tex_makeup", "")),
+            "eye_sky_path": str(michael_cfg.get("tex_eye_sky", "")),
+            "eye_cloud_path": str(michael_cfg.get("tex_eye_cloud", "")),
+            "eye_cloud_mask_path": str(michael_cfg.get("tex_eye_cloud_mask", "")),
+            "eye_highlight_path": str(michael_cfg.get("tex_eye_highlight", "")),
+            "emission_mask": str(michael_cfg.get("tex_face_emission", "")),
             "grid_column": 0,
             "grid_row": 1,  # Top row in Blender UV space (v: 0.5 .. 1.0)
         },
         "body": {
-            "diffuse_path": str(michael_cfg["tex_body"]),
+            "diffuse_path": str(resolved_body or michael_cfg.get("tex_body", "")),
             "grid_column": 1,
             "grid_row": 1,
         },
@@ -106,9 +118,9 @@ def build_texture_sources(michael_cfg):
             "grid_row": 0,
         },
         "hair_main": {
-            "diffuse_path": str(michael_cfg["tex_hair_diffuse"]),
-            "light_mask": str(michael_cfg["tex_hair_light_mask"]),
-            "normal_path": str(michael_cfg["tex_hair_normal"]),
+            "diffuse_path": str(michael_cfg.get("tex_hair_diffuse", "")),
+            "light_mask": str(michael_cfg.get("tex_hair_light_mask", "")),
+            "normal_path": str(michael_cfg.get("tex_hair_normal", "")),
             "grid_column": 2,
             "grid_row": 0,
         },
@@ -116,47 +128,22 @@ def build_texture_sources(michael_cfg):
 
     accessory_sources = {
         "pin_back": {
-            "diffuse_path": str(michael_cfg["tex_hair_acc_blue"]),
+            "diffuse_path": str(michael_cfg.get("tex_hair_acc_blue", "")),
             "sub_column": 1,
             "sub_row": 1,
         },
         "silver_pins": {
-            "diffuse_path": str(michael_cfg["tex_hair_acc_pin"]),
+            "diffuse_path": str(michael_cfg.get("tex_hair_acc_pin", "")),
             "sub_column": 0,
             "sub_row": 0,
         },
         "halo": {
-            "diffuse_path": str(michael_cfg["tex_hair_acc_mat"]),
+            "diffuse_path": str(michael_cfg.get("tex_hair_acc_mat", "")),
             "sub_column": 0,
             "sub_row": 1,
         },
     }
     return main_sources, accessory_sources
-
-
-def apply_vibrant_hair_transform(image_rgba):
-    """
-    Transform hair and cat-ear textures into the saturated vibrant sky-indigo
-    lilToon look seen in VRChat.
-    """
-    image_array = numpy.array(image_rgba, dtype=numpy.float32)
-    red_channel = image_array[:, :, 0]
-    green_channel = image_array[:, :, 1]
-    blue_channel = image_array[:, :, 2]
-    alpha_channel = image_array[:, :, 3]
-
-    luminance_channel = 0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel
-    normalized_luminance = numpy.clip(luminance_channel / 255.0, 0.0, 1.0)
-
-    new_red_channel = numpy.clip(normalized_luminance * 90.0, 0, 255)
-    new_green_channel = numpy.clip(normalized_luminance * 175.0 + 15.0, 0, 255)
-    new_blue_channel = numpy.clip(numpy.power(normalized_luminance, 0.6) * 255.0 + 20.0, 0, 255)
-
-    transformed_array = numpy.stack(
-        [new_red_channel, new_green_channel, new_blue_channel, alpha_channel],
-        axis=-1,
-    ).astype(numpy.uint8)
-    return Image.fromarray(transformed_array, "RGBA")
 
 
 def build_liltoon_er_textures(output_directory, cell_dimension=512):
@@ -166,6 +153,23 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
     """
     michael_cfg = project_paths.get_character_paths("michael")
     main_sources, accessory_sources = build_texture_sources(michael_cfg)
+    shinano_tex_dir = Path(michael_cfg["tex_shinano_dir"])
+
+    unity_scene_path = str(michael_cfg.get("unity_scene", "")).strip()
+    unity_avatar_name = str(michael_cfg.get("unity_avatar_name", "")).strip() or None
+    unity_config = unity_scene_helper.extract_unity_avatar_config(
+        unity_scene_path,
+        avatar_name=unity_avatar_name,
+        character_hints=("shinano", "reunion"),
+    )
+    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
+        michael_cfg.get("fbx_hair", ""),
+        unity_config=unity_config,
+    )
+    custom_hair_tex_ready = bool(
+        hair_mode == "custom"
+        and os.path.exists(main_sources["hair_main"]["diffuse_path"])
+    )
 
     total_columns = 4
     total_rows = 2
@@ -204,8 +208,34 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
         start_y = pillow_row_index * cell_dimension
         end_y = start_y + cell_dimension
 
+        # 1C. Default Shinano hair fallback when custom hair FBX or texture is absent
+        if source_key == "hair_main" and not custom_hair_tex_ready:
+            fallback_reason = (
+                hair_reason if hair_mode == "default" else "tex_hair_diffuse_missing"
+            )
+            print(i18n.translate("michael.atlas.hair_fallback", reason=fallback_reason))
+            default_hair_src = calibration_helper.resolve_existing_file(
+                shinano_tex_dir / "Shinano_hair.png"
+            )
+            if default_hair_src is None:
+                raise FileNotFoundError(
+                    i18n.translate(
+                        "michael.atlas.required_missing",
+                        path=shinano_tex_dir / "Shinano_hair.png",
+                    )
+                )
+            hair_diff, hair_spec, hair_norm = calibration_helper.calibrate_shinano_default_hair(
+                base_hair_path=default_hair_src,
+                shinano_tex_root=shinano_tex_dir,
+                output_size=cell_dimension,
+            )
+            diffuse_array[start_y:end_y, start_x:end_x] = numpy.array(hair_diff)
+            specular_array[start_y:end_y, start_x:end_x] = numpy.array(hair_spec)
+            normal_array[start_y:end_y, start_x:end_x] = numpy.array(hair_norm)
+            continue
+
         diffuse_path = source_info["diffuse_path"]
-        if not os.path.exists(diffuse_path):
+        if not diffuse_path or not os.path.exists(diffuse_path):
             raise FileNotFoundError(
                 i18n.translate("michael.atlas.required_missing", path=diffuse_path)
             )
@@ -220,84 +250,39 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
         )
         cell_diffuse_image = Image.open(diffuse_path).convert("RGBA")
 
-        # 1A. Special lilToon + MoonButterfly compositing for Face and Eyes
+        # 1A. Special lilToon + optional MoonButterfly compositing for Face and Eyes
         if source_key == "face":
-            face_highres = cell_diffuse_image.resize((1024, 1024), Image.Resampling.LANCZOS)
-            face_numpy_array = numpy.array(face_highres, dtype=numpy.float32)
-
-            # Warm lilToon peach tint (_Color: 0.99, 0.92, 0.92)
-            face_numpy_array[:, :, 0] = numpy.clip(face_numpy_array[:, :, 0] * 1.00, 0, 255)
-            face_numpy_array[:, :, 1] = numpy.clip(face_numpy_array[:, :, 1] * 0.94, 0, 255)
-            face_numpy_array[:, :, 2] = numpy.clip(face_numpy_array[:, :, 2] * 0.93, 0, 255)
-            composite_face = Image.fromarray(face_numpy_array.astype(numpy.uint8), "RGBA")
-
-            makeup_path = source_info.get("makeup_path")
-            if makeup_path and os.path.exists(makeup_path):
-                makeup_image = (
-                    Image.open(makeup_path)
-                    .convert("RGBA")
-                    .resize((1024, 1024), Image.Resampling.LANCZOS)
+            composite_face, missing_face_layers = (
+                calibration_helper.composite_shinano_face_with_fallback(
+                    face_path=diffuse_path,
+                    target_size=1024,
+                    makeup_path=source_info.get("makeup_path"),
+                    eye_sky_path=source_info.get("eye_sky_path"),
+                    eye_cloud_path=source_info.get("eye_cloud_path"),
+                    eye_cloud_mask_path=source_info.get("eye_cloud_mask_path"),
+                    eye_highlight_path=source_info.get("eye_highlight_path"),
                 )
-                composite_face.alpha_composite(makeup_image)
-
-            eye_sky_path = source_info.get("eye_sky_path")
-            if eye_sky_path and os.path.exists(eye_sky_path):
-                eye_sky_image = (
-                    Image.open(eye_sky_path)
-                    .convert("RGBA")
-                    .resize((1024, 1024), Image.Resampling.LANCZOS)
+            )
+            if missing_face_layers:
+                print(
+                    i18n.translate(
+                        "michael.atlas.eye_fallback",
+                        layers=", ".join(missing_face_layers),
+                    )
                 )
-                composite_face.alpha_composite(eye_sky_image)
-
-            eye_cloud_path = source_info.get("eye_cloud_path")
-            eye_cloud_mask_path = source_info.get("eye_cloud_mask_path")
-            if (
-                eye_cloud_path
-                and eye_cloud_mask_path
-                and os.path.exists(eye_cloud_path)
-                and os.path.exists(eye_cloud_mask_path)
-            ):
-                cloud_image = (
-                    Image.open(eye_cloud_path)
-                    .convert("RGBA")
-                    .resize((1024, 1024), Image.Resampling.LANCZOS)
-                )
-                cloud_mask_image = (
-                    Image.open(eye_cloud_mask_path)
-                    .convert("L")
-                    .resize((1024, 1024), Image.Resampling.LANCZOS)
-                )
-                cloud_numpy_array = numpy.array(cloud_image, dtype=numpy.float32)
-                mask_numpy_array = (numpy.array(cloud_mask_image, dtype=numpy.float32) / 255.0) * 0.434
-                cloud_numpy_array[:, :, 3] = numpy.clip(mask_numpy_array * 255.0, 0, 255).astype(
-                    numpy.uint8
-                )
-                cloud_composite = Image.fromarray(cloud_numpy_array.astype(numpy.uint8), "RGBA")
-                composite_face.alpha_composite(cloud_composite)
-
-            eye_highlight_path = source_info.get("eye_highlight_path")
-            if eye_highlight_path and os.path.exists(eye_highlight_path):
-                highlight_image = (
-                    Image.open(eye_highlight_path)
-                    .convert("RGBA")
-                    .resize((1024, 1024), Image.Resampling.LANCZOS)
-                )
-                composite_face.alpha_composite(highlight_image)
 
             cell_diffuse_resized = composite_face.resize(
                 (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
             )
             cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
 
-            emission_mask_path = source_info.get("emission_mask")
-            if emission_mask_path and os.path.exists(emission_mask_path):
-                mask_image = Image.open(emission_mask_path).convert("L")
-                mask_resized = mask_image.resize(
-                    (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
-                )
-                mask_numpy_array = numpy.array(mask_resized, dtype=numpy.float32) / 255.0
-                eye_mask_boolean = mask_numpy_array > 0.20
-                specular_array[start_y:end_y, start_x:end_x][eye_mask_boolean] = [
+            eye_spec_mask = calibration_helper.build_shinano_face_specular(
+                cell_dimension,
+                shinano_tex_dir,
+                source_info.get("emission_mask"),
+            )
+            if eye_spec_mask is not None:
+                specular_array[start_y:end_y, start_x:end_x][eye_spec_mask] = [
                     95,
                     110,
                     130,
@@ -306,17 +291,21 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
 
         # 1B. Body skin warmth calibration
         elif source_key == "body":
-            cell_diffuse_resized = cell_diffuse_image.resize(
-                (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
+            cell_diffuse_resized = calibration_helper.apply_shinano_skin_warmth(
+                cell_diffuse_image.resize(
+                    (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
+                ),
+                red_gain=1.01,
+                green_gain=0.94,
+                blue_gain=0.93,
             )
             cell_diffuse_numpy = numpy.array(cell_diffuse_resized, dtype=numpy.float32)
-            cell_diffuse_numpy[:, :, 0] = numpy.clip(cell_diffuse_numpy[:, :, 0] * 1.01, 0, 255)
-            cell_diffuse_numpy[:, :, 1] = numpy.clip(cell_diffuse_numpy[:, :, 1] * 0.94, 0, 255)
-            cell_diffuse_numpy[:, :, 2] = numpy.clip(cell_diffuse_numpy[:, :, 2] * 0.93, 0, 255)
 
-        # 1C. Anime hair and cat ears
+        # 1C. Custom anime hair and cat ears (Neko Tied Bob)
         elif source_key == "hair_main":
-            vibrant_hair_image = apply_vibrant_hair_transform(cell_diffuse_image)
+            vibrant_hair_image = calibration_helper.apply_shinano_vibrant_hair_tint(
+                cell_diffuse_image
+            )
             cell_diffuse_resized = vibrant_hair_image.resize(
                 (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
             )
@@ -431,46 +420,54 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
     cell_base_y = 1 * cell_dimension
     sub_dimension = cell_dimension // 2
 
-    for accessory_key, accessory_info in accessory_sources.items():
-        accessory_path = accessory_info["diffuse_path"]
-        if not os.path.exists(accessory_path):
-            raise FileNotFoundError(
-                i18n.translate("michael.atlas.accessory_missing", path=accessory_path)
+    if custom_hair_tex_ready:
+        for accessory_key, accessory_info in accessory_sources.items():
+            accessory_path = accessory_info["diffuse_path"]
+            if not accessory_path or not os.path.exists(accessory_path):
+                print(
+                    i18n.translate(
+                        "michael.atlas.accessory_skip",
+                        key=accessory_key,
+                        path=accessory_path,
+                    )
+                )
+                continue
+
+            print(i18n.translate("michael.atlas.processing_accessory", key=accessory_key))
+            accessory_image = Image.open(accessory_path).convert("RGBA")
+
+            if accessory_key == "pin_back":
+                accessory_image = calibration_helper.apply_shinano_vibrant_hair_tint(
+                    accessory_image
+                )
+
+            accessory_resized = accessory_image.resize(
+                (sub_dimension, sub_dimension), Image.Resampling.LANCZOS
             )
+            accessory_numpy = numpy.array(accessory_resized)
 
-        print(i18n.translate("michael.atlas.processing_accessory", key=accessory_key))
-        accessory_image = Image.open(accessory_path).convert("RGBA")
+            sub_col = accessory_info["sub_column"]
+            sub_row_blender = accessory_info["sub_row"]
+            pillow_sub_row = 1 - sub_row_blender
 
-        if accessory_key == "pin_back":
-            accessory_image = apply_vibrant_hair_transform(accessory_image)
+            paste_sub_x = cell_base_x + (sub_col * sub_dimension)
+            paste_sub_y = cell_base_y + (pillow_sub_row * sub_dimension)
 
-        accessory_resized = accessory_image.resize(
-            (sub_dimension, sub_dimension), Image.Resampling.LANCZOS
-        )
-        accessory_numpy = numpy.array(accessory_resized)
-
-        sub_col = accessory_info["sub_column"]
-        sub_row_blender = accessory_info["sub_row"]
-        pillow_sub_row = 1 - sub_row_blender
-
-        paste_sub_x = cell_base_x + (sub_col * sub_dimension)
-        paste_sub_y = cell_base_y + (pillow_sub_row * sub_dimension)
-
-        diffuse_array[
-            paste_sub_y : paste_sub_y + sub_dimension,
-            paste_sub_x : paste_sub_x + sub_dimension,
-        ] = accessory_numpy
-
-        if accessory_key in ("silver_pins", "halo"):
-            specular_array[
+            diffuse_array[
                 paste_sub_y : paste_sub_y + sub_dimension,
                 paste_sub_x : paste_sub_x + sub_dimension,
-            ] = [210, 215, 225, 240]
-        elif accessory_key == "pin_back":
-            specular_array[
-                paste_sub_y : paste_sub_y + sub_dimension,
-                paste_sub_x : paste_sub_x + sub_dimension,
-            ] = [45, 60, 80, 110]
+            ] = accessory_numpy
+
+            if accessory_key in ("silver_pins", "halo"):
+                specular_array[
+                    paste_sub_y : paste_sub_y + sub_dimension,
+                    paste_sub_x : paste_sub_x + sub_dimension,
+                ] = [210, 215, 225, 240]
+            elif accessory_key == "pin_back":
+                specular_array[
+                    paste_sub_y : paste_sub_y + sub_dimension,
+                    paste_sub_x : paste_sub_x + sub_dimension,
+                ] = [45, 60, 80, 110]
 
     # 3. Write atlas textures to disk
     diffuse_output_path = os.path.join(output_directory, Path(michael_cfg["atlas_png"]).name)

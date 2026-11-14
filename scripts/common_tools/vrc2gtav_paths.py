@@ -621,6 +621,20 @@ def build_blender_command(
     return command_list, custom_env
 
 
+def extract_custom_blender_args(argv_tokens: Optional[List[str]] = None) -> List[str]:
+    """
+    Return custom CLI arguments passed after `--`, avoiding Blender's own flags
+    when a script is invoked via `blender -b -P script.py` without `--`.
+    """
+    raw_arguments = list(sys.argv) if argv_tokens is None else list(argv_tokens)
+    if "--" in raw_arguments:
+        return raw_arguments[raw_arguments.index("--") + 1 :]
+    executable_name = Path(raw_arguments[0]).name.lower() if raw_arguments else ""
+    if "blender" in executable_name:
+        return []
+    return raw_arguments[1:]
+
+
 def get_rpf_paths() -> Dict[str, Path]:
     """Return all resolved paths from the [rpf_paths] section of vrc2gtav.cfg."""
     parser = load_project_config()
@@ -662,13 +676,13 @@ def get_character_paths(
             )
         )
     root_directory = get_project_root()
-    non_path_keys = {"ped_name", "prop_ped_name", "ytd_name"}
+    non_path_keys = {"ped_name", "prop_ped_name", "ytd_name", "unity_avatar_name"}
     list_path_keys = {"extra_model_ydds"}
 
     resolved_character: Dict[str, Union[Path, str, List[Union[Path, str]]]] = {}
     for option_key, option_value in parser.items(character_section):
         cleaned_value = option_value.strip()
-        if option_key in non_path_keys:
+        if option_key in non_path_keys or not cleaned_value:
             resolved_character[option_key] = cleaned_value
         elif option_key in list_path_keys:
             item_list: List[Union[Path, str]] = []

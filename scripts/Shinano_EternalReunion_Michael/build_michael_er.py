@@ -46,6 +46,7 @@ for _tools_candidate in (
 
 import hand_skeleton_helper
 import mathutils
+import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
@@ -348,6 +349,11 @@ HEAD_ACCESSORY_MESH_NAMES = frozenset({
     "_Pin.Back",
     "_Pin.R",
     "_Pin.L2",
+    "Hair_base",
+    "Hair_bang",
+    "Hair_back",
+    "Hair_side",
+    "Other_ear",
 })
 
 
@@ -357,7 +363,12 @@ def smoothstep_unit(scalar_val):
     return clamped_val * clamped_val * (3.0 - 2.0 * clamped_val)
 
 
-def compute_pocket_watch_align_matrix(arm_outfit, arm_watch):
+def compute_pocket_watch_align_matrix(
+    arm_outfit,
+    arm_watch,
+    watch_scale=1.0,
+    armature_scale=(1.0, 1.0, 1.0),
+):
     """Compute the 4x4 matrix aligning the Pocket Watch to the waist watch ring."""
     watch_bone_name = "Pocket Watch_Root"
     if not arm_outfit or watch_bone_name not in arm_outfit.data.bones:
@@ -375,17 +386,23 @@ def compute_pocket_watch_align_matrix(arm_outfit, arm_watch):
     outfit_matrix = arm_outfit.matrix_world @ outfit_bone.matrix_local
     watch_matrix = arm_watch.matrix_world @ watch_bone.matrix_local
 
-    # Normalize 3x3 rotations before inverting to isolate orientation and apply 1.10 scale
+    # Normalize 3x3 rotations before inverting to isolate orientation and apply watch scale
     outfit_rot_mat = outfit_matrix.to_3x3().normalized().to_4x4()
     watch_rot_mat = watch_matrix.to_3x3().normalized().to_4x4()
     watch_head_pos = arm_watch.matrix_world @ watch_bone.head_local
 
-    # Exact Pocket Watch_Root coordinates from Shinano.unity (< 0.5 mm error to ring)
-    unity_target_pos = mathutils.Vector((-0.05371, -0.07346, 0.82380))
+    # Target waist watch ring position aligned in Shinano rest coordinates
+    unity_target_pos = mathutils.Vector(
+        (
+            -0.05371 * armature_scale[0],
+            -0.07346 * armature_scale[1],
+            0.82380 * armature_scale[2],
+        )
+    )
     return (
         mathutils.Matrix.Translation(unity_target_pos)
         @ outfit_rot_mat
-        @ mathutils.Matrix.Scale(1.10, 4)
+        @ mathutils.Matrix.Scale(float(watch_scale), 4)
         @ watch_rot_mat.inverted()
         @ mathutils.Matrix.Translation(-watch_head_pos)
     )
@@ -615,13 +632,12 @@ def apply_shape_key_weights_by_index(mesh_obj, weights_by_index, label):
 
 
 def validate_build_inputs(cli_args):
-    """Verify all required FBX, skeleton, animation, and texture inputs exist."""
+    """Verify required FBX, skeleton, animation, and texture inputs exist."""
     required_paths = [
         (i18n.translate("michael.build.input_skeleton_label"), cli_args.skeleton_yft),
         (i18n.translate("michael.build.input_shinano_fbx_label"), cli_args.shinano_fbx),
         (i18n.translate("michael.build.input_outfit_fbx_label"), cli_args.outfit_fbx),
         (i18n.translate("michael.build.input_watch_fbx_label"), cli_args.watch_fbx),
-        (i18n.translate("michael.build.input_hair_fbx_label"), cli_args.hair_fbx),
         (i18n.translate("michael.build.input_face_anim_label"), cli_args.face_anim),
     ]
     for desc_label, file_path in required_paths:
@@ -788,25 +804,61 @@ def build_shinano_er_for_gtav(cli_args):
     if arm_watch:
         imported_armatures.append(arm_watch)
 
-    print(i18n.translate("michael.build.importing_hair", path=cli_args.hair_fbx))
-    bpy.ops.import_scene.fbx(filepath=cli_args.hair_fbx)
-    arm_hair = next(
-        (
-            scene_obj
-            for scene_obj in bpy.data.objects
-            if scene_obj.type == "ARMATURE"
-            and scene_obj != ped_armature
-            and scene_obj not in imported_armatures
-        ),
-        None,
+    # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
+    target_cfg = getattr(cli_args, "target_cfg", None) or project_paths.get_character_paths(
+        cli_args.target_character
     )
-    if arm_hair:
-        imported_armatures.append(arm_hair)
+    unity_scene_override = getattr(cli_args, "unity_scene", None)
+    unity_avatar_override = getattr(cli_args, "unity_avatar_name", None)
+    effective_cfg = dict(target_cfg)
+    if unity_scene_override is not None:
+        effective_cfg["unity_scene"] = unity_scene_override
+    if unity_avatar_override is not None:
+        effective_cfg["unity_avatar_name"] = unity_avatar_override
 
-    # Rotate arms to GTA V A-pose (-55 degrees) and apply Neck scale (0.90) from Shinano.unity
+    unity_config = unity_scene_helper.load_unity_avatar_from_cfg(
+        effective_cfg,
+        i18n_module=i18n,
+        character_hints=("shinano", "reunion"),
+    )
+    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
+        cli_args.hair_fbx,
+        unity_config=unity_config,
+    )
+
+    arm_hair = None
+    if hair_mode == "custom":
+        print(
+            i18n.translate(
+                "unity_scene.hair_custom_active", reason=hair_reason, path=cli_args.hair_fbx
+            )
+        )
+        print(i18n.translate("michael.build.importing_hair", path=cli_args.hair_fbx))
+        bpy.ops.import_scene.fbx(filepath=cli_args.hair_fbx)
+        arm_hair = next(
+            (
+                scene_obj
+                for scene_obj in bpy.data.objects
+                if scene_obj.type == "ARMATURE"
+                and scene_obj != ped_armature
+                and scene_obj not in imported_armatures
+            ),
+            None,
+        )
+        if arm_hair:
+            imported_armatures.append(arm_hair)
+    else:
+        print(i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
+
+    # Apply Unity Armature scale, GTA V A-pose (-55 deg), and Unity bone pose scales
     arm_angle_rad = -math.radians(abs(char_profile["arm_pose_degrees"]))
-    neck_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit) if arm_obj}
+    armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
     for arm_obj in imported_armatures:
+        arm_obj.scale = (
+            arm_obj.scale.x * armature_override_scale[0],
+            arm_obj.scale.y * armature_override_scale[1],
+            arm_obj.scale.z * armature_override_scale[2],
+        )
         bpy.context.view_layer.objects.active = arm_obj
         bpy.ops.object.mode_set(mode="POSE")
         for left_arm_name in ["Upper_arm.L", "UpperArm.L", "LeftUpperArm"]:
@@ -819,17 +871,26 @@ def build_shinano_er_for_gtav(cli_args):
                 pose_bone = arm_obj.pose.bones[right_arm_name]
                 pose_bone.rotation_mode = "XYZ"
                 pose_bone.rotation_euler = (arm_angle_rad, 0.0, 0.0)
-        if arm_obj in neck_scaled_armatures and "Neck" in arm_obj.pose.bones:
-            neck_pose_bone = arm_obj.pose.bones["Neck"]
-            neck_pose_bone.scale = (0.9, 0.9, 0.9)
+        unity_scene_helper.apply_unity_bone_scales_to_pose(arm_obj, unity_config)
         bpy.ops.object.mode_set(mode="OBJECT")
 
-    if not arm_hair or "Hair Root" not in arm_hair.data.bones:
-        raise RuntimeError(i18n.translate("michael.build.hair_root_missing"))
-    hair_root_rest_pos = (
-        arm_hair.matrix_world @ arm_hair.data.bones["Hair Root"].head_local
-    ).copy()
-    watch_transform_matrix = compute_pocket_watch_align_matrix(arm_outfit, arm_watch)
+    hair_root_rest_pos = None
+    if hair_mode == "custom":
+        if not arm_hair or "Hair Root" not in arm_hair.data.bones:
+            raise RuntimeError(i18n.translate("michael.build.hair_root_missing"))
+        hair_root_rest_pos = (
+            arm_hair.matrix_world @ arm_hair.data.bones["Hair Root"].head_local
+        ).copy()
+
+    watch_align_scale = unity_scene_helper.get_uniform_scale(
+        unity_config, ("Pocket Watch_Root", "Pocket Watch"), default_scale=1.0
+    )
+    watch_transform_matrix = compute_pocket_watch_align_matrix(
+        arm_outfit,
+        arm_watch,
+        watch_scale=watch_align_scale,
+        armature_scale=armature_override_scale,
+    )
 
     # 4. Load original Shinano FBX facial normals
     fbx_face_normals = load_fbx_face_loop_normals(cli_args.shinano_fbx)
@@ -947,10 +1008,13 @@ def build_shinano_er_for_gtav(cli_args):
             47: 0.488,
         },
     }
-    for hair_mesh_name, hair_weights in hair_shape_keys_by_index.items():
-        apply_shape_key_weights_by_index(
-            bpy.data.objects.get(hair_mesh_name), hair_weights, hair_mesh_name
-        )
+    if hair_mode == "custom":
+        for hair_mesh_name, hair_weights in hair_shape_keys_by_index.items():
+            hair_mesh_obj = bpy.data.objects.get(hair_mesh_name)
+            if hair_mesh_obj and hair_mesh_obj.data.shape_keys:
+                apply_shape_key_weights_by_index(
+                    hair_mesh_obj, hair_weights, hair_mesh_name
+                )
 
     bpy.context.view_layer.update()
 
@@ -970,49 +1034,73 @@ def build_shinano_er_for_gtav(cli_args):
         "UN3_Glasses": {"atlas_col": 0, "atlas_row": 0, "shrink_cull": False},
         "UN3_WaistChain": {"atlas_col": 0, "atlas_row": 0, "shrink_cull": False},
         "Pocket Watch": {"atlas_col": 1, "atlas_row": 0, "shrink_cull": False},
-        "Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Top Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Under Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Side Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "In Hair": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Ribbon": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "Ears": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        "_Pin.Back": {
-            "u_offset": 0.875,
-            "v_offset": 0.25,
-            "u_scale": 0.125,
-            "v_scale": 0.25,
-            "shrink_cull": False,
-        },
-        "_Pin.R": {
-            "u_offset": 0.75,
-            "v_offset": 0.0,
-            "u_scale": 0.125,
-            "v_scale": 0.25,
-            "clamp_v": True,
-            "shrink_cull": False,
-        },
-        "_Pin.L2": {
-            "u_offset": 0.75,
-            "v_offset": 0.0,
-            "u_scale": 0.125,
-            "v_scale": 0.25,
-            "clamp_v": True,
-            "shrink_cull": False,
-        },
-        "_Halo": {
-            "u_offset": 0.75,
-            "v_offset": 0.25,
-            "u_scale": 0.125,
-            "v_scale": 0.25,
-            "shrink_cull": False,
-        },
     }
 
-    scale_factor = (char_profile["target_z_max"] - char_profile["target_z_min"]) / (1.132 - 0.106)
-    vertical_offset = char_profile["target_z_min"] - (0.106 * scale_factor)
+    if hair_mode == "custom":
+        active_mesh_configs.update(
+            {
+                "Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Top Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Under Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Side Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "In Hair": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Ribbon": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Ears": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "_Pin.Back": {
+                    "u_offset": 0.875,
+                    "v_offset": 0.25,
+                    "u_scale": 0.125,
+                    "v_scale": 0.25,
+                    "shrink_cull": False,
+                },
+                "_Pin.R": {
+                    "u_offset": 0.75,
+                    "v_offset": 0.0,
+                    "u_scale": 0.125,
+                    "v_scale": 0.25,
+                    "clamp_v": True,
+                    "shrink_cull": False,
+                },
+                "_Pin.L2": {
+                    "u_offset": 0.75,
+                    "v_offset": 0.0,
+                    "u_scale": 0.125,
+                    "v_scale": 0.25,
+                    "clamp_v": True,
+                    "shrink_cull": False,
+                },
+                "_Halo": {
+                    "u_offset": 0.75,
+                    "v_offset": 0.25,
+                    "u_scale": 0.125,
+                    "v_scale": 0.25,
+                    "shrink_cull": False,
+                },
+            }
+        )
+    else:
+        active_mesh_configs.update(
+            {
+                "Hair_base": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Hair_bang": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Hair_back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Hair_side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Other_ear": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+            }
+        )
+
+    scale_factor, vertical_offset = unity_scene_helper.compute_gtav_height_mapping(
+        bpy,
+        unity_config,
+        active_mesh_configs.keys(),
+        ("Body", "Body_base", "UN2_Shoes"),
+        char_profile["target_z_min"],
+        char_profile["target_z_max"],
+        0.106,
+        1.132,
+    )
 
     depsgraph_eval = bpy.context.evaluated_depsgraph_get()
     processed_objects = []
@@ -1206,17 +1294,43 @@ def build_shinano_er_for_gtav(cli_args):
             hat_rot_matrix = mathutils.Matrix.Rotation(math.radians(-11.464), 4, "X")
             hat_pos_delta = mathutils.Vector((0.0, 0.02655, 0.01388))
 
-        is_neko_hair = mesh_name in neko_hair_mesh_names
+        is_neko_hair = (hair_mode == "custom") and (mesh_name in neko_hair_mesh_names)
         neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
-        neko_hair_scale = 1.08696
+        custom_hair_node_scale = unity_scene_helper.get_uniform_scale(
+            unity_config,
+            ("Neko BoB_Lime", "Neko Tied Bob hair", "Hair Root", "Hair_root"),
+            default_scale=1.0,
+        )
+        head_pose_bone = arm_base.pose.bones.get("Head") if arm_base else None
+        head_rest_bone = arm_base.data.bones.get("Head") if arm_base else None
+        head_world_scale = 1.0
+        if head_pose_bone is not None and arm_base is not None:
+            head_world_scale = (arm_base.matrix_world @ head_pose_bone.matrix).to_scale().x
+            if head_rest_bone is not None:
+                head_delta = (
+                    arm_base.matrix_world @ head_pose_bone.head
+                    - arm_base.matrix_world @ head_rest_bone.head_local
+                )
+                neko_target_hair_root = (
+                    mathutils.Vector(
+                        (
+                            0.000653 * armature_override_scale[0],
+                            0.010790 * armature_override_scale[1],
+                            1.202636 * armature_override_scale[2],
+                        )
+                    )
+                    + head_delta
+                )
+        neko_hair_scale = custom_hair_node_scale * head_world_scale
         neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
 
+        eval_world_matrix = evaluated_obj.matrix_world
         for vert_item in baked_mesh.vertices:
-            world_co = source_obj.matrix_world @ vert_item.co
+            world_co = eval_world_matrix @ vert_item.co
             if is_beret_mesh:
                 rel_co = world_co - hat_pivot
                 world_co = hat_pivot + (hat_rot_matrix @ rel_co) + hat_pos_delta
-            elif is_neko_hair:
+            elif is_neko_hair and hair_root_rest_pos is not None:
                 rel_hair = (world_co - hair_root_rest_pos) * neko_hair_scale
                 world_co = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
             elif mesh_name == "Pocket Watch":
@@ -1312,7 +1426,7 @@ def build_shinano_er_for_gtav(cli_args):
                         or "hair" in mesh_name.lower()
                         or "glasses" in mesh_name.lower()
                         or "beret" in mesh_name.lower()
-                        or mesh_name in neko_hair_mesh_names
+                        or mesh_name in HEAD_ACCESSORY_MESH_NAMES
                         or mesh_name == "Body"
                     )
                     else (
@@ -1546,11 +1660,8 @@ def build_shinano_er_for_gtav(cli_args):
 
 
 def extract_custom_blender_args():
-    """Return CLI arguments appearing after `--` (or `sys.argv[1:]` directly)."""
-    raw_arguments = sys.argv
-    if "--" in raw_arguments:
-        return raw_arguments[raw_arguments.index("--") + 1 :]
-    return raw_arguments[1:]
+    """Return CLI arguments appearing after `--` (or standalone Python args)."""
+    return project_paths.extract_custom_blender_args()
 
 
 def resolve_startup_language(custom_arguments) -> None:
@@ -1609,6 +1720,16 @@ def parse_blender_cli_args():
         help=i18n.translate("michael.build.arg_hair_fbx"),
     )
     argument_parser.add_argument(
+        "--unity-scene",
+        default=None,
+        help="Optional Unity scene path override for scale extraction",
+    )
+    argument_parser.add_argument(
+        "--unity-avatar-name",
+        default=None,
+        help="Optional Unity root GameObject name override",
+    )
+    argument_parser.add_argument(
         "--face-anim",
         default=None,
         help=i18n.translate("michael.build.arg_face_anim"),
@@ -1650,18 +1771,35 @@ def parse_blender_cli_args():
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    michael_cfg = project_paths.get_character_paths("michael")
-    parsed_args.skeleton_yft = parsed_args.skeleton_yft or str(michael_cfg["skeleton_yft"])
-    parsed_args.shinano_fbx = parsed_args.shinano_fbx or str(michael_cfg["fbx_shinano"])
-    parsed_args.outfit_fbx = parsed_args.outfit_fbx or str(michael_cfg["fbx_outfit"])
-    parsed_args.watch_fbx = parsed_args.watch_fbx or str(michael_cfg["fbx_watch"])
-    parsed_args.hair_fbx = parsed_args.hair_fbx or str(michael_cfg["fbx_hair"])
-    parsed_args.face_anim = parsed_args.face_anim or str(michael_cfg["face_anim"])
-    parsed_args.texture_dir = parsed_args.texture_dir or str(michael_cfg["textures_dir"])
-    parsed_args.atlas_png = parsed_args.atlas_png or Path(michael_cfg["atlas_png"]).name
-    parsed_args.normal_png = parsed_args.normal_png or Path(michael_cfg["normal_png"]).name
-    parsed_args.spec_png = parsed_args.spec_png or Path(michael_cfg["spec_png"]).name
-    parsed_args.output_dir = parsed_args.output_dir or str(michael_cfg["exported_models_dir"])
+    target_cfg = project_paths.get_character_paths(parsed_args.target_character)
+    parsed_args.target_cfg = target_cfg
+    parsed_args.skeleton_yft = parsed_args.skeleton_yft or str(target_cfg["skeleton_yft"])
+    parsed_args.shinano_fbx = parsed_args.shinano_fbx or str(
+        target_cfg.get("fbx_shinano") or target_cfg.get("source_fbx", "")
+    )
+    parsed_args.outfit_fbx = parsed_args.outfit_fbx or str(target_cfg.get("fbx_outfit", ""))
+    parsed_args.watch_fbx = parsed_args.watch_fbx or str(target_cfg.get("fbx_watch", ""))
+    parsed_args.hair_fbx = (
+        parsed_args.hair_fbx
+        if parsed_args.hair_fbx is not None
+        else str(target_cfg.get("fbx_hair", ""))
+    )
+    parsed_args.unity_scene = (
+        parsed_args.unity_scene
+        if parsed_args.unity_scene is not None
+        else str(target_cfg.get("unity_scene", ""))
+    )
+    parsed_args.unity_avatar_name = (
+        parsed_args.unity_avatar_name
+        if parsed_args.unity_avatar_name is not None
+        else str(target_cfg.get("unity_avatar_name", ""))
+    )
+    parsed_args.face_anim = parsed_args.face_anim or str(target_cfg.get("face_anim", ""))
+    parsed_args.texture_dir = parsed_args.texture_dir or str(target_cfg["textures_dir"])
+    parsed_args.atlas_png = parsed_args.atlas_png or Path(target_cfg["atlas_png"]).name
+    parsed_args.normal_png = parsed_args.normal_png or Path(target_cfg["normal_png"]).name
+    parsed_args.spec_png = parsed_args.spec_png or Path(target_cfg["spec_png"]).name
+    parsed_args.output_dir = parsed_args.output_dir or str(target_cfg["exported_models_dir"])
 
     return parsed_args
 

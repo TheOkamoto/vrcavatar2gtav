@@ -29,41 +29,9 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import texture_calibration_helper as calibration_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
-
-
-def apply_vibrant_hair_transform(image_rgba_object: Image.Image) -> Image.Image:
-    """
-    Transform Shinano hair albedo into a saturated indigo-blue palette while
-    keeping the cyan gradient on the inner ear fluff, matching VRChat lilToon.
-    """
-    image_pixel_array = numpy_lib.array(image_rgba_object, dtype=numpy_lib.float32)
-    red_channel = image_pixel_array[:, :, 0]
-    green_channel = image_pixel_array[:, :, 1]
-    blue_channel = image_pixel_array[:, :, 2]
-    alpha_channel = image_pixel_array[:, :, 3]
-
-    # Weighted original luminance
-    weighted_luminance = (
-        0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel
-    )
-    normalized_luminance = numpy_lib.clip(weighted_luminance / 255.0, 0.0, 1.0)
-
-    # lilToon tonal curve for electric indigo-blue highlights
-    transformed_red = numpy_lib.clip(normalized_luminance * 90.0, 0, 255)
-    transformed_green = numpy_lib.clip(
-        normalized_luminance * 175.0 + 15.0, 0, 255
-    )
-    transformed_blue = numpy_lib.clip(
-        numpy_lib.power(normalized_luminance, 0.6) * 255.0 + 20.0, 0, 255
-    )
-
-    result_pixel_array = numpy_lib.stack(
-        [transformed_red, transformed_green, transformed_blue, alpha_channel],
-        axis=-1,
-    ).astype(numpy_lib.uint8)
-    return Image.fromarray(result_pixel_array, "RGBA")
 
 
 def build_franklin_atlas() -> bool:
@@ -115,75 +83,33 @@ def build_franklin_atlas() -> bool:
         )
 
         # 1. Face (Shinano_face) -> Top-Left quadrant
-        face_raw_path = Path(franklin_cfg["tex_face"])
-        raw_face_image = (
-            Image.open(face_raw_path)
-            .convert("RGBA")
-            .resize((2048, 2048), Image.Resampling.LANCZOS)
+        face_raw_path = calibration_helper.resolve_existing_file(
+            franklin_cfg.get("tex_face"),
+            [shinano_textures_directory / "Shinano_face.png"],
         )
-        face_array = numpy_lib.array(raw_face_image, dtype=numpy_lib.float32)
+        if face_raw_path is None:
+            raise FileNotFoundError(
+                f"Shinano face texture not found: {franklin_cfg.get('tex_face')}"
+            )
 
-        # Warm peach skin adjustment matching lilToon
-        face_array[:, :, 0] = numpy_lib.clip(face_array[:, :, 0] * 1.00, 0, 255)
-        face_array[:, :, 1] = numpy_lib.clip(face_array[:, :, 1] * 0.94, 0, 255)
-        face_array[:, :, 2] = numpy_lib.clip(face_array[:, :, 2] * 0.93, 0, 255)
-        composite_face_image = Image.fromarray(
-            face_array.astype(numpy_lib.uint8), "RGBA"
+        composite_face_image, missing_face_layers = (
+            calibration_helper.composite_shinano_face_with_fallback(
+                face_path=face_raw_path,
+                target_size=2048,
+                makeup_path=franklin_cfg.get("tex_makeup"),
+                eye_sky_path=franklin_cfg.get("tex_eye_sky"),
+                eye_cloud_path=franklin_cfg.get("tex_eye_cloud"),
+                eye_cloud_mask_path=franklin_cfg.get("tex_eye_cloud_mask"),
+                eye_highlight_path=franklin_cfg.get("tex_eye_highlight"),
+            )
         )
-
-        # Subtle makeup overlay
-        makeup_texture_path = Path(franklin_cfg["tex_makeup"])
-        if makeup_texture_path.exists():
-            makeup_layer_image = (
-                Image.open(makeup_texture_path)
-                .convert("RGBA")
-                .resize((2048, 2048), Image.Resampling.LANCZOS)
+        if missing_face_layers:
+            print(
+                project_i18n.translate(
+                    "franklin.atlas.eye_fallback",
+                    layers=", ".join(missing_face_layers),
+                )
             )
-            composite_face_image.alpha_composite(makeup_layer_image)
-
-        # MoonButterfly eye layers
-        sky_layer_path = Path(franklin_cfg["tex_eye_sky"])
-        if sky_layer_path.exists():
-            sky_layer_image = (
-                Image.open(sky_layer_path)
-                .convert("RGBA")
-                .resize((2048, 2048), Image.Resampling.LANCZOS)
-            )
-            composite_face_image.alpha_composite(sky_layer_image)
-
-        cloud_texture_path = Path(franklin_cfg["tex_eye_cloud"])
-        cloud_mask_texture_path = Path(franklin_cfg["tex_eye_cloud_mask"])
-        if cloud_texture_path.exists() and cloud_mask_texture_path.exists():
-            cloud_layer_image = (
-                Image.open(cloud_texture_path)
-                .convert("RGBA")
-                .resize((2048, 2048), Image.Resampling.LANCZOS)
-            )
-            cloud_mask_image = (
-                Image.open(cloud_mask_texture_path)
-                .convert("L")
-                .resize((2048, 2048), Image.Resampling.LANCZOS)
-            )
-            cloud_pixel_array = numpy_lib.array(cloud_layer_image, dtype=numpy_lib.float32)
-            normalized_mask_array = (
-                numpy_lib.array(cloud_mask_image, dtype=numpy_lib.float32) / 255.0
-            ) * 0.434
-            cloud_pixel_array[:, :, 3] = numpy_lib.clip(
-                normalized_mask_array * 255.0, 0, 255
-            ).astype(numpy_lib.uint8)
-            cloud_composite_image = Image.fromarray(
-                cloud_pixel_array.astype(numpy_lib.uint8), "RGBA"
-            )
-            composite_face_image.alpha_composite(cloud_composite_image)
-
-        highlight_layer_path = Path(franklin_cfg["tex_eye_highlight"])
-        if highlight_layer_path.exists():
-            highlight_layer_image = (
-                Image.open(highlight_layer_path)
-                .convert("RGBA")
-                .resize((2048, 2048), Image.Resampling.LANCZOS)
-            )
-            composite_face_image.alpha_composite(highlight_layer_image)
 
         final_face_quadrant = composite_face_image.resize(
             (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
@@ -192,9 +118,25 @@ def build_franklin_atlas() -> bool:
             final_face_quadrant
         )
 
+        face_spec_mask = calibration_helper.build_shinano_face_specular(
+            cell_dimension,
+            shinano_textures_directory,
+            franklin_cfg.get("tex_face_emission", ""),
+        )
+        if face_spec_mask is not None:
+            specular_pixel_array[0:cell_dimension, 0:cell_dimension][face_spec_mask] = [
+                95,
+                110,
+                130,
+                200,
+            ]
+
         # 2. Body (Shinano_body) -> Top-Right quadrant
-        body_raw_path = Path(franklin_cfg["tex_body"])
-        if body_raw_path.exists():
+        body_raw_path = calibration_helper.resolve_existing_file(
+            franklin_cfg.get("tex_body"),
+            [shinano_textures_directory / "Shinano_body.png"],
+        )
+        if body_raw_path is not None:
             raw_body_image = (
                 Image.open(body_raw_path)
                 .convert("RGBA")
@@ -202,24 +144,24 @@ def build_franklin_atlas() -> bool:
                     (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
                 )
             )
-            body_array = numpy_lib.array(raw_body_image, dtype=numpy_lib.float32)
-            body_array[:, :, 0] = numpy_lib.clip(body_array[:, :, 0] * 1.01, 0, 255)
-            body_array[:, :, 1] = numpy_lib.clip(body_array[:, :, 1] * 0.94, 0, 255)
-            body_array[:, :, 2] = numpy_lib.clip(body_array[:, :, 2] * 0.93, 0, 255)
+            warm_body_image = calibration_helper.apply_shinano_skin_warmth(
+                raw_body_image, red_gain=1.01, green_gain=0.94, blue_gain=0.93
+            )
             diffuse_pixel_array[
                 0:cell_dimension, cell_dimension : 2 * cell_dimension
-            ] = body_array.astype(numpy_lib.uint8)
+            ] = numpy_lib.array(warm_body_image)
 
         # 3. Costume (Shinano_costume) -> Bottom-Left quadrant
         costume_source_candidates = [
             source_textures_directory / "shinano_costume.png",
             textures_subfolder / "shinano_costume.png",
-            Path(franklin_cfg["tex_costume"]),
+            franklin_cfg.get("tex_costume"),
+            shinano_textures_directory / "Shinano_costume.png",
         ]
-        found_costume_path = next(
-            (item for item in costume_source_candidates if item.exists()), None
+        found_costume_path = calibration_helper.resolve_existing_file(
+            None, costume_source_candidates
         )
-        if found_costume_path:
+        if found_costume_path is not None:
             costume_layer_image = (
                 Image.open(found_costume_path)
                 .convert("RGBA")
@@ -231,26 +173,42 @@ def build_franklin_atlas() -> bool:
                 cell_dimension : 2 * cell_dimension, 0:cell_dimension
             ] = numpy_lib.array(costume_layer_image)
 
-        # 4. Hair (Shinano_hair) -> Bottom-Right quadrant
+        # 4. Hair (Shinano_hair or optional custom override) -> Bottom-Right quadrant
+        configured_hair_path = str(franklin_cfg.get("tex_hair", "")).strip()
         hair_source_candidates = [
             source_textures_directory / "shinano_hair.png",
             textures_subfolder / "shinano_hair.png",
-            Path(franklin_cfg["tex_hair"]),
+            configured_hair_path,
+            shinano_textures_directory / "Shinano_hair.png",
         ]
-        found_hair_path = next(
-            (item for item in hair_source_candidates if item.exists()), None
+        found_hair_path = calibration_helper.resolve_existing_file(
+            None, hair_source_candidates
         )
-        if found_hair_path:
-            raw_hair_image = Image.open(found_hair_path).convert("RGBA")
-            vibrant_hair_image = apply_vibrant_hair_transform(
-                raw_hair_image
-            ).resize(
-                (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
+        base_shinano_hair = shinano_textures_directory / "Shinano_hair.png"
+        if configured_hair_path and not Path(configured_hair_path).is_file():
+            print(project_i18n.translate("franklin.atlas.hair_fallback"))
+
+        if found_hair_path is not None:
+            hair_diffuse_quad, hair_spec_quad, hair_norm_quad = (
+                calibration_helper.calibrate_shinano_default_hair(
+                    base_hair_path=base_shinano_hair if base_shinano_hair.is_file() else found_hair_path,
+                    shinano_tex_root=shinano_textures_directory,
+                    output_size=cell_dimension,
+                    target_tint_path=found_hair_path,
+                )
             )
             diffuse_pixel_array[
                 cell_dimension : 2 * cell_dimension,
                 cell_dimension : 2 * cell_dimension,
-            ] = numpy_lib.array(vibrant_hair_image)
+            ] = numpy_lib.array(hair_diffuse_quad)
+            specular_pixel_array[
+                cell_dimension : 2 * cell_dimension,
+                cell_dimension : 2 * cell_dimension,
+            ] = numpy_lib.array(hair_spec_quad)
+            normal_pixel_array[
+                cell_dimension : 2 * cell_dimension,
+                cell_dimension : 2 * cell_dimension,
+            ] = numpy_lib.array(hair_norm_quad)
 
         # Save final PNG channels configured via vrc2gtav.cfg
         diffuse_final_path = Path(franklin_cfg["atlas_png"])

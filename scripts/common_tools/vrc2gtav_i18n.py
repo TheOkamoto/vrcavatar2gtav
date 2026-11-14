@@ -2755,4 +2755,104 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "展開済み RPF ヘッダー",
         "pt": "Cabeçalhos RPF Implantados",
     },
+    "tests.suite_unity": {
+        "en": "Unity Scene Scales and Hair Fallback",
+        "ja": "Unity シーンのスケール抽出とデフォルト髪フォールバック",
+        "pt": "Escalas Unity e Fallback de Cabelo Padrão",
+    },
+    "tests.unity_empty_unit_scales": {
+        "en": "Empty/missing .unity defaults to 1.0 scales",
+        "ja": "未指定・欠損 .unity での 1.0 スケール既定値",
+        "pt": ".unity vazio/ausente usa escalas padrão 1.0",
+    },
+    "tests.unity_extracts_scene_scales": {
+        "en": "Synthetic .unity extracts !u!4, !u!1001, and PB cancellation",
+        "ja": "疑似 .unity からの !u!4 / !u!1001 スケール抽出と PB 相殺",
+        "pt": ".unity sintético extrai !u!4, !u!1001 e cancelamento PB",
+    },
+    "tests.unity_hair_fallback_mode": {
+        "en": "Hair resolver defaults cleanly when custom hair is absent",
+        "ja": "カスタム髪不在時のデフォルト髪自動フォールバック",
+        "pt": "Resolvedor de cabelo volta ao padrão quando o customizado falta",
+    },
+    "tests.texture_fallback_ready": {
+        "en": "Texture calibration degrades cleanly without optional packs",
+        "ja": "オプション素材不在時のテクスチャ補正フォールバック",
+        "pt": "Calibração de textura faz fallback seguro sem pacotes opcionais",
+    },
+    "unity_scene.loaded": {
+        "en": "[Unity] Loaded scales from {scene} (avatar='{avatar}', root={root}, armature={armature}, bones={count})",
+        "ja": "[Unity] {scene} からスケールを読み込み (avatar='{avatar}', root={root}, armature={armature}, bones={count})",
+        "pt": "[Unity] Escalas carregadas de {scene} (avatar='{avatar}', root={root}, armadura={armature}, ossos={count})",
+    },
+    "unity_scene.default_unit_scales": {
+        "en": "[Unity] No custom .unity scale overrides active; using unit body scales (1.0)",
+        "ja": "[Unity] カスタム .unity スケール上書きなし。全ボディスケール 1.0 を使用します",
+        "pt": "[Unity] Nenhuma escala customizada de .unity ativa; usando escalas corporais padrão (1.0)",
+    },
+    "unity_scene.applied_bones": {
+        "en": "[Unity] Applied {count} pose bone scale override(s) from scene",
+        "ja": "[Unity] シーンから {count} 個のボーンポーズスケール上書きを適用しました",
+        "pt": "[Unity] Aplicado(s) {count} ajuste(s) de escala em ossos a partir da cena",
+    },
+    "unity_scene.hair_fallback_default": {
+        "en": "[Hair] Using base avatar default hair ({reason})",
+        "ja": "[Hair] アバター標準のデフォルト髪を使用します ({reason})",
+        "pt": "[Cabelo] Usando cabelo padrão do avatar base ({reason})",
+    },
+    "unity_scene.hair_custom_active": {
+        "en": "[Hair] Using custom hair FBX ({reason}): {path}",
+        "ja": "[Hair] カスタム髪 FBX を使用します ({reason}): {path}",
+        "pt": "[Cabelo] Usando FBX de cabelo customizado ({reason}): {path}",
+    },
+    "franklin.atlas.hair_fallback": {
+        "en": "[INFO] Custom Franklin hair texture missing; calibrating base Shinano_hair.png.",
+        "ja": "[INFO] カスタム髪テクスチャが見つからないため基本 Shinano_hair.png を調整して使用します。",
+        "pt": "[INFO] Textura de cabelo customizada ausente; calibrando Shinano_hair.png padrão.",
+    },
+    "franklin.atlas.eye_fallback": {
+        "en": "[INFO] Optional face/eye layers absent ({layers}); keeping base Shinano_face.png eyes.",
+        "ja": "[INFO] オプションの目・メイク素材不在 ({layers}) のため基本 Shinano_face.png の目を使用します。",
+        "pt": "[INFO] Camadas opcionais de rosto/olhos ausentes ({layers}); mantendo olhos de Shinano_face.png.",
+    },
+    "michael.atlas.hair_fallback": {
+        "en": "[INFO] Custom hair asset absent ({reason}); calibrating default Shinano hair in cell (2, 0).",
+        "ja": "[INFO] カスタム髪不在 ({reason}) のためセル (2, 0) に標準 Shinano 髪を調整配置します。",
+        "pt": "[INFO] Cabelo customizado ausente ({reason}); calibrando cabelo padrão da Shinano na célula (2, 0).",
+    },
+    "michael.atlas.eye_fallback": {
+        "en": "[INFO] Optional face/eye layers absent ({layers}); keeping base Shinano_face.png eyes.",
+        "ja": "[INFO] オプションの目・メイク素材不在 ({layers}) のため基本 Shinano_face.png の目を使用します。",
+        "pt": "[INFO] Camadas opcionais de rosto/olhos ausentes ({layers}); mantendo olhos de Shinano_face.png.",
+    },
+    "michael.atlas.accessory_skip": {
+        "en": "[INFO] Optional hair accessory texture absent ({key}: {path}); skipping sub-cell.",
+        "ja": "[INFO] オプション髪アクセサリ不在 ({key}: {path}) のためサブセルをスキップします。",
+        "pt": "[INFO] Textura opcional de acessório capilar ausente ({key}: {path}); ignorando subcélula.",
+    },
+    "trevor.atlas.hair_fallback": {
+        "en": "[INFO] Using Miltina default hair calibrated from Milltina_Hair.png (lilToon material).",
+        "ja": "[INFO] Milltina_Hair.png を lilToon マテリアル基準で調整した標準髪を使用します。",
+        "pt": "[INFO] Usando cabelo padrão da Miltina calibrado de Milltina_Hair.png (material lilToon).",
+    },
+    "trevor.atlas.hair_custom": {
+        "en": "[INFO] Using custom hair texture override for Miltina: {path}",
+        "ja": "[INFO] Miltina 用カスタム髪テクスチャの上書きを使用します: {path}",
+        "pt": "[INFO] Usando textura de cabelo customizada para Miltina: {path}",
+    },
+    "trevor.atlas.eye_fallback": {
+        "en": "[INFO] Optional AWEyes textures absent; keeping default Milltina_Face.png eyes.",
+        "ja": "[INFO] オプションの AWEyes 目素材が不在のため基本 Milltina_Face.png の目を使用します。",
+        "pt": "[INFO] Texturas opcionais AWEyes ausentes; mantendo os olhos padrão de Milltina_Face.png.",
+    },
+    "setup.unity_scene_detected": {
+        "en": "Detected optional Unity scene for {char}: {path}",
+        "ja": "{char} 用のオプション Unity シーンを検出しました: {path}",
+        "pt": "Cena Unity opcional detectada para {char}: {path}",
+    },
+    "setup.unity_scene_optional": {
+        "en": "No Unity scene configured for {char}; default 1.0 body scales will be used.",
+        "ja": "{char} 用の Unity シーン未設定のため標準 1.0 ボディスケールを使用します。",
+        "pt": "Nenhuma cena Unity configurada para {char}; escalas corporais padrão 1.0 serão usadas.",
+    },
 }

@@ -56,6 +56,8 @@ vrc2gtav/
 │   ├── repack_and_deploy_everything.py # Repacota RPFs com barra de progresso e instala no GTA V
 │   ├── run_mod_manager.py     # Cópia espelhada do orquestrador mestre
 │   ├── setup_first_run.py     # Assistente First-Run (cria vrc2gtav.cfg e extrai RPFs base)
+│   ├── texture_calibration_helper.py # Calibração de shaders, cabelo padrão e fallback de olhos/rosto
+│   ├── unity_scene_helper.py  # Extrator de escalas de cenas .unity e resolvedor de cabelo padrão/custom
 │   ├── vrc2gtav_i18n.py       # Motor trilíngue (en / ja / pt) baseado no idioma do sistema
 │   └── vrc2gtav_paths.py      # Leitor do vrc2gtav.cfg + conversor Windows/WSL
 │
@@ -96,6 +98,16 @@ Todos os scripts Python e inicializadores `.bat` detectam automaticamente o idio
    - Popula os esqueletos base (`player_zero.yft`, `player_one.yft`, `player_two.yft`) em `*/2_blender/` e em `staging/backup_vanilla_skeletons/`.
 2. **Para mover o projeto, o GTA V ou o Blender de unidade/pasta:** edite apenas `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em `vrc2gtav.cfg` — nenhum script `.py` precisa ser alterado.
 3. **Variáveis de Ambiente Opcionais:** `VRC2GTAV_LANG`, `VRC2GTAV_CFG`, `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
+
+### Escalas Corporais Padrão (`1.0`) e Extração de Cenas `.unity`
+
+- **Proporções padrão `1.0` no GitHub:** Os padrões limpos do repositório (`unity_scene =` em branco no `vrc2gtav.cfg.example`) mantêm corpo, cabeça, ossos e acessórios exatamente em escala `1.0`, sem multiplicadores fixos no código.
+- **Leitura automática de arquivos `.unity`:** Aponte `unity_scene` (e opcionalmente `unity_avatar_name`) nas seções `[franklin]`, `[michael]` ou `[trevor]` para a sua cena do Unity. O módulo [`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) lê a hierarquia YAML (`GameObject`, `Transform`, sobrescritas de `PrefabInstance` e cancelamento de escalas de `PhysBone`/Marshmallow) e aplica suas proporções personalizadas com normalização de altura no GTA V.
+
+### Fallback Automático para Cabelo e Texturas Padrão
+
+- **Shinano (Franklin e Michael) e Miltina (Trevor):** Se um pacote de cabelo customizado (`fbx_hair`, como o *Neko Tied Bob hair*) ou textura opcional de olhos/maquiagem (*MoonButterfly eye*, *AWEyes*) estiver vazio ou ausente no disco, [`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) e [`texture_calibration_helper.py`](scripts/common_tools/texture_calibration_helper.py) fazem fallback automático para o cabelo padrão do avatar base (`Hair_base`, `Hair_bang`, `Hair_back`, `Hair_side`, `Other_ear` com `Shinano_hair.png`; `Milltina_hair_*` com `Milltina_Hair.png` calibrada) e para o rosto base, sem falhas.
+- **Cabelo customizado opcional em qualquer avatar:** Ao preencher `fbx_hair` (e eventuais texturas customizadas) no `vrc2gtav.cfg`, tanto a **Shinano** quanto a **Miltina** passam a usar o cabelo customizado automaticamente.
 
 ---
 
@@ -309,9 +321,9 @@ Todos os avatares, vestidos, cabelos, acessórios, texturas e presets abaixo per
 | **Avatar Base & Traje Casual** | オリジナル3Dモデル「しなの」 (*Shinano*) | ポンデロニウム研究所 (`ponderogen`) | Michael, Franklin | [BOOTH](https://ponderogen.booth.pm/items/6106863) / [Loja](https://ponderogen.booth.pm/) |
 | **Avatar Base & Traje Maid** | オリジナル3Dモデル『ミルティナ』 (*Milltina*) | DOLOS art (`dolosart`) | Trevor | [BOOTH](https://dolosart.booth.pm/items/6538026) / [Loja](https://dolosart.booth.pm/) |
 | **Vestido, Sapatos & Acessórios** | 【15アバター対応】エターナル・リユニオン【MA対応】 (*Eternal Reunion* + *Pocket Watch*) | VAGRANT (`Vagrant Brand`) | Michael | [BOOTH](https://vagrant.booth.pm/items/5634313) / [Loja](https://vagrant.booth.pm/) |
-| **Cabelo, Orelhas, Presilhas & Auréola** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael | [BOOTH](https://li-ne.booth.pm/items/7977491) / [Loja](https://li-ne.booth.pm/) |
-| **Textura de Olhos (Shinano)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [Loja](https://ha-oa.booth.pm/) |
-| **Textura de Olhos (Milltina)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [Loja](https://nagikawamart.booth.pm/) |
+| **Cabelo, Orelhas, Presilhas & Auréola (Opcional)** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael *(usa cabelo padrão Shinano se ausente)* | [BOOTH](https://li-ne.booth.pm/items/7977491) / [Loja](https://li-ne.booth.pm/) |
+| **Textura de Olhos (Shinano, Opcional)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin *(fallback para `Shinano_face.png`)* | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [Loja](https://ha-oa.booth.pm/) |
+| **Textura de Olhos (Milltina, Opcional)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor *(fallback para `Milltina_Face.png`)* | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [Loja](https://nagikawamart.booth.pm/) |
 
 ---
 

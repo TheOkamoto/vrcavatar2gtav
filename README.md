@@ -56,6 +56,8 @@ vrc2gtav/
 │   ├── repack_and_deploy_everything.py # Repack RPFs with progress bars and install to GTA V
 │   ├── run_mod_manager.py     # Mirrored copy of the master orchestrator
 │   ├── setup_first_run.py     # First-Run Setup Wizard (writes vrc2gtav.cfg & extracts base RPFs)
+│   ├── texture_calibration_helper.py # Shader-calibrated default hair & eye/face fallback compositing
+│   ├── unity_scene_helper.py  # .unity scene scale extractor & custom-vs-default hair resolver
 │   ├── vrc2gtav_i18n.py       # Trilingual engine (en / ja / pt) using OS system locale
 │   └── vrc2gtav_paths.py      # Central vrc2gtav.cfg reader + Windows/WSL path converter
 │
@@ -96,6 +98,16 @@ Every Python script and Windows `.bat` launcher automatically adapts its output,
    - Populates base skeletons (`player_zero.yft`, `player_one.yft`, `player_two.yft`) into `*/2_blender/` and `staging/backup_vanilla_skeletons/`.
 2. **Relocating drives or folders:** Edit `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]`, or `[trevor]` in `vrc2gtav.cfg` — no Python edits are required.
 3. **Optional Environment Variables:** `VRC2GTAV_LANG`, `VRC2GTAV_CFG`, `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
+
+### Unit `1.0` Default Scales & `.unity` Scene Scale Extraction
+
+- **Out-of-the-box `1.0` proportions:** Clean repository defaults (`unity_scene =` blank in `vrc2gtav.cfg.example`) keep every character's body, head, bone, and prop scale at `1.0` with no hardcoded scaling overrides.
+- **Automatic `.unity` extraction:** Point `unity_scene` (and optional `unity_avatar_name`) under `[franklin]`, `[michael]`, or `[trevor]` to your Unity scene file. [`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) streams the YAML hierarchy (`GameObject`, `Transform`, `PrefabInstance` overrides, and `PhysBone`/Marshmallow scale cancellation) to reproduce your customized Unity proportions accurately in GTA V.
+
+### Default Hair & Texture Fallback (Zero Missing-Asset Failures)
+
+- **Shinano (Franklin & Michael) & Miltina (Trevor):** If an optional custom hair pack (`fbx_hair`, such as *Neko Tied Bob hair*) or third-party eye/makeup pack (*MoonButterfly eye*, *AWEyes*) is blank or missing on disk, both [`unity_scene_helper.py`](scripts/common_tools/unity_scene_helper.py) and [`texture_calibration_helper.py`](scripts/common_tools/texture_calibration_helper.py) automatically fall back to the base avatar's built-in default hair (`Hair_base`, `Hair_bang`, `Hair_back`, `Hair_side`, `Other_ear` with `Shinano_hair.png`; `Milltina_hair_*` with calibrated `Milltina_Hair.png`) and base face texture.
+- **Custom hair support for all avatars:** Setting `fbx_hair` (and optional texture overrides) in `vrc2gtav.cfg` swaps in custom hair seamlessly for both **Shinano** and **Miltina**.
 
 ---
 
@@ -289,9 +301,9 @@ All avatars, outfits, hairstyles, accessories, eye textures, and presets belong 
 | **Base Avatar & Casual Outfit** | オリジナル3Dモデル「しなの」 (*Shinano*) | ポンデロニウム研究所 (`ponderogen`) | Michael, Franklin | [BOOTH](https://ponderogen.booth.pm/items/6106863) / [Shop](https://ponderogen.booth.pm/) |
 | **Base Avatar & Maid Outfit** | オリジナル3Dモデル『ミルティナ』 (*Milltina*) | DOLOS art (`dolosart`) | Trevor | [BOOTH](https://dolosart.booth.pm/items/6538026) / [Shop](https://dolosart.booth.pm/) |
 | **Dress, Shoes & Accessories** | 【15アバター対応】エターナル・リユニオン【MA対応】 (*Eternal Reunion* + *Pocket Watch*) | VAGRANT (`Vagrant Brand`) | Michael | [BOOTH](https://vagrant.booth.pm/items/5634313) / [Shop](https://vagrant.booth.pm/) |
-| **Hair, Cat Ears, Clips & Halo** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael | [BOOTH](https://li-ne.booth.pm/items/7977491) / [Shop](https://li-ne.booth.pm/) |
-| **Eye Texture (Shinano)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [Shop](https://ha-oa.booth.pm/) |
-| **Eye Texture (Milltina)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [Shop](https://nagikawamart.booth.pm/) |
+| **Hair, Cat Ears, Clips & Halo (Optional)** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael *(falls back to default Shinano hair if absent)* | [BOOTH](https://li-ne.booth.pm/items/7977491) / [Shop](https://li-ne.booth.pm/) |
+| **Eye Texture (Shinano, Optional)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin *(falls back to `Shinano_face.png`)* | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [Shop](https://ha-oa.booth.pm/) |
+| **Eye Texture (Milltina, Optional)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor *(falls back to `Milltina_Face.png`)* | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [Shop](https://nagikawamart.booth.pm/) |
 
 ---
 

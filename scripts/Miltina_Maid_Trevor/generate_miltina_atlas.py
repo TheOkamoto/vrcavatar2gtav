@@ -31,6 +31,7 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import texture_calibration_helper as calibration_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
@@ -55,16 +56,23 @@ def generate_miltina_texture_atlas() -> bool:
         output_directory = Path(trevor_cfg["textures_dir"])
         output_directory.mkdir(parents=True, exist_ok=True)
 
-        source_face_path = Path(trevor_cfg["tex_face"])
-        blue_eyes_path = Path(trevor_cfg["tex_eye_base"])
-        osakana_path = Path(trevor_cfg["tex_eye_highlight"])
+        source_face_path = calibration_helper.resolve_existing_file(
+            trevor_cfg.get("tex_face"),
+            [Path(trevor_cfg["tex_dolosart_dir"]) / "Milltina_Face.png"],
+        )
         source_body_path = Path(trevor_cfg["tex_body"])
         source_costume_path = Path(trevor_cfg["tex_costume"])
-        source_hair_path = Path(trevor_cfg["tex_hair"])
+        default_hair_path = calibration_helper.resolve_existing_file(
+            trevor_cfg.get("tex_hair"),
+            [Path(trevor_cfg["tex_dolosart_dir"]) / "Milltina_Hair.png"],
+        )
+        custom_hair_override = calibration_helper.resolve_existing_file(
+            trevor_cfg.get("tex_hair_custom", "")
+        )
         costume_normal_path = Path(trevor_cfg["tex_costume_normal"])
 
-        if not source_face_path.exists():
-            print(i18n.translate("trevor.atlas.face_missing", path=source_face_path))
+        if source_face_path is None:
+            print(i18n.translate("trevor.atlas.face_missing", path=trevor_cfg.get("tex_face", "")))
             return False
 
         atlas_dimension = 2048
@@ -73,18 +81,22 @@ def generate_miltina_texture_atlas() -> bool:
         print(i18n.translate("trevor.atlas.loading_dir", path=source_face_path.parent))
         raw_face_image = Image.open(source_face_path).convert("RGBA")
 
-        # Composite anime blue irises and highlights
-        if blue_eyes_path.exists():
+        # Composite optional AWEyes irises and highlights with clean fallback to Milltina_Face
+        raw_face_image, eye_spec_mask_raw, used_custom_eyes = (
+            calibration_helper.composite_miltina_eyes_with_fallback(
+                raw_face_image,
+                trevor_cfg.get("tex_eye_base"),
+                trevor_cfg.get("tex_eye_highlight"),
+                trevor_cfg.get("tex_nagima_dir"),
+            )
+        )
+        if used_custom_eyes:
             print(i18n.translate("trevor.atlas.compositing_eyes"))
-            blue_eyes_image = Image.open(blue_eyes_path).convert("RGBA")
-            raw_face_image = Image.alpha_composite(raw_face_image, blue_eyes_image)
-        if osakana_path.exists():
-            osakana_image = Image.open(osakana_path).convert("RGBA")
-            raw_face_image = Image.alpha_composite(raw_face_image, osakana_image)
+        else:
+            print(i18n.translate("trevor.atlas.eye_fallback"))
 
         body_image = Image.open(source_body_path).convert("RGBA")
         costume_image = Image.open(source_costume_path).convert("RGBA")
-        hair_image = Image.open(source_hair_path).convert("RGBA")
 
         face_quadrant = raw_face_image.resize(
             (half_dimension, half_dimension), Image.Resampling.LANCZOS
@@ -95,9 +107,6 @@ def generate_miltina_texture_atlas() -> bool:
         costume_quadrant = costume_image.resize(
             (half_dimension, half_dimension), Image.Resampling.LANCZOS
         )
-        hair_quadrant = hair_image.resize(
-            (half_dimension, half_dimension), Image.Resampling.LANCZOS
-        )
 
         # 1. Lift facial brightness to counter RAGE dark shading
         face_pixel_array = numpy_lib.array(face_quadrant, dtype=numpy_lib.float32)
@@ -106,13 +115,36 @@ def generate_miltina_texture_atlas() -> bool:
         face_pixel_array[:, :, :3] = numpy_lib.clip(lifted_face_pixels * 255.0, 0.0, 255.0)
         face_quadrant = Image.fromarray(face_pixel_array.astype(numpy_lib.uint8))
 
-        # 2. Apply vibrant sapphire blue hair tint
-        hair_pixel_array = numpy_lib.array(hair_quadrant, dtype=numpy_lib.float32)
-        blue_tint_vector = numpy_lib.array([0.18, 0.44, 0.92], dtype=numpy_lib.float32)
-        hair_pixel_array[:, :, :3] = numpy_lib.clip(
-            hair_pixel_array[:, :, :3] * blue_tint_vector * 1.25, 0.0, 255.0
-        )
-        hair_quadrant = Image.fromarray(hair_pixel_array.astype(numpy_lib.uint8))
+        # 2. Calibrate hair (custom override if explicitly provided, else Milltina_Hair.mat calibration)
+        custom_hair_fbx = str(trevor_cfg.get("fbx_hair", "")).strip()
+        if custom_hair_fbx and Path(custom_hair_fbx).is_file() and custom_hair_override is not None:
+            print(i18n.translate("trevor.atlas.hair_custom", path=custom_hair_override))
+            raw_custom_hair = (
+                Image.open(custom_hair_override)
+                .convert("RGBA")
+                .resize((half_dimension, half_dimension), Image.Resampling.LANCZOS)
+            )
+            hair_quadrant = calibration_helper.apply_shinano_vibrant_hair_tint(raw_custom_hair)
+            hair_specular_quadrant = Image.new(
+                "RGBA", (half_dimension, half_dimension), (140, 140, 140, 255)
+            )
+            hair_luma = numpy_lib.array(raw_custom_hair.convert("L"), dtype=numpy_lib.float32)
+            hair_normal_quadrant = calibration_helper.generate_directional_hair_normal(
+                hair_luma, strength=2.0
+            )
+        else:
+            if default_hair_path is None:
+                print(i18n.translate("trevor.atlas.face_missing", path=trevor_cfg.get("tex_hair", "")))
+                return False
+            print(i18n.translate("trevor.atlas.hair_fallback"))
+            dolosart_mat_dir = Path(trevor_cfg["tex_dolosart_dir"]).parent
+            hair_quadrant, hair_specular_quadrant, hair_normal_quadrant = (
+                calibration_helper.calibrate_miltina_default_hair(
+                    base_hair_path=default_hair_path,
+                    dolosart_mat_dir=dolosart_mat_dir,
+                    output_size=half_dimension,
+                )
+            )
 
         # 3. Compose Diffuse Atlas
         diffuse_atlas_image = Image.new(
@@ -131,17 +163,25 @@ def generate_miltina_texture_atlas() -> bool:
         specular_atlas_image = Image.new(
             "RGBA", (atlas_dimension, atlas_dimension), (40, 40, 40, 255)
         )
-        hair_specular_quadrant = Image.new(
-            "RGBA", (half_dimension, half_dimension), (140, 140, 140, 255)
-        )
         costume_specular_quadrant = Image.new(
             "RGBA", (half_dimension, half_dimension), (60, 60, 60, 255)
         )
         skin_specular_quadrant = Image.new(
             "RGBA", (half_dimension, half_dimension), (30, 30, 30, 255)
         )
+        if eye_spec_mask_raw is not None:
+            resized_eye_mask = numpy_lib.array(
+                Image.fromarray((eye_spec_mask_raw.astype(numpy_lib.uint8) * 255)).resize(
+                    (half_dimension, half_dimension), Image.Resampling.NEAREST
+                )
+            ) > 127
+            face_spec_arr = numpy_lib.array(skin_specular_quadrant, dtype=numpy_lib.uint8)
+            face_spec_arr[resized_eye_mask] = [95, 110, 130, 200]
+            face_specular_quadrant = Image.fromarray(face_spec_arr, "RGBA")
+        else:
+            face_specular_quadrant = skin_specular_quadrant
 
-        specular_atlas_image.paste(skin_specular_quadrant, (0, 0))
+        specular_atlas_image.paste(face_specular_quadrant, (0, 0))
         specular_atlas_image.paste(skin_specular_quadrant, (half_dimension, 0))
         specular_atlas_image.paste(costume_specular_quadrant, (0, half_dimension))
         specular_atlas_image.paste(hair_specular_quadrant, (half_dimension, half_dimension))
@@ -160,6 +200,7 @@ def generate_miltina_texture_atlas() -> bool:
                 (half_dimension, half_dimension), Image.Resampling.LANCZOS
             )
             normal_atlas_image.paste(costume_normal_quadrant, (0, half_dimension))
+        normal_atlas_image.paste(hair_normal_quadrant, (half_dimension, half_dimension))
 
         normal_output_path = Path(trevor_cfg["normal_png"])
         normal_atlas_image.save(normal_output_path, "PNG")

@@ -32,6 +32,7 @@ for _tools_candidate in (
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
 import hand_skeleton_helper
+import unity_scene_helper
 
 project_i18n.set_active_language()
 FRANKLIN_CFG = project_paths.get_character_paths("franklin")
@@ -220,14 +221,37 @@ print(project_i18n.translate("franklin.importing_fbx", filename=Path(source_fbx_
 bpy.ops.import_scene.fbx(filepath=source_fbx_path)
 shinano_armature = bpy.data.objects["Armature"]
 
-# Rotate arms to match Franklin's A-pose (-55 degrees)
+# Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
+unity_config = unity_scene_helper.load_unity_avatar_from_cfg(
+    FRANKLIN_CFG,
+    i18n_module=project_i18n,
+    character_hints=("shinano", "casual"),
+)
+
+armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
+shinano_armature.scale = (
+    shinano_armature.scale.x * armature_override_scale[0],
+    shinano_armature.scale.y * armature_override_scale[1],
+    shinano_armature.scale.z * armature_override_scale[2],
+)
+
+# Rotate arms to GTA V A-pose (-55 degrees) and apply optional Unity bone scales
 bpy.context.view_layer.objects.active = shinano_armature
 bpy.ops.object.mode_set(mode="POSE")
 shinano_armature.pose.bones["Upper_arm.L"].rotation_mode = "XYZ"
 shinano_armature.pose.bones["Upper_arm.L"].rotation_euler = (-math.radians(55), 0, 0)
 shinano_armature.pose.bones["Upper_arm.R"].rotation_mode = "XYZ"
 shinano_armature.pose.bones["Upper_arm.R"].rotation_euler = (-math.radians(55), 0, 0)
+applied_pose_bones = unity_scene_helper.apply_unity_bone_scales_to_pose(
+    shinano_armature, unity_config
+)
 bpy.ops.object.mode_set(mode="OBJECT")
+if applied_pose_bones:
+    print(
+        project_i18n.translate(
+            "unity_scene.applied_bones", count=len(applied_pose_bones)
+        )
+    )
 
 
 def load_fbx_face_loop_normals(fbx_path: str):
@@ -352,6 +376,50 @@ include_mesh_names = [
     "Other_tail",
 ]
 
+hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
+    FRANKLIN_CFG.get("fbx_hair", ""),
+    unity_config=unity_config,
+)
+custom_hair_mesh_names = set()
+custom_hair_armatures = []
+if hair_mode == "custom":
+    custom_hair_fbx = str(FRANKLIN_CFG["fbx_hair"]).strip()
+    print(
+        project_i18n.translate(
+            "unity_scene.hair_custom_active", reason=hair_reason, path=custom_hair_fbx
+        )
+    )
+    default_hair_material = None
+    default_hair_ref = bpy.data.objects.get("Hair_base")
+    if default_hair_ref and default_hair_ref.data.materials:
+        default_hair_material = default_hair_ref.data.materials[0]
+    for default_hair_name in ("Hair_back", "Hair_bang", "Hair_base", "Hair_side"):
+        if default_hair_name in include_mesh_names:
+            include_mesh_names.remove(default_hair_name)
+        default_hair_obj = bpy.data.objects.get(default_hair_name)
+        if default_hair_obj is not None:
+            bpy.data.objects.remove(default_hair_obj)
+
+    pre_import_objs = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(filepath=custom_hair_fbx)
+    for imported_obj in bpy.data.objects:
+        if imported_obj in pre_import_objs:
+            continue
+        if imported_obj.type == "ARMATURE":
+            custom_hair_armatures.append(imported_obj)
+            unity_scene_helper.apply_unity_bone_scales_to_pose(imported_obj, unity_config)
+        elif imported_obj.type == "MESH":
+            if "tail" in imported_obj.name.lower():
+                bpy.data.objects.remove(imported_obj)
+                continue
+            if default_hair_material is not None:
+                imported_obj.data.materials.clear()
+                imported_obj.data.materials.append(default_hair_material)
+            custom_hair_mesh_names.add(imported_obj.name)
+            include_mesh_names.append(imported_obj.name)
+else:
+    print(project_i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
+
 bone_mapping_table = {
     "Hips": "SKEL_Pelvis",
     "Spine": "SKEL_Spine1",
@@ -413,15 +481,20 @@ def get_target_bone(source_bone_name: str) -> str:
     return "SKEL_Pelvis"
 
 
-scale_factor = (0.640 - (-0.907)) / (1.132 - 0.106)
-z_offset = -0.907 - (0.106 * scale_factor)
+scale_factor, z_offset = unity_scene_helper.compute_gtav_height_mapping(
+    bpy,
+    unity_config,
+    include_mesh_names,
+    ("Body", "Body_base", "Cloth_boots"),
+    -0.907,
+    0.640,
+    0.106,
+    1.132,
+)
 
 depsgraph = bpy.context.evaluated_depsgraph_get()
 processed_objs = []
 kept_body_normals = None
-
-head_pivot = mathutils.Vector((0.0, 0.0124, 1.1323))
-head_scale = 1.10
 
 for mesh_name in include_mesh_names:
     src_obj = bpy.data.objects.get(mesh_name)
@@ -474,14 +547,10 @@ for mesh_name in include_mesh_names:
         bm_data.free()
         new_mesh.update()
 
-    # Apply 1.1x anime proportion scaling on head, face, hair, and ears
-    is_head_component = mesh_name in ["Body", "Hair_back", "Hair_bang", "Hair_base", "Hair_side", "Other_ear"]
-
+    # Transform evaluated mesh vertices into GTA V world space
+    eval_world_matrix = eval_obj.matrix_world
     for vert_item in new_mesh.vertices:
-        vert_coord = vert_item.co.copy()
-        if is_head_component:
-            relative_offset = vert_coord - head_pivot
-            vert_coord = head_pivot + (relative_offset * head_scale)
+        vert_coord = eval_world_matrix @ vert_item.co
         vert_item.co.x = vert_coord.x * scale_factor
         vert_item.co.y = vert_coord.y * scale_factor
         vert_item.co.z = vert_coord.z * scale_factor + z_offset
@@ -527,7 +596,8 @@ for mesh_name in include_mesh_names:
         else:
             default_bone = (
                 "SKEL_Head"
-                if mesh_name in ["Body", "Hair_bang", "Hair_side", "Hair_back", "Other_ear"]
+                if mesh_name in ["Body", "Hair_bang", "Hair_side", "Hair_back", "Hair_base", "Other_ear"]
+                or mesh_name in custom_hair_mesh_names
                 else "SKEL_Pelvis"
             )
             default_vgroup = new_obj.vertex_groups.get(default_bone)
@@ -559,8 +629,8 @@ relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
 )
 print(project_i18n.translate("franklin.arm_bones_relocated", count=relocated_arm_bones))
 
-# Remove temporary source meshes and armature
-for temp_obj in [shinano_armature] + [
+# Remove temporary source meshes and armatures
+for temp_obj in [shinano_armature] + custom_hair_armatures + [
     bpy.data.objects.get(mesh_name_item)
     for mesh_name_item in list(include_mesh_names)
     if bpy.data.objects.get(mesh_name_item)
