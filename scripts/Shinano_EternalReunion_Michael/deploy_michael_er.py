@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 """
-deploy_universal_slots_private_ER.py
-====================================
-Aplica a Substituicao Universal de Slots (Opcao 3) para o Michael (player_zero)
-e o Franklin (player_one) no Grand Theft Auto V Legacy:
-  1. Todos os slots de tronco (uppr_000 a uppr_031) recebem as respectivas malhas completas:
-     - Michael: Shinano Eternal Reunion (uppr_000_u.ydd / uppr_000_r.ydd)
-     - Franklin: Shinano Padrao com fixes de rosto (lilToon warm peach + olhos MoonButterfly)
-       e maos (dedos consolidados em SKEL_Hand) (uppr_008_u.ydd)
-  2. Todos os dicionarios de textura de tronco (uppr_diff_000 a uppr_diff_031) sao atualizados:
-     - Michael: test_er.ytd (Atlas 4x2)
-     - Franklin: shinano_franklin_2k.ytd (Atlas 2x2)
-  3. Todos os slots humanos restantes (lowr, feet, head, hair, berd, teef, hand, accs, decl, task, jbib)
-     sao convertidos em drawables dummy (invisiveis de 1 KB).
-  4. Atualiza os DLCs mppatchesng e patchday3ng com as devidas malhas e dummies.
-  5. Aplica a correcao binaria de TOC (file_size = 0 para RPFs aninhados) para evitar ERR_GEN_ZLIB_2.
-  6. Valida a integridade estrita com rage verify.
+deploy_michael_er.py
+====================
+Applies Universal Slot Replacement (Michael player_zero & Franklin player_one)
+in Grand Theft Auto V Legacy:
+  1. Replaces torso slots (uppr_000 through uppr_031) with the compiled avatars.
+  2. Updates torso texture dictionaries (uppr_diff_000 through uppr_diff_031).
+  3. Replaces remaining human slots (lowr, feet, head, hair, berd, teef, hand,
+     accs, decl, task, jbib) with invisible 1 KB dummy drawables.
+  4. Replaces glasses props (p_eyes_*.ydd) with prop dummies.
+  5. Updates mppatchesng and patchday3ng DLC archives.
+  6. Applies nested RPF binary TOC fix (file_size = 0) to prevent ERR_GEN_ZLIB_2.
+  7. Verifies final RPF integrity with `rage verify`.
 """
 
+import argparse
 import os
 import shutil
 import struct
@@ -31,65 +28,23 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
     if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
 
+import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
-MICHAEL_CFG = project_paths.get_character_paths("michael")
-FRANKLIN_CFG = project_paths.get_character_paths("franklin")
-RPF_PATHS_CFG = project_paths.get_rpf_paths()
-STAGING_DIR = project_paths.get_staging_dir()
 
-RAGE_TOOL_PATH = str(project_paths.get_rage_cli())
-DUMMY_SOURCE_PATH = str(project_paths.get_dummy_ydd_path())
-PROP_DUMMY_SOURCE_PATH = str(project_paths.get_prop_dummy_ydd_path())
-
-# Fontes do Michael (player_zero)
-MICHAEL_ER_DIR = str(MICHAEL_CFG["character_dir"])
-MICHAEL_UPPR_U = str(MICHAEL_CFG["target_model_ydd"])
-MICHAEL_UPPR_R = str(MICHAEL_CFG["extra_model_ydds"][0])
-MICHAEL_YTD = str(MICHAEL_CFG["ytd_file"])
-
-# Fontes do Franklin (player_one)
-FRANKLIN_DIR = str(FRANKLIN_CFG["character_dir"])
-FRANKLIN_UPPR_U = str(FRANKLIN_CFG["target_model_ydd"])
-FRANKLIN_YTD = str(FRANKLIN_CFG["ytd_file"])
-
-# Diretorios de trabalho em streamedpeds_players e streamedpedprops
-STREAMED_BASE_DIR = str(RPF_PATHS_CFG["streamedpeds_extracted"])
-PLAYER_ZERO_DIR = str(MICHAEL_CFG["staging_streamed_ped_dir"])
-PLAYER_ONE_DIR = str(FRANKLIN_CFG["staging_streamed_ped_dir"])
-STREAMEDPROPS_BASE_DIR = str(RPF_PATHS_CFG["streamedpedprops_extracted"])
-PLAYER_ZERO_PROPS_DIR = str(MICHAEL_CFG["staging_streamed_props_dir"])
-PLAYER_ONE_PROPS_DIR = str(FRANKLIN_CFG["staging_streamed_props_dir"])
-
-# Arquivos RPF do x64v
-STREAMED_TARGET_RPF = str(STAGING_DIR / "streamedpeds_players_shinano.rpf")
-STREAMEDPROPS_TARGET_RPF = str(STAGING_DIR / "streamedpedprops_shinano.rpf")
-X64V_EXTRACTED_DIR = str(RPF_PATHS_CFG["x64v_extracted"])
-X64V_MODDED_RPF = str(RPF_PATHS_CFG["x64v_modded_rpf"])
-GTAV_MODS_X64V_RPF = str(RPF_PATHS_CFG["x64v_game_rpf"])
-
-# Diretorios e arquivos do DLC mppatchesng
-STAGING_MPPATCHES_SEED = str(RPF_PATHS_CFG["mppatches_extracted"])
-STAGING_MPPATCHESNG_SEED = str(RPF_PATHS_CFG["mppatches_dlc_extracted"])
-MPPATCHES_WORK_DIR = os.path.join(MICHAEL_ER_DIR, "5_rpf_package", "mppatches_work")
-MPPATCHES_EXTRACTED_DIR = os.path.join(MPPATCHES_WORK_DIR, "mppatches_extracted")
-MPPATCHESNG_EXTRACTED_DIR = os.path.join(MPPATCHES_WORK_DIR, "mppatchesng_extracted")
-MPPATCHES_TARGET_RPF = os.path.join(MPPATCHES_WORK_DIR, "mppatches.rpf")
-MPPATCHESNG_TARGET_RPF = os.path.join(MPPATCHES_WORK_DIR, "mppatchesng_dlc.rpf")
-GTAV_MODS_MPPATCHESNG_DLC_RPF = str(RPF_PATHS_CFG["mppatches_game_rpf"])
-
-# Diretorios e arquivos do DLC patchday3ng
-PATCHDAY3_WORK_DIR = os.path.join(FRANKLIN_DIR, "5_rpf_package", "patchday3_work")
-PATCHDAY3_EXTRACTED_DIR = os.path.join(PATCHDAY3_WORK_DIR, "patchday3_extracted")
-PATCHDAY3NG_EXTRACTED_DIR = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng_extracted")
-PATCHDAY3_TARGET_RPF = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng.rpf")
-PATCHDAY3NG_TARGET_RPF = os.path.join(PATCHDAY3_WORK_DIR, "patchday3ng_dlc.rpf")
-GTAV_MODS_PATCHDAY3NG_DLC_RPF = str(RPF_PATHS_CFG["patchday3ng_game_rpf"])
+def resolve_startup_language() -> None:
+    """Resolve UI language from CLI arguments, environment variables, or config."""
+    configured_language = None
+    try:
+        configured_language = project_paths.get_configured_language()
+    except FileNotFoundError:
+        configured_language = None
+    i18n.set_active_language(configured_language, cli_args=sys.argv[1:])
 
 
 def execute_shell_task(command_arguments, task_description):
-    """Executa comando com tratamento estrito de erros."""
-    print(f"[TAREFA] {task_description}...")
+    """Run an external command with strict error checking and localized logging."""
+    print(i18n.translate("michael.deploy.task_start", description=task_description))
     completed_process = subprocess.run(
         command_arguments,
         stdout=subprocess.PIPE,
@@ -97,26 +52,31 @@ def execute_shell_task(command_arguments, task_description):
         text=True,
     )
     if completed_process.returncode != 0:
-        print(f"[ERRO] Falha ao executar: {' '.join(command_arguments)}")
+        print(
+            i18n.translate(
+                "michael.deploy.task_failed", command=" ".join(command_arguments)
+            )
+        )
         print(f"Stdout:\n{completed_process.stdout}")
         print(f"Stderr:\n{completed_process.stderr}")
-        raise RuntimeError(f"Erro na execucao: {task_description}")
-    print(f"[OK] {task_description} concluido com sucesso.")
+        raise RuntimeError(
+            i18n.translate("michael.deploy.task_error", description=task_description)
+        )
+    print(i18n.translate("michael.deploy.task_done", description=task_description))
     return completed_process.stdout
 
 
 def patch_rpf_table_of_contents(rpf_archive_path):
     """
-    Corrige o TOC de arquivos RPF aninhados definindo file_size = 0.
-    Isto e mandatorio na RAGE Engine para evitar ERR_GEN_ZLIB_2.
+    Patch nested RPF TOC entries by setting file_size = 0.
+    Required by RAGE Engine to avoid ERR_GEN_ZLIB_2 on nested OPEN archives.
     """
-    print(f"[INFO] Aplicando correcao binaria no TOC de: {rpf_archive_path}")
+    print(i18n.translate("michael.deploy.toc_patching", path=rpf_archive_path))
     with open(rpf_archive_path, "r+b") as file_stream:
-        magic_number, entry_count, names_byte_len, encryption_code = struct.unpack(
+        _magic_number, entry_count, _names_byte_len, _encryption_code = struct.unpack(
             "<IIII", file_stream.read(16)
         )
         table_bytes = file_stream.read(entry_count * 16)
-        names_bytes = file_stream.read(names_byte_len)
         patched_entries_counter = 0
 
         for entry_idx in range(entry_count):
@@ -134,14 +94,23 @@ def patch_rpf_table_of_contents(rpf_archive_path):
                 file_stream.write(entry_chunk)
                 patched_entries_counter += 1
 
-    print(f"[INFO] {patched_entries_counter} entradas de arquivos RPF aninhados corrigidas no TOC.")
+    print(i18n.translate("michael.deploy.toc_patched", count=patched_entries_counter))
 
 
-def apply_universal_slots_to_ped(ped_directory, source_uppr_u, source_uppr_r, source_ytd, ped_label):
-    """
-    Substitui todos os slots de uppr_ pelo avatar completo e todos os outros slots por dummies.
-    """
-    print(f"\n[INFO] Aplicando substituicao universal em: {ped_label} ({ped_directory})")
+def apply_universal_slots_to_ped(
+    ped_directory,
+    source_uppr_u,
+    source_uppr_r,
+    source_ytd,
+    dummy_source_path,
+    ped_label,
+):
+    """Replace all uppr_* slots with the full avatar and convert other slots to dummies."""
+    print(
+        i18n.translate(
+            "michael.deploy.applying_ped", label=ped_label, directory=ped_directory
+        )
+    )
     all_filenames = os.listdir(ped_directory)
     uppr_count = 0
     ytd_count = 0
@@ -150,263 +119,400 @@ def apply_universal_slots_to_ped(ped_directory, source_uppr_u, source_uppr_r, so
     for filename in all_filenames:
         target_path = os.path.join(ped_directory, filename)
 
-        # 1. Slots de tronco (uppr_*.ydd)
         if filename.startswith("uppr_") and filename.endswith(".ydd"):
             if "_r.ydd" in filename:
                 shutil.copy2(source_uppr_r, target_path)
             else:
                 shutil.copy2(source_uppr_u, target_path)
             uppr_count += 1
-
-        # 2. Dicionarios de textura de tronco (uppr_diff_*.ytd)
         elif filename.startswith("uppr_diff_") and filename.endswith(".ytd"):
             shutil.copy2(source_ytd, target_path)
             ytd_count += 1
-
-        # 3. Outros slots corporais humanos -> Dummy invisivel
         elif filename.endswith(".ydd") and not filename.startswith("uppr_"):
-            shutil.copy2(DUMMY_SOURCE_PATH, target_path)
+            shutil.copy2(dummy_source_path, target_path)
             dummy_count += 1
 
-    print(f"[OK] {ped_label}: {uppr_count} drawables uppr substituidos, {ytd_count} dicionarios .ytd atualizados, {dummy_count} slots humanos convertidos em dummy.")
+    print(
+        i18n.translate(
+            "michael.deploy.ped_summary",
+            label=ped_label,
+            uppr=uppr_count,
+            ytd=ytd_count,
+            dummy=dummy_count,
+        )
+    )
 
 
 def deploy_universal():
-    """Executa o pipeline completo de implantacao universal."""
+    """Execute the full universal slot deployment pipeline for Michael and Franklin."""
+    michael_cfg = project_paths.get_character_paths("michael")
+    franklin_cfg = project_paths.get_character_paths("franklin")
+    rpf_paths_cfg = project_paths.get_rpf_paths()
+    staging_dir = project_paths.get_staging_dir()
+
+    rage_tool_path = str(project_paths.get_rage_cli())
+    dummy_source_path = str(project_paths.get_dummy_ydd_path())
+    prop_dummy_source_path = str(project_paths.get_prop_dummy_ydd_path())
+
+    michael_er_dir = str(michael_cfg["character_dir"])
+    michael_uppr_u = str(michael_cfg["target_model_ydd"])
+    michael_uppr_r = str(michael_cfg["extra_model_ydds"][0])
+    michael_ytd = str(michael_cfg["ytd_file"])
+
+    franklin_dir = str(franklin_cfg["character_dir"])
+    franklin_uppr_u = str(franklin_cfg["target_model_ydd"])
+    franklin_ytd = str(franklin_cfg["ytd_file"])
+
+    streamed_base_dir = str(rpf_paths_cfg["streamedpeds_extracted"])
+    player_zero_dir = str(michael_cfg["staging_streamed_ped_dir"])
+    player_one_dir = str(franklin_cfg["staging_streamed_ped_dir"])
+    streamedprops_base_dir = str(rpf_paths_cfg["streamedpedprops_extracted"])
+    player_zero_props_dir = str(michael_cfg["staging_streamed_props_dir"])
+    player_one_props_dir = str(franklin_cfg["staging_streamed_props_dir"])
+
+    streamed_target_rpf = str(staging_dir / "streamedpeds_players_shinano.rpf")
+    streamedprops_target_rpf = str(staging_dir / "streamedpedprops_shinano.rpf")
+    x64v_extracted_dir = str(rpf_paths_cfg["x64v_extracted"])
+    x64v_modded_rpf = str(rpf_paths_cfg["x64v_modded_rpf"])
+    gtav_mods_x64v_rpf = str(rpf_paths_cfg["x64v_game_rpf"])
+
+    staging_mppatches_seed = str(rpf_paths_cfg["mppatches_extracted"])
+    staging_mppatchesng_seed = str(rpf_paths_cfg["mppatches_dlc_extracted"])
+    mppatches_work_dir = os.path.join(michael_er_dir, "5_rpf_package", "mppatches_work")
+    mppatches_extracted_dir = os.path.join(mppatches_work_dir, "mppatches_extracted")
+    mppatchesng_extracted_dir = os.path.join(mppatches_work_dir, "mppatchesng_extracted")
+    mppatches_target_rpf = os.path.join(mppatches_work_dir, "mppatches.rpf")
+    mppatchesng_target_rpf = os.path.join(mppatches_work_dir, "mppatchesng_dlc.rpf")
+    gtav_mods_mppatchesng_dlc_rpf = str(rpf_paths_cfg["mppatches_game_rpf"])
+
+    patchday3_work_dir = os.path.join(franklin_dir, "5_rpf_package", "patchday3_work")
+    patchday3_extracted_dir = os.path.join(patchday3_work_dir, "patchday3_extracted")
+    patchday3ng_extracted_dir = os.path.join(patchday3_work_dir, "patchday3ng_extracted")
+    patchday3_target_rpf = os.path.join(patchday3_work_dir, "patchday3ng.rpf")
+    patchday3ng_target_rpf = os.path.join(patchday3_work_dir, "patchday3ng_dlc.rpf")
+    gtav_mods_patchday3ng_dlc_rpf = str(rpf_paths_cfg["patchday3ng_game_rpf"])
+
     print("======================================================================")
-    print("INICIANDO IMPLANTACAO UNIVERSAL DE SLOTS (MICHAEL & FRANKLIN)")
+    print(i18n.translate("michael.deploy.banner"))
     print("======================================================================")
 
-    # 1. Verifica integridade dos arquivos fonte necessarios
-    assert os.path.exists(MICHAEL_UPPR_U), f"Arquivo nao encontrado: {MICHAEL_UPPR_U}"
-    assert os.path.exists(MICHAEL_UPPR_R), f"Arquivo nao encontrado: {MICHAEL_UPPR_R}"
-    assert os.path.exists(MICHAEL_YTD), f"Arquivo nao encontrado: {MICHAEL_YTD}"
-    assert os.path.exists(FRANKLIN_UPPR_U), f"Arquivo nao encontrado: {FRANKLIN_UPPR_U}"
-    assert os.path.exists(FRANKLIN_YTD), f"Arquivo nao encontrado: {FRANKLIN_YTD}"
-    assert os.path.exists(DUMMY_SOURCE_PATH), f"Arquivo nao encontrado: {DUMMY_SOURCE_PATH}"
-    assert os.path.exists(PROP_DUMMY_SOURCE_PATH), f"Arquivo nao encontrado: {PROP_DUMMY_SOURCE_PATH}"
+    # 1. Verify required source artifacts exist
+    for required_path in (
+        michael_uppr_u,
+        michael_uppr_r,
+        michael_ytd,
+        franklin_uppr_u,
+        franklin_ytd,
+        dummy_source_path,
+        prop_dummy_source_path,
+    ):
+        if not os.path.exists(required_path):
+            raise FileNotFoundError(
+                i18n.translate("michael.deploy.missing_file", path=required_path)
+            )
 
-    # 2. Aplica substituicao universal em streamedpeds_players_extracted
+    # 2. Apply universal slot replacement in streamedpeds_players_extracted
     apply_universal_slots_to_ped(
-        PLAYER_ZERO_DIR, MICHAEL_UPPR_U, MICHAEL_UPPR_R, MICHAEL_YTD, "Michael (player_zero)"
+        player_zero_dir,
+        michael_uppr_u,
+        michael_uppr_r,
+        michael_ytd,
+        dummy_source_path,
+        "Michael (player_zero)",
     )
     apply_universal_slots_to_ped(
-        PLAYER_ONE_DIR, FRANKLIN_UPPR_U, FRANKLIN_UPPR_U, FRANKLIN_YTD, "Franklin (player_one)"
+        player_one_dir,
+        franklin_uppr_u,
+        franklin_uppr_u,
+        franklin_ytd,
+        dummy_source_path,
+        "Franklin (player_one)",
     )
-    if os.path.exists(str(MICHAEL_CFG["target_yft"])):
-        shutil.copy2(str(MICHAEL_CFG["target_yft"]), os.path.join(STREAMED_BASE_DIR, "player_zero.yft"))
-    if os.path.exists(str(FRANKLIN_CFG["target_yft"])):
-        shutil.copy2(str(FRANKLIN_CFG["target_yft"]), os.path.join(STREAMED_BASE_DIR, "player_one.yft"))
+    if os.path.exists(str(michael_cfg["target_yft"])):
+        shutil.copy2(
+            str(michael_cfg["target_yft"]),
+            os.path.join(streamed_base_dir, "player_zero.yft"),
+        )
+    if os.path.exists(str(franklin_cfg["target_yft"])):
+        shutil.copy2(
+            str(franklin_cfg["target_yft"]),
+            os.path.join(streamed_base_dir, "player_one.yft"),
+        )
 
-    # 3. Empacota streamedpeds_players.rpf e insere no x64v_extracted
-    print("\n[INFO] Empacotando streamedpeds_players_shinano.rpf...")
+    # 3. Pack streamedpeds_players.rpf and inject into x64v_extracted
+    print(i18n.translate("michael.deploy.packing_streamed"))
     execute_shell_task(
         [
-            RAGE_TOOL_PATH,
+            rage_tool_path,
             "create",
             "-o",
-            STREAMED_TARGET_RPF,
-            STREAMED_BASE_DIR,
+            streamed_target_rpf,
+            streamed_base_dir,
             "-e",
             "open",
         ],
-        "Empacotamento de streamedpeds_players_shinano.rpf",
+        i18n.translate("michael.deploy.task_pack_streamed"),
     )
 
     nested_streamed_dest = os.path.join(
-        X64V_EXTRACTED_DIR, "models", "cdimages", "streamedpeds_players.rpf"
+        x64v_extracted_dir, "models", "cdimages", "streamedpeds_players.rpf"
     )
-    shutil.copy2(STREAMED_TARGET_RPF, nested_streamed_dest)
-    print(f"[INFO] Atualizado: {nested_streamed_dest}")
+    shutil.copy2(streamed_target_rpf, nested_streamed_dest)
+    print(i18n.translate("michael.deploy.updated_path", path=nested_streamed_dest))
 
-    # 3B. Substitui oculos (p_eyes_*.ydd) em streamedpedprops e empacota streamedpedprops.rpf
+    # 3B. Replace glasses props (p_eyes_*.ydd) in streamedpedprops and pack RPF
     project_paths.ensure_streamedpedprops_extracted()
     project_paths.patch_character_glasses_props(
-        PLAYER_ZERO_PROPS_DIR, PROP_DUMMY_SOURCE_PATH, "player_zero_p"
+        player_zero_props_dir, prop_dummy_source_path, "player_zero_p"
     )
     project_paths.patch_character_glasses_props(
-        PLAYER_ONE_PROPS_DIR, PROP_DUMMY_SOURCE_PATH, "player_one_p"
+        player_one_props_dir, prop_dummy_source_path, "player_one_p"
     )
     execute_shell_task(
         [
-            RAGE_TOOL_PATH,
+            rage_tool_path,
             "create",
             "-o",
-            STREAMEDPROPS_TARGET_RPF,
-            STREAMEDPROPS_BASE_DIR,
+            streamedprops_target_rpf,
+            streamedprops_base_dir,
             "-e",
             "open",
         ],
-        "Empacotamento de streamedpedprops_shinano.rpf",
+        i18n.translate("michael.deploy.task_pack_props"),
     )
-    patch_rpf_table_of_contents(STREAMEDPROPS_TARGET_RPF)
+    patch_rpf_table_of_contents(streamedprops_target_rpf)
     nested_props_dest = str(
-        RPF_PATHS_CFG["x64v_extracted"] / RPF_PATHS_CFG["streamedpedprops_rpf_relative"]
+        rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpedprops_rpf_relative"]
     )
-    shutil.copy2(STREAMEDPROPS_TARGET_RPF, nested_props_dest)
-    print(f"[INFO] Atualizado: {nested_props_dest}")
+    shutil.copy2(streamedprops_target_rpf, nested_props_dest)
+    print(i18n.translate("michael.deploy.updated_path", path=nested_props_dest))
 
-    # 4. Empacota x64v_modded.rpf e aplica correcao de TOC
-    print("\n[INFO] Empacotando x64v_modded.rpf...")
+    # 4. Pack x64v_modded.rpf and patch TOC
+    print(i18n.translate("michael.deploy.packing_x64v"))
     execute_shell_task(
         [
-            RAGE_TOOL_PATH,
+            rage_tool_path,
             "create",
             "-o",
-            X64V_MODDED_RPF,
-            X64V_EXTRACTED_DIR,
+            x64v_modded_rpf,
+            x64v_extracted_dir,
             "-e",
             "open",
         ],
-        "Empacotamento de x64v_modded.rpf",
+        i18n.translate("michael.deploy.task_pack_x64v"),
     )
-
-    patch_rpf_table_of_contents(X64V_MODDED_RPF)
-
+    patch_rpf_table_of_contents(x64v_modded_rpf)
     execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", X64V_MODDED_RPF],
-        "Verificacao de integridade de x64v_modded.rpf",
+        [rage_tool_path, "verify", x64v_modded_rpf],
+        i18n.translate("michael.deploy.task_verify_x64v"),
     )
 
-    print(f"[INFO] Copiando x64v_modded.rpf para {GTAV_MODS_X64V_RPF}...")
-    shutil.copy2(X64V_MODDED_RPF, GTAV_MODS_X64V_RPF)
-
+    print(
+        i18n.translate(
+            "michael.deploy.copying_to", src="x64v_modded.rpf", dest=gtav_mods_x64v_rpf
+        )
+    )
+    shutil.copy2(x64v_modded_rpf, gtav_mods_x64v_rpf)
     execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", GTAV_MODS_X64V_RPF],
-        f"Verificacao final de integridade em {GTAV_MODS_X64V_RPF}",
+        [rage_tool_path, "verify", gtav_mods_x64v_rpf],
+        i18n.translate("michael.deploy.task_verify_target", path=gtav_mods_x64v_rpf),
     )
 
-    # 5. Atualiza DLC mppatchesng
-    print("\n[INFO] Atualizando DLC mppatchesng...")
-    os.makedirs(MPPATCHES_WORK_DIR, exist_ok=True)
-    if not os.path.exists(MPPATCHES_EXTRACTED_DIR):
-        shutil.copytree(STAGING_MPPATCHES_SEED, MPPATCHES_EXTRACTED_DIR)
-    if not os.path.exists(MPPATCHESNG_EXTRACTED_DIR):
-        shutil.copytree(STAGING_MPPATCHESNG_SEED, MPPATCHESNG_EXTRACTED_DIR)
+    # 5. Update mppatchesng DLC
+    print(i18n.translate("michael.deploy.updating_mppatches"))
+    os.makedirs(mppatches_work_dir, exist_ok=True)
+    if not os.path.exists(mppatches_extracted_dir):
+        shutil.copytree(staging_mppatches_seed, mppatches_extracted_dir)
+    if not os.path.exists(mppatchesng_extracted_dir):
+        shutil.copytree(staging_mppatchesng_seed, mppatchesng_extracted_dir)
 
-    # Atualiza Michael no mppatches
-    pz_mp = os.path.join(MPPATCHES_EXTRACTED_DIR, "player_zero")
-    if os.path.exists(pz_mp):
-        for entry_filename in os.listdir(pz_mp):
-            entry_filepath = os.path.join(pz_mp, entry_filename)
+    michael_mppatches_dir = os.path.join(mppatches_extracted_dir, "player_zero")
+    if os.path.exists(michael_mppatches_dir):
+        for entry_filename in os.listdir(michael_mppatches_dir):
+            entry_filepath = os.path.join(michael_mppatches_dir, entry_filename)
             if entry_filename.startswith("uppr_") and entry_filename.endswith(".ydd"):
-                shutil.copy2(MICHAEL_UPPR_U, entry_filepath)
+                shutil.copy2(michael_uppr_u, entry_filepath)
             elif entry_filename.startswith("uppr_diff_") and entry_filename.endswith(".ytd"):
-                shutil.copy2(MICHAEL_YTD, entry_filepath)
+                shutil.copy2(michael_ytd, entry_filepath)
             elif entry_filename.endswith(".ydd"):
-                shutil.copy2(DUMMY_SOURCE_PATH, entry_filepath)
+                shutil.copy2(dummy_source_path, entry_filepath)
 
-    # Atualiza Franklin no mppatches
-    po_mp = os.path.join(MPPATCHES_EXTRACTED_DIR, "player_one")
-    if os.path.exists(po_mp):
-        for entry_filename in os.listdir(po_mp):
-            entry_filepath = os.path.join(po_mp, entry_filename)
+    franklin_mppatches_dir = os.path.join(mppatches_extracted_dir, "player_one")
+    if os.path.exists(franklin_mppatches_dir):
+        for entry_filename in os.listdir(franklin_mppatches_dir):
+            entry_filepath = os.path.join(franklin_mppatches_dir, entry_filename)
             if entry_filename.startswith("uppr_") and entry_filename.endswith(".ydd"):
-                shutil.copy2(FRANKLIN_UPPR_U, entry_filepath)
+                shutil.copy2(franklin_uppr_u, entry_filepath)
             elif entry_filename.startswith("uppr_diff_") and entry_filename.endswith(".ytd"):
-                shutil.copy2(FRANKLIN_YTD, entry_filepath)
+                shutil.copy2(franklin_ytd, entry_filepath)
             elif entry_filename.endswith(".ydd"):
-                shutil.copy2(DUMMY_SOURCE_PATH, entry_filepath)
+                shutil.copy2(dummy_source_path, entry_filepath)
 
     execute_shell_task(
-        [RAGE_TOOL_PATH, "create", "-o", MPPATCHES_TARGET_RPF, MPPATCHES_EXTRACTED_DIR, "-e", "open"],
-        "Empacotamento de mppatches.rpf",
+        [
+            rage_tool_path,
+            "create",
+            "-o",
+            mppatches_target_rpf,
+            mppatches_extracted_dir,
+            "-e",
+            "open",
+        ],
+        i18n.translate("michael.deploy.task_pack_mppatches"),
     )
 
     nested_mppatches_dest = os.path.join(
-        MPPATCHESNG_EXTRACTED_DIR, "x64", "models", "cdimages", "mppatches.rpf"
+        mppatchesng_extracted_dir, "x64", "models", "cdimages", "mppatches.rpf"
     )
-    shutil.copy2(MPPATCHES_TARGET_RPF, nested_mppatches_dest)
+    shutil.copy2(mppatches_target_rpf, nested_mppatches_dest)
 
     execute_shell_task(
-        [RAGE_TOOL_PATH, "create", "-o", MPPATCHESNG_TARGET_RPF, MPPATCHESNG_EXTRACTED_DIR, "-e", "open"],
-        "Empacotamento de mppatchesng_dlc.rpf",
+        [
+            rage_tool_path,
+            "create",
+            "-o",
+            mppatchesng_target_rpf,
+            mppatchesng_extracted_dir,
+            "-e",
+            "open",
+        ],
+        i18n.translate("michael.deploy.task_pack_mppatches_dlc"),
     )
-
-    patch_rpf_table_of_contents(MPPATCHESNG_TARGET_RPF)
-
+    patch_rpf_table_of_contents(mppatchesng_target_rpf)
     execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", MPPATCHESNG_TARGET_RPF],
-        "Verificacao de integridade de mppatchesng_dlc.rpf",
+        [rage_tool_path, "verify", mppatchesng_target_rpf],
+        i18n.translate("michael.deploy.task_verify_mppatches_dlc"),
     )
 
-    print(f"[INFO] Copiando mppatchesng_dlc.rpf para {GTAV_MODS_MPPATCHESNG_DLC_RPF}...")
-    shutil.copy2(MPPATCHESNG_TARGET_RPF, GTAV_MODS_MPPATCHESNG_DLC_RPF)
-
+    print(
+        i18n.translate(
+            "michael.deploy.copying_to",
+            src="mppatchesng_dlc.rpf",
+            dest=gtav_mods_mppatchesng_dlc_rpf,
+        )
+    )
+    shutil.copy2(mppatchesng_target_rpf, gtav_mods_mppatchesng_dlc_rpf)
     execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", GTAV_MODS_MPPATCHESNG_DLC_RPF],
-        "Verificacao final de integridade em mppatchesng/dlc.rpf",
+        [rage_tool_path, "verify", gtav_mods_mppatchesng_dlc_rpf],
+        i18n.translate("michael.deploy.task_verify_target", path="mppatchesng/dlc.rpf"),
     )
 
-    # 6. Atualiza DLC patchday3ng
-    print("\n[INFO] Atualizando DLC patchday3ng...")
-    os.makedirs(PATCHDAY3_WORK_DIR, exist_ok=True)
-    if not os.path.exists(PATCHDAY3NG_EXTRACTED_DIR):
+    # 6. Update patchday3ng DLC
+    print(i18n.translate("michael.deploy.updating_patchday3"))
+    os.makedirs(patchday3_work_dir, exist_ok=True)
+    if not os.path.exists(patchday3ng_extracted_dir):
         execute_shell_task(
-            [RAGE_TOOL_PATH, "extract", "-o", PATCHDAY3NG_EXTRACTED_DIR, GTAV_MODS_PATCHDAY3NG_DLC_RPF],
-            "Extracao do patchday3ng/dlc.rpf original",
+            [
+                rage_tool_path,
+                "extract",
+                "-o",
+                patchday3ng_extracted_dir,
+                gtav_mods_patchday3ng_dlc_rpf,
+            ],
+            i18n.translate("michael.deploy.task_extract_patchday3_dlc"),
         )
 
-    # Extrai o patchday3ng.rpf aninhado
-    nested_p3_rpf_path = os.path.join(
-        PATCHDAY3NG_EXTRACTED_DIR, "x64", "models", "cdimages", "patchday3ng.rpf"
+    nested_patchday3_rpf_path = os.path.join(
+        patchday3ng_extracted_dir, "x64", "models", "cdimages", "patchday3ng.rpf"
     )
-    if not os.path.exists(PATCHDAY3_EXTRACTED_DIR):
+    if not os.path.exists(patchday3_extracted_dir):
         execute_shell_task(
-            [RAGE_TOOL_PATH, "extract", "-o", PATCHDAY3_EXTRACTED_DIR, nested_p3_rpf_path],
-            "Extracao de patchday3ng.rpf",
+            [
+                rage_tool_path,
+                "extract",
+                "-o",
+                patchday3_extracted_dir,
+                nested_patchday3_rpf_path,
+            ],
+            i18n.translate("michael.deploy.task_extract_patchday3_rpf"),
         )
 
-    # Injeta Franklin uppr_008_u.ydd atualizado
-    po_p3 = os.path.join(PATCHDAY3_EXTRACTED_DIR, "player_one")
-    if os.path.exists(po_p3):
-        f_target = os.path.join(po_p3, "uppr_008_u.ydd")
-        shutil.copy2(FRANKLIN_UPPR_U, f_target)
-        print(f"[INFO] Atualizado: {f_target}")
+    franklin_patchday3_dir = os.path.join(patchday3_extracted_dir, "player_one")
+    if os.path.exists(franklin_patchday3_dir):
+        franklin_target_ydd = os.path.join(franklin_patchday3_dir, "uppr_008_u.ydd")
+        shutil.copy2(franklin_uppr_u, franklin_target_ydd)
+        print(i18n.translate("michael.deploy.updated_path", path=franklin_target_ydd))
 
-    # Injeta Michael uppr_029_u.ydd atualizado e decl dummy
-    pz_p3 = os.path.join(PATCHDAY3_EXTRACTED_DIR, "player_zero")
-    if os.path.exists(pz_p3):
-        m_target = os.path.join(pz_p3, "uppr_029_u.ydd")
-        if os.path.exists(m_target):
-            shutil.copy2(MICHAEL_UPPR_U, m_target)
-            print(f"[INFO] Atualizado: {m_target}")
-        m_decl = os.path.join(pz_p3, "decl_003_u.ydd")
-        if os.path.exists(m_decl):
-            shutil.copy2(DUMMY_SOURCE_PATH, m_decl)
-            print(f"[INFO] Dummy aplicado em: {m_decl}")
+    michael_patchday3_dir = os.path.join(patchday3_extracted_dir, "player_zero")
+    if os.path.exists(michael_patchday3_dir):
+        michael_target_ydd = os.path.join(michael_patchday3_dir, "uppr_029_u.ydd")
+        if os.path.exists(michael_target_ydd):
+            shutil.copy2(michael_uppr_u, michael_target_ydd)
+            print(i18n.translate("michael.deploy.updated_path", path=michael_target_ydd))
+        michael_decl_ydd = os.path.join(michael_patchday3_dir, "decl_003_u.ydd")
+        if os.path.exists(michael_decl_ydd):
+            shutil.copy2(dummy_source_path, michael_decl_ydd)
+            print(i18n.translate("michael.deploy.dummy_applied", path=michael_decl_ydd))
 
     execute_shell_task(
-        [RAGE_TOOL_PATH, "create", "-o", PATCHDAY3_TARGET_RPF, PATCHDAY3_EXTRACTED_DIR, "-e", "open"],
-        "Empacotamento de patchday3ng.rpf",
+        [
+            rage_tool_path,
+            "create",
+            "-o",
+            patchday3_target_rpf,
+            patchday3_extracted_dir,
+            "-e",
+            "open",
+        ],
+        i18n.translate("michael.deploy.task_pack_patchday3_rpf"),
     )
 
-    shutil.copy2(PATCHDAY3_TARGET_RPF, nested_p3_rpf_path)
+    shutil.copy2(patchday3_target_rpf, nested_patchday3_rpf_path)
 
     execute_shell_task(
-        [RAGE_TOOL_PATH, "create", "-o", PATCHDAY3NG_TARGET_RPF, PATCHDAY3NG_EXTRACTED_DIR, "-e", "open"],
-        "Empacotamento de patchday3ng_dlc.rpf",
+        [
+            rage_tool_path,
+            "create",
+            "-o",
+            patchday3ng_target_rpf,
+            patchday3ng_extracted_dir,
+            "-e",
+            "open",
+        ],
+        i18n.translate("michael.deploy.task_pack_patchday3_dlc"),
+    )
+    patch_rpf_table_of_contents(patchday3ng_target_rpf)
+    execute_shell_task(
+        [rage_tool_path, "verify", patchday3ng_target_rpf],
+        i18n.translate("michael.deploy.task_verify_patchday3_dlc"),
     )
 
-    patch_rpf_table_of_contents(PATCHDAY3NG_TARGET_RPF)
-
-    execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", PATCHDAY3NG_TARGET_RPF],
-        "Verificacao de integridade de patchday3ng_dlc.rpf",
+    print(
+        i18n.translate(
+            "michael.deploy.copying_to",
+            src="patchday3ng_dlc.rpf",
+            dest=gtav_mods_patchday3ng_dlc_rpf,
+        )
     )
-
-    print(f"[INFO] Copiando patchday3ng_dlc.rpf para {GTAV_MODS_PATCHDAY3NG_DLC_RPF}...")
-    shutil.copy2(PATCHDAY3NG_TARGET_RPF, GTAV_MODS_PATCHDAY3NG_DLC_RPF)
-
+    shutil.copy2(patchday3ng_target_rpf, gtav_mods_patchday3ng_dlc_rpf)
     execute_shell_task(
-        [RAGE_TOOL_PATH, "verify", GTAV_MODS_PATCHDAY3NG_DLC_RPF],
-        "Verificacao final de integridade em patchday3ng/dlc.rpf",
+        [rage_tool_path, "verify", gtav_mods_patchday3ng_dlc_rpf],
+        i18n.translate("michael.deploy.task_verify_target", path="patchday3ng/dlc.rpf"),
     )
 
     print("\n======================================================================")
-    print("[SUCESSO] IMPLANTACAO UNIVERSAL CONCLUIDA COM EXITO!")
+    print(i18n.translate("michael.deploy.done"))
     print("======================================================================")
 
 
-if __name__ == "__main__":
+def main() -> int:
+    """CLI entry point for deploying Michael and Franklin universal slots."""
+    resolve_startup_language()
+    parser = argparse.ArgumentParser(description=i18n.translate("michael.deploy.cli_desc"))
+    parser.add_argument(
+        "--lang",
+        choices=list(i18n.SUPPORTED_LANGUAGES) + ["auto"],
+        default=None,
+        help=i18n.translate("common.language_option_help"),
+    )
+    parsed_args = parser.parse_args()
+    if parsed_args.lang and parsed_args.lang != "auto":
+        os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
+        i18n.set_active_language(parsed_args.lang)
+
     deploy_universal()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

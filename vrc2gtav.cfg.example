@@ -1,21 +1,26 @@
 # ==============================================================================
 # vrc2gtav.cfg.example
-# Modelo de configuracao centralizada de caminhos do projeto vrc2gtav.
+# Centralized path and language configuration template for the vrc2gtav project.
 #
-# No primeiro uso (ou executando `python run_mod_manager.py --setup`), o arquivo
-# local `vrc2gtav.cfg` (ignorado no Git) e criado automaticamente a partir deste
-# modelo e configurado com os caminhos reais da sua maquina.
+# On first run (or by running `python run_mod_manager.py --setup`), the local
+# `vrc2gtav.cfg` file (ignored by Git) is generated automatically from this
+# template and populated with the real paths on your machine.
 #
-# Regras de edicao:
-#   - Voce pode usar barras normais (C:/...) em Windows e Linux/WSL.
-#   - O resolvedor (vrc2gtav_paths.py) converte automaticamente entre caminhos
-#     Windows (X:/...) e caminhos WSL (/mnt/x/...) conforme o sistema operacional.
-#   - Variaveis no formato ${secao:chave} sao interpoladas automaticamente.
-#   - Defina VRC2GTAV_CFG no ambiente para apontar para outro arquivo .cfg.
+# Editing rules:
+#   - You may use forward slashes (C:/...) on both Windows and Linux/WSL.
+#   - The resolver (vrc2gtav_paths.py) automatically translates between Windows
+#     paths (X:/...) and WSL paths (/mnt/x/...) based on the host OS.
+#   - Variables written as ${section:key} are interpolated automatically.
+#   - Set VRC2GTAV_CFG in the environment to point to a custom .cfg file.
+#   - Set [general] language = auto | en | ja | pt (or VRC2GTAV_LANG env var).
 # ==============================================================================
 
+[general]
+# Interface language: auto (detect from OS locale), en (English), ja (Japanese), pt (Portuguese)
+language = auto
+
 [directories]
-# '.' resolve automaticamente para a pasta onde vrc2gtav.cfg esta.
+# '.' resolves automatically to the directory containing vrc2gtav.cfg.
 project_root = .
 unity_assets = C:/VRChatProjects/waifuv4/Assets
 gtav_root = C:/Games/Grand Theft Auto V

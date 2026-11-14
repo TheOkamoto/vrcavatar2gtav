@@ -2,26 +2,20 @@
 """
 setup_first_run.py
 ==================
-Configurador de Primeira Execucao (First-Run Setup) e Extrator de Assets
-Vanilla do GTA V para o projeto vrc2gtav.
+First-Run Configurator and Vanilla GTA V Asset Extractor for vrc2gtav.
 
-Este repositorio nao distribui arquivos protegidos por direitos autorais da
-Rockstar Games (.rpf, .yft, drawables/texturas originais) nem assets pagos de
-terceiros (BOOTH / Unity / VRChat). No primeiro uso, este script:
-  1. Garante que `vrc2gtav.cfg` exista a partir de `vrc2gtav.cfg.example`.
-  2. Detecta ou solicita ao usuario os caminhos locais de:
-       - Instalacao legal do GTA V Legacy (`gtav_root`, contendo `GTA5.exe`)
-       - Pasta `Assets` do projeto Unity/VRChat com os avatares licenciados
-       - Blender (com Sollumz instalado)
-       - RAGE CLI (`rage`) e Python
-  3. Extrai os arquivos base vanilla necessarios do seu GTA V para `staging/`
-     e popula os esqueletos base (`player_zero.yft`, `player_one.yft`,
-     `player_two.yft`) nas pastas `2_blender/` dos tres personagens.
-
-Regras de Implementacao:
-  - Zero variaveis de uma ou duas letras.
-  - Zero emojis (mensagens formatadas com marcadores ASCII padronizados).
-  - Multiplataforma (Windows nativo e Linux/WSL).
+This repository does not redistribute Rockstar Games copyrighted archives
+(.rpf, .yft, vanilla drawables/textures) or paid third-party assets (BOOTH /
+Unity / VRChat). On first run, this tool:
+  1. Ensures `vrc2gtav.cfg` exists by copying `vrc2gtav.cfg.example`.
+  2. Auto-detects or prompts the user for local paths:
+       - Legitimate GTA V Legacy installation (`gtav_root`, containing `GTA5.exe`)
+       - Unity/VRChat `Assets` directory containing the user's licensed avatars
+       - Blender executable (with the Sollumz add-on installed)
+       - RAGE CLI (`rage`) and Python executables
+  3. Extracts required vanilla base archives from GTA V into `staging/` and
+     populates base skeletons (`player_zero.yft`, `player_one.yft`,
+     `player_two.yft`) inside each character's `2_blender/` directory.
 """
 
 import argparse
@@ -43,6 +37,7 @@ for tools_dir_candidate in (
     if tools_dir_candidate.is_dir() and str(tools_dir_candidate) not in sys.path:
         sys.path.insert(0, str(tools_dir_candidate))
 
+import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
 
 
@@ -54,7 +49,7 @@ PLACEHOLDER_MARKERS = (
 
 
 def is_valid_gtav_root(candidate_dir: Path) -> bool:
-    """Verifica se a pasta informada contem GTA5.exe e x64v.rpf."""
+    """Return True if the candidate folder contains GTA5.exe and x64v.rpf."""
     return (
         candidate_dir.is_dir()
         and (candidate_dir / "GTA5.exe").is_file()
@@ -64,8 +59,8 @@ def is_valid_gtav_root(candidate_dir: Path) -> bool:
 
 def format_path_for_cfg(raw_path_text: str) -> str:
     """
-    Formata um caminho para armazenamento portatil em vrc2gtav.cfg.
-    Converte `/mnt/x/...` em `X:/...` para funcionar em Windows Blender e Linux/WSL.
+    Normalize a path for portable storage inside vrc2gtav.cfg, converting
+    `/mnt/x/...` into `X:/...` so both Windows Blender and Linux/WSL work.
     """
     cleaned_text = str(raw_path_text).strip().strip('"').strip("'")
     if not cleaned_text:
@@ -80,7 +75,7 @@ def format_path_for_cfg(raw_path_text: str) -> str:
 
 
 def detect_gtav_root(current_value: str) -> Optional[Path]:
-    """Tenta localizar automaticamente a instalacao do GTA V no Windows ou WSL."""
+    """Attempt to locate the GTA V Legacy installation automatically on Windows or WSL."""
     candidate_paths: List[Path] = []
     if current_value and current_value not in PLACEHOLDER_MARKERS:
         try:
@@ -123,7 +118,7 @@ def detect_gtav_root(current_value: str) -> Optional[Path]:
 
 
 def is_valid_unity_assets_dir(candidate_dir: Path) -> bool:
-    """Verifica se a pasta Assets contem subpastas esperadas de avatares VRChat."""
+    """Return True if the candidate folder contains expected VRChat avatar asset subfolders."""
     if not candidate_dir.is_dir():
         return False
     expected_markers = (
@@ -135,7 +130,7 @@ def is_valid_unity_assets_dir(candidate_dir: Path) -> bool:
 
 
 def detect_unity_assets(current_value: str) -> Optional[Path]:
-    """Tenta localizar automaticamente a pasta Assets do Unity/VRChat."""
+    """Attempt to locate the Unity/VRChat Assets folder automatically."""
     candidate_paths: List[Path] = []
     if current_value and current_value not in PLACEHOLDER_MARKERS:
         try:
@@ -173,7 +168,7 @@ def detect_unity_assets(current_value: str) -> Optional[Path]:
 
 
 def detect_blender_executable(current_value: str) -> Optional[str]:
-    """Tenta localizar o executavel do Blender no sistema."""
+    """Attempt to locate a Blender executable on the system."""
     if current_value and current_value not in PLACEHOLDER_MARKERS:
         try:
             resolved_current = project_paths.to_host_path(
@@ -212,7 +207,7 @@ def detect_blender_executable(current_value: str) -> Optional[str]:
 
 
 def detect_rage_executable(current_value: str) -> Optional[str]:
-    """Tenta localizar o binario rage CLI (https://github.com/VIRUXE/rage)."""
+    """Attempt to locate the RAGE CLI binary (https://github.com/VIRUXE/rage)."""
     if current_value:
         which_configured = shutil.which(current_value)
         if which_configured:
@@ -249,14 +244,14 @@ def update_cfg_values_in_place(
     section_updates: Dict[str, Dict[str, str]],
 ) -> None:
     """
-    Atualiza chaves especificas em vrc2gtav.cfg preservando comentarios,
-    ordenacao original e referencias ${secao:chave}.
+    Update specific keys inside vrc2gtav.cfg while preserving comments,
+    section ordering, and ${section:key} variable references.
     """
     original_lines = config_file_path.read_text(encoding="utf-8").splitlines(keepends=True)
     updated_lines: List[str] = []
     active_section: Optional[str] = None
     remaining_updates: Dict[str, Dict[str, str]] = {
-        sec_key: dict(sec_map) for sec_key, sec_map in section_updates.items()
+        section_key: dict(section_map) for section_key, section_map in section_updates.items()
     }
 
     for line_text in original_lines:
@@ -304,14 +299,16 @@ def prompt_path_setting(
     detected_value: Optional[str],
     validator_desc: str,
 ) -> str:
-    """Solicita interativamente um caminho no terminal oferecendo valor padrao detectado."""
+    """Interactively prompt for a path setting, offering the auto-detected default."""
     suggested_value = detected_value if detected_value else current_value
     print(f"\n  {prompt_title} ({validator_desc})")
     if current_value:
-        print(f"    Atual no .cfg: {current_value}")
+        print(project_i18n.translate("setup.prompt_current", value=current_value))
     if detected_value and detected_value != current_value:
-        print(f"    Detectado automaticamente: {detected_value}")
-    entered_text = input(f"    Caminho [Enter = usar '{suggested_value}']: ").strip()
+        print(project_i18n.translate("setup.prompt_detected", value=detected_value))
+    entered_text = input(
+        project_i18n.translate("setup.prompt_input", suggested=suggested_value)
+    ).strip()
     chosen_raw = entered_text if entered_text else suggested_value
     return format_path_for_cfg(chosen_raw)
 
@@ -325,13 +322,13 @@ def configure_vrc2gtav_cfg(
     python_override: Optional[str] = None,
 ) -> Path:
     """
-    Garante que `vrc2gtav.cfg` exista e atualiza seus caminhos principais de forma
-    interativa ou nao-interativa.
+    Ensure `vrc2gtav.cfg` exists and update its primary executable and
+    directory paths interactively or non-interactively.
     """
     cfg_was_created = not project_paths.has_project_config_file()
     config_file_path = project_paths.ensure_project_config_from_example(PROJECT_ROOT_HINT)
     if cfg_was_created:
-        print(f"[INFO] Criado arquivo de configuracao local a partir do template: {config_file_path}")
+        print(project_i18n.translate("setup.created_cfg", path=config_file_path))
 
     project_paths.invalidate_config_cache()
     config_parser = project_paths.load_project_config(force_reload=True)
@@ -354,10 +351,10 @@ def configure_vrc2gtav_cfg(
         chosen_gtav_root = format_path_for_cfg(gtav_root_override)
     elif interactive:
         chosen_gtav_root = prompt_path_setting(
-            "1) Pasta raiz do GTA V Legacy",
+            project_i18n.translate("setup.step_gtav_title"),
             current_gtav_root,
             detected_gtav_str,
-            "deve conter GTA5.exe e x64v.rpf",
+            project_i18n.translate("setup.step_gtav_desc"),
         )
     else:
         chosen_gtav_root = detected_gtav_str or current_gtav_root
@@ -366,10 +363,10 @@ def configure_vrc2gtav_cfg(
         chosen_unity_assets = format_path_for_cfg(unity_assets_override)
     elif interactive:
         chosen_unity_assets = prompt_path_setting(
-            "2) Pasta Assets do Unity/VRChat",
+            project_i18n.translate("setup.step_assets_title"),
             current_unity_assets,
             detected_assets_str,
-            "contendo Shinano/, DOLOSart/, Vagrant Brand/, Li-ne/, etc.",
+            project_i18n.translate("setup.step_assets_desc"),
         )
     else:
         chosen_unity_assets = detected_assets_str or current_unity_assets
@@ -378,10 +375,10 @@ def configure_vrc2gtav_cfg(
         chosen_blender = format_path_for_cfg(blender_override)
     elif interactive:
         chosen_blender = prompt_path_setting(
-            "3) Executavel do Blender (com add-on Sollumz)",
+            project_i18n.translate("setup.step_blender_title"),
             current_blender,
             detected_blender,
-            "ex: C:/Program Files/Blender Foundation/Blender 4.0/blender.exe",
+            project_i18n.translate("setup.step_blender_desc"),
         )
     else:
         chosen_blender = detected_blender or current_blender
@@ -390,10 +387,10 @@ def configure_vrc2gtav_cfg(
         chosen_rage = format_path_for_cfg(rage_override)
     elif interactive:
         chosen_rage = prompt_path_setting(
-            "4) Executavel RAGE CLI (rage)",
+            project_i18n.translate("setup.step_rage_title"),
             current_rage,
             detected_rage,
-            "ex: rage no PATH ou caminho completo para o binario rage",
+            project_i18n.translate("setup.step_rage_desc"),
         )
     else:
         chosen_rage = detected_rage or current_rage
@@ -421,7 +418,7 @@ def configure_vrc2gtav_cfg(
             },
         },
     )
-    print(f"[OK] Configuracao salva em: {config_file_path}")
+    print(project_i18n.translate("setup.saved_cfg", path=config_file_path))
     return config_file_path
 
 
@@ -432,9 +429,11 @@ def run_rage_extract(
     patterns: Optional[List[str]] = None,
     description: str = "",
 ) -> None:
-    """Executa `rage extract` com chaves Ng derivadas de gtav_root_dir."""
+    """Run `rage extract` with Ng keys derived from gtav_root_dir."""
     if not archive_path.is_file():
-        raise FileNotFoundError(f"Arquivo RPF de origem nao encontrado: {archive_path}")
+        raise FileNotFoundError(
+            project_i18n.translate("setup.source_rpf_missing", path=archive_path)
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     command_args: List[str] = ["--exe", str(gtav_root_dir), "extract", str(archive_path)]
@@ -443,15 +442,19 @@ def run_rage_extract(
     command_args.extend(["-o", str(output_dir)])
 
     full_command = project_paths.build_rage_command(*command_args)
-    label_text = description if description else f"Extraindo {archive_path.name}"
+    label_text = (
+        description
+        if description
+        else project_i18n.translate("setup.extracting_default", filename=archive_path.name)
+    )
     print(f"[INFO] {label_text} -> {output_dir}...")
     subprocess.run(full_command, check=True)
 
 
 def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
     """
-    Extrai os arquivos RPF base vanilla do GTA V para `staging/` e semeia
-    os esqueletos base `player_*.yft` nas pastas `2_blender/` dos 3 personagens.
+    Extract vanilla base RPF archives from GTA V into `staging/` and seed
+    base `player_*.yft` skeletons into each character's `2_blender/` directory.
     """
     project_paths.invalidate_config_cache()
     gtav_root_dir = project_paths.get_gtav_root_dir()
@@ -460,21 +463,19 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
     rpf_paths_cfg = project_paths.get_rpf_paths()
 
     if not is_valid_gtav_root(gtav_root_dir):
-        print(
-            f"[ERRO] Instalacao valida do GTA V Legacy nao encontrada em: {gtav_root_dir}\n"
-            f"       Certifique-se de que GTA5.exe e x64v.rpf existam na pasta configurada."
-        )
+        print(project_i18n.translate("setup.invalid_gtav_root", path=gtav_root_dir))
         return False
 
     rage_cli_binary = project_paths.get_rage_cli()
-    if not (Path(rage_cli_binary).is_file() or shutil.which(rage_cli_binary) or rage_cli_binary.startswith("wsl ")):
-        print(
-            f"[ERRO] RAGE CLI nao encontrado em '{rage_cli_binary}'.\n"
-            f"       Instale o binario `rage` (https://github.com/VIRUXE/rage) e informe o caminho no vrc2gtav.cfg."
-        )
+    if not (
+        Path(rage_cli_binary).is_file()
+        or shutil.which(rage_cli_binary)
+        or rage_cli_binary.startswith("wsl ")
+    ):
+        print(project_i18n.translate("setup.rage_not_found", rage_bin=rage_cli_binary))
         return False
 
-    # Garante pastas locais ignoradas no Git
+    # Ensure runtime-only directories exist locally
     for runtime_dir in (
         staging_dir,
         project_paths.get_renders_output_dir(),
@@ -491,11 +492,11 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
         Path(char_cfg["exported_models_dir"]).mkdir(parents=True, exist_ok=True)
         Path(char_cfg["skeleton_yft"]).parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. Extrai e valida chaves de decriptografia do GTA5.exe
+    # 1. Extract and validate decryption keys from GTA5.exe
     keys_output_dir = staging_dir / "rage_keys"
     if force_reextract or not keys_output_dir.is_dir() or not any(keys_output_dir.iterdir()):
         keys_output_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[INFO] Extraindo chaves criptograficas do GTA5.exe em {keys_output_dir}...")
+        print(project_i18n.translate("setup.extracting_keys", path=keys_output_dir))
         extract_keys_cmd = project_paths.build_rage_command(
             "--exe",
             str(gtav_root_dir),
@@ -505,9 +506,9 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
         )
         subprocess.run(extract_keys_cmd, check=True)
     else:
-        print(f"[OK] Chaves RAGE ja disponiveis em: {keys_output_dir}")
+        print(project_i18n.translate("setup.keys_ready", path=keys_output_dir))
 
-    # 2. Extrai x64v.rpf vanilla -> staging/x64v_extracted
+    # 2. Extract vanilla x64v.rpf -> staging/x64v_extracted
     x64v_extracted_dir = rpf_paths_cfg["x64v_extracted"]
     nested_streamedpeds_rpf = x64v_extracted_dir / rpf_paths_cfg["streamedpeds_rpf_relative"]
     nested_props_rpf = x64v_extracted_dir / rpf_paths_cfg["streamedpedprops_rpf_relative"]
@@ -519,13 +520,13 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
             vanilla_x64v_rpf,
             x64v_extracted_dir,
             gtav_root_dir,
-            description="Extraindo x64v.rpf vanilla",
+            description=project_i18n.translate("setup.desc_extract_x64v"),
         )
         x64v_freshly_extracted = True
     else:
-        print(f"[OK] x64v_extracted ja preparado: {x64v_extracted_dir}")
+        print(project_i18n.translate("setup.x64v_ready", path=x64v_extracted_dir))
 
-    # 3. Extrai streamedpeds_players.rpf -> staging/streamedpeds_players_extracted
+    # 3. Extract streamedpeds_players.rpf -> staging/streamedpeds_players_extracted
     streamedpeds_dir = rpf_paths_cfg["streamedpeds_extracted"]
     has_all_player_dirs = all(
         (streamedpeds_dir / ped_slot).is_dir()
@@ -536,14 +537,14 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
             nested_streamedpeds_rpf,
             streamedpeds_dir,
             gtav_root_dir,
-            description="Extraindo streamedpeds_players.rpf",
+            description=project_i18n.translate("setup.desc_extract_streamedpeds"),
         )
     else:
-        print(f"[OK] streamedpeds_players_extracted ja preparado: {streamedpeds_dir}")
+        print(project_i18n.translate("setup.streamedpeds_ready", path=streamedpeds_dir))
 
-    # 4. Salva copias imutaveis dos esqueletos vanilla (.yft) e popula */2_blender/
-    # Nota: se x64v_extracted ja existia de um deploy anterior, streamedpeds_players.rpf
-    # dentro dele pode estar modificado; por isso extraimos diretamente do x64v.rpf original.
+    # 4. Save immutable copies of vanilla skeletons (.yft) and seed */2_blender/.
+    # Note: if x64v_extracted already existed from an earlier deploy, the nested
+    # streamedpeds_players.rpf inside it may already be modded, so read from original x64v.rpf.
     vanilla_skeletons_backup = rpf_paths_cfg.get(
         "vanilla_skeletons_backup",
         staging_dir / "backup_vanilla_skeletons",
@@ -561,7 +562,7 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
                 vanilla_skeletons_backup,
                 gtav_root_dir,
                 patterns=missing_vanilla_yft_names,
-                description="Extraindo esqueletos vanilla (.yft)",
+                description=project_i18n.translate("setup.desc_extract_skeletons"),
             )
         else:
             temp_vanilla_stage = staging_dir / "_tmp_vanilla_skeletons"
@@ -573,7 +574,9 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
                     temp_vanilla_stage,
                     gtav_root_dir,
                     patterns=[streamed_rel_str],
-                    description="Extraindo streamedpeds_players.rpf vanilla para esqueletos",
+                    description=project_i18n.translate(
+                        "setup.desc_extract_vanilla_peds_for_skeletons"
+                    ),
                 )
                 temp_nested_peds = temp_vanilla_stage / rpf_paths_cfg["streamedpeds_rpf_relative"]
                 run_rage_extract(
@@ -581,25 +584,35 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
                     vanilla_skeletons_backup,
                     gtav_root_dir,
                     patterns=missing_vanilla_yft_names,
-                    description="Extraindo esqueletos vanilla (.yft)",
+                    description=project_i18n.translate("setup.desc_extract_skeletons"),
                 )
             finally:
                 shutil.rmtree(temp_vanilla_stage, ignore_errors=True)
     else:
-        print(f"[OK] Backups de esqueletos vanilla ja salvos em: {vanilla_skeletons_backup}")
+        print(
+            project_i18n.translate(
+                "setup.skeleton_backups_ready", path=vanilla_skeletons_backup
+            )
+        )
 
     for char_section in ("franklin", "michael", "trevor"):
         skeleton_dest = project_paths.ensure_character_skeleton_yft(char_section)
-        print(f"[OK] Esqueleto base pronto ({char_section}): {skeleton_dest}")
+        print(
+            project_i18n.translate(
+                "setup.character_skeleton_ready",
+                character=char_section,
+                path=skeleton_dest,
+            )
+        )
 
-    # 5. Extrai streamedpedprops.rpf -> staging/streamedpedprops_extracted
+    # 5. Extract streamedpedprops.rpf -> staging/streamedpedprops_extracted
     props_dir = rpf_paths_cfg["streamedpedprops_extracted"]
     if force_reextract and props_dir.is_dir():
         shutil.rmtree(props_dir, ignore_errors=True)
     project_paths.ensure_streamedpedprops_extracted()
-    print(f"[OK] streamedpedprops_extracted pronto: {props_dir}")
+    print(project_i18n.translate("setup.streamedpedprops_ready", path=props_dir))
 
-    # 6. Extrai mppatchesng/dlc.rpf e mppatches.rpf
+    # 6. Extract mppatchesng/dlc.rpf and mppatches.rpf
     vanilla_mppatches_dlc = (
         gtav_root_dir / "update" / "x64" / "dlcpacks" / "mppatchesng" / "dlc.rpf"
     )
@@ -608,7 +621,11 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
     mppatches_models_dir = rpf_paths_cfg["mppatches_extracted"]
 
     if not vanilla_mppatches_dlc.is_file():
-        print(f"[ERRO] DLC obrigatorio mppatchesng nao encontrado em: {vanilla_mppatches_dlc}")
+        print(
+            project_i18n.translate(
+                "setup.mppatches_missing", path=vanilla_mppatches_dlc
+            )
+        )
         return False
 
     if force_reextract or not inner_mppatches_rpf.is_file():
@@ -616,10 +633,10 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
             vanilla_mppatches_dlc,
             mppatches_dlc_dir,
             gtav_root_dir,
-            description="Extraindo update/x64/dlcpacks/mppatchesng/dlc.rpf",
+            description=project_i18n.translate("setup.desc_extract_mppatchesng"),
         )
     else:
-        print(f"[OK] mppatchesng_extracted ja preparado: {mppatches_dlc_dir}")
+        print(project_i18n.translate("setup.mppatchesng_ready", path=mppatches_dlc_dir))
 
     has_mppatches_players = all(
         (mppatches_models_dir / ped_slot).is_dir()
@@ -630,12 +647,12 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
             inner_mppatches_rpf,
             mppatches_models_dir,
             gtav_root_dir,
-            description="Extraindo mppatches.rpf",
+            description=project_i18n.translate("setup.desc_extract_mppatches"),
         )
     else:
-        print(f"[OK] mppatches_extracted ja preparado: {mppatches_models_dir}")
+        print(project_i18n.translate("setup.mppatches_ready", path=mppatches_models_dir))
 
-    # 7. Extrai patchday4ng/dlc.rpf e patchday4ng.rpf (quando presente na instalacao do usuario)
+    # 7. Extract patchday4ng/dlc.rpf and patchday4ng.rpf when present in user install
     vanilla_patchday4_dlc = (
         gtav_root_dir / "update" / "x64" / "dlcpacks" / "patchday4ng" / "dlc.rpf"
     )
@@ -649,29 +666,41 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
                 vanilla_patchday4_dlc,
                 patchday4_dlc_dir,
                 gtav_root_dir,
-                description="Extraindo update/x64/dlcpacks/patchday4ng/dlc.rpf",
+                description=project_i18n.translate("setup.desc_extract_patchday4_dlc"),
             )
         else:
-            print(f"[OK] patchday4ng_dlc_extracted ja preparado: {patchday4_dlc_dir}")
+            print(
+                project_i18n.translate(
+                    "setup.patchday4_dlc_ready", path=patchday4_dlc_dir
+                )
+            )
 
-        if force_reextract or not patchday4_models_dir.is_dir() or not any(patchday4_models_dir.iterdir()):
+        if (
+            force_reextract
+            or not patchday4_models_dir.is_dir()
+            or not any(patchday4_models_dir.iterdir())
+        ):
             run_rage_extract(
                 inner_patchday4_rpf,
                 patchday4_models_dir,
                 gtav_root_dir,
-                description="Extraindo patchday4ng.rpf",
+                description=project_i18n.translate("setup.desc_extract_patchday4_rpf"),
             )
         else:
-            print(f"[OK] patchday4ng_models_extracted ja preparado: {patchday4_models_dir}")
+            print(
+                project_i18n.translate(
+                    "setup.patchday4_models_ready", path=patchday4_models_dir
+                )
+            )
     else:
-        print("[INFO] DLC opcional patchday4ng nao encontrado no gtav_root; etapa ignorada.")
+        print(project_i18n.translate("setup.patchday4_optional_skipped"))
 
-    print("\n[SUCESSO] Setup inicial e extracao vanilla concluidos com sucesso!")
+    print(project_i18n.translate("setup.extraction_success"))
     return True
 
 
 def diagnose_setup_state() -> Dict[str, bool]:
-    """Diagnostica se vrc2gtav.cfg, caminhos principais, RPFs e esqueletos estao prontos."""
+    """Inspect whether vrc2gtav.cfg, core paths, extracted RPFs, and skeletons are ready."""
     has_cfg_file = project_paths.has_project_config_file()
     if not has_cfg_file:
         return {
@@ -717,7 +746,7 @@ def diagnose_setup_state() -> Dict[str, bool]:
 
 
 def is_first_run_needed() -> bool:
-    """Retorna True se ainda faltar configuracao ou extracao vanilla inicial."""
+    """Return True if configuration or initial vanilla extraction is still incomplete."""
     status_map = diagnose_setup_state()
     return not (
         status_map["has_cfg"]
@@ -728,13 +757,17 @@ def is_first_run_needed() -> bool:
 
 
 def print_setup_diagnostics() -> bool:
-    """Imprime relatorio legivel do estado do setup inicial."""
+    """Print a human-readable First-Run readiness report."""
     status_map = diagnose_setup_state()
     print("\n" + "=" * 70)
-    print("  DIAGNOSTICO DE PRIMEIRA EXECUCAO (VRC2GTAV)")
+    print(project_i18n.translate("setup.diag_header"))
     print("=" * 70)
     for check_name, check_passed in status_map.items():
-        tag_str = "[OK]" if check_passed else "[PENDENTE]"
+        tag_str = (
+            project_i18n.translate("setup.diag_tag_ok")
+            if check_passed
+            else project_i18n.translate("setup.diag_tag_pending")
+        )
         print(f"  {tag_str:10} {check_name}")
     print("=" * 70)
     return all(status_map.values())
@@ -749,15 +782,11 @@ def run_first_run_setup(
     rage_override: Optional[str] = None,
     python_override: Optional[str] = None,
 ) -> bool:
-    """Executa o fluxo completo de configuracao inicial e extracao vanilla do GTA V."""
+    """Run the full First-Run configuration and vanilla GTA V extraction flow."""
     print("\n" + "=" * 70)
-    print("  SETUP INICIAL (FIRST-RUN) E EXTRACAO DE ASSETS VANILLA DO GTA V")
+    print(project_i18n.translate("setup.banner_title"))
     print("=" * 70)
-    print(
-        "  Nenhum arquivo protegido do GTA V ou asset pago de VRChat e distribuido\n"
-        "  neste repositorio. Vamos configurar seus caminhos locais e extrair os\n"
-        "  arquivos vanilla necessarios diretamente da sua instalacao do GTA V."
-    )
+    print(project_i18n.translate("setup.banner_notice"))
 
     configure_vrc2gtav_cfg(
         interactive=interactive,
@@ -770,11 +799,7 @@ def run_first_run_setup(
 
     unity_assets_dir = project_paths.get_vrc_assets_dir()
     if not unity_assets_dir.is_dir():
-        print(
-            f"[AVISO] Pasta Assets Unity ainda nao existe ou nao acessivel: {unity_assets_dir}\n"
-            f"        A extracao do GTA V continuara, mas certifique-se de apontar para seus assets\n"
-            f"        antes de compilar as texturas e modelos 3D."
-        )
+        print(project_i18n.translate("setup.unity_assets_warning", path=unity_assets_dir))
 
     extraction_ok = extract_vanilla_gtav_assets(force_reextract=force_reextract)
     print_setup_diagnostics()
@@ -782,32 +807,61 @@ def run_first_run_setup(
 
 
 def main() -> int:
-    """Ponto de entrada CLI do assistente de primeira execucao."""
+    """CLI entrypoint for the First-Run setup wizard."""
+    project_i18n.set_active_language()
     arg_parser = argparse.ArgumentParser(
-        description="Assistente First-Run e extrator de arquivos vanilla do GTA V para vrc2gtav"
+        description=project_i18n.translate("setup.cli_description")
     )
     arg_parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Apenas exibe o diagnostico sem modificar arquivos",
+        help=project_i18n.translate("setup.cli_check_only"),
     )
     arg_parser.add_argument(
         "--non-interactive",
         action="store_true",
-        help="Nao faz perguntas no terminal (usa autodetect / vrc2gtav.cfg / flags CLI)",
+        help=project_i18n.translate("setup.cli_non_interactive"),
     )
     arg_parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-extrai RPFs vanilla mesmo se as pastas ja existirem em staging/",
+        help=project_i18n.translate("setup.cli_force"),
     )
-    arg_parser.add_argument("--gtav-root", default=None, help="Pasta raiz do GTA V Legacy")
-    arg_parser.add_argument("--unity-assets", default=None, help="Pasta Assets do projeto Unity")
-    arg_parser.add_argument("--blender", default=None, help="Executavel do Blender")
-    arg_parser.add_argument("--rage", default=None, help="Executavel RAGE CLI (rage)")
-    arg_parser.add_argument("--python", default=None, help="Executavel Python 3")
+    arg_parser.add_argument(
+        "--lang",
+        choices=["auto", "en", "ja", "pt"],
+        default="auto",
+        help=project_i18n.translate("common.language_option_help"),
+    )
+    arg_parser.add_argument(
+        "--gtav-root",
+        default=None,
+        help=project_i18n.translate("setup.cli_gtav_root"),
+    )
+    arg_parser.add_argument(
+        "--unity-assets",
+        default=None,
+        help=project_i18n.translate("setup.cli_unity_assets"),
+    )
+    arg_parser.add_argument(
+        "--blender",
+        default=None,
+        help=project_i18n.translate("setup.cli_blender"),
+    )
+    arg_parser.add_argument(
+        "--rage",
+        default=None,
+        help=project_i18n.translate("setup.cli_rage"),
+    )
+    arg_parser.add_argument(
+        "--python",
+        default=None,
+        help=project_i18n.translate("setup.cli_python"),
+    )
 
     parsed_args = arg_parser.parse_args()
+    project_i18n.set_active_language(parsed_args.lang)
+
     if parsed_args.check_only:
         is_ready = print_setup_diagnostics()
         return 0 if is_ready else 1

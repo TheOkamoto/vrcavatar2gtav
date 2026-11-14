@@ -2,23 +2,31 @@
 """
 hand_skeleton_helper.py
 =======================
-Utilitario compartilhado para rigagem 1:1 de dedos e realocacao de esqueletos
-(.ydd no Blender e .yft via PyMateria) nos tres protagonistas do GTA V.
+Shared helper for 1:1 finger rigging and skeleton relocation (.ydd in Blender
+and .yft via PyMateria) across all three GTA V protagonists.
 
-Garante que:
-  1. Os 30 ossos de dedos (SKEL_{L,R}_Finger{0..4}{0..2}) e ossos auxiliares
-     de torcao/pulso (RB_{L,R}_ForeArmRoll, RB_{L,R}_ArmRoll, PH/IK_{L,R}_Hand)
-     sejam mapeados individualmente em vez de serem colapsados no pulso.
-  2. Os ossos da armature do drawable (.ydd) e do fragmento (.yft) sejam
-     movidos em paralelo para as posicoes exatas dos membros/dedos do avatar
-     VRChat na A-pose, preservando as rotacoes locais nativas das animacoes .ycd.
+Ensures that:
+  1. All 30 finger bones (SKEL_{L,R}_Finger{0..4}{0..2}) and arm/wrist helper
+     bones (RB_{L,R}_ForeArmRoll, RB_{L,R}_ArmRoll, PH/IK_{L,R}_Hand) are mapped
+     individually instead of collapsing into the wrist.
+  2. Drawable (.ydd) and fragment (.yft) armature joints move in parallel to the
+     exact VRChat avatar A-pose joint locations while preserving native local .ycd
+     animation rotations.
 """
 
+import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 
-# Ossos auxiliares de braco/pulso preservados alem da lista basica do esqueleto
+_MODULE_DIR = Path(__file__).resolve().parent
+if str(_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(_MODULE_DIR))
+
+from vrc2gtav_i18n import translate
+
+
+# Additional arm/wrist helper bones preserved alongside the standard finger set
 EXTRA_ARM_HELPER_BONES = (
     "RB_L_ArmRoll",
     "RB_R_ArmRoll",
@@ -30,7 +38,7 @@ EXTRA_ARM_HELPER_BONES = (
     "IK_R_Hand",
 )
 
-# Todos os 30 ossos canonicos de dedos no GTA V
+# All 30 canonical GTA V finger bone names
 GTAV_FINGER_BONE_NAMES = tuple(
     f"SKEL_{side_tag}_Finger{finger_idx}{segment_idx}"
     for side_tag in ("L", "R")
@@ -38,7 +46,7 @@ GTAV_FINGER_BONE_NAMES = tuple(
     for segment_idx in range(3)
 )
 
-# Candidatos de nomes de ossos VRChat (Shinano, ER e Milltina) para cada alvo GTA V
+# Candidate VRChat bone names (Shinano, ER, and Milltina) for each GTA V target bone
 VRC_ARM_HAND_BONE_CANDIDATES: Dict[str, Tuple[str, ...]] = {
     "SKEL_L_Clavicle": ("Shoulder.L", "Shoulder_L", "LeftShoulder"),
     "SKEL_L_UpperArm": ("Upper_arm.L", "Upper_arm_L", "UpperArm.L", "LeftUpperArm"),
@@ -68,7 +76,7 @@ for _side_code, _humanoid_side in (("L", "Left"), ("R", "Right")):
 
 
 def detect_bone_side_code(bone_name: str) -> Optional[str]:
-    """Detecta o lado anatomico ('L' ou 'R') a partir de convensoes Blender/Unity."""
+    """Detect the anatomical side ('L' or 'R') from Blender/Unity naming conventions."""
     lower_name = bone_name.lower()
     if (
         bone_name.endswith(".L")
@@ -89,11 +97,11 @@ def detect_bone_side_code(bone_name: str) -> Optional[str]:
 
 def resolve_finger_or_arm_bone(source_bone_name: str) -> Optional[str]:
     """
-    Mapeia nomes de ossos de dedos e suporte/torcao de braco (Shinano/Miltina/VRChat)
-    para seus equivalentes exatos no esqueleto do GTA V.
+    Map VRChat/Shinano/Miltina finger and arm support/twist bones to their
+    exact GTA V skeleton counterparts.
 
-    Retorna None caso o osso nao seja de dedo ou suporte de braco, permitindo
-    que a tabela/regra especifica do personagem trate o restante sem regressao.
+    Return None for unrelated bones so the character-specific mapping rules
+    handle the remaining bones without regression.
     """
     if source_bone_name in GTAV_FINGER_BONE_NAMES or source_bone_name in EXTRA_ARM_HELPER_BONES:
         return source_bone_name
@@ -104,7 +112,7 @@ def resolve_finger_or_arm_bone(source_bone_name: str) -> Optional[str]:
 
     lower_name = source_bone_name.lower()
 
-    # 1. Suportes e torcoes de antebraco/braco/roupa
+    # 1. Forearm, upper arm, and sleeve twist/support bones
     if (
         "lower_arm_twist" in lower_name
         or "lower_arm_cloth_twist" in lower_name
@@ -128,7 +136,7 @@ def resolve_finger_or_arm_bone(source_bone_name: str) -> Optional[str]:
     if "costume_support1" in lower_name or "costume_support3" in lower_name:
         return f"SKEL_{side_code}_UpperArm"
 
-    # 2. Mapeamento 1:1 para os 30 ossos canonicos de dedos (SKEL_{L,R}_Finger{0..4}{0..2})
+    # 2. 1:1 mapping for all 30 canonical finger bones (SKEL_{L,R}_Finger{0..4}{0..2})
     finger_keywords = (
         ("thumb", 0),
         ("index", 1),
@@ -165,14 +173,14 @@ def extract_avatar_arm_hand_targets(
     world_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> Dict[str, "mathutils.Vector"]:
     """
-    Extrai as posicoes mundiais pos-pose (-55 graus) dos ossos de clavicula, braco,
-    antebraco, pulso e 30 dedos da armature VRChat convertidas para o espaco GTA V.
+    Extract post-pose (-55 deg) world-space coordinates of clavicle, upper arm,
+    forearm, wrist, and all 30 finger joints converted into GTA V space.
     """
     import bpy
     import mathutils
 
     if fbx_armature_obj is None or fbx_armature_obj.type != "ARMATURE":
-        raise ValueError("Armature VRChat invalida ao extrair alvos de ossos das maos.")
+        raise ValueError(translate("hand.invalid_vrc_armature"))
 
     bpy.context.view_layer.update()
 
@@ -217,11 +225,14 @@ def extract_avatar_arm_hand_targets(
     ]
     if missing_main_bones or missing_finger_bones:
         raise RuntimeError(
-            "Ossos obrigatorios ausentes ao extrair alvos da armature VRChat: "
-            f"principais={missing_main_bones}, dedos={missing_finger_bones}"
+            translate(
+                "hand.missing_required_bones",
+                main_bones=missing_main_bones,
+                finger_bones=missing_finger_bones,
+            )
         )
 
-    # Calcula ossos auxiliares de torcao (50%) e acopladores de mao (PH/IK)
+    # Compute mid-segment twist helpers (50%) and hand attachment helpers (PH/IK)
     for side_code in ("L", "R"):
         upper_arm_pos = bone_world_targets[f"SKEL_{side_code}_UpperArm"]
         forearm_pos = bone_world_targets[f"SKEL_{side_code}_Forearm"]
@@ -240,14 +251,14 @@ def relocate_blender_armature_bones(
     bone_world_targets: Dict[str, "mathutils.Vector"],
 ) -> int:
     """
-    Translada as articulacoes (head/tail em paralelo) dos membros superiores e dedos
-    da armature GTA V no Blender mantendo a orientacao/roll nativos intactos.
+    Translate upper-limb and finger edit bones (head/tail in parallel) on the
+    GTA V Blender armature while keeping native bone orientations and roll intact.
     """
     import bpy
     import mathutils
 
     if ped_armature_obj is None or ped_armature_obj.type != "ARMATURE":
-        raise ValueError("Armature GTA V invalida para realocacao de ossos.")
+        raise ValueError(translate("hand.invalid_gtav_armature"))
 
     bpy.context.view_layer.objects.active = ped_armature_obj
     if ped_armature_obj.mode != "OBJECT":
@@ -285,7 +296,7 @@ def relocate_blender_armature_bones(
             edit_bone_item.tail = edit_bone_item.head + tail_offset_local
             relocated_counter += 1
 
-        # Salva referencia de filhos antes da recursao
+        # Snapshot child references before recursion.
         child_edit_bones = list(edit_bone_item.children)
         for child_edit_bone in child_edit_bones:
             walk_edit_bone(child_edit_bone, bone_delta_world, current_subtree_flag)
@@ -304,7 +315,7 @@ def relocate_blender_armature_bones(
 
 
 def _build_bone_local_matrix(bone_node, translation_vec) -> "mathutils.Matrix":
-    """Constroi matriz local 4x4 a partir de default_translation, default_rotation e default_scale."""
+    """Construct a 4x4 local matrix from default_translation, default_rotation, and default_scale."""
     import mathutils
 
     rot_raw = bone_node.default_rotation
@@ -326,11 +337,11 @@ def patch_yft_skeleton(
     bone_world_targets: Dict[str, "mathutils.Vector"],
 ) -> Tuple[int, int, float]:
     """
-    Atualiza `default_translation` no esqueleto do arquivo .yft via PyMateria,
-    mantendo rotacoes e escalas originais e propagando deltas para filhos nao
-    mapeados dentro das cadeias SKEL_L_Clavicle e SKEL_R_Clavicle.
+    Update `default_translation` entries in the .yft fragment skeleton via PyMateria,
+    preserving original rotations/scales and propagating deltas to unmapped children
+    inside SKEL_L_Clavicle and SKEL_R_Clavicle chains.
 
-    Tambem reimporta o .yft gerado para validar round-trip exato dos alvos.
+    Also re-imports the exported .yft to verify exact round-trip target coordinates.
     """
     import mathutils
     import pymateria as pymateria_root
@@ -340,15 +351,15 @@ def patch_yft_skeleton(
     resolved_output = Path(output_yft_path)
     if not resolved_source.is_file():
         raise FileNotFoundError(
-            f"Arquivo .yft de origem nao encontrado: {resolved_source}"
+            translate("hand.yft_source_not_found", path=resolved_source)
         )
 
     fragment_asset = gen8_module.Fragment.import_rsc(str(resolved_source)).result
     if fragment_asset is None or fragment_asset.drawable is None:
-        raise RuntimeError(f"Fragmento sem drawable valido em: {resolved_source}")
+        raise RuntimeError(translate("hand.fragment_missing_drawable", path=resolved_source))
     skeleton_obj = fragment_asset.drawable.skeleton
     if skeleton_obj is None or skeleton_obj.root_bone is None:
-        raise RuntimeError(f"Fragmento sem esqueleto valido em: {resolved_source}")
+        raise RuntimeError(translate("hand.fragment_missing_skeleton", path=resolved_source))
 
     updated_bones_count = 0
     total_bones_count = 0
@@ -421,7 +432,7 @@ def patch_yft_skeleton(
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
     gen8_module.Fragment.export_rsc(fragment_asset, str(resolved_output))
 
-    # Validacao round-trip apos exportacao binaria
+    # Round-trip validation after binary export
     verify_fragment = gen8_module.Fragment.import_rsc(str(resolved_output)).result
     verify_positions: Dict[str, mathutils.Vector] = {}
 
@@ -443,7 +454,11 @@ def patch_yft_skeleton(
     for bone_name, expected_vec in bone_world_targets.items():
         if bone_name not in verify_positions:
             raise RuntimeError(
-                f"Osso alvo '{bone_name}' desapareceu apos exportar {resolved_output}."
+                translate(
+                    "hand.target_bone_disappeared",
+                    bone_name=bone_name,
+                    path=resolved_output,
+                )
             )
         target_vec = mathutils.Vector(
             (float(expected_vec.x), float(expected_vec.y), float(expected_vec.z))
@@ -454,8 +469,11 @@ def patch_yft_skeleton(
 
     if max_roundtrip_error > 1e-3:
         raise RuntimeError(
-            f"Erro de round-trip excessivo ao validar {resolved_output.name}: "
-            f"{max_roundtrip_error:.6f} m"
+            translate(
+                "hand.roundtrip_error_excessive",
+                filename=resolved_output.name,
+                error_meters=max_roundtrip_error,
+            )
         )
 
     return updated_bones_count, total_bones_count, max_roundtrip_error

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 vrc2gtav_paths.py
-==================
-Resolvedor centralizado de configuracoes e caminhos multiplataforma
-(Windows nativo e Linux/WSL) a partir do arquivo vrc2gtav.cfg.
+=================
+Centralized cross-platform configuration and path resolver (native Windows
+and Linux/WSL) backed by vrc2gtav.cfg.
 
-Todos os scripts do projeto importam este modulo para obter caminhos de
-executaveis, diretorios, modelos, texturas, skeletons, arquivos .fbx e RPFs
-sem depender de caminhos fixos espalhados pelo codigo.
+All project scripts import this module to obtain executable, directory, model,
+texture, skeleton, .fbx, and RPF archive paths without hardcoding paths in code.
 """
 
 import configparser
@@ -19,6 +18,22 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+
+
+_MODULE_DIR = Path(__file__).resolve().parent
+if str(_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(_MODULE_DIR))
+
+from vrc2gtav_i18n import (
+    LANG_ENV_VAR,
+    configure_utf8_stdio,
+    get_active_language,
+    get_explicit_language_override,
+    get_language_display_name,
+    translate,
+)
+
+configure_utf8_stdio()
 
 
 CONFIG_ENV_VAR_NAME = "VRC2GTAV_CFG"
@@ -33,19 +48,19 @@ _CONFIG_CACHE: Dict[str, object] = {
 
 
 def invalidate_config_cache() -> None:
-    """Limpa o cache interno do arquivo .cfg para forcar recarregamento imediato."""
+    """Clear the cached .cfg parser state to force an immediate reload on next read."""
     _CONFIG_CACHE["config_path"] = None
     _CONFIG_CACHE["parser"] = None
     _CONFIG_CACHE["mtime"] = None
 
 
 def is_windows_host() -> bool:
-    """Retorna True se o interpretador Python atual estiver rodando em Windows."""
+    """Return True when the active Python interpreter is running on Windows."""
     return platform.system() == "Windows"
 
 
 def is_wsl_host() -> bool:
-    """Retorna True se o Python estiver rodando dentro do Windows Subsystem for Linux."""
+    """Return True when Python is running inside Windows Subsystem for Linux."""
     if is_windows_host():
         return False
     release_text = platform.release().lower()
@@ -54,11 +69,11 @@ def is_wsl_host() -> bool:
 
 def to_host_path(raw_path_text: str, project_root_dir: Optional[Path] = None) -> Path:
     """
-    Converte uma string de caminho do .cfg (Windows X:/..., WSL /mnt/x/...,
-    POSIX /home/... ou relativo) para um pathlib.Path nativo do SO atual.
+    Convert a .cfg path string (Windows X:/..., WSL /mnt/x/..., POSIX /home/...,
+    or relative path) into a native pathlib.Path for the current host OS.
     """
     if not raw_path_text or not str(raw_path_text).strip():
-        raise ValueError("Caminho vazio encontrado ao resolver configuracao.")
+        raise ValueError(translate("paths.empty_path_error"))
 
     normalized_text = str(raw_path_text).strip().strip('"').strip("'")
     normalized_slashes = normalized_text.replace("\\", "/")
@@ -78,7 +93,7 @@ def to_host_path(raw_path_text: str, project_root_dir: Optional[Path] = None) ->
             return (project_root_dir / candidate_path).resolve()
         return candidate_path
 
-    # Ambiente Linux / WSL
+    # Linux / WSL environment
     if windows_drive_match:
         drive_letter = windows_drive_match.group(1).lower()
         remaining_path = windows_drive_match.group(2)
@@ -94,8 +109,8 @@ def to_host_path(raw_path_text: str, project_root_dir: Optional[Path] = None) ->
 
 def to_windows_path(raw_path_value: Union[str, Path], use_backslashes: bool = False) -> str:
     """
-    Converte qualquer caminho (/mnt/e/... ou E:/...) para formato Windows (E:/... ou E:\\...).
-    Indispensavel para invocar executaveis Windows (como blender.exe) a partir do WSL.
+    Convert any host path (/mnt/e/... or E:/...) to Windows format (E:/... or E:\\...).
+    Required when invoking Windows executables (such as blender.exe) from WSL.
     """
     path_text = str(raw_path_value).strip().strip('"').strip("'")
     normalized_slashes = path_text.replace("\\", "/")
@@ -115,17 +130,17 @@ def to_windows_path(raw_path_value: Union[str, Path], use_backslashes: bool = Fa
 
 def find_project_config_file(explicit_config_path: Optional[Union[str, Path]] = None) -> Path:
     """
-    Localiza o arquivo vrc2gtav.cfg usando:
-      1. Caminho explicito (parametro), se fornecido
-      2. Variavel de ambiente VRC2GTAV_CFG, se definida
-      3. Busca ascendente a partir deste arquivo e do diretorio de trabalho atual
+    Locate vrc2gtav.cfg using priority order:
+      1. Explicit path argument, if provided
+      2. VRC2GTAV_CFG environment variable, if set
+      3. Upward directory scan from this module and current working directory
     """
     if explicit_config_path is not None:
         explicit_file = Path(explicit_config_path).expanduser().resolve()
         if explicit_file.is_file():
             return explicit_file
         raise FileNotFoundError(
-            f"Arquivo de configuracao especificado nao encontrado: {explicit_file}"
+            translate("paths.config_not_found_explicit", path=explicit_file)
         )
 
     env_override = operating_system.environ.get(CONFIG_ENV_VAR_NAME, "").strip()
@@ -134,7 +149,11 @@ def find_project_config_file(explicit_config_path: Optional[Union[str, Path]] = 
         if env_file.is_file():
             return env_file
         raise FileNotFoundError(
-            f"Arquivo apontado por {CONFIG_ENV_VAR_NAME} nao encontrado: {env_file}"
+            translate(
+                "paths.config_not_found_env",
+                env_var=CONFIG_ENV_VAR_NAME,
+                path=env_file,
+            )
         )
 
     search_origins = [Path(__file__).resolve().parent, Path.cwd().resolve()]
@@ -145,15 +164,18 @@ def find_project_config_file(explicit_config_path: Optional[Union[str, Path]] = 
                 return candidate_cfg.resolve()
 
     raise FileNotFoundError(
-        f"Arquivo '{DEFAULT_CONFIG_FILENAME}' nao encontrado. "
-        f"Certifique-se de que existe na raiz do projeto ou defina {CONFIG_ENV_VAR_NAME}."
+        translate(
+            "paths.config_not_found_default",
+            filename=DEFAULT_CONFIG_FILENAME,
+            env_var=CONFIG_ENV_VAR_NAME,
+        )
     )
 
 
 def has_project_config_file(
     explicit_config_path: Optional[Union[str, Path]] = None,
 ) -> bool:
-    """Retorna True se vrc2gtav.cfg (ou caminho explicito/VRC2GTAV_CFG) existir."""
+    """Return True if vrc2gtav.cfg (or an explicit/VRC2GTAV_CFG path) exists."""
     try:
         find_project_config_file(explicit_config_path)
         return True
@@ -164,13 +186,13 @@ def has_project_config_file(
 def find_project_config_example(
     explicit_example_path: Optional[Union[str, Path]] = None,
 ) -> Path:
-    """Localiza o template vrc2gtav.cfg.example na raiz do projeto."""
+    """Locate the vrc2gtav.cfg.example template in the project root."""
     if explicit_example_path is not None:
         explicit_file = Path(explicit_example_path).expanduser().resolve()
         if explicit_file.is_file():
             return explicit_file
         raise FileNotFoundError(
-            f"Arquivo template especificado nao encontrado: {explicit_file}"
+            translate("paths.template_not_found_explicit", path=explicit_file)
         )
 
     search_origins = [Path(__file__).resolve().parent, Path.cwd().resolve()]
@@ -181,7 +203,10 @@ def find_project_config_example(
                 return candidate_example.resolve()
 
     raise FileNotFoundError(
-        f"Arquivo template '{DEFAULT_CONFIG_EXAMPLE_FILENAME}' nao encontrado."
+        translate(
+            "paths.template_not_found_default",
+            filename=DEFAULT_CONFIG_EXAMPLE_FILENAME,
+        )
     )
 
 
@@ -189,8 +214,7 @@ def ensure_project_config_from_example(
     project_root_hint: Optional[Path] = None,
 ) -> Path:
     """
-    Garante que vrc2gtav.cfg exista. Se nao existir, copia vrc2gtav.cfg.example
-    para vrc2gtav.cfg na raiz do projeto.
+    Ensure vrc2gtav.cfg exists by copying vrc2gtav.cfg.example if missing.
     """
     if has_project_config_file():
         return find_project_config_file()
@@ -211,16 +235,15 @@ def load_project_config(
     force_reload: bool = False,
 ) -> configparser.ConfigParser:
     """
-    Carrega e faz o parse de vrc2gtav.cfg com ExtendedInterpolation (${secao:chave}),
-    resolvendo project_root dinamicamente quando configurado como '.' e mantendo cache
-    invalidado por modificacao do arquivo.
+    Load and parse vrc2gtav.cfg with ExtendedInterpolation (${section:key}),
+    dynamically resolving project_root when set to '.' and caching by mtime.
     """
     resolved_cfg_file = find_project_config_file(config_file_path)
     try:
         current_mtime = resolved_cfg_file.stat().st_mtime
     except OSError as os_error:
         raise FileNotFoundError(
-            f"Nao foi possivel ler metadados de {resolved_cfg_file}: {os_error}"
+            translate("paths.config_stat_error", path=resolved_cfg_file, error=os_error)
         ) from os_error
 
     if (
@@ -234,24 +257,24 @@ def load_project_config(
     parser = configparser.ConfigParser(
         interpolation=configparser.ExtendedInterpolation()
     )
-    # Preserva caixa original das chaves caso necessario
+    # Preserve exact option key casing.
     parser.optionxform = str  # type: ignore[assignment]
 
     try:
         read_files = parser.read(str(resolved_cfg_file), encoding="utf-8")
     except configparser.Error as parse_error:
         raise RuntimeError(
-            f"Erro de sintaxe ao ler configuracao '{resolved_cfg_file}': {parse_error}"
+            translate("paths.config_parse_error", path=resolved_cfg_file, error=parse_error)
         ) from parse_error
 
     if not read_files:
         raise FileNotFoundError(
-            f"Falha ao abrir arquivo de configuracao: {resolved_cfg_file}"
+            translate("paths.config_open_error", path=resolved_cfg_file)
         )
 
     if not parser.has_section("directories"):
         raise ValueError(
-            f"Secao obrigatoria [directories] ausente em {resolved_cfg_file}."
+            translate("paths.config_missing_directories", path=resolved_cfg_file)
         )
 
     raw_project_root = parser.get(
@@ -272,23 +295,39 @@ def load_project_config(
     return parser
 
 
-def get_config_value(section_name: str, option_name: str) -> str:
-    """Retorna uma string interpolada do vrc2gtav.cfg com erro descritivo caso ausente."""
+def get_configured_language() -> str:
+    """Return [general] -> language from vrc2gtav.cfg, or 'auto' if absent."""
+    if not has_project_config_file():
+        return "auto"
     parser = load_project_config()
+    if parser.has_section("general") and parser.has_option("general", "language"):
+        value_text = parser.get("general", "language", fallback="auto").strip()
+        return value_text if value_text else "auto"
+    return "auto"
+
+
+def get_config_value(section_name: str, option_name: str) -> str:
+    """Return an interpolated value from vrc2gtav.cfg with a descriptive error if missing."""
+    parser = load_project_config()
+    cfg_file = find_project_config_file()
     if not parser.has_section(section_name):
         raise KeyError(
-            f"Secao [{section_name}] nao encontrada em {find_project_config_file()}."
+            translate("paths.section_not_found", section=section_name, path=cfg_file)
         )
     if not parser.has_option(section_name, option_name):
         raise KeyError(
-            f"Chave '{option_name}' nao encontrada na secao [{section_name}] "
-            f"de {find_project_config_file()}."
+            translate(
+                "paths.option_not_found",
+                option=option_name,
+                section=section_name,
+                path=cfg_file,
+            )
         )
     return parser.get(section_name, option_name).strip()
 
 
 def get_project_root() -> Path:
-    """Retorna o diretorio raiz do projeto configurado em [directories] -> project_root."""
+    """Return the resolved project root directory from [directories] -> project_root."""
     raw_root_value = get_config_value("directories", "project_root")
     return to_host_path(raw_root_value)
 
@@ -299,8 +338,8 @@ def get_config_path(
     as_windows_path: bool = False,
 ) -> Union[Path, str]:
     """
-    Resolve qualquer caminho do arquivo .cfg para Path nativo do SO atual
-    ou string Windows (quando as_windows_path=True).
+    Resolve a .cfg path entry into a native host Path (or Windows string when
+    as_windows_path=True).
     """
     raw_value = get_config_value(section_name, option_name)
     resolved_host_path = to_host_path(raw_value, project_root_dir=get_project_root())
@@ -314,7 +353,7 @@ def get_config_path_list(
     option_name: str,
     as_windows_path: bool = False,
 ) -> List[Union[Path, str]]:
-    """Resolve uma lista separada por virgulas do .cfg para uma lista de caminhos."""
+    """Resolve a comma-separated .cfg list entry into host Paths or Windows strings."""
     raw_list_text = get_config_value(section_name, option_name)
     resolved_items: List[Union[Path, str]] = []
     root_directory = get_project_root()
@@ -330,42 +369,42 @@ def get_config_path_list(
 
 
 def get_vrc_assets_dir() -> Path:
-    """Retorna o diretorio Assets do projeto Unity configurado no .cfg."""
+    """Return the Unity project Assets directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "unity_assets"))
 
 
 def get_staging_dir() -> Path:
-    """Retorna o diretorio staging configurado no .cfg."""
+    """Return the staging directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "staging"))
 
 
 def get_gtav_root_dir() -> Path:
-    """Retorna o diretorio raiz da instalacao do GTA V configurado no .cfg."""
+    """Return the GTA V installation root directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "gtav_root"))
 
 
 def get_gtav_mods_dir() -> Path:
-    """Retorna o diretorio mods do GTA V configurado no .cfg."""
+    """Return the GTA V mods directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "gtav_mods"))
 
 
 def get_deploy_tools_dir() -> Path:
-    """Retorna o diretorio _deploy_tools configurado no .cfg."""
+    """Return the _deploy_tools directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "deploy_tools"))
 
 
 def get_scripts_root_dir() -> Path:
-    """Retorna o diretorio scripts configurado no .cfg."""
+    """Return the scripts root directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "scripts_root"))
 
 
 def get_common_tools_dir() -> Path:
-    """Retorna o diretorio scripts/common_tools configurado no .cfg."""
+    """Return the scripts/common_tools directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "common_tools"))
 
 
 def get_artifacts_dir() -> Path:
-    """Retorna o diretorio de artefatos configurado no .cfg (ou caminho inexistente se vazio)."""
+    """Return the artifacts directory configured in vrc2gtav.cfg (or an inert fallback if empty)."""
     raw_artifacts_value = get_config_value("directories", "artifacts").strip()
     if not raw_artifacts_value:
         return get_staging_dir() / "_no_artifacts_configured"
@@ -373,22 +412,22 @@ def get_artifacts_dir() -> Path:
 
 
 def get_renders_output_dir() -> Path:
-    """Retorna o diretorio de saida de renders configurado no .cfg."""
+    """Return the renders output directory configured in vrc2gtav.cfg."""
     return Path(get_config_path("directories", "renders_output"))
 
 
 def get_dummy_ydd_path() -> Path:
-    """Retorna o caminho do arquivo dummy head_000_r.ydd configurado em [common_assets]."""
+    """Return the head_000_r.ydd dummy mesh path from [common_assets]."""
     return Path(get_config_path("common_assets", "dummy_ydd"))
 
 
 def get_prop_dummy_ydd_path() -> Path:
-    """Retorna o caminho do arquivo dummy p_eyes_dummy.ydd configurado em [common_assets]."""
+    """Return the p_eyes_dummy.ydd prop dummy mesh path from [common_assets]."""
     return Path(get_config_path("common_assets", "prop_dummy_ydd"))
 
 
 def get_rage_cli() -> str:
-    """Retorna o executavel ou caminho do RAGE CLI configurado em [executables] -> rage."""
+    """Return the RAGE CLI executable or command configured in [executables] -> rage."""
     raw_rage_value = get_config_value("executables", "rage")
     if "/" not in raw_rage_value and "\\" not in raw_rage_value:
         located_binary = shutil.which(raw_rage_value)
@@ -398,13 +437,13 @@ def get_rage_cli() -> str:
 
     host_rage_path = to_host_path(raw_rage_value, project_root_dir=get_project_root())
     if is_windows_host() and not host_rage_path.exists():
-        # Fallback caso o usuario execute no Windows apontando para rage compilado no WSL
+        # Fallback when invoked from Windows targeting a WSL-built rage binary.
         return f"wsl {raw_rage_value}"
     return str(host_rage_path)
 
 
 def build_rage_command(*rage_args: str) -> List[str]:
-    """Constroi lista de argumentos para invocar o rage CLI no host ou via WSL."""
+    """Build an argument list to invoke the RAGE CLI natively or via WSL."""
     rage_executable = get_rage_cli()
     if rage_executable.startswith("wsl "):
         wsl_binary = rage_executable[4:].strip()
@@ -413,7 +452,7 @@ def build_rage_command(*rage_args: str) -> List[str]:
 
 
 def get_blender_exe(as_windows_path: bool = False) -> str:
-    """Retorna o caminho do executavel Blender configurado em [executables] -> blender."""
+    """Return the Blender executable path configured in [executables] -> blender."""
     raw_blender_value = get_config_value("executables", "blender")
     if "/" not in raw_blender_value and "\\" not in raw_blender_value:
         located_binary = shutil.which(raw_blender_value)
@@ -427,7 +466,7 @@ def get_blender_exe(as_windows_path: bool = False) -> str:
 
 
 def get_python_exe() -> str:
-    """Retorna o executavel Python configurado em [executables] -> python, com fallback."""
+    """Return the Python executable path from [executables] -> python, with sys.executable fallback."""
     raw_python_value = get_config_value("executables", "python")
     if "/" not in raw_python_value and "\\" not in raw_python_value:
         located_binary = shutil.which(raw_python_value)
@@ -441,7 +480,7 @@ def get_python_exe() -> str:
 
 
 def get_ffmpeg_exe() -> str:
-    """Retorna o executavel ffmpeg configurado em [executables] -> ffmpeg."""
+    """Return the ffmpeg executable path configured in [executables] -> ffmpeg."""
     raw_ffmpeg_value = get_config_value("executables", "ffmpeg")
     if "/" not in raw_ffmpeg_value and "\\" not in raw_ffmpeg_value:
         located_binary = shutil.which(raw_ffmpeg_value)
@@ -450,14 +489,14 @@ def get_ffmpeg_exe() -> str:
 
 
 def get_windows_cmd_exe() -> Path:
-    """Retorna o caminho do cmd.exe configurado em [executables] -> windows_cmd."""
+    """Return the Windows cmd.exe path configured in [executables] -> windows_cmd."""
     return Path(get_config_path("executables", "windows_cmd"))
 
 
 def find_working_wsl_interop() -> Optional[str]:
     """
-    Em ambiente WSL, encontra um socket /run/WSL/*_interop funcional caso o socket
-    atual esteja expirado apos reinicio de sessao.
+    Under WSL, locate a working /run/WSL/*_interop socket in case the current
+    session socket expired after a suspend/reconnect.
     """
     if not is_wsl_host():
         return None
@@ -500,12 +539,16 @@ def build_blender_command(
     extra_arguments: Optional[List[str]] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
     """
-    Monta o comando e variaveis de ambiente para executar um script no Blender
-    tanto em Windows nativo quanto em Linux/WSL (via interoperabilidade Windows).
+    Construct the command line and environment variables to execute a Blender
+    Python script on either native Windows or Linux/WSL (via Windows interop).
     """
     custom_env = operating_system.environ.copy()
     blender_host_exe = get_blender_exe(as_windows_path=False)
     extra_tokens = list(extra_arguments) if extra_arguments else []
+
+    explicit_lang = get_explicit_language_override(config_language=get_configured_language())
+    if explicit_lang and not custom_env.get(LANG_ENV_VAR, "").strip():
+        custom_env[LANG_ENV_VAR] = explicit_lang
 
     if is_windows_host():
         custom_env[CONFIG_ENV_VAR_NAME] = str(find_project_config_file())
@@ -522,8 +565,8 @@ def build_blender_command(
             command_list.extend(extra_tokens)
         return command_list, custom_env
 
-    # Em WSL, se o executavel do Blender for .exe Windows, invoca diretamente via
-    # binfmt_misc para evitar quebra de aspas do cmd.exe e propaga VRC2GTAV_CFG via WSLENV.
+    # Under WSL targeting a Windows blender.exe, invoke directly via binfmt_misc
+    # to avoid cmd.exe quoting issues and forward env variables via WSLENV.
     if blender_host_exe.lower().endswith(".exe"):
         custom_env[CONFIG_ENV_VAR_NAME] = to_windows_path(find_project_config_file())
         working_interop = find_working_wsl_interop()
@@ -537,6 +580,10 @@ def build_blender_command(
         ]
         if CONFIG_ENV_VAR_NAME not in propagated_vars:
             propagated_vars.append(CONFIG_ENV_VAR_NAME)
+        if custom_env.get(LANG_ENV_VAR, "").strip() and not any(
+            existing.split("/")[0] == LANG_ENV_VAR for existing in propagated_vars
+        ):
+            propagated_vars.append(LANG_ENV_VAR)
         for path_env_key in ("VRC2GTAV_ROOT", "VRC_ASSETS_DIR", "GTAV_MODS_DIR", "RAGE_CLI", "BLENDER_EXE"):
             if path_env_key in custom_env and not any(
                 existing.split("/")[0] == path_env_key for existing in propagated_vars
@@ -558,7 +605,7 @@ def build_blender_command(
             command_list.extend(extra_tokens)
         return command_list, custom_env
 
-    # Blender Linux nativo
+    # Native Linux Blender
     custom_env[CONFIG_ENV_VAR_NAME] = str(find_project_config_file())
     command_list = [
         blender_host_exe,
@@ -575,12 +622,16 @@ def build_blender_command(
 
 
 def get_rpf_paths() -> Dict[str, Path]:
-    """Retorna todos os caminhos resolvidos da secao [rpf_paths] de vrc2gtav.cfg."""
+    """Return all resolved paths from the [rpf_paths] section of vrc2gtav.cfg."""
     parser = load_project_config()
     root_directory = get_project_root()
     if not parser.has_section("rpf_paths"):
         raise KeyError(
-            f"Secao [rpf_paths] ausente em {find_project_config_file()}."
+            translate(
+                "paths.section_not_found",
+                section="rpf_paths",
+                path=find_project_config_file(),
+            )
         )
     resolved_map: Dict[str, Path] = {}
     for option_key, option_value in parser.items("rpf_paths"):
@@ -598,13 +649,17 @@ def get_character_paths(
     as_windows_path: bool = False,
 ) -> Dict[str, Union[Path, str, List[Union[Path, str]]]]:
     """
-    Retorna um dicionario com todas as chaves resolvidas de um personagem
-    ('franklin', 'michael' ou 'trevor') do arquivo vrc2gtav.cfg.
+    Return a dictionary with all resolved keys for a protagonist section
+    ('franklin', 'michael', or 'trevor') from vrc2gtav.cfg.
     """
     parser = load_project_config()
     if not parser.has_section(character_section):
         raise KeyError(
-            f"Secao [{character_section}] nao encontrada em {find_project_config_file()}."
+            translate(
+                "paths.section_not_found",
+                section=character_section,
+                path=find_project_config_file(),
+            )
         )
     root_directory = get_project_root()
     non_path_keys = {"ped_name", "prop_ped_name", "ytd_name"}
@@ -636,9 +691,8 @@ def get_character_paths(
 
 def ensure_streamedpedprops_extracted() -> Path:
     """
-    Garante que o arquivo streamedpedprops.rpf esteja extraido em staging.
-    Caso a pasta ainda nao exista ou esteja vazia, extrai automaticamente a
-    partir de x64v_extracted usando o RAGE CLI.
+    Ensure streamedpedprops.rpf is extracted into staging, extracting it from
+    x64v_extracted via the RAGE CLI if missing or empty.
     """
     rpf_paths_cfg = get_rpf_paths()
     props_extracted_dir = rpf_paths_cfg["streamedpedprops_extracted"]
@@ -650,7 +704,7 @@ def ensure_streamedpedprops_extracted() -> Path:
     )
     if not nested_props_rpf.is_file():
         raise FileNotFoundError(
-            f"streamedpedprops.rpf nao encontrado para extracao em: {nested_props_rpf}"
+            translate("paths.streamedpedprops_not_found", path=nested_props_rpf)
         )
 
     props_extracted_dir.mkdir(parents=True, exist_ok=True)
@@ -665,16 +719,21 @@ def ensure_streamedpedprops_extracted() -> Path:
         str(props_extracted_dir),
         str(nested_props_rpf),
     )
-    print(f"[INFO] Extraindo {nested_props_rpf} -> {props_extracted_dir}...")
+    print(
+        translate(
+            "paths.extracting_streamedpedprops",
+            source_path=nested_props_rpf,
+            target_dir=props_extracted_dir,
+        )
+    )
     subprocess.run(rage_command, check=True)
     return props_extracted_dir
 
 
 def ensure_character_skeleton_yft(character_section: str) -> Path:
     """
-    Garante que o arquivo base player_*.yft exista na pasta 2_blender do personagem.
-    Caso esteja ausente (repositorio limpo pos-clone), restaura a partir de
-    backup_vanilla_skeletons ou extrai diretamente do streamedpeds_players.rpf.
+    Ensure the base player_*.yft skeleton exists inside the character's 2_blender
+    folder, restoring it from vanilla backup or extracting directly from GTA V RPFs.
     """
     character_cfg = get_character_paths(character_section)
     skeleton_yft_path = Path(character_cfg["skeleton_yft"])
@@ -693,8 +752,10 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
     if vanilla_backup_yft.is_file():
         shutil.copy2(vanilla_backup_yft, skeleton_yft_path)
         print(
-            f"[OK] Esqueleto base restaurado de backup vanilla: "
-            f"{skeleton_yft_path.name}"
+            translate(
+                "paths.restored_skeleton_backup",
+                filename=skeleton_yft_path.name,
+            )
         )
         return skeleton_yft_path
 
@@ -709,8 +770,11 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
                 rage_global_flags = ["--exe", str(gtav_root_dir)]
             streamed_rel_str = rpf_paths_cfg["streamedpeds_rpf_relative"].as_posix()
             print(
-                f"[INFO] Extraindo esqueleto vanilla '{ped_filename}' de "
-                f"{vanilla_x64v_rpf.name}..."
+                translate(
+                    "paths.extracting_vanilla_skeleton",
+                    filename=ped_filename,
+                    archive_name=vanilla_x64v_rpf.name,
+                )
             )
             subprocess.run(
                 build_rage_command(
@@ -748,7 +812,7 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
     if nested_streamedpeds_rpf.is_file():
         vanilla_backup_dir.mkdir(parents=True, exist_ok=True)
         gtav_root_dir = get_gtav_root_dir()
-        rage_global_flags: List[str] = []
+        rage_global_flags = []
         if (gtav_root_dir / "GTA5.exe").is_file():
             rage_global_flags = ["--exe", str(gtav_root_dir)]
         rage_command = build_rage_command(
@@ -760,8 +824,11 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
             str(vanilla_backup_dir),
         )
         print(
-            f"[INFO] Extraindo esqueleto base '{ped_filename}' de "
-            f"{nested_streamedpeds_rpf.name}..."
+            translate(
+                "paths.extracting_base_skeleton",
+                filename=ped_filename,
+                archive_name=nested_streamedpeds_rpf.name,
+            )
         )
         subprocess.run(rage_command, check=True)
         if vanilla_backup_yft.is_file():
@@ -769,8 +836,7 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
             return skeleton_yft_path
 
     raise FileNotFoundError(
-        f"Esqueleto base '{skeleton_yft_path}' ausente. Execute o Setup Inicial "
-        f"(`python run_mod_manager.py --setup`) para extrair os arquivos vanilla do seu GTA V."
+        translate("paths.skeleton_missing_run_setup", path=skeleton_yft_path)
     )
 
 
@@ -780,19 +846,19 @@ def patch_character_glasses_props(
     character_label: str = "",
 ) -> Dict[str, int]:
     """
-    Substitui todos os drawables de oculos (p_eyes_*.ydd) dentro da pasta de props
-    do personagem (player_zero_p, player_one_p ou player_two_p) pelo dummy rigido
-    sem esqueleto (p_eyes_dummy.ydd), preservando .ytd e outros acessorios.
+    Replace all eyewear drawables (p_eyes_*.ydd) inside a protagonist props
+    folder with the empty rigid prop dummy (p_eyes_dummy.ydd), leaving .ytd and
+    all other accessories untouched.
     """
     props_dir_path = Path(target_props_directory)
     dummy_file_path = Path(prop_dummy_path)
     if not dummy_file_path.is_file():
         raise FileNotFoundError(
-            f"Prop Dummy YDD nao encontrado em: {dummy_file_path}"
+            translate("paths.prop_dummy_not_found", path=dummy_file_path)
         )
 
     if not props_dir_path.is_dir():
-        print(f"  [AVISO] Diretorio de props nao encontrado: {props_dir_path}")
+        print(translate("paths.props_dir_missing", path=props_dir_path))
         return {"replaced_glasses": 0, "untouched": 0}
 
     replaced_glasses = 0
@@ -810,30 +876,48 @@ def patch_character_glasses_props(
     label_text = character_label if character_label else props_dir_path.name
     dummy_size_bytes = dummy_file_path.stat().st_size
     print(f"  [{label_text}] {props_dir_path.parent.name}/{props_dir_path.name}:")
-    print(f"      Dummies de oculos (p_eyes_*.ydd, {dummy_size_bytes} B): {replaced_glasses}")
-    print(f"      Outros props/texturas intocados:         {untouched_props}")
+    print(
+        translate(
+            "paths.props_replaced_line",
+            size_bytes=dummy_size_bytes,
+            count=replaced_glasses,
+        )
+    )
+    print(translate("paths.props_untouched_line", count=untouched_props))
     return {"replaced_glasses": replaced_glasses, "untouched": untouched_props}
 
 
 def print_summary() -> None:
-    """Imprime todos os caminhos principais carregados do vrc2gtav.cfg para diagnostico."""
+    """Print key resolved paths from vrc2gtav.cfg for diagnostics."""
     cfg_file = find_project_config_file()
     rpf_paths = get_rpf_paths()
-    print("=== VRC2GTAV: Caminhos Carregados via .cfg ===")
-    print(f"Arquivo .cfg: {cfg_file}")
-    print(f"Sistema Operacional: {platform.system()} ({platform.release()})")
-    print(f"Raiz do Projeto: {get_project_root()}")
-    print(f"Assets Unity: {get_vrc_assets_dir()}")
-    print(f"Staging: {get_staging_dir()}")
-    print(f"GTA V Mods: {get_gtav_mods_dir()}")
-    print(f"RAGE CLI: {get_rage_cli()}")
-    print(f"Blender Exe: {get_blender_exe()}")
-    print(f"Python Exe: {get_python_exe()}")
-    print(f"FFmpeg Exe: {get_ffmpeg_exe()}")
-    print(f"Dummy YDD: {get_dummy_ydd_path()}")
-    print(f"Prop Dummy YDD: {get_prop_dummy_ydd_path()}")
-    print(f"x64v Mod RPF: {rpf_paths['x64v_game_rpf']}")
-    print("============================================")
+    print(translate("paths.summary_header"))
+    print(translate("paths.summary_cfg_file", path=cfg_file))
+    print(
+        translate(
+            "paths.summary_language",
+            language=get_language_display_name(get_active_language()),
+        )
+    )
+    print(
+        translate(
+            "paths.summary_os",
+            system_name=platform.system(),
+            release_name=platform.release(),
+        )
+    )
+    print(translate("paths.summary_project_root", path=get_project_root()))
+    print(translate("paths.summary_unity_assets", path=get_vrc_assets_dir()))
+    print(translate("paths.summary_staging", path=get_staging_dir()))
+    print(translate("paths.summary_gtav_mods", path=get_gtav_mods_dir()))
+    print(translate("paths.summary_rage_cli", path=get_rage_cli()))
+    print(translate("paths.summary_blender_exe", path=get_blender_exe()))
+    print(translate("paths.summary_python_exe", path=get_python_exe()))
+    print(translate("paths.summary_ffmpeg_exe", path=get_ffmpeg_exe()))
+    print(translate("paths.summary_dummy_ydd", path=get_dummy_ydd_path()))
+    print(translate("paths.summary_prop_dummy_ydd", path=get_prop_dummy_ydd_path()))
+    print(translate("paths.summary_x64v_mod_rpf", path=rpf_paths["x64v_game_rpf"]))
+    print("=" * 44)
 
 
 if __name__ == "__main__":

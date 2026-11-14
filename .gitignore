@@ -1,8 +1,8 @@
 # ======================================================================
-# .gitignore - Projeto vrc2gtav
+# .gitignore - vrc2gtav Project
 # ======================================================================
 
-# Arquivos de Staging e Dumps Temporarios de RPFs do GTA V (12 GB de dumps base do jogo)
+# Staging directories and temporary GTA V RPF extraction dumps
 staging/
 *_extracted/
 *.rpf
@@ -10,7 +10,7 @@ staging/
 *.tmp
 *~
 
-# Python e Ambientes Virtuais
+# Python bytecode and virtual environments
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,7 +19,7 @@ env/
 venv/
 *.egg-info/
 
-# Arquivos de Sistema Operacional e IDEs
+# Operating system metadata and IDE files
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -28,14 +28,14 @@ desktop.ini
 *.swp
 *.swo
 
-# Backups do Blender
+# Blender backup files
 *.blend1
 *.blend2
 
-# Renderizacoes RAGE e Blender
+# RAGE and Blender rendered images
 renders/
 
-# Arquivos do GTA V e Assets Proprietarios Compilados (Nao Versionar por Copyright)
+# Compiled GTA V game files and proprietary assets (excluded for copyright safety)
 *.yft
 *.yft.xml
 *.ydd
@@ -44,14 +44,14 @@ renders/
 *.dds
 *.backup_*
 
-# Unica excecao tecnica: dummy meshes vazias (sem geometria/textura protegida)
+# Technical exception: empty dummy mesh containers (no copyrighted geometry/textures)
 !_deploy_tools/head_000_r.ydd
 !_deploy_tools/p_eyes_dummy.ydd
 
-# Configuracao local especifica da maquina (gerada a partir de vrc2gtav.cfg.example)
+# Machine-local path configuration (generated from vrc2gtav.cfg.example)
 vrc2gtav.cfg
 
-# Backups locais e outputs gerados em tempo de execucao
+# Local backups and runtime-generated outputs
 backups/
 1_Franklin_Shinano_Casual/3_textures_gtav/textures/
 1_Franklin_Shinano_Casual/4_exported_models/
@@ -59,4 +59,3 @@ backups/
 2_Michael_Shinano_EternalReunion/4_exported_models/
 3_Trevor_Miltina_Maid/3_textures_gtav/*.png
 3_Trevor_Miltina_Maid/4_exported_models/
-

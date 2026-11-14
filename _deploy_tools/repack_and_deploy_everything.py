@@ -2,24 +2,19 @@
 """
 repack_and_deploy_everything.py
 ===============================
-Repacota e instala todos os arquivos RPF do mod GTA V com barra de progresso:
-  1. Repack mppatches.rpf e patch do TOC (f_size=0, enc='OPEN')
-  2. Repack mppatchesng_dlc.rpf e patch do TOC (f_size=0, enc='OPEN')
-  3. Deploy dlc.rpf -> D:/GTAV/mods/update/x64/dlcpacks/mppatchesng/dlc.rpf
-  4. Repack/Deploy patchday4ng (quando presente no staging)
-  5. Repack streamedpeds_players.rpf e patch do TOC (f_size=0, enc='OPEN')
-  6. Repack streamedpedprops.rpf e patch do TOC (f_size=0, enc='OPEN')
-  7. Repack x64v_modded.rpf e patch do TOC (f_size=0, enc='OPEN')
-  8. Deploy x64v.rpf -> D:/GTAV/mods/x64v.rpf
-  9. Verificacao de integridade estrita (rage verify / list -d)
-
-Regras de Implementacao:
-  - Zero variaveis de uma ou duas letras.
-  - Zero emojis (mensagens formatadas com marcadores ASCII padronizados).
-  - Tratamento rigoroso de erros e excecoes.
-  - Multiplataforma (Windows e Linux/WSL).
+Repack and deploy all GTA V mod RPF archives with live progress bars:
+  1. Repack mppatches.rpf and patch TOC (f_size=0, enc='OPEN')
+  2. Repack mppatchesng_dlc.rpf and patch TOC (f_size=0, enc='OPEN')
+  3. Deploy dlc.rpf -> <gtav_mods>/update/x64/dlcpacks/mppatchesng/dlc.rpf
+  4. Repack/Deploy patchday4ng (when present in staging)
+  5. Repack streamedpeds_players.rpf and patch TOC (f_size=0, enc='OPEN')
+  6. Repack streamedpedprops.rpf and patch TOC (f_size=0, enc='OPEN')
+  7. Repack x64v_modded.rpf and patch TOC (f_size=0, enc='OPEN')
+  8. Deploy x64v.rpf -> <gtav_mods>/x64v.rpf
+  9. Run strict integrity verification (`rage list -d` + header check)
 """
 
+import argparse
 import os
 import shutil
 import struct
@@ -28,79 +23,86 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Dict
 
-# Adiciona o diretorio de ferramentas ao sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Add current directory to sys.path so shared helpers import in both layouts.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 try:
+    import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import vrc2gtav_i18n as project_i18n
     from common_tools import vrc2gtav_paths as project_paths
 
-RAGE_CLI_TOOL = project_paths.get_rage_cli()
-GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
-STAGING_DIRECTORY = project_paths.get_staging_dir()
-RPF_PATHS_CONFIG = project_paths.get_rpf_paths()
 
-MPPATCHES_EXTRACTED_DIR = RPF_PATHS_CONFIG["mppatches_extracted"]
-MPPATCHESNG_EXTRACTED_DIR = RPF_PATHS_CONFIG["mppatches_dlc_extracted"]
-MPPATCHES_RPF_FILE = (
-    MPPATCHESNG_EXTRACTED_DIR / RPF_PATHS_CONFIG["mppatches_rpf_relative"]
-)
-MPPATCHESNG_DLC_RPF_FILE = RPF_PATHS_CONFIG["mppatches_modded_rpf"]
-TARGET_DLC_RPF_PATH = RPF_PATHS_CONFIG["mppatches_game_rpf"]
-
-PATCHDAY4NG_EXTRACTED_DIR = RPF_PATHS_CONFIG["patchday4ng_dlc_extracted"]
-PATCHDAY4NG_INNER_RPF = (
-    PATCHDAY4NG_EXTRACTED_DIR / RPF_PATHS_CONFIG["patchday4ng_rpf_relative"]
-)
-PATCHDAY4NG_MODELS_DIR = RPF_PATHS_CONFIG["patchday4ng_models_extracted"]
-PATCHDAY4NG_DLC_RPF_FILE = RPF_PATHS_CONFIG["patchday4ng_modded_rpf"]
-TARGET_PATCHDAY4NG_DLC_PATH = RPF_PATHS_CONFIG["patchday4ng_game_rpf"]
-
-STREAMEDPEDS_EXTRACTED_DIR = RPF_PATHS_CONFIG["streamedpeds_extracted"]
-STREAMEDPEDPROPS_EXTRACTED_DIR = RPF_PATHS_CONFIG["streamedpedprops_extracted"]
-X64V_EXTRACTED_DIR = RPF_PATHS_CONFIG["x64v_extracted"]
-STREAMEDPEDS_RPF_FILE = (
-    X64V_EXTRACTED_DIR / RPF_PATHS_CONFIG["streamedpeds_rpf_relative"]
-)
-STREAMEDPEDPROPS_RPF_FILE = (
-    X64V_EXTRACTED_DIR / RPF_PATHS_CONFIG["streamedpedprops_rpf_relative"]
-)
-X64V_MODDED_RPF_FILE = RPF_PATHS_CONFIG["x64v_modded_rpf"]
-TARGET_X64V_RPF_PATH = RPF_PATHS_CONFIG["x64v_game_rpf"]
+def _load_repack_paths() -> Dict[str, object]:
+    """Resolve all executable, staging, and target archive paths from vrc2gtav.cfg."""
+    rpf_paths_cfg = project_paths.get_rpf_paths()
+    mppatchesng_extracted_dir = rpf_paths_cfg["mppatches_dlc_extracted"]
+    patchday4ng_extracted_dir = rpf_paths_cfg["patchday4ng_dlc_extracted"]
+    x64v_extracted_dir = rpf_paths_cfg["x64v_extracted"]
+    return {
+        "rage_cli": project_paths.get_rage_cli(),
+        "gtav_mods_dir": project_paths.get_gtav_mods_dir(),
+        "staging_dir": project_paths.get_staging_dir(),
+        "mppatches_extracted_dir": rpf_paths_cfg["mppatches_extracted"],
+        "mppatchesng_extracted_dir": mppatchesng_extracted_dir,
+        "mppatches_rpf_file": mppatchesng_extracted_dir / rpf_paths_cfg["mppatches_rpf_relative"],
+        "mppatchesng_dlc_rpf_file": rpf_paths_cfg["mppatches_modded_rpf"],
+        "target_dlc_rpf_path": rpf_paths_cfg["mppatches_game_rpf"],
+        "patchday4ng_extracted_dir": patchday4ng_extracted_dir,
+        "patchday4ng_inner_rpf": patchday4ng_extracted_dir / rpf_paths_cfg["patchday4ng_rpf_relative"],
+        "patchday4ng_models_dir": rpf_paths_cfg["patchday4ng_models_extracted"],
+        "patchday4ng_dlc_rpf_file": rpf_paths_cfg["patchday4ng_modded_rpf"],
+        "target_patchday4ng_dlc_path": rpf_paths_cfg["patchday4ng_game_rpf"],
+        "streamedpeds_extracted_dir": rpf_paths_cfg["streamedpeds_extracted"],
+        "streamedpedprops_extracted_dir": rpf_paths_cfg["streamedpedprops_extracted"],
+        "x64v_extracted_dir": x64v_extracted_dir,
+        "streamedpeds_rpf_file": x64v_extracted_dir / rpf_paths_cfg["streamedpeds_rpf_relative"],
+        "streamedpedprops_rpf_file": x64v_extracted_dir / rpf_paths_cfg["streamedpedprops_rpf_relative"],
+        "x64v_modded_rpf_file": rpf_paths_cfg["x64v_modded_rpf"],
+        "target_x64v_rpf_path": rpf_paths_cfg["x64v_game_rpf"],
+    }
 
 
 def patch_rpf7_open_and_zero_compressed(rpf_file_path: Path) -> int:
     """
-    Modifica a tabela de conteudo (TOC) de um arquivo RPF7:
-      1. Define o cabeçalho de criptografia para 'OPEN' (offset 12).
-      2. Zera os bytes de tamanho comprimido de entradas binarias normais.
-    Evita travamentos de leitura e o erro critico ERR_GEN_ZLIB_2 no GTA V.
+    Patch an RPF7 archive table of contents:
+      1. Set the encryption header flag at offset 12 to 'OPEN'.
+      2. Zero out compressed-size bytes for non-resource binary entries.
+    Prevents streaming stalls and ERR_GEN_ZLIB_2 crashes in GTA V.
     """
     if not rpf_file_path.exists():
         raise FileNotFoundError(
-            f"[ERRO] Arquivo RPF para patching nao encontrado: {rpf_file_path}"
+            project_i18n.translate("repack.rpf_not_found", path=rpf_file_path)
         )
 
     patched_entries_count = 0
     try:
         with open(rpf_file_path, "r+b") as rpf_file_handle:
             header_bytes = rpf_file_handle.read(16)
-            magic_number, total_entries_count, names_length, encryption_flag = (
+            magic_number, total_entries_count, _names_length, _encryption_flag = (
                 struct.unpack("<IIII", header_bytes)
             )
 
-            # Valida se eh um arquivo RPF7 legitimo (magic 0x52504637 == '7FPR')
+            # Verify valid RPF7 magic value (0x52504637 == '7FPR')
             if magic_number != 0x52504637:
                 raise ValueError(
-                    f"[ERRO] Magic invalido para RPF7 em {rpf_file_path}: 0x{magic_number:08X}"
+                    project_i18n.translate(
+                        "repack.rpf7_invalid_magic",
+                        path=rpf_file_path,
+                        magic=magic_number,
+                    )
                 )
 
-            # Grava a flag de criptografia 'OPEN'
+            # Write 'OPEN' encryption flag
             rpf_file_handle.seek(12)
             rpf_file_handle.write(b"OPEN")
 
-            # Le a tabela de entradas (TOC)
+            # Read the 16-byte-per-entry TOC table
             rpf_file_handle.seek(16)
             toc_table_data = rpf_file_handle.read(total_entries_count * 16)
 
@@ -111,7 +113,7 @@ def patch_rpf7_open_and_zero_compressed(rpf_file_path: Path) -> int:
                 )
                 entry_descriptor = struct.unpack("<I", entry_record[4:8])[0]
 
-                # Ignora diretorios (0x7FFFFF00) e recursos RSC7 de jogo (bit 31 ativo)
+                # Skip directories (0x7FFFFF00) and RSC7 game resources (bit 31 set)
                 is_directory_entry = entry_descriptor == 0x7FFFFF00
                 is_resource_entry = (entry_descriptor & 0x80000000) != 0
                 if is_directory_entry or is_resource_entry:
@@ -132,26 +134,33 @@ def patch_rpf7_open_and_zero_compressed(rpf_file_path: Path) -> int:
 
     except Exception as error_exception:
         print(
-            f"[ERRO] Falha ao aplicar patch no RPF {rpf_file_path}: {error_exception}"
+            project_i18n.translate(
+                "repack.rpf_patch_failed",
+                path=rpf_file_path,
+                error=error_exception,
+            )
         )
         raise
 
     print(
-        f"  [RPF7 PATCH] {rpf_file_path.name}: enc='OPEN', "
-        f"corrigidas {patched_entries_count} entradas binarias (f_size=0)"
+        project_i18n.translate(
+            "repack.rpf7_patched_summary",
+            filename=rpf_file_path.name,
+            count=patched_entries_count,
+        )
     )
     return patched_entries_count
 
 
 def get_adaptive_bar_width(reserved_columns: int = 62) -> int:
-    """Calcula a largura da barra para caber inteira no terminal (ex: CMD 80 colunas)."""
+    """Compute progress bar width to fit cleanly within the terminal width."""
     terminal_columns = shutil.get_terminal_size(fallback=(80, 24)).columns
     available_columns = terminal_columns - reserved_columns
     return max(12, min(28, available_columns))
 
 
 def format_progress_bar(fraction_value: float, bar_width: int = 0) -> str:
-    """Formata uma barra de progresso ASCII padronizada entre [0.0, 1.0]."""
+    """Format a normalized ASCII progress bar within [0.0, 1.0]."""
     resolved_width = bar_width if bar_width > 0 else get_adaptive_bar_width()
     clamped_fraction = max(0.0, min(1.0, fraction_value))
     filled_count = int(round(clamped_fraction * resolved_width))
@@ -160,7 +169,7 @@ def format_progress_bar(fraction_value: float, bar_width: int = 0) -> str:
 
 
 def format_indeterminate_bar(tick_index: int, bar_width: int = 0) -> str:
-    """Formata uma barra de atividade ASCII animada enquanto o tamanho cresce do zero."""
+    """Format a sliding ASCII activity indicator while output size is still zero."""
     resolved_width = bar_width if bar_width > 0 else get_adaptive_bar_width()
     slider_width = 4
     travel_span = max(1, resolved_width - slider_width)
@@ -177,10 +186,7 @@ def format_indeterminate_bar(tick_index: int, bar_width: int = 0) -> str:
 
 
 def write_progress_line(line_text: str, is_final: bool = False) -> None:
-    """
-    Escreve uma linha de progresso adaptando-se automaticamente a TTY interativo
-    (atualizacao inline com \\r ajustada a largura do terminal) ou log/pipe.
-    """
+    """Write a progress update adapting automatically between interactive TTY and pipes."""
     is_interactive_tty = sys.stdout.isatty()
     if is_interactive_tty:
         terminal_columns = shutil.get_terminal_size(fallback=(80, 24)).columns
@@ -197,45 +203,55 @@ def write_progress_line(line_text: str, is_final: bool = False) -> None:
 
 
 class PipelineProgressTracker:
-    """Gerencia e exibe a barra de progresso global entre todas as etapas do deploy."""
+    """Tracks and prints overall progress across all repack/deploy stages."""
 
     def __init__(self, total_stages: int):
+        """Initialize tracker with total stage count."""
         self.total_stages = max(1, total_stages)
         self.current_stage = 0
         self.pipeline_start_time = time.time()
 
     def begin_stage(self, stage_title: str) -> None:
-        """Avanca para a proxima etapa e imprime a barra de progresso global."""
+        """Advance to the next stage and print the overall progress banner."""
         self.current_stage = min(self.total_stages, self.current_stage + 1)
         fraction_completed = (self.current_stage - 1) / self.total_stages
         global_bar = format_progress_bar(fraction_completed, bar_width=24)
         percent_completed = fraction_completed * 100.0
         elapsed_seconds = time.time() - self.pipeline_start_time
         print(
-            f"\n[ETAPA {self.current_stage}/{self.total_stages}] "
-            f"{global_bar} {percent_completed:5.1f}% | {stage_title} "
-            f"({elapsed_seconds:.1f}s decorridos)",
+            project_i18n.translate(
+                "repack.stage_line",
+                current=self.current_stage,
+                total=self.total_stages,
+                bar=global_bar,
+                percent=percent_completed,
+                title=stage_title,
+                elapsed=elapsed_seconds,
+            ),
             flush=True,
         )
 
     def finish_pipeline(self) -> None:
-        """Exibe a barra global em 100% ao concluir todo o pipeline."""
+        """Print the completed 100% pipeline banner."""
         global_bar = format_progress_bar(1.0, bar_width=24)
         total_elapsed = time.time() - self.pipeline_start_time
         print(
-            f"\n[PROGRESSO] Pipeline Completo {global_bar} 100.0% "
-            f"(tempo total: {total_elapsed:.1f}s)",
+            project_i18n.translate(
+                "repack.pipeline_complete_line",
+                bar=global_bar,
+                elapsed=total_elapsed,
+            ),
             flush=True,
         )
 
 
 def compute_directory_total_bytes(target_directory: Path) -> int:
-    """Calcula o volume total de bytes de entrada para estimar o tamanho do RPF."""
+    """Compute cumulative input file size inside a folder to estimate RPF output volume."""
     total_size_bytes = 0
     if not target_directory.is_dir():
         return 0
     for walk_root, dir_names, file_names in os.walk(target_directory):
-        # Mantem dir_names referenciado de forma limpa sem variaveis curtas
+        # Preserve directory traversal list without short temporary identifiers
         dir_names[:] = dir_names
         for single_filename in file_names:
             candidate_path = Path(walk_root) / single_filename
@@ -250,18 +266,28 @@ def copy_file_with_progress(
     source_file_path: Path, destination_file_path: Path, copy_label: str
 ) -> None:
     """
-    Copia um arquivo grande em blocos exibindo barra de progresso, MB/s e ETA,
-    preservando metadados (equivalente ao shutil.copy2).
+    Copy a large archive in 4 MB chunks while displaying progress, throughput
+    (MB/s), and ETA, preserving file metadata (equivalent to shutil.copy2).
     """
     destination_file_path.parent.mkdir(parents=True, exist_ok=True)
     total_file_bytes = source_file_path.stat().st_size
     total_megabytes = total_file_bytes / (1024.0 * 1024.0)
-    print(f"Instalando {copy_label} ({total_megabytes:.1f} MB) -> {destination_file_path}...", flush=True)
+    print(
+        project_i18n.translate(
+            "repack.installing_start",
+            label=copy_label,
+            megabytes=total_megabytes,
+            dest=destination_file_path,
+        ),
+        flush=True,
+    )
 
     if total_file_bytes == 0:
         shutil.copy2(str(source_file_path), str(destination_file_path))
         write_progress_line(
-            f"  [PROGRESSO] {format_progress_bar(1.0)} 100.0% (0.0/0.0 MB)",
+            project_i18n.translate(
+                "repack.copy_zero_done", bar=format_progress_bar(1.0)
+            ),
             is_final=True,
         )
         return
@@ -302,10 +328,14 @@ def copy_file_with_progress(
                     percent_done >= next_non_tty_milestone and percent_done < 100.0
                 )
                 if should_render_tty or should_render_log:
-                    progress_text = (
-                        f"  [PROGRESSO] {format_progress_bar(fraction_done)} "
-                        f"{percent_done:5.1f}% ({copied_megabytes:.1f}/{total_megabytes:.1f} MB "
-                        f"| {transfer_rate_mbs:.1f} MB/s | ETA {eta_seconds:.0f}s)"
+                    progress_text = project_i18n.translate(
+                        "repack.copy_progress",
+                        bar=format_progress_bar(fraction_done),
+                        percent=percent_done,
+                        copied_mb=copied_megabytes,
+                        total_mb=total_megabytes,
+                        rate_mbs=transfer_rate_mbs,
+                        eta_sec=eta_seconds,
                     )
                     write_progress_line(progress_text, is_final=False)
                     last_tty_refresh = current_time
@@ -316,11 +346,16 @@ def copy_file_with_progress(
     total_elapsed = max(0.001, time.time() - copy_start_time)
     final_rate_mbs = total_megabytes / total_elapsed
     write_progress_line(
-        f"  [PROGRESSO] {format_progress_bar(1.0)} 100.0% "
-        f"({total_megabytes:.1f}/{total_megabytes:.1f} MB | {final_rate_mbs:.1f} MB/s | {total_elapsed:.1f}s)",
+        project_i18n.translate(
+            "repack.copy_done",
+            bar=format_progress_bar(1.0),
+            total_mb=total_megabytes,
+            rate_mbs=final_rate_mbs,
+            elapsed=total_elapsed,
+        ),
         is_final=True,
     )
-    print(f"{copy_label} instalado com sucesso.", flush=True)
+    print(project_i18n.translate("repack.installed_ok", label=copy_label), flush=True)
 
 
 def execute_rage_create_with_progress(
@@ -330,13 +365,19 @@ def execute_rage_create_with_progress(
     task_description: str,
 ) -> str:
     """
-    Executa `rage create` monitorando progresso em tempo real:
-      - Fase de leitura/indexacao: exibe barra animada enquanto o .rpf ainda nao cresceu.
-      - Fase de gravacao em disco: calcula progresso real pelo volume gravado no .rpf.
+    Run `rage create` while monitoring real-time disk growth and showing
+    an animated activity indicator during input scanning.
     """
     expected_bytes = max(1, compute_directory_total_bytes(source_directory_path))
     expected_megabytes = expected_bytes / (1024.0 * 1024.0)
-    print(f"--- {task_description} ({expected_megabytes:.1f} MB entrada) ---", flush=True)
+    print(
+        project_i18n.translate(
+            "repack.create_start",
+            description=task_description,
+            expected_mb=expected_megabytes,
+        ),
+        flush=True,
+    )
 
     start_timestamp = time.time()
     process_handle = subprocess.Popen(
@@ -345,6 +386,7 @@ def execute_rage_create_with_progress(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
         errors="replace",
     )
 
@@ -372,37 +414,35 @@ def execute_rage_create_with_progress(
 
         if written_bytes <= 0:
             activity_bar = format_indeterminate_bar(tick_counter)
+            line_msg = project_i18n.translate(
+                "repack.reading_files",
+                bar=activity_bar,
+                elapsed=elapsed_seconds,
+                expected_mb=expected_megabytes,
+            )
             if is_interactive_tty:
-                write_progress_line(
-                    f"  [PROGRESSO] {activity_bar} Lendo arquivos... "
-                    f"({elapsed_seconds:.1f}s | ~{expected_megabytes:.1f} MB)",
-                    is_final=False,
-                )
+                write_progress_line(line_msg, is_final=False)
                 tty_line_active = True
             elif current_time - last_log_heartbeat >= 5.0:
-                write_progress_line(
-                    f"  [PROGRESSO] {activity_bar} Lendo arquivos... "
-                    f"({elapsed_seconds:.1f}s | ~{expected_megabytes:.1f} MB)",
-                    is_final=True,
-                )
+                write_progress_line(line_msg, is_final=True)
                 last_log_heartbeat = current_time
         else:
             write_fraction = min(0.99, written_bytes / expected_bytes)
             write_percent = write_fraction * 100.0
             written_megabytes = written_bytes / (1024.0 * 1024.0)
+            line_msg = project_i18n.translate(
+                "repack.writing_rpf",
+                bar=format_progress_bar(write_fraction),
+                percent=write_percent,
+                written_mb=written_megabytes,
+                expected_mb=expected_megabytes,
+                elapsed=elapsed_seconds,
+            )
             if is_interactive_tty:
-                write_progress_line(
-                    f"  [PROGRESSO] {format_progress_bar(write_fraction)} "
-                    f"{write_percent:5.1f}% Gravando RPF ({written_megabytes:.1f}/{expected_megabytes:.1f} MB | {elapsed_seconds:.1f}s)",
-                    is_final=False,
-                )
+                write_progress_line(line_msg, is_final=False)
                 tty_line_active = True
             elif write_percent >= next_write_milestone or (current_time - last_log_heartbeat >= 5.0):
-                write_progress_line(
-                    f"  [PROGRESSO] {format_progress_bar(write_fraction)} "
-                    f"{write_percent:5.1f}% Gravando RPF ({written_megabytes:.1f}/{expected_megabytes:.1f} MB | {elapsed_seconds:.1f}s)",
-                    is_final=True,
-                )
+                write_progress_line(line_msg, is_final=True)
                 last_log_heartbeat = current_time
                 while next_write_milestone <= write_percent:
                     next_write_milestone += 25.0
@@ -417,9 +457,13 @@ def execute_rage_create_with_progress(
         if tty_line_active:
             sys.stdout.write("\n")
             sys.stdout.flush()
-        print(f"[ERRO] Falha ao executar: {task_description}")
-        print(f"Codigo de retorno: {process_handle.returncode}")
-        print("Saida do processo:")
+        print(project_i18n.translate("repack.cmd_failed", description=task_description))
+        print(
+            project_i18n.translate(
+                "repack.return_code", returncode=process_handle.returncode
+            )
+        )
+        print(project_i18n.translate("repack.process_output"))
         print(combined_stdout)
         raise subprocess.CalledProcessError(
             process_handle.returncode, command_arguments_list, output=combined_stdout
@@ -429,8 +473,12 @@ def execute_rage_create_with_progress(
     final_bytes = output_rpf_path.stat().st_size if output_rpf_path.exists() else 0
     final_megabytes = final_bytes / (1024.0 * 1024.0)
     write_progress_line(
-        f"  [PROGRESSO] {format_progress_bar(1.0)} 100.0% "
-        f"({final_megabytes:.1f} MB) Concluido em {final_seconds:.1f}s",
+        project_i18n.translate(
+            "repack.create_done",
+            bar=format_progress_bar(1.0),
+            final_mb=final_megabytes,
+            elapsed=final_seconds,
+        ),
         is_final=True,
     )
     return combined_stdout
@@ -440,13 +488,14 @@ def repack_single_rpf_stage(
     output_rpf_path: Path,
     source_directory_path: Path,
     task_description: str,
+    rage_cli_binary: str,
 ) -> None:
-    """Remove RPF antigo, executa `rage create` com progresso e aplica patch OPEN/f_size=0."""
+    """Remove stale output RPF, rebuild via `rage create`, and patch header/TOC."""
     if output_rpf_path.exists():
         output_rpf_path.unlink()
     execute_rage_create_with_progress(
         [
-            RAGE_CLI_TOOL,
+            rage_cli_binary,
             "create",
             "-o",
             str(output_rpf_path),
@@ -459,25 +508,47 @@ def repack_single_rpf_stage(
     patch_rpf7_open_and_zero_compressed(output_rpf_path)
 
 
-def main():
-    print("=== GTA V MOD REPACK & DEPLOY PIPELINE ===", flush=True)
-    print(f"RAGE CLI:        {RAGE_CLI_TOOL}", flush=True)
-    print(f"Staging RPF:     {STAGING_DIRECTORY}", flush=True)
-    print(f"Destino GTA V:   {GTAV_MODS_DIRECTORY}", flush=True)
+def run_repack_and_deploy() -> None:
+    """Execute the full RPF repack, OPEN header patch, deploy, and verify flow."""
+    paths_map = _load_repack_paths()
+    rage_cli_tool = str(paths_map["rage_cli"])
+    gtav_mods_dir = Path(paths_map["gtav_mods_dir"])
+    staging_dir = Path(paths_map["staging_dir"])
 
-    # Validacao previa dos diretorios essenciais
-    if not STAGING_DIRECTORY.exists():
-        print(
-            f"[ERRO] Diretorio de staging nao encontrado: {STAGING_DIRECTORY}"
-        )
+    mppatches_extracted_dir = Path(paths_map["mppatches_extracted_dir"])
+    mppatchesng_extracted_dir = Path(paths_map["mppatchesng_extracted_dir"])
+    mppatches_rpf_file = Path(paths_map["mppatches_rpf_file"])
+    mppatchesng_dlc_rpf_file = Path(paths_map["mppatchesng_dlc_rpf_file"])
+    target_dlc_rpf_path = Path(paths_map["target_dlc_rpf_path"])
+
+    patchday4ng_extracted_dir = Path(paths_map["patchday4ng_extracted_dir"])
+    patchday4ng_inner_rpf = Path(paths_map["patchday4ng_inner_rpf"])
+    patchday4ng_models_dir = Path(paths_map["patchday4ng_models_dir"])
+    patchday4ng_dlc_rpf_file = Path(paths_map["patchday4ng_dlc_rpf_file"])
+    target_patchday4ng_dlc_path = Path(paths_map["target_patchday4ng_dlc_path"])
+
+    streamedpeds_extracted_dir = Path(paths_map["streamedpeds_extracted_dir"])
+    streamedpedprops_extracted_dir = Path(paths_map["streamedpedprops_extracted_dir"])
+    x64v_extracted_dir = Path(paths_map["x64v_extracted_dir"])
+    streamedpeds_rpf_file = Path(paths_map["streamedpeds_rpf_file"])
+    streamedpedprops_rpf_file = Path(paths_map["streamedpedprops_rpf_file"])
+    x64v_modded_rpf_file = Path(paths_map["x64v_modded_rpf_file"])
+    target_x64v_rpf_path = Path(paths_map["target_x64v_rpf_path"])
+
+    print(project_i18n.translate("repack.banner"), flush=True)
+    print(f"RAGE CLI:        {rage_cli_tool}", flush=True)
+    print(f"Staging RPF:     {staging_dir}", flush=True)
+    print(project_i18n.translate("repack.gtav_dest", path=gtav_mods_dir), flush=True)
+
+    if not staging_dir.exists():
+        print(project_i18n.translate("repack.staging_missing", path=staging_dir))
         sys.exit(1)
 
     has_patchday4ng_staging = (
-        PATCHDAY4NG_EXTRACTED_DIR.exists() and PATCHDAY4NG_MODELS_DIR.exists()
+        patchday4ng_extracted_dir.exists() and patchday4ng_models_dir.exists()
     )
-    has_streamedpedprops_staging = STREAMEDPEDPROPS_EXTRACTED_DIR.is_dir()
+    has_streamedpedprops_staging = streamedpedprops_extracted_dir.is_dir()
 
-    # Etapas: mppatches + mppatchesng_dlc + deploy_dlc + [patchday4ng*3] + streamedpeds + [streamedpedprops] + x64v + deploy_x64v + verify
     total_pipeline_stages = (
         7
         + (3 if has_patchday4ng_staging else 0)
@@ -487,105 +558,135 @@ def main():
 
     try:
         # 1. Repack mppatches.rpf
-        stage_tracker.begin_stage("Repacotando mppatches.rpf")
+        stage_title = project_i18n.translate("repack.stage_repacking", name="mppatches.rpf")
+        stage_tracker.begin_stage(stage_title)
         repack_single_rpf_stage(
-            MPPATCHES_RPF_FILE,
-            MPPATCHES_EXTRACTED_DIR,
-            "Repacotando mppatches.rpf",
+            mppatches_rpf_file,
+            mppatches_extracted_dir,
+            stage_title,
+            rage_cli_tool,
         )
 
         # 2. Repack mppatchesng_dlc.rpf
-        stage_tracker.begin_stage("Repacotando mppatchesng_dlc.rpf")
+        stage_title = project_i18n.translate("repack.stage_repacking", name="mppatchesng_dlc.rpf")
+        stage_tracker.begin_stage(stage_title)
         repack_single_rpf_stage(
-            MPPATCHESNG_DLC_RPF_FILE,
-            MPPATCHESNG_EXTRACTED_DIR,
-            "Repacotando mppatchesng_dlc.rpf",
+            mppatchesng_dlc_rpf_file,
+            mppatchesng_extracted_dir,
+            stage_title,
+            rage_cli_tool,
         )
 
         # 3. Deploy dlc.rpf
-        stage_tracker.begin_stage("Instalando mppatchesng/dlc.rpf")
+        stage_tracker.begin_stage(
+            project_i18n.translate("repack.stage_installing", name="mppatchesng/dlc.rpf")
+        )
         copy_file_with_progress(
-            MPPATCHESNG_DLC_RPF_FILE, TARGET_DLC_RPF_PATH, "dlc.rpf"
+            mppatchesng_dlc_rpf_file, target_dlc_rpf_path, "dlc.rpf"
         )
 
-        # 3B. Repack e Deploy patchday4ng (se presente no staging)
+        # 3B. Repack and deploy patchday4ng when present in staging
         if has_patchday4ng_staging:
-            stage_tracker.begin_stage("Repacotando patchday4ng.rpf")
+            stage_title = project_i18n.translate("repack.stage_repacking", name="patchday4ng.rpf")
+            stage_tracker.begin_stage(stage_title)
             repack_single_rpf_stage(
-                PATCHDAY4NG_INNER_RPF,
-                PATCHDAY4NG_MODELS_DIR,
-                "Repacotando patchday4ng.rpf",
+                patchday4ng_inner_rpf,
+                patchday4ng_models_dir,
+                stage_title,
+                rage_cli_tool,
             )
 
-            stage_tracker.begin_stage("Repacotando patchday4ng dlc.rpf")
+            stage_title = project_i18n.translate("repack.stage_repacking", name="patchday4ng dlc.rpf")
+            stage_tracker.begin_stage(stage_title)
             repack_single_rpf_stage(
-                PATCHDAY4NG_DLC_RPF_FILE,
-                PATCHDAY4NG_EXTRACTED_DIR,
-                "Repacotando patchday4ng dlc.rpf",
+                patchday4ng_dlc_rpf_file,
+                patchday4ng_extracted_dir,
+                stage_title,
+                rage_cli_tool,
             )
 
-            stage_tracker.begin_stage("Instalando patchday4ng/dlc.rpf")
+            stage_tracker.begin_stage(
+                project_i18n.translate("repack.stage_installing", name="patchday4ng/dlc.rpf")
+            )
             copy_file_with_progress(
-                PATCHDAY4NG_DLC_RPF_FILE,
-                TARGET_PATCHDAY4NG_DLC_PATH,
+                patchday4ng_dlc_rpf_file,
+                target_patchday4ng_dlc_path,
                 "patchday4ng/dlc.rpf",
             )
 
         # 4. Repack streamedpeds_players.rpf
-        stage_tracker.begin_stage("Repacotando streamedpeds_players.rpf")
+        stage_title = project_i18n.translate(
+            "repack.stage_repacking", name="streamedpeds_players.rpf"
+        )
+        stage_tracker.begin_stage(stage_title)
         repack_single_rpf_stage(
-            STREAMEDPEDS_RPF_FILE,
-            STREAMEDPEDS_EXTRACTED_DIR,
-            "Repacotando streamedpeds_players.rpf",
+            streamedpeds_rpf_file,
+            streamedpeds_extracted_dir,
+            stage_title,
+            rage_cli_tool,
         )
 
-        # 4B. Repack streamedpedprops.rpf (props e dummies de oculos)
+        # 4B. Repack streamedpedprops.rpf (props and eyewear dummies)
         if has_streamedpedprops_staging:
-            stage_tracker.begin_stage("Repacotando streamedpedprops.rpf")
+            stage_title = project_i18n.translate(
+                "repack.stage_repacking", name="streamedpedprops.rpf"
+            )
+            stage_tracker.begin_stage(stage_title)
             repack_single_rpf_stage(
-                STREAMEDPEDPROPS_RPF_FILE,
-                STREAMEDPEDPROPS_EXTRACTED_DIR,
-                "Repacotando streamedpedprops.rpf",
+                streamedpedprops_rpf_file,
+                streamedpedprops_extracted_dir,
+                stage_title,
+                rage_cli_tool,
             )
         else:
             print(
-                f"[AVISO] Diretorio streamedpedprops_extracted ausente ({STREAMEDPEDPROPS_EXTRACTED_DIR}); pulando repack de props."
+                project_i18n.translate(
+                    "repack.props_missing_skip", path=streamedpedprops_extracted_dir
+                )
             )
 
         # 5. Repack x64v_modded.rpf
-        stage_tracker.begin_stage("Repacotando x64v_modded.rpf")
+        stage_title = project_i18n.translate("repack.stage_repacking", name="x64v_modded.rpf")
+        stage_tracker.begin_stage(stage_title)
         repack_single_rpf_stage(
-            X64V_MODDED_RPF_FILE,
-            X64V_EXTRACTED_DIR,
-            "Repacotando x64v_modded.rpf",
+            x64v_modded_rpf_file,
+            x64v_extracted_dir,
+            stage_title,
+            rage_cli_tool,
         )
 
         # 6. Deploy x64v.rpf
-        stage_tracker.begin_stage("Instalando x64v.rpf")
+        stage_tracker.begin_stage(
+            project_i18n.translate("repack.stage_installing", name="x64v.rpf")
+        )
         copy_file_with_progress(
-            X64V_MODDED_RPF_FILE, TARGET_X64V_RPF_PATH, "x64v.rpf"
+            x64v_modded_rpf_file, target_x64v_rpf_path, "x64v.rpf"
         )
 
-        # 7. Verificacao de Criptografia e Estrutura
-        stage_tracker.begin_stage("Verificando RPFs instalados (OPEN e f_size=0)")
-        print("\n=== VERIFICANDO ARQUIVOS INSTALADOS ===", flush=True)
-        with open(TARGET_DLC_RPF_PATH, "rb") as dlc_archive_file:
+        # 7. Verify encryption flags and uncompressed TOC entries
+        stage_tracker.begin_stage(project_i18n.translate("repack.stage_verifying"))
+        print(project_i18n.translate("repack.verifying_header"), flush=True)
+        with open(target_dlc_rpf_path, "rb") as dlc_archive_file:
             dlc_archive_file.seek(12)
             dlc_encryption_flag = dlc_archive_file.read(4)
 
-        with open(TARGET_X64V_RPF_PATH, "rb") as x64v_archive_file:
+        with open(target_x64v_rpf_path, "rb") as x64v_archive_file:
             x64v_archive_file.seek(12)
             x64v_encryption_flag = x64v_archive_file.read(4)
 
         print(
-            f"dlc.rpf cabecalho de criptografia:  {dlc_encryption_flag} (esperado b'OPEN')"
+            project_i18n.translate(
+                "repack.verify_dlc_header", flag=dlc_encryption_flag
+            )
         )
         print(
-            f"x64v.rpf cabecalho de criptografia: {x64v_encryption_flag} (esperado b'OPEN')"
+            project_i18n.translate(
+                "repack.verify_x64v_header", flag=x64v_encryption_flag
+            )
         )
 
         dlc_verification_output = subprocess.run(
-            [RAGE_CLI_TOOL, "list", "-d", str(TARGET_DLC_RPF_PATH)],
+            [rage_cli_tool, "list", "-d", str(target_dlc_rpf_path)],
             capture_output=True,
             text=True,
             check=True,
@@ -597,11 +698,13 @@ def main():
             and "Compressed: 0" not in line_content
         ]
         print(
-            f"Entradas binarias comprimidas em dlc.rpf: {len(dlc_compressed_entries)} (esperado 0)"
+            project_i18n.translate(
+                "repack.verify_dlc_compressed", count=len(dlc_compressed_entries)
+            )
         )
 
         x64v_verification_output = subprocess.run(
-            [RAGE_CLI_TOOL, "list", "-d", str(TARGET_X64V_RPF_PATH)],
+            [rage_cli_tool, "list", "-d", str(target_x64v_rpf_path)],
             capture_output=True,
             text=True,
             check=True,
@@ -613,7 +716,9 @@ def main():
             and "Compressed: 0" not in line_content
         ]
         print(
-            f"Entradas binarias comprimidas em x64v.rpf: {len(x64v_compressed_entries)} (esperado 0)"
+            project_i18n.translate(
+                "repack.verify_x64v_compressed", count=len(x64v_compressed_entries)
+            )
         )
 
         is_dlc_valid = (
@@ -625,19 +730,31 @@ def main():
 
         if is_dlc_valid and is_x64v_valid:
             stage_tracker.finish_pipeline()
-            print(
-                "\n[VERIFICACAO APROVADA] Todos os arquivos foram instalados com sucesso, "
-                "com cabecalho 'OPEN' e zero risco de ERR_GEN_ZLIB_2!"
-            )
+            print(project_i18n.translate("repack.verify_passed"))
         else:
-            print(
-                "\n[AVISO] Discrepancias encontradas na verificacao. Verifique os logs detalhados."
-            )
+            print(project_i18n.translate("repack.verify_warn"))
             sys.exit(1)
 
     except Exception as general_error:
-        print(f"\n[FALHA FATAL NO DEPLOY] {general_error}")
+        print(project_i18n.translate("repack.fatal_error", error=general_error))
         sys.exit(1)
+
+
+def main() -> None:
+    """CLI entrypoint for RPF repacking and GTA V deployment."""
+    project_i18n.set_active_language()
+    argument_parser = argparse.ArgumentParser(
+        description=project_i18n.translate("repack.cli_description")
+    )
+    argument_parser.add_argument(
+        "--lang",
+        choices=["auto", "en", "ja", "pt"],
+        default="auto",
+        help=project_i18n.translate("common.language_option_help"),
+    )
+    parsed_arguments = argument_parser.parse_args()
+    project_i18n.set_active_language(parsed_arguments.lang)
+    run_repack_and_deploy()
 
 
 if __name__ == "__main__":

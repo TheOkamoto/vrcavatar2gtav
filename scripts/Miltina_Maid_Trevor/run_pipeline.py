@@ -2,14 +2,16 @@
 """
 run_pipeline.py
 ===============
-Executa a pipeline completa de Miltina Maid (Trevor - player_two) utilizando
-exclusivamente os caminhos definidos em vrc2gtav.cfg:
-  1. Gera o texture atlas 2K e compila o .ytd
-  2. Executa build_trevor_miltina.py no Blender e gera preview renders
-  3. Renderiza preview no RAGE e copia capturas se o diretorio de artefatos existir
-  4. Aplica os arquivos nos slots do Trevor e executa o repack/deploy RPF
+Runs the complete Miltina Maid (Trevor / player_two) pipeline using the
+paths configured in vrc2gtav.cfg:
+  1. Generates the 2K Texture Atlas and compiles the .ytd archive.
+  2. Executes build_trevor_miltina.py in Blender and renders previews.
+  3. Renders RAGE Engine previews and copies captures to artifacts if present.
+  4. Applies files to Trevor slots and runs RPF repack/deploy.
 """
 
+import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -22,10 +24,35 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
     if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
 
+import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
 
+def resolve_startup_language() -> None:
+    """Resolve UI language from CLI arguments, environment variables, or config."""
+    configured_language = None
+    try:
+        configured_language = project_paths.get_configured_language()
+    except FileNotFoundError:
+        configured_language = None
+    i18n.set_active_language(configured_language, cli_args=sys.argv[1:])
+
+
 def main() -> int:
+    """Execute the end-to-end Miltina Maid build, render, and deploy pipeline."""
+    resolve_startup_language()
+    parser = argparse.ArgumentParser(description=i18n.translate("trevor.run.cli_desc"))
+    parser.add_argument(
+        "--lang",
+        choices=list(i18n.SUPPORTED_LANGUAGES) + ["auto"],
+        default=None,
+        help=i18n.translate("common.language_option_help"),
+    )
+    parsed_args = parser.parse_args()
+    if parsed_args.lang and parsed_args.lang != "auto":
+        os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
+        i18n.set_active_language(parsed_args.lang)
+
     trevor_cfg = project_paths.get_character_paths("trevor")
     python_exe = project_paths.get_python_exe()
     rage_cli = project_paths.get_rage_cli()
@@ -33,22 +60,22 @@ def main() -> int:
     renders_source = project_paths.get_renders_output_dir()
     staging_dir = project_paths.get_staging_dir()
 
-    # 1. Gerar Atlas 2K e .ytd
-    print("[INFO] Gerando texture atlas 2K da Miltina...")
+    # 1. Generate 2K Atlas and .ytd
+    print(i18n.translate("trevor.run.generating_atlas"))
     atlas_script = Path(trevor_cfg["atlas_script"])
     if not atlas_script.exists():
-        print(f"[ERRO] Script de atlas nao encontrado: {atlas_script}")
+        print(i18n.translate("trevor.run.atlas_script_missing", path=atlas_script))
         return 1
     subprocess.run([python_exe, str(atlas_script)], check=True)
 
-    # 2. Compilar modelo no Blender + renderizar previews
+    # 2. Compile model in Blender + render previews
     project_paths.ensure_character_skeleton_yft("trevor")
     blender_script = Path(trevor_cfg["blender_script"])
     if not blender_script.exists():
-        print(f"[ERRO] Script Blender nao encontrado: {blender_script}")
+        print(i18n.translate("trevor.run.blender_script_missing", path=blender_script))
         return 1
     blender_cmd, blender_env = project_paths.build_blender_command(blender_script)
-    print("[INFO] Executando build e render no Blender...")
+    print(i18n.translate("trevor.run.running_blender"))
     subprocess.run(
         blender_cmd,
         stdin=subprocess.DEVNULL,
@@ -61,13 +88,13 @@ def main() -> int:
             source_render = renders_source / render_name
             if source_render.exists():
                 shutil.copy2(source_render, artifacts_dir / render_name)
-                print(f"[OK] Render copiado para artifacts: {render_name}")
+                print(i18n.translate("trevor.run.copied_render", name=render_name))
 
-    # 3. Preview no RAGE Engine (opcional se modelos e .ytd existirem)
+    # 3. Preview in RAGE Engine
     ydd_path = Path(trevor_cfg["target_model_ydd"])
     ytd_path = Path(trevor_cfg["ytd_file"])
     if not ydd_path.exists() or not ytd_path.exists():
-        print(f"[ERRO] Arquivos compilados ausentes: {ydd_path} / {ytd_path}")
+        print(i18n.translate("trevor.run.compiled_missing", ydd=ydd_path, ytd=ytd_path))
         return 1
 
     rpf_stage_dir = staging_dir / "miltina_preview_rpf_stage"
@@ -84,7 +111,7 @@ def main() -> int:
 
     rage_render_dir = renders_source / "miltina_rage_renders"
     rage_render_dir.mkdir(parents=True, exist_ok=True)
-    print("[INFO] Gerando preview de render no RAGE...")
+    print(i18n.translate("trevor.run.rendering_rage"))
     subprocess.run(
         [
             rage_cli,
@@ -103,7 +130,7 @@ def main() -> int:
             if filename.suffix.lower() == ".png":
                 dest_name = f"miltina_rage_{filename.name}"
                 shutil.copy2(filename, artifacts_dir / dest_name)
-                print(f"[OK] Captura RAGE copiada para artifacts: {dest_name}")
+                print(i18n.translate("trevor.run.copied_rage_capture", name=dest_name))
 
         front_screenshot = rage_render_dir / f"{ydd_path.stem}_front.png"
         if front_screenshot.exists():
@@ -114,10 +141,14 @@ def main() -> int:
                 (int(width_px * 0.25), 0, int(width_px * 0.75), int(height_px * 0.42))
             )
             cropped_img.save(crop_dest)
-            print("[OK] Gerado recorte do rosto RAGE: miltina_rage_head_crop.png")
+            print(
+                i18n.translate(
+                    "trevor.run.created_head_crop", name="miltina_rage_head_crop.png"
+                )
+            )
 
-    # 4. Aplicar modelo + texturas nos slots do Trevor e fazer deploy RPF
-    print("[INFO] Aplicando Miltina aos slots do Trevor...")
+    # 4. Apply model and textures to Trevor slots and run RPF deploy
+    print(i18n.translate("trevor.run.applying_slots"))
     apply_characters_script = project_paths.get_config_path(
         "common_assets", "apply_characters_script"
     )
@@ -126,13 +157,13 @@ def main() -> int:
         check=True,
     )
 
-    print("[INFO] Repacotando RPFs e instalando no diretorio mods do GTA V...")
+    print(i18n.translate("trevor.run.repacking"))
     repack_script = project_paths.get_config_path(
         "common_assets", "repack_deploy_script"
     )
     subprocess.run([python_exe, str(repack_script)], check=True)
 
-    print("[SUCESSO] Pipeline completa da Miltina finalizada com sucesso.")
+    print(i18n.translate("trevor.run.done"))
     return 0
 
 

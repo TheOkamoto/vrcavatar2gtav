@@ -1,36 +1,23 @@
 #!/usr/bin/env python3
 """
-build_avatar_gtav_pivate_ER.py
-==============================
-Script executado via Blender 4.0+ (modo background) com addon Sollumz 2.9.0
-para compilar a Shinano Eternal Reunion completa (acessorios, cabelo custom
-CooniBob e relogio de bolso) como componente superior (uppr) para o Michael
-(player_zero) no GTA V Legacy (RAGE Engine GEN8).
+build_michael_er.py
+===================
+Executed via Blender 4.0+ (background mode) with the Sollumz addon to compile
+the full Shinano Eternal Reunion avatar (outfits, CooniBob custom hair, and
+Pocket Watch) as an upper component (`uppr`) for Michael (`player_zero`) in
+GTA V Legacy (RAGE Engine GEN8).
 
-Caracteristicas Tecnicas e Regras RAGE Engine:
-  1. Suporte Multi-FBX:
-     - Shinano Base: Body (rosto/olhos) e Body_base (corpo humano)
-     - Eternal Reunion: UN1 (camisa, saia, laco, choker), UN2 (corset, boina, sapatos, meias),
-       UN3 (bolsa, oculos, corrente de cintura)
-     - Pocket Watch: Relogio de bolso funcional
-     - CooniBob: Cabelo curto customizado com orelhas (CooniBob_Bang, Back, Side, Dog Ears, ACC)
-  2. Remocao estrita de itens inativos / EditorOnly da hierarquia do Unity:
-     - Roupas intimas (Cloth_under_bra, Cloth_under_shorts) excluidas
-     - Cabelo padrao desabilitado excluido
-     - Cauda CooniBob_Tail excluida
-     - Variante UN1_Shirt_Summer e UN4_ChestRibbon 2 excluidas
-  3. Shrink Culling e Blendshapes:
-     - Ativa Corset=1.0 em Body_base e deleta faces do corpo ocultas sob a roupa
-     - Ativa Breasts_big=1.0 (busto conforme referencia) e Toe_heels=1.0
-     - Aplica 64 blendshapes faciais de ShinanoDefAdultNewv5.anim no Body
-  4. Mapeamento Universal de Ossos (Modular Avatar Bake):
-     - Todos os ossos de saia, bolsa, correntes, relogio e cabelo sao assados
-       diretamente nos 55 ossos validos do esqueleto do Michael (player_zero.yft)
-  5. Texture Atlas 4x2 Unificado com Shader ped_default.sps:
-     - UVs remapeadas para as 7 celulas da imagem 4096x2048
-     - Sem sobreposicao de texturas, sem efeito camuflado, sem tela preta
-  6. Auto-Chunking de Geometrias (< 30.000 vertices):
-     - Divide sub-geometrias densas em slots adicionais para respeitar o limite uint16 (65.535)
+Technical Rules & Features:
+  1. Multi-FBX assembly: Shinano Base, Eternal Reunion Outfit, Pocket Watch,
+     and CooniBob / Neko Tied Bob Hair.
+  2. Strict removal of EditorOnly / disabled Unity items (underwear, default
+     hair, CooniBob_Tail, UN2_Beret, summer variants).
+  3. Shrink culling and indexed Unity blendshapes + 64 facial blendshapes from
+     ShinanoDefAdultNewv5.anim.
+  4. Universal bone mapping onto the Michael GTA V skeleton (`player_zero.yft`)
+     and 1:1 arm/hand/finger relocation for RAGE animations.
+  5. Unified 4x2 Texture Atlas (`ped_default.sps`).
+  6. Auto-chunking of oversized materials to respect the uint16 vertex limit.
 """
 
 import argparse
@@ -47,7 +34,7 @@ import addon_utils
 import bmesh
 import bpy
 
-# Configura sys.path para localizar vrc2gtav_paths independentemente de espelho
+# Locate vrc2gtav_paths / vrc2gtav_i18n regardless of repository mirror
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _REPO_ROOT_CANDIDATE = _SCRIPT_DIR.parent.parent
 for _tools_candidate in (
@@ -57,13 +44,14 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
-import vrc2gtav_paths as project_paths
 import hand_skeleton_helper
 import mathutils
+import vrc2gtav_i18n as i18n
+import vrc2gtav_paths as project_paths
 
 
 # ---------------------------------------------------------------------------
-# Perfis dos personagens do GTA V Legacy
+# GTA V Legacy character profiles
 # ---------------------------------------------------------------------------
 CHARACTER_PROFILES = {
     "michael": {
@@ -94,9 +82,10 @@ CHARACTER_PROFILES = {
 
 
 # ---------------------------------------------------------------------------
-# Leitor autonomo de arquivos Unity .anim (YAML) para blendshapes faciais
+# Standalone Unity .anim (YAML) parser for facial blendshapes
 # ---------------------------------------------------------------------------
 def load_unity_anim_blendshapes(anim_file_path):
+    """Parse normalized blendshape curve weights from a Unity .anim YAML file."""
     blendshape_weights = {}
     if not anim_file_path or not os.path.exists(anim_file_path):
         return blendshape_weights
@@ -127,15 +116,17 @@ def load_unity_anim_blendshapes(anim_file_path):
 
 
 # ---------------------------------------------------------------------------
-# Leitor binario de nos FBX para extrair normais IndexToDirect
+# Binary FBX node reader for IndexToDirect custom face normals
 # ---------------------------------------------------------------------------
 def parse_fbx_binary_nodes(fbx_raw_bytes):
+    """Parse binary FBX node records into a nested Python list tree."""
     fbx_version = struct.unpack_from("<I", fbx_raw_bytes, 23)[0]
     is_64bit_header = fbx_version >= 7500
     header_format = "<QQQB" if is_64bit_header else "<IIIB"
     header_byte_size = 25 if is_64bit_header else 13
 
     def parse_single_property(byte_pos):
+        """Decode one FBX node property value and return (value, next_pos)."""
         type_code = chr(fbx_raw_bytes[byte_pos])
         byte_pos += 1
         if type_code == "Y":
@@ -174,9 +165,12 @@ def parse_fbx_binary_nodes(fbx_raw_bytes):
                 f"<{array_length}{format_map[type_code]}", raw_array
             )
             return unpacked_array, byte_pos
-        raise ValueError(f"Tipo de propriedade FBX desconhecido: {type_code}")
+        raise ValueError(
+            i18n.translate("michael.build.unknown_fbx_prop", type_code=type_code)
+        )
 
     def parse_single_node(byte_pos):
+        """Recursively decode one FBX node and its children."""
         end_offset, prop_count, prop_byte_len, name_len = struct.unpack_from(
             header_format, fbx_raw_bytes, byte_pos
         )
@@ -189,7 +183,7 @@ def parse_fbx_binary_nodes(fbx_raw_bytes):
         byte_pos += name_len
         prop_list = []
         prop_end_pos = byte_pos + prop_byte_len
-        for prop_index in range(prop_count):
+        for _prop_index in range(prop_count):
             prop_val, byte_pos = parse_single_property(byte_pos)
             prop_list.append(prop_val)
         byte_pos = prop_end_pos
@@ -212,6 +206,7 @@ def parse_fbx_binary_nodes(fbx_raw_bytes):
 
 
 def load_fbx_face_loop_normals(fbx_file_path, target_geometry_names=None):
+    """Extract per-loop IndexToDirect facial normals from the source FBX."""
     if not os.path.exists(fbx_file_path):
         return None
     if target_geometry_names is None:
@@ -278,7 +273,7 @@ def load_fbx_face_loop_normals(fbx_file_path, target_geometry_names=None):
 
 
 # ---------------------------------------------------------------------------
-# Mapeador Universal de Ossos para GTA V (Modular Avatar Bake)
+# Universal GTA V bone mapper (Modular Avatar bake)
 # ---------------------------------------------------------------------------
 HUMAN_TO_GTAV_BONE_MAP = {
     "Hips": "SKEL_Pelvis",
@@ -357,21 +352,21 @@ HEAD_ACCESSORY_MESH_NAMES = frozenset({
 
 
 def smoothstep_unit(scalar_val):
-    """Interpolacao Hermite suave limitada ao intervalo [0.0, 1.0]."""
+    """Smooth Hermite interpolation clamped to [0.0, 1.0]."""
     clamped_val = max(0.0, min(1.0, float(scalar_val)))
     return clamped_val * clamped_val * (3.0 - 2.0 * clamped_val)
 
 
 def compute_pocket_watch_align_matrix(arm_outfit, arm_watch):
-    """Calcula a matriz 4x4 para alinhar o Pocket Watch ao anel da cintura (Shinano.unity)."""
+    """Compute the 4x4 matrix aligning the Pocket Watch to the waist watch ring."""
     watch_bone_name = "Pocket Watch_Root"
     if not arm_outfit or watch_bone_name not in arm_outfit.data.bones:
         raise RuntimeError(
-            f"Osso '{watch_bone_name}' nao encontrado na armature do outfit Eternal Reunion."
+            i18n.translate("michael.build.watch_bone_missing_outfit", bone=watch_bone_name)
         )
     if not arm_watch or watch_bone_name not in arm_watch.data.bones:
         raise RuntimeError(
-            f"Osso '{watch_bone_name}' nao encontrado na armature do Pocket Watch."
+            i18n.translate("michael.build.watch_bone_missing_watch", bone=watch_bone_name)
         )
 
     outfit_bone = arm_outfit.data.bones[watch_bone_name]
@@ -380,12 +375,12 @@ def compute_pocket_watch_align_matrix(arm_outfit, arm_watch):
     outfit_matrix = arm_outfit.matrix_world @ outfit_bone.matrix_local
     watch_matrix = arm_watch.matrix_world @ watch_bone.matrix_local
 
-    # Normaliza rotacoes 3x3 antes da inversao para isolar apenas orientacao e aplicar escala 1.10 de cena
+    # Normalize 3x3 rotations before inverting to isolate orientation and apply 1.10 scale
     outfit_rot_mat = outfit_matrix.to_3x3().normalized().to_4x4()
     watch_rot_mat = watch_matrix.to_3x3().normalized().to_4x4()
     watch_head_pos = arm_watch.matrix_world @ watch_bone.head_local
 
-    # Posicao exata do MA Pocket Watch_Root na cena Shinano.unity (alinha ao UN_Watchring com precisao < 0.5 mm)
+    # Exact Pocket Watch_Root coordinates from Shinano.unity (< 0.5 mm error to ring)
     unity_target_pos = mathutils.Vector((-0.05371, -0.07346, 0.82380))
     return (
         mathutils.Matrix.Translation(unity_target_pos)
@@ -403,7 +398,7 @@ def compute_skirt_vertex_weights(
     vgroup_names_by_idx,
     vgroup_target_names,
 ):
-    """Calcula pesos anatomicos da saia (z_back28_high) evitando esticamento, split traseiro e clipping."""
+    """Compute anatomical skirt bone weights (z_back28_high) to avoid rear clipping."""
     remapped_weights = {}
     skirt_weight = 0.0
 
@@ -417,30 +412,38 @@ def compute_skirt_vertex_weights(
                 skirt_weight += grp_elem.weight
             else:
                 target_bone = vgroup_target_names[grp_elem.group]
-                remapped_weights[target_bone] = remapped_weights.get(target_bone, 0.0) + grp_elem.weight
+                remapped_weights[target_bone] = (
+                    remapped_weights.get(target_bone, 0.0) + grp_elem.weight
+                )
 
     if skirt_weight > 0.0:
-        # Rampa vertical: cintura (+0.10) presa 100% ao Pelvis/Spine; barra/gluteos (<= +0.02) liberam ate 28% atras
-        z_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
-        # Rampa frontal->traseira: frente (y <= -0.02) fica 100% no Pelvis para nao afundar na barriga ao sentar
+        # Vertical ramp: waist (+0.10) anchored 100% to Pelvis; hem (<= +0.02) shares up to 28%
+        vertical_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
+        # Front-to-back ramp: keep front (y <= -0.02) on Pelvis to prevent belly sink when sitting
         back_ramp = smoothstep_unit((ydd_co.y + 0.02) / 0.06)
-        # Interpolacao anatomica L/R (+X = perna esquerda SKEL_L_Thigh, -X = perna direita SKEL_R_Thigh)
-        lr_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
+        # Left/right blend across centerline (+X left thigh, -X right thigh)
+        left_right_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
 
-        thigh_cap = z_ramp * 0.28 * back_ramp
+        thigh_cap = vertical_ramp * 0.28 * back_ramp
         thigh_weight = skirt_weight * thigh_cap
         pelvis_weight = skirt_weight - thigh_weight
 
         if pelvis_weight > 1e-6:
-            remapped_weights["SKEL_Pelvis"] = remapped_weights.get("SKEL_Pelvis", 0.0) + pelvis_weight
-        left_thigh_weight = thigh_weight * lr_mix
-        right_thigh_weight = thigh_weight * (1.0 - lr_mix)
+            remapped_weights["SKEL_Pelvis"] = (
+                remapped_weights.get("SKEL_Pelvis", 0.0) + pelvis_weight
+            )
+        left_thigh_weight = thigh_weight * left_right_mix
+        right_thigh_weight = thigh_weight * (1.0 - left_right_mix)
         if left_thigh_weight > 1e-6:
-            remapped_weights["SKEL_L_Thigh"] = remapped_weights.get("SKEL_L_Thigh", 0.0) + left_thigh_weight
+            remapped_weights["SKEL_L_Thigh"] = (
+                remapped_weights.get("SKEL_L_Thigh", 0.0) + left_thigh_weight
+            )
         if right_thigh_weight > 1e-6:
-            remapped_weights["SKEL_R_Thigh"] = remapped_weights.get("SKEL_R_Thigh", 0.0) + right_thigh_weight
+            remapped_weights["SKEL_R_Thigh"] = (
+                remapped_weights.get("SKEL_R_Thigh", 0.0) + right_thigh_weight
+            )
 
-    # Garante no maximo 4 influencias por vertice para compatibilidade RAGE Engine
+    # Enforce maximum 4 bone influences per vertex for RAGE Engine compatibility
     if len(remapped_weights) > 4:
         sorted_weights = sorted(
             remapped_weights.items(),
@@ -453,31 +456,29 @@ def compute_skirt_vertex_weights(
 
 
 def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
-    # 1. Regras especificas por malha de acessorios
+    """Map a VRChat/Unity bone name to its target GTA V RAGE skeleton bone."""
     if mesh_name == "UN3_Bag":
-        lower_b = source_bone_name.lower()
-        if "shoulder.l" in lower_b or "shoulder_l" in lower_b:
+        lower_bone_name = source_bone_name.lower()
+        if "shoulder.l" in lower_bone_name or "shoulder_l" in lower_bone_name:
             return "SKEL_L_Clavicle"
-        if "shoulder.r" in lower_b or "shoulder_r" in lower_b:
+        if "shoulder.r" in lower_bone_name or "shoulder_r" in lower_bone_name:
             return "SKEL_R_Clavicle"
-        if "upper_arm.l" in lower_b or "upperarm.l" in lower_b:
+        if "upper_arm.l" in lower_bone_name or "upperarm.l" in lower_bone_name:
             return "SKEL_L_UpperArm"
-        if "upper_arm.r" in lower_b or "upperarm.r" in lower_b:
+        if "upper_arm.r" in lower_bone_name or "upperarm.r" in lower_bone_name:
             return "SKEL_R_UpperArm"
-        # Toda a estrutura da mochila (UN_Bag, UN_Bagchain, UN_Bag_Ring, alcas e corpo)
-        # deve acompanhar estritamente o peito/torso (SKEL_Spine2) para evitar que o anel
-        # e as correntes se soltem e flutuem no ar atras do personagem na idle pose.
+        # Bind bag body, rings, and chains strictly to Spine2 so straps follow the chest
         return "SKEL_Spine2"
 
     if source_bone_name in HUMAN_TO_GTAV_BONE_MAP:
         return HUMAN_TO_GTAV_BONE_MAP[source_bone_name]
 
-    # 2. Mapeamento 1:1 dos 30 ossos de dedos e ossos auxiliares de torcao (RB_*/Forearm/UpperArm)
+    # 1:1 mapping of 30 finger bones and twist helper bones
     resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
     if resolved_arm_or_finger is not None:
         return resolved_arm_or_finger
 
-    # Fallback para palmas ou nomes genericos de mao sem dedo especifico (evita capturar ponteiros do relogio)
+    # Fallback for palm bones while excluding Pocket Watch hand pointers
     lower_name = source_bone_name.lower()
     if mesh_name != "Pocket Watch" and "hand" in lower_name:
         side_code = (
@@ -487,7 +488,6 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
         )
         return f"SKEL_{side_code}_Hand"
 
-    # Peito, lacos e ribbons de busto -> SKEL_Spine2
     if (
         lower_name.startswith("breast")
         or lower_name.startswith("bust")
@@ -496,8 +496,7 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     ):
         return "SKEL_Spine2"
 
-    # Cabelo, orelhas, chapeu, presilhas, aureola e fita de cabelo -> SKEL_Head
-    # Escopo restrito as malhas de cabeca para nao capturar 'heart' (ear), 'side' (UN_SideChain) ou 'gear' (ear)
+    # Restrict head keyword matching to head meshes so torso accessories ('heart', 'gear') stay safe
     allow_head_mapping = mesh_name is None or mesh_name in HEAD_ACCESSORY_MESH_NAMES
     if allow_head_mapping and (
         "hair" in lower_name
@@ -516,20 +515,17 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     ):
         return "SKEL_Head"
 
-    # Gluteos -> Thighs
     if "butt.l" in lower_name or "butt_l" in lower_name:
         return "SKEL_L_Thigh"
     if "butt.r" in lower_name or "butt_r" in lower_name:
         return "SKEL_R_Thigh"
 
-    # Bracos auxiliares de suporte
     if "support" in lower_name:
         side_code = "L" if (".l" in lower_name or "_l" in lower_name) else "R"
         if "lower" in lower_name or "support2" in lower_name or "support3" in lower_name:
             return f"SKEL_{side_code}_Forearm"
         return f"SKEL_{side_code}_UpperArm"
 
-    # Bolsas, correntes de cintura, coracao de quadril e relogio de bolso -> SKEL_Pelvis
     if (
         "bag" in lower_name
         or "chain" in lower_name
@@ -543,14 +539,14 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     ):
         return "SKEL_Pelvis"
 
-    # Saia (UN_Skirt) sem mapeamento invertido .l/.r: fallback para SKEL_Pelvis
     return "SKEL_Pelvis"
 
 
 # ---------------------------------------------------------------------------
-# Divisao de Geometrias Grandes para o Limite uint16 da RAGE Engine (<30.000 verts)
+# Oversized geometry splitter for RAGE uint16 vertex limits (< 30,000 verts)
 # ---------------------------------------------------------------------------
 def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=30000):
+    """Split dense material slots into multiple chunks under the uint16 limit."""
     mesh_data = mesh_object.data
     polys_by_material = {}
     for poly_item in mesh_data.polygons:
@@ -565,8 +561,12 @@ def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=3000
         base_material = mesh_data.materials[mat_index]
         chunk_total = math.ceil(len(poly_indices) / max_polys_per_chunk)
         print(
-            f"[INFO] Dividindo material '{base_material.name}' ({len(poly_indices)} triangulos) "
-            f"em {chunk_total} sub-geometrias para respeitar o limite uint16 (65.535 vertices)."
+            i18n.translate(
+                "michael.build.splitting_material",
+                name=base_material.name,
+                count=len(poly_indices),
+                chunks=chunk_total,
+            )
         )
 
         for chunk_idx in range(1, chunk_total):
@@ -584,9 +584,9 @@ def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=3000
 
 
 def apply_shape_key_weights_by_index(mesh_obj, weights_by_index, label):
-    """Aplica pesos de shape keys por indice 0-based (apos Basis) zerando os demais."""
+    """Apply shape key weights by 0-based index (after Basis), zeroing others."""
     if not mesh_obj or not mesh_obj.data.shape_keys:
-        raise RuntimeError(f"Malha '{label}' nao possui shape keys disponiveis.")
+        raise RuntimeError(i18n.translate("michael.build.no_shape_keys", label=label))
 
     key_blocks = mesh_obj.data.shape_keys.key_blocks
     for key_block in key_blocks[1:]:
@@ -597,45 +597,60 @@ def apply_shape_key_weights_by_index(mesh_obj, weights_by_index, label):
         target_slot = zero_based_idx + 1
         if target_slot >= len(key_blocks):
             raise IndexError(
-                f"Shape key indice {zero_based_idx} fora do intervalo em '{mesh_obj.name}' "
-                f"(total disponivel: {len(key_blocks) - 1})."
+                i18n.translate(
+                    "michael.build.shape_key_oob",
+                    index=zero_based_idx,
+                    name=mesh_obj.name,
+                    available=len(key_blocks) - 1,
+                )
             )
         key_blocks[target_slot].value = weight_val
         applied_count += 1
 
-    print(f"[INFO] Aplicados {applied_count} shape keys por indice em '{mesh_obj.name}'.")
+    print(
+        i18n.translate(
+            "michael.build.applied_shape_keys", count=applied_count, name=mesh_obj.name
+        )
+    )
 
 
 def validate_build_inputs(cli_args):
-    """Valida existencia dos arquivos e parametros de entrada antes da compilacao."""
+    """Verify all required FBX, skeleton, animation, and texture inputs exist."""
     required_paths = [
-        ("Esqueleto GTA V (.yft)", cli_args.skeleton_yft),
-        ("FBX Base Shinano", cli_args.shinano_fbx),
-        ("FBX Roupas Eternal Reunion", cli_args.outfit_fbx),
-        ("FBX Pocket Watch", cli_args.watch_fbx),
-        ("FBX Cabelo Neko Tied Bob", cli_args.hair_fbx),
-        ("Animacao Facial (.anim)", cli_args.face_anim),
+        (i18n.translate("michael.build.input_skeleton_label"), cli_args.skeleton_yft),
+        (i18n.translate("michael.build.input_shinano_fbx_label"), cli_args.shinano_fbx),
+        (i18n.translate("michael.build.input_outfit_fbx_label"), cli_args.outfit_fbx),
+        (i18n.translate("michael.build.input_watch_fbx_label"), cli_args.watch_fbx),
+        (i18n.translate("michael.build.input_hair_fbx_label"), cli_args.hair_fbx),
+        (i18n.translate("michael.build.input_face_anim_label"), cli_args.face_anim),
     ]
     for desc_label, file_path in required_paths:
         if not os.path.isfile(file_path):
-            raise FileNotFoundError(f"{desc_label} nao encontrado em: {file_path}")
+            raise FileNotFoundError(
+                i18n.translate(
+                    "michael.build.input_missing", label=desc_label, path=file_path
+                )
+            )
 
     texture_dir = os.path.abspath(cli_args.texture_dir)
     for tex_name in (cli_args.atlas_png, cli_args.normal_png, cli_args.spec_png):
         tex_path = os.path.join(texture_dir, tex_name)
         if not os.path.isfile(tex_path):
-            raise FileNotFoundError(f"Textura do atlas nao encontrada em: {tex_path}")
+            raise FileNotFoundError(
+                i18n.translate("michael.build.atlas_tex_missing", path=tex_path)
+            )
 
     if not (1 <= cli_args.max_verts_per_chunk <= 65535):
         raise ValueError(
-            f"--max-verts-per-chunk fora do limite uint16 (1..65535): {cli_args.max_verts_per_chunk}"
+            i18n.translate("michael.build.max_verts_oob", value=cli_args.max_verts_per_chunk)
         )
 
 
 # ---------------------------------------------------------------------------
-# Pipeline Principal de Montagem e Exportacao
+# Main Assembly and Export Pipeline
 # ---------------------------------------------------------------------------
 def build_shinano_er_for_gtav(cli_args):
+    """Compile and export Shinano Eternal Reunion (.ydd + .yft) inside Blender."""
     validate_build_inputs(cli_args)
     addon_utils.enable("sollumz")
     from sollumz.sollumz_properties import SollumType
@@ -649,10 +664,10 @@ def build_shinano_er_for_gtav(cli_args):
 
     char_key = cli_args.target_character.lower()
     if char_key not in CHARACTER_PROFILES:
-        raise ValueError(f"Personagem invalido: {char_key}. Use michael, franklin ou trevor.")
+        raise ValueError(i18n.translate("michael.build.invalid_character", name=char_key))
     char_profile = CHARACTER_PROFILES[char_key]
 
-    # 1. Limpa a cena do Blender
+    # 1. Clear current Blender scene
     for obj_item in list(bpy.data.objects):
         bpy.data.objects.remove(obj_item)
     for mesh_item in list(bpy.data.meshes):
@@ -662,10 +677,10 @@ def build_shinano_er_for_gtav(cli_args):
     for mat_item in list(bpy.data.materials):
         bpy.data.materials.remove(mat_item)
 
-    # 2. Importa o esqueleto base .yft do personagem do GTA V
+    # 2. Import GTA V base .yft skeleton
     skel_dir = os.path.dirname(os.path.abspath(cli_args.skeleton_yft)) + "/"
     skel_filename = os.path.basename(cli_args.skeleton_yft)
-    print(f"[INFO] Importando esqueleto base do GTA V: {cli_args.skeleton_yft}")
+    print(i18n.translate("michael.build.importing_skeleton", path=cli_args.skeleton_yft))
     bpy.ops.sollumz.import_assets(directory=skel_dir, files=[{"name": skel_filename}])
 
     ped_armature = bpy.data.objects.get(char_profile["ped_name"])
@@ -676,7 +691,7 @@ def build_shinano_er_for_gtav(cli_args):
         )
     if not ped_armature:
         raise RuntimeError(
-            f"Esqueleto GTA V nao carregado de '{cli_args.skeleton_yft}'."
+            i18n.translate("michael.build.skeleton_load_failed", path=cli_args.skeleton_yft)
         )
 
     valid_gtav_bones = {
@@ -725,50 +740,70 @@ def build_shinano_er_for_gtav(cli_args):
         if extra_obj != ped_armature:
             bpy.data.objects.remove(extra_obj)
 
-    # 3. Importa os 4 pacotes FBX do avatar e acessorios
+    # 3. Import the 4 avatar & accessory FBX packages
     imported_armatures = []
 
-    # 3A. Shinano Base (Body e Body_base)
-    print(f"[INFO] Importando Base Shinano FBX: {cli_args.shinano_fbx}")
+    print(i18n.translate("michael.build.importing_shinano", path=cli_args.shinano_fbx))
     bpy.ops.import_scene.fbx(filepath=cli_args.shinano_fbx)
     arm_base = next(
-        (obj for obj in bpy.data.objects if obj.type == "ARMATURE" and obj != ped_armature and obj not in imported_armatures),
+        (
+            scene_obj
+            for scene_obj in bpy.data.objects
+            if scene_obj.type == "ARMATURE"
+            and scene_obj != ped_armature
+            and scene_obj not in imported_armatures
+        ),
         None,
     )
     if arm_base:
         imported_armatures.append(arm_base)
 
-    # 3B. Eternal Reunion Outfit FBX
-    print(f"[INFO] Importando Outfit FBX: {cli_args.outfit_fbx}")
+    print(i18n.translate("michael.build.importing_outfit", path=cli_args.outfit_fbx))
     bpy.ops.import_scene.fbx(filepath=cli_args.outfit_fbx)
     arm_outfit = next(
-        (obj for obj in bpy.data.objects if obj.type == "ARMATURE" and obj != ped_armature and obj not in imported_armatures),
+        (
+            scene_obj
+            for scene_obj in bpy.data.objects
+            if scene_obj.type == "ARMATURE"
+            and scene_obj != ped_armature
+            and scene_obj not in imported_armatures
+        ),
         None,
     )
     if arm_outfit:
         imported_armatures.append(arm_outfit)
 
-    # 3C. Pocket Watch FBX
-    print(f"[INFO] Importando Pocket Watch FBX: {cli_args.watch_fbx}")
+    print(i18n.translate("michael.build.importing_watch", path=cli_args.watch_fbx))
     bpy.ops.import_scene.fbx(filepath=cli_args.watch_fbx)
     arm_watch = next(
-        (obj for obj in bpy.data.objects if obj.type == "ARMATURE" and obj != ped_armature and obj not in imported_armatures),
+        (
+            scene_obj
+            for scene_obj in bpy.data.objects
+            if scene_obj.type == "ARMATURE"
+            and scene_obj != ped_armature
+            and scene_obj not in imported_armatures
+        ),
         None,
     )
     if arm_watch:
         imported_armatures.append(arm_watch)
 
-    # 3D. CooniBob Hair FBX
-    print(f"[INFO] Importando CooniBob Hair FBX: {cli_args.hair_fbx}")
+    print(i18n.translate("michael.build.importing_hair", path=cli_args.hair_fbx))
     bpy.ops.import_scene.fbx(filepath=cli_args.hair_fbx)
     arm_hair = next(
-        (obj for obj in bpy.data.objects if obj.type == "ARMATURE" and obj != ped_armature and obj not in imported_armatures),
+        (
+            scene_obj
+            for scene_obj in bpy.data.objects
+            if scene_obj.type == "ARMATURE"
+            and scene_obj != ped_armature
+            and scene_obj not in imported_armatures
+        ),
         None,
     )
     if arm_hair:
         imported_armatures.append(arm_hair)
 
-    # Rotaciona bracos para a A-pose do GTA V (-55 graus) e ajusta escala do Neck (0.90) conforme Shinano.unity
+    # Rotate arms to GTA V A-pose (-55 degrees) and apply Neck scale (0.90) from Shinano.unity
     arm_angle_rad = -math.radians(abs(char_profile["arm_pose_degrees"]))
     neck_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit) if arm_obj}
     for arm_obj in imported_armatures:
@@ -790,20 +825,18 @@ def build_shinano_er_for_gtav(cli_args):
         bpy.ops.object.mode_set(mode="OBJECT")
 
     if not arm_hair or "Hair Root" not in arm_hair.data.bones:
-        raise RuntimeError(
-            "Osso 'Hair Root' nao encontrado na armature do cabelo Neko Tied Bob."
-        )
+        raise RuntimeError(i18n.translate("michael.build.hair_root_missing"))
     hair_root_rest_pos = (
         arm_hair.matrix_world @ arm_hair.data.bones["Hair Root"].head_local
     ).copy()
     watch_transform_matrix = compute_pocket_watch_align_matrix(arm_outfit, arm_watch)
 
-    # 4. Carrega normais originais do rosto do FBX da Shinano
+    # 4. Load original Shinano FBX facial normals
     fbx_face_normals = load_fbx_face_loop_normals(cli_args.shinano_fbx)
     if fbx_face_normals:
-        print(f"[INFO] {len(fbx_face_normals)} normais faciais IndexToDirect carregadas do FBX.")
+        print(i18n.translate("michael.build.fbx_normals_loaded", count=len(fbx_face_normals)))
 
-    # 5. Aplica blendshapes faciais no Body
+    # 5. Apply facial blendshapes on Body
     face_blendshapes = load_unity_anim_blendshapes(cli_args.face_anim)
     body_mesh_obj = bpy.data.objects.get("Body")
     if body_mesh_obj and body_mesh_obj.data.shape_keys:
@@ -814,11 +847,7 @@ def build_shinano_er_for_gtav(cli_args):
             if key_block:
                 key_block.value = shape_val
 
-    # 6. Aplica blendshapes de modelagem e encolhimento no Body_base (foto Unity + SMR 1762524570)
-    # 100%: Corset, Hip_big, Breasts_big, Nail_hand_Oval, Shrink_Upper_arm, Shrink_Elbow,
-    # Shrink_Chest1..2, Shrink_Breast1..2, Shrink_Spine_1..2, Shrink_Hip_all,
-    # Shrink_Upper_leg1..2, Shrink_Knees, Shrink_Lower_leg, Shrink_Ankle, Shrink_Foot.
-    # 0%: Neck1..3, Shoulder, Low_arm, wrist, hand, Hip1..4, Stocking1..3, Toe_heels, Toe_highheels.
+    # 6. Apply Body_base shaping & shrink keys
     body_base_weights = {
         0: 1.0,
         6: 1.0,
@@ -844,7 +873,7 @@ def build_shinano_er_for_gtav(cli_args):
         bpy.data.objects.get("Body_base"), body_base_weights, "Body_base"
     )
 
-    # 6A. Aplica blendshapes de ajuste das roupas Eternal Reunion e Pocket Watch
+    # 6A. Apply Eternal Reunion outfit & Pocket Watch blendshapes
     outfit_shape_keys_by_index = {
         "UN1_Shirt": {0: 1.0, 4: 1.0},
         "UN1_Skirt": {4: 1.0, 5: 1.0},
@@ -859,7 +888,7 @@ def build_shinano_er_for_gtav(cli_args):
             bpy.data.objects.get(outfit_mesh_name), outfit_weights, outfit_mesh_name
         )
 
-    # 6B. Aplica blendshapes do Neko Tied Bob hair por indice exato (Shinano.unity / MA Shinano.prefab)
+    # 6B. Apply indexed Neko Tied Bob hair blendshapes (Shinano.unity / MA Shinano.prefab)
     hair_shape_keys_by_index = {
         "Bangs": {9: 0.284, 17: 1.0, 22: 1.0},
         "Side Bangs": {0: 1.0, 4: 1.0},
@@ -925,29 +954,22 @@ def build_shinano_er_for_gtav(cli_args):
 
     bpy.context.view_layer.update()
 
-    # 7. Inventario das 27 malhas ativas aprovadas
-    # Lista com mapeamento de categoria para o Atlas 4x2 unificado
-    ACTIVE_MESH_CONFIGS = {
-        # Shinano Base
+    # 7. Active mesh inventory and 4x2 Atlas quadrant mapping
+    active_mesh_configs = {
         "Body": {"atlas_col": 0, "atlas_row": 1, "shrink_cull": False},
         "Body_base": {"atlas_col": 1, "atlas_row": 1, "shrink_cull": True},
-        # Eternal Reunion UN1
         "UN1_Shirt": {"atlas_col": 2, "atlas_row": 1, "shrink_cull": False},
         "UN1_Skirt": {"atlas_col": 2, "atlas_row": 1, "shrink_cull": False},
         "UN1_ChestRibbon": {"atlas_col": 2, "atlas_row": 1, "shrink_cull": False},
         "UN1_Choker": {"atlas_col": 2, "atlas_row": 1, "shrink_cull": False},
-        # Eternal Reunion UN2
         "UN2_Corset": {"atlas_col": 3, "atlas_row": 1, "shrink_cull": False},
-        # "UN2_Beret": Desabilitada a pedido do usuario (tratada como EditorOnly / desativada)
+        # UN2_Beret disabled by user preference
         "UN2_Shoes": {"atlas_col": 3, "atlas_row": 1, "shrink_cull": False},
         "UN2_Stocking": {"atlas_col": 3, "atlas_row": 1, "shrink_cull": False},
-        # Eternal Reunion UN3
         "UN3_Bag": {"atlas_col": 0, "atlas_row": 0, "shrink_cull": False},
         "UN3_Glasses": {"atlas_col": 0, "atlas_row": 0, "shrink_cull": False},
         "UN3_WaistChain": {"atlas_col": 0, "atlas_row": 0, "shrink_cull": False},
-        # Pocket Watch
         "Pocket Watch": {"atlas_col": 1, "atlas_row": 0, "shrink_cull": False},
-        # Neko Tied Bob hair (Cabelo Principal em azul vibrante)
         "Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
         "Top Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
         "Under Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
@@ -956,9 +978,7 @@ def build_shinano_er_for_gtav(cli_args):
         "Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
         "In Hair": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
         "Ribbon": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        # Orelhas de Gato (Ears) do Neko Tied Bob hair ativas na ausencia da boina
         "Ears": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-        # Neko Tied Bob hair - Acessorios integrados na celula (coluna 3, linha 0)
         "_Pin.Back": {
             "u_offset": 0.875,
             "v_offset": 0.25,
@@ -982,7 +1002,6 @@ def build_shinano_er_for_gtav(cli_args):
             "clamp_v": True,
             "shrink_cull": False,
         },
-        # Aureola metalica flutuante (_Halo)
         "_Halo": {
             "u_offset": 0.75,
             "v_offset": 0.25,
@@ -993,55 +1012,85 @@ def build_shinano_er_for_gtav(cli_args):
     }
 
     scale_factor = (char_profile["target_z_max"] - char_profile["target_z_min"]) / (1.132 - 0.106)
-    z_offset = char_profile["target_z_min"] - (0.106 * scale_factor)
+    vertical_offset = char_profile["target_z_min"] - (0.106 * scale_factor)
 
     depsgraph_eval = bpy.context.evaluated_depsgraph_get()
     processed_objects = []
     preserved_body_normals = None
 
-    # Pre-calcula pesos de deformacao da mandibula (FACIAL_jaw) atraves do shape key vrc.v_aa
+    # Precompute FACIAL_jaw weights derived from the vrc.v_aa shape key
     body_jaw_weights = {}
     orig_body_obj = bpy.data.objects.get("Body")
     if orig_body_obj and orig_body_obj.data.shape_keys:
-        kb_aa = orig_body_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
-        basis = orig_body_obj.data.shape_keys.key_blocks.get("Basis")
-        if kb_aa and basis:
+        shape_key_aa = orig_body_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
+        basis_key = orig_body_obj.data.shape_keys.key_blocks.get("Basis")
+        if shape_key_aa and basis_key:
             for vert_item in orig_body_obj.data.vertices:
-                delta_z = kb_aa.data[vert_item.index].co.z - basis.data[vert_item.index].co.z
+                delta_z = (
+                    shape_key_aa.data[vert_item.index].co.z
+                    - basis_key.data[vert_item.index].co.z
+                )
                 if delta_z < -0.0005:
-                    w_val = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
-                    body_jaw_weights[vert_item.index] = w_val
-            print(f"[OK] {len(body_jaw_weights)} vertices mapeados para FACIAL_jaw no Body.")
+                    jaw_weight_value = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
+                    body_jaw_weights[vert_item.index] = jaw_weight_value
+            print(
+                i18n.translate(
+                    "michael.build.jaw_weights_mapped", count=len(body_jaw_weights)
+                )
+            )
 
-    for mesh_name, mesh_cfg in ACTIVE_MESH_CONFIGS.items():
+    neko_hair_mesh_names = {
+        "Bangs",
+        "Top Back",
+        "Under Side",
+        "Back",
+        "Side Bangs",
+        "Side",
+        "In Hair",
+        "Ribbon",
+        "Ears",
+        "_Halo",
+        "_Pin.Back",
+        "_Pin.R",
+        "_Pin.L2",
+    }
+
+    for mesh_name, mesh_cfg in active_mesh_configs.items():
         source_obj = bpy.data.objects.get(mesh_name)
         if not source_obj or source_obj.type != "MESH":
-            print(f"[AVISO] Objeto de malha '{mesh_name}' nao encontrado, ignorando.")
+            print(i18n.translate("michael.build.mesh_not_found", name=mesh_name))
             continue
 
-        print(f"[INFO] Processando malha: {mesh_name} ({len(source_obj.data.vertices)} vertices)")
+        print(
+            i18n.translate(
+                "michael.build.processing_mesh",
+                name=mesh_name,
+                count=len(source_obj.data.vertices),
+            )
+        )
 
-        # Identifica vertices encolhidos pelas chaves Shrink_* ativas em Body_base
+        # Detect vertices shrunken by active Shrink_* keys on Body_base
         shrunk_vertex_indices = set()
         if mesh_cfg["shrink_cull"] and source_obj.data.shape_keys:
             basis_block = source_obj.data.shape_keys.key_blocks[0]
             for key_block in source_obj.data.shape_keys.key_blocks[1:]:
-                # Culling estrito para chaves Shrink_* (cintura, seios, bracos superiores e pernas sob a roupa)
                 is_shrink_key = key_block.name.lower().startswith("shrink_")
                 if is_shrink_key and key_block.value > 0.5:
                     for vert_idx in range(len(source_obj.data.vertices)):
-                        delta_vec = key_block.data[vert_idx].co - basis_block.data[vert_idx].co
+                        delta_vec = (
+                            key_block.data[vert_idx].co - basis_block.data[vert_idx].co
+                        )
                         if delta_vec.length > 0.00002:
                             shrunk_vertex_indices.add(vert_idx)
 
         evaluated_obj = source_obj.evaluated_get(depsgraph_eval)
         baked_mesh = bpy.data.meshes.new_from_object(evaluated_obj)
 
-        bm_data = bmesh.new()
-        bm_data.from_mesh(baked_mesh)
+        bmesh_data = bmesh.new()
+        bmesh_data.from_mesh(baked_mesh)
 
-        orig_vert_layer = bm_data.verts.layers.int.new("orig_vert_idx")
-        for vert_idx_counter, bm_vert_item in enumerate(bm_data.verts):
+        orig_vert_layer = bmesh_data.verts.layers.int.new("orig_vert_idx")
+        for vert_idx_counter, bm_vert_item in enumerate(bmesh_data.verts):
             bm_vert_item[orig_vert_layer] = vert_idx_counter
 
         if mesh_name == "Body":
@@ -1050,37 +1099,37 @@ def build_shinano_er_for_gtav(cli_args):
                 for mat_idx, mat_obj in enumerate(source_obj.data.materials)
                 if mat_obj and "alpha" in mat_obj.name.lower()
             ]
-            orig_loop_layer = bm_data.loops.layers.int.new("orig_loop_idx")
+            orig_loop_layer = bmesh_data.loops.layers.int.new("orig_loop_idx")
             loop_counter = 0
-            for face_item in bm_data.faces:
+            for face_item in bmesh_data.faces:
                 for loop_item in face_item.loops:
                     loop_item[orig_loop_layer] = loop_counter
                     loop_counter += 1
             if alpha_mat_indices:
                 faces_to_remove = [
                     face_item
-                    for face_item in bm_data.faces
+                    for face_item in bmesh_data.faces
                     if face_item.material_index in alpha_mat_indices
                 ]
-                bmesh.ops.delete(bm_data, geom=faces_to_remove, context="FACES")
-                loose_verts = [vert for vert in bm_data.verts if not vert.link_faces]
-                bmesh.ops.delete(bm_data, geom=loose_verts, context="VERTS")
+                bmesh.ops.delete(bmesh_data, geom=faces_to_remove, context="FACES")
+                loose_verts = [vert for vert in bmesh_data.verts if not vert.link_faces]
+                bmesh.ops.delete(bmesh_data, geom=loose_verts, context="VERTS")
 
-            bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
+            bmesh.ops.triangulate(bmesh_data, faces=bmesh_data.faces)
             kept_loop_indices = []
-            for face_item in bm_data.faces:
+            for face_item in bmesh_data.faces:
                 face_item.smooth = True
                 for loop_item in face_item.loops:
                     kept_loop_indices.append(loop_item[orig_loop_layer])
             kept_orig_vert_indices = [
-                bm_vert_item[orig_vert_layer] for bm_vert_item in bm_data.verts
+                bm_vert_item[orig_vert_layer] for bm_vert_item in bmesh_data.verts
             ]
-            bm_data.to_mesh(baked_mesh)
-            bm_data.free()
+            bmesh_data.to_mesh(baked_mesh)
+            bmesh_data.free()
             baked_mesh.update()
         else:
             if mesh_name == "Pocket Watch":
-                # Remove lente de vidro opaca (Glass_Lenz) para revelar o mostrador romano e engrenagens no GTA V
+                # Strip opaque glass cover (Glass_Lenz) so Roman dial and gears remain visible
                 watch_materials = (
                     baked_mesh.materials
                     if len(baked_mesh.materials) > 0
@@ -1092,106 +1141,90 @@ def build_shinano_er_for_gtav(cli_args):
                     if mat_obj and "glass" in mat_obj.name.lower()
                 }
                 if glass_mat_indices:
-                    bm_data.verts.ensure_lookup_table()
+                    bmesh_data.verts.ensure_lookup_table()
                     glass_faces = [
                         face_item
-                        for face_item in bm_data.faces
+                        for face_item in bmesh_data.faces
                         if face_item.material_index in glass_mat_indices
                     ]
                     if glass_faces:
-                        bmesh.ops.delete(bm_data, geom=glass_faces, context="FACES")
-                        loose_verts = [vert for vert in bm_data.verts if not vert.link_faces]
+                        bmesh.ops.delete(bmesh_data, geom=glass_faces, context="FACES")
+                        loose_verts = [
+                            vert for vert in bmesh_data.verts if not vert.link_faces
+                        ]
                         if loose_verts:
-                            bmesh.ops.delete(bm_data, geom=loose_verts, context="VERTS")
+                            bmesh.ops.delete(bmesh_data, geom=loose_verts, context="VERTS")
                         print(
-                            f"[INFO] Removidas {len(glass_faces)} faces de vidro/lente de '{mesh_name}'."
+                            i18n.translate(
+                                "michael.build.removed_glass_faces",
+                                count=len(glass_faces),
+                                name=mesh_name,
+                            )
                         )
 
             if shrunk_vertex_indices:
-                bm_data.verts.ensure_lookup_table()
+                bmesh_data.verts.ensure_lookup_table()
                 hidden_faces = [
                     face_item
-                    for face_item in bm_data.faces
+                    for face_item in bmesh_data.faces
                     if all(
                         vert_item[orig_vert_layer] in shrunk_vertex_indices
                         for vert_item in face_item.verts
                     )
                 ]
                 if hidden_faces:
-                    bmesh.ops.delete(bm_data, geom=hidden_faces, context="FACES")
-                    loose_verts = [vert for vert in bm_data.verts if not vert.link_faces]
-                    bmesh.ops.delete(bm_data, geom=loose_verts, context="VERTS")
+                    bmesh.ops.delete(bmesh_data, geom=hidden_faces, context="FACES")
+                    loose_verts = [
+                        vert for vert in bmesh_data.verts if not vert.link_faces
+                    ]
+                    bmesh.ops.delete(bmesh_data, geom=loose_verts, context="VERTS")
                     print(
-                        f"[INFO] Shrink Culling removeu {len(hidden_faces)} faces ocultas de {mesh_name}."
+                        i18n.translate(
+                            "michael.build.shrink_culled",
+                            count=len(hidden_faces),
+                            name=mesh_name,
+                        )
                     )
 
-            bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
-            for face_item in bm_data.faces:
+            bmesh.ops.triangulate(bmesh_data, faces=bmesh_data.faces)
+            for face_item in bmesh_data.faces:
                 face_item.smooth = True
             kept_orig_vert_indices = [
-                bm_vert_item[orig_vert_layer] for bm_vert_item in bm_data.verts
+                bm_vert_item[orig_vert_layer] for bm_vert_item in bmesh_data.verts
             ]
-            bm_data.to_mesh(baked_mesh)
-            bm_data.free()
+            bmesh_data.to_mesh(baked_mesh)
+            bmesh_data.free()
             baked_mesh.update()
 
-        # Transformacao exata do Neko Tied Bob hair baseada na cena Shinano.unity (MA Shinano -> Hair Root)
-        neko_hair_mesh_names = {
-            "Bangs",
-            "Top Back",
-            "Under Side",
-            "Back",
-            "Side Bangs",
-            "Side",
-            "In Hair",
-            "Ribbon",
-            "Ears",
-            "_Halo",
-            "_Pin.Back",
-            "_Pin.R",
-            "_Pin.L2",
-        }
         offset_x = mesh_cfg.get("offset_x", 0.0)
         offset_y = mesh_cfg.get("offset_y", 0.0)
         offset_z = mesh_cfg.get("offset_z", 0.0)
 
-        # Ajuste de transformacao da boina (UN2_Beret) conforme cena Shinano.unity
-        is_beret_mesh = (mesh_name == "UN2_Beret")
+        is_beret_mesh = mesh_name == "UN2_Beret"
         if is_beret_mesh:
-            # Pivo do osso UN_HatRoot no espaco de mundo do Blender
             hat_pivot = mathutils.Vector((0.0, 0.0314, 1.2534))
-            # Inclinacao extra extraida do Shinano.unity (Euler X = -30.272 graus vs rest -18.808 graus no FBX)
-            # Delta de inclinacao para tras: -11.464 graus
             hat_rot_matrix = mathutils.Matrix.Rotation(math.radians(-11.464), 4, "X")
-            # Delta de translacao relativo a Head entre o FBX e a cena Shinano.unity:
-            # Unity LocalPosition: {x: 0, y: 0.1347, z: -0.0473} vs rest {x: -0.000011, y: 0.120822, z: -0.020751}
-            # Delta Unity: dY = +0.013878 (cima), dZ = -0.026549 (tras)
-            # Mapeamento para Blender: dY_blender = +0.026549 (tras), dZ_blender = +0.013878 (cima)
             hat_pos_delta = mathutils.Vector((0.0, 0.02655, 0.01388))
 
-        # Posicao, escala (1.08696) e leve pitch (-0.001953 rad em X) do osso Hair Root no Unity
-        is_neko_hair = (mesh_name in neko_hair_mesh_names)
+        is_neko_hair = mesh_name in neko_hair_mesh_names
         neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
         neko_hair_scale = 1.08696
         neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
 
-        # Escala e alinha altura ao esqueleto do Michael aplicando a matriz de mundo da fonte e offset
         for vert_item in baked_mesh.vertices:
             world_co = source_obj.matrix_world @ vert_item.co
             if is_beret_mesh:
                 rel_co = world_co - hat_pivot
                 world_co = hat_pivot + (hat_rot_matrix @ rel_co) + hat_pos_delta
             elif is_neko_hair:
-                # Mapeia o cabelo do Hair Root em repouso do FBX para o MA Hair Root da cena Shinano.unity
                 rel_hair = (world_co - hair_root_rest_pos) * neko_hair_scale
                 world_co = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
             elif mesh_name == "Pocket Watch":
-                # Aplica escala 1.10, rotacao e translacao de cena do Shinano.unity para prender no anel
                 world_co = watch_transform_matrix @ world_co
 
             vert_item.co.x = (world_co.x + offset_x) * scale_factor
             vert_item.co.y = (world_co.y + offset_y) * scale_factor
-            vert_item.co.z = (world_co.z + offset_z) * scale_factor + z_offset
+            vert_item.co.z = (world_co.z + offset_z) * scale_factor + vertical_offset
 
         if (
             mesh_name == "Body"
@@ -1206,7 +1239,7 @@ def build_shinano_er_for_gtav(cli_args):
         proc_obj = bpy.data.objects.new(f"proc_{mesh_name}", baked_mesh)
         bpy.context.collection.objects.link(proc_obj)
 
-        # Mapeia UVs desta malha para o seu quadrante ou sub-quadrante no Atlas 4x2
+        # Remap UVs into the target quadrant or sub-quadrant of the 4x2 Atlas
         u_scale = mesh_cfg.get("u_scale", 0.25)
         v_scale = mesh_cfg.get("v_scale", 0.5)
         if "u_offset" in mesh_cfg and "v_offset" in mesh_cfg:
@@ -1228,16 +1261,17 @@ def build_shinano_er_for_gtav(cli_args):
                     orig_v = min(1.0, max(0.0, orig_v % 1.0))
                 loop_entry.uv = (u_offset + (orig_u * u_scale), v_offset + (orig_v * v_scale))
 
-        # Atribui pesos de vertices aos 55 ossos validos do GTA V
+        # Assign vertex weights to valid GTA V bones
         vgroup_names_by_idx = {
-            vgroup.index: vgroup.name
-            for vgroup in source_obj.vertex_groups
+            vgroup.index: vgroup.name for vgroup in source_obj.vertex_groups
         }
         vgroup_target_names = {
             vgroup.index: resolve_gtav_target_bone(vgroup.name, mesh_name)
             for vgroup in source_obj.vertex_groups
         }
-        vertex_weight_map = {vert_idx: {} for vert_idx in range(len(baked_mesh.vertices))}
+        vertex_weight_map = {
+            vert_idx: {} for vert_idx in range(len(baked_mesh.vertices))
+        }
         if mesh_name == "UN1_Skirt":
             for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
                 ydd_vert_co = baked_mesh.vertices[new_vert_idx].co
@@ -1255,8 +1289,12 @@ def build_shinano_er_for_gtav(cli_args):
                     for grp_elem in src_vert.groups:
                         if grp_elem.weight > 0.001 and grp_elem.group in vgroup_target_names:
                             target_bone_name = vgroup_target_names[grp_elem.group]
-                            current_weight = vertex_weight_map[new_vert_idx].get(target_bone_name, 0.0)
-                            vertex_weight_map[new_vert_idx][target_bone_name] = current_weight + grp_elem.weight
+                            current_weight = vertex_weight_map[new_vert_idx].get(
+                                target_bone_name, 0.0
+                            )
+                            vertex_weight_map[new_vert_idx][target_bone_name] = (
+                                current_weight + grp_elem.weight
+                            )
 
         for vert_idx, bone_weights in vertex_weight_map.items():
             weight_sum = sum(bone_weights.values())
@@ -1289,38 +1327,42 @@ def build_shinano_er_for_gtav(cli_args):
                 dst_group.add([vert_idx], 1.0, "REPLACE")
 
         if mesh_name == "Body" and body_jaw_weights:
-            jaw_vg = proc_obj.vertex_groups.get("FACIAL_jaw")
-            if not jaw_vg:
-                jaw_vg = proc_obj.vertex_groups.new(name="FACIAL_jaw")
-            head_vg = proc_obj.vertex_groups.get("SKEL_Head")
-            if not head_vg:
-                head_vg = proc_obj.vertex_groups.new(name="SKEL_Head")
-            for new_v_idx, orig_v_idx in enumerate(kept_orig_vert_indices):
-                if orig_v_idx in body_jaw_weights:
-                    jaw_w = body_jaw_weights[orig_v_idx]
-                    jaw_vg.add([new_v_idx], jaw_w, "REPLACE")
-                    head_vg.add([new_v_idx], max(0.0, 1.0 - jaw_w), "REPLACE")
-            print("[OK] Pesos de FACIAL_jaw e SKEL_Head aplicados no Body do Michael.")
+            jaw_vgroup = proc_obj.vertex_groups.get("FACIAL_jaw")
+            if not jaw_vgroup:
+                jaw_vgroup = proc_obj.vertex_groups.new(name="FACIAL_jaw")
+            head_vgroup = proc_obj.vertex_groups.get("SKEL_Head")
+            if not head_vgroup:
+                head_vgroup = proc_obj.vertex_groups.new(name="SKEL_Head")
+            for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+                if orig_vert_idx in body_jaw_weights:
+                    jaw_weight = body_jaw_weights[orig_vert_idx]
+                    jaw_vgroup.add([new_vert_idx], jaw_weight, "REPLACE")
+                    head_vgroup.add([new_vert_idx], max(0.0, 1.0 - jaw_weight), "REPLACE")
+            print(i18n.translate("michael.build.jaw_head_applied"))
 
         processed_objects.append(proc_obj)
 
     if arm_base is None:
-        raise RuntimeError("Armature base da Shinano nao encontrada para realocar bracos/dedos.")
+        raise RuntimeError(i18n.translate("michael.build.base_armature_missing"))
     bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
-        arm_base, scale_factor, z_offset
+        arm_base, scale_factor, vertical_offset
     )
     relocated_armature_bones = hand_skeleton_helper.relocate_blender_armature_bones(
         ped_armature, bone_world_targets
     )
-    print(f"[OK] {relocated_armature_bones} ossos de bracos/maos/dedos realocados em ped_armature.")
+    print(
+        i18n.translate("michael.build.bones_relocated", count=relocated_armature_bones)
+    )
 
-    # 8. Limpa os objetos de armatures e malhas brutas
+    # 8. Remove source armatures and raw meshes
     for old_obj in list(bpy.data.objects):
         if old_obj != ped_armature and old_obj not in processed_objects:
             bpy.data.objects.remove(old_obj)
 
-    # 9. Une todas as 17 malhas processadas no objeto SKEL_ROOT
-    print(f"[INFO] Unindo {len(processed_objects)} malhas processadas em SKEL_ROOT...")
+    # 9. Join all processed meshes into SKEL_ROOT
+    print(
+        i18n.translate("michael.build.joining_meshes", count=len(processed_objects))
+    )
     bpy.ops.object.select_all(action="DESELECT")
     for proc_obj in processed_objects:
         proc_obj.select_set(True)
@@ -1343,37 +1385,41 @@ def build_shinano_er_for_gtav(cli_args):
 
     total_verts = len(joined_mesh_obj.data.vertices)
     total_polys = len(joined_mesh_obj.data.polygons)
-    print(f"[INFO] SKEL_ROOT unificado: {total_verts} vertices, {total_polys} poligonos.")
+    print(
+        i18n.translate(
+            "michael.build.unified_summary", verts=total_verts, polys=total_polys
+        )
+    )
 
-    # 10. Cria e configura o material unificado ped_default.sps com o Atlas 4x2
+    # 10. Create unified ped_default.sps shader material for the 4x2 Atlas
     texture_dir = os.path.abspath(cli_args.texture_dir)
     atlas_image_path = os.path.join(texture_dir, cli_args.atlas_png)
     normal_image_path = os.path.join(texture_dir, cli_args.normal_png)
     spec_image_path = os.path.join(texture_dir, cli_args.spec_png)
 
-    atlas_img = bpy.data.images.load(atlas_image_path)
-    flat_norm_img = bpy.data.images.load(normal_image_path)
-    black_spec_img = bpy.data.images.load(spec_image_path)
+    atlas_image = bpy.data.images.load(atlas_image_path)
+    flat_normal_image = bpy.data.images.load(normal_image_path)
+    specular_image = bpy.data.images.load(spec_image_path)
 
-    ped_mat = create_shader("ped_default.sps")
-    ped_mat.name = "shinano_er_mat"
+    ped_material = create_shader("ped_default.sps")
+    ped_material.name = "shinano_er_mat"
 
-    diff_node = ped_mat.node_tree.nodes.get("DiffuseSampler")
-    if diff_node:
-        diff_node.image = atlas_img
-        diff_node.texture_properties.embedded = False
+    diffuse_node = ped_material.node_tree.nodes.get("DiffuseSampler")
+    if diffuse_node:
+        diffuse_node.image = atlas_image
+        diffuse_node.texture_properties.embedded = False
 
-    bump_node = ped_mat.node_tree.nodes.get("BumpSampler")
+    bump_node = ped_material.node_tree.nodes.get("BumpSampler")
     if bump_node:
-        bump_node.image = flat_norm_img
+        bump_node.image = flat_normal_image
         bump_node.texture_properties.embedded = False
 
-    spec_node = ped_mat.node_tree.nodes.get("SpecSampler")
-    if spec_node:
-        spec_node.image = black_spec_img
-        spec_node.texture_properties.embedded = False
+    specular_node = ped_material.node_tree.nodes.get("SpecSampler")
+    if specular_node:
+        specular_node.image = specular_image
+        specular_node.texture_properties.embedded = False
 
-    for shader_node in ped_mat.node_tree.nodes:
+    for shader_node in ped_material.node_tree.nodes:
         if shader_node.name == "bumpiness" and hasattr(shader_node, "set_float"):
             shader_node.set_float(0.35)
         elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
@@ -1381,18 +1427,14 @@ def build_shinano_er_for_gtav(cli_args):
         elif shader_node.name == "detailSettings" and hasattr(shader_node, "set_vec4"):
             shader_node.set_vec3((0.0, 0.0, 0.0))
         elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
-            # lilToon: reflexao especular dinamica para metais dourados, sapatos e presilhas
             shader_node.set_float(0.85)
         elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):
-            # lilToon: brilho pontual nitido caracteristico de anime e cel-shading
             shader_node.set_float(24.0)
         elif shader_node.name == "specularFresnel" and hasattr(shader_node, "set_float"):
-            # lilToon: efeito Rim Light de contorno de silhueta (_UseRim: 1)
             shader_node.set_float(0.70)
 
-    # Limpa materiais antigos e atribui o ped_mat unificado
     joined_mesh_obj.data.materials.clear()
-    joined_mesh_obj.data.materials.append(ped_mat)
+    joined_mesh_obj.data.materials.append(ped_material)
 
     for poly_item in joined_mesh_obj.data.polygons:
         poly_item.material_index = 0
@@ -1404,7 +1446,6 @@ def build_shinano_er_for_gtav(cli_args):
     bpy.ops.sollumz.color_attrs_add_missing()
     bpy.ops.sollumz.uv_maps_add_missing()
 
-    # Define Color 1 = Branco Neutro e Color 2 = Preto Alpha 0 (elimina suor/oleo)
     color_attr_1 = joined_mesh_obj.data.color_attributes.get("Color 1")
     if color_attr_1:
         for corner_item in color_attr_1.data:
@@ -1415,7 +1456,6 @@ def build_shinano_er_for_gtav(cli_args):
         for corner_item in color_attr_2.data:
             corner_item.color = (0.0, 0.0, 0.0, 0.0)
 
-    # Normais suaves de anime no rosto
     if fbx_face_normals and preserved_body_normals:
         joined_mesh_obj.data.use_auto_smooth = True
         joined_mesh_obj.data.calc_normals_split()
@@ -1441,12 +1481,12 @@ def build_shinano_er_for_gtav(cli_args):
         joined_mesh_obj.data.normals_split_custom_set(split_normals)
         ydrexport.triangulate_mesh = lambda eval_mesh: eval_mesh
 
-    # 11. Divide malha em sub-geometrias se vertices > 30.000 para limite uint16
+    # 11. Split large materials for the uint16 RAGE limit
     split_oversized_material_geometries(
         joined_mesh_obj, max_vertices_per_chunk=cli_args.max_verts_per_chunk
     )
 
-    # 12. Monta hierarquia de Drawable Dictionary do Sollumz e anexa ao ped_armature
+    # 12. Build Sollumz Drawable Dictionary hierarchy
     ydd_parent_empty = create_empty_object(SollumType.DRAWABLE_DICTIONARY)
     ped_armature.sollum_type = SollumType.DRAWABLE
     ped_armature.parent = ydd_parent_empty
@@ -1461,13 +1501,12 @@ def build_shinano_er_for_gtav(cli_args):
     convert_obj_to_model(joined_mesh_obj)
     joined_mesh_obj.parent = ped_armature
 
-    arm_mod = joined_mesh_obj.modifiers.new("Armature", "ARMATURE")
-    arm_mod.object = ped_armature
+    armature_modifier = joined_mesh_obj.modifiers.new("Armature", "ARMATURE")
+    armature_modifier.object = ped_armature
 
     output_dir = os.path.abspath(cli_args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Exporta para os drawables especificados do personagem
     for drawable_item_name in char_profile["export_drawables"]:
         ydd_parent_empty.name = drawable_item_name
         ped_armature.name = drawable_item_name
@@ -1483,97 +1522,148 @@ def build_shinano_er_for_gtav(cli_args):
             target_formats={"NATIVE", "CWXML"},
             limit_to_selected=False,
         )
-        print(f"[INFO] Exportado {drawable_item_name}.ydd -> {export_status}")
+        print(
+            i18n.translate(
+                "michael.build.exported_ydd",
+                name=drawable_item_name,
+                status=export_status,
+            )
+        )
 
     yft_output_path = os.path.join(output_dir, f"{char_profile['ped_name']}.yft")
     updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(
         cli_args.skeleton_yft, yft_output_path, bone_world_targets
     )
     print(
-        f"[OK] Esqueleto .yft exportado em {yft_output_path} "
-        f"({updated_yft_bones}/{total_yft_bones} ossos, erro max={max_yft_delta:.6f} m)"
+        i18n.translate(
+            "michael.build.exported_yft",
+            path=yft_output_path,
+            updated=updated_yft_bones,
+            total=total_yft_bones,
+            delta=max_yft_delta,
+        )
     )
 
 
-def parse_blender_cli_args():
+def extract_custom_blender_args():
+    """Return CLI arguments appearing after `--` (or `sys.argv[1:]` directly)."""
     raw_arguments = sys.argv
-    double_dash_index = raw_arguments.index("--") if "--" in raw_arguments else len(raw_arguments)
-    custom_arguments = raw_arguments[double_dash_index + 1 :]
+    if "--" in raw_arguments:
+        return raw_arguments[raw_arguments.index("--") + 1 :]
+    return raw_arguments[1:]
 
-    michael_cfg = project_paths.get_character_paths("michael")
+
+def resolve_startup_language(custom_arguments) -> None:
+    """Resolve UI language before parsing Blender CLI arguments."""
+    configured_language = None
+    try:
+        configured_language = project_paths.get_configured_language()
+    except FileNotFoundError:
+        configured_language = None
+    i18n.set_active_language(configured_language, cli_args=custom_arguments)
+
+
+def parse_blender_cli_args():
+    """Parse CLI options passed to Blender and populate config defaults lazily."""
+    custom_arguments = extract_custom_blender_args()
+    resolve_startup_language(custom_arguments)
 
     argument_parser = argparse.ArgumentParser(
-        description="Compilador Shinano Eternal Reunion para GTA V Legacy"
+        description=i18n.translate("michael.build.cli_desc")
+    )
+    argument_parser.add_argument(
+        "--lang",
+        choices=list(i18n.SUPPORTED_LANGUAGES) + ["auto"],
+        default=None,
+        help=i18n.translate("common.language_option_help"),
     )
     argument_parser.add_argument(
         "--target-character",
         default="michael",
         choices=["michael", "franklin", "trevor"],
-        help="Personagem alvo do Modo Historia",
+        help=i18n.translate("michael.build.arg_target_char"),
     )
     argument_parser.add_argument(
         "--skeleton-yft",
-        default=str(michael_cfg["skeleton_yft"]),
-        help="Caminho do arquivo de esqueleto .yft",
+        default=None,
+        help=i18n.translate("michael.build.arg_skeleton"),
     )
     argument_parser.add_argument(
         "--shinano-fbx",
-        default=str(michael_cfg["fbx_shinano"]),
-        help="Caminho do FBX base da Shinano (Body e Body_base)",
+        default=None,
+        help=i18n.translate("michael.build.arg_shinano_fbx"),
     )
     argument_parser.add_argument(
         "--outfit-fbx",
-        default=str(michael_cfg["fbx_outfit"]),
-        help="Caminho do FBX de roupas Eternal Reunion",
+        default=None,
+        help=i18n.translate("michael.build.arg_outfit_fbx"),
     )
     argument_parser.add_argument(
         "--watch-fbx",
-        default=str(michael_cfg["fbx_watch"]),
-        help="Caminho do FBX do Relogio de Bolso",
+        default=None,
+        help=i18n.translate("michael.build.arg_watch_fbx"),
     )
     argument_parser.add_argument(
         "--hair-fbx",
-        default=str(michael_cfg["fbx_hair"]),
-        help="Caminho do FBX do Cabelo Neko Tied Bob hair",
+        default=None,
+        help=i18n.translate("michael.build.arg_hair_fbx"),
     )
     argument_parser.add_argument(
         "--face-anim",
-        default=str(michael_cfg["face_anim"]),
-        help="Caminho do arquivo .anim com expressoes faciais",
+        default=None,
+        help=i18n.translate("michael.build.arg_face_anim"),
     )
     argument_parser.add_argument(
         "--texture-dir",
-        default=str(michael_cfg["textures_dir"]),
-        help="Diretorio das texturas do Atlas 4x2",
+        default=None,
+        help=i18n.translate("michael.build.arg_texture_dir"),
     )
     argument_parser.add_argument(
         "--atlas-png",
-        default=Path(michael_cfg["atlas_png"]).name,
-        help="Nome do arquivo PNG do Texture Atlas",
+        default=None,
+        help=i18n.translate("michael.build.arg_atlas_png"),
     )
     argument_parser.add_argument(
         "--normal-png",
-        default=Path(michael_cfg["normal_png"]).name,
-        help="Nome do arquivo PNG do flat normal map",
+        default=None,
+        help=i18n.translate("michael.build.arg_normal_png"),
     )
     argument_parser.add_argument(
         "--spec-png",
-        default=Path(michael_cfg["spec_png"]).name,
-        help="Nome do arquivo PNG do black specular map",
+        default=None,
+        help=i18n.translate("michael.build.arg_spec_png"),
     )
     argument_parser.add_argument(
         "--output-dir",
-        default=str(michael_cfg["exported_models_dir"]),
-        help="Diretorio de saida dos arquivos .ydd",
+        default=None,
+        help=i18n.translate("michael.build.arg_output_dir"),
     )
     argument_parser.add_argument(
         "--max-verts-per-chunk",
         type=int,
         default=30000,
-        help="Maximo de vertices por sub-geometria (uint16)",
+        help=i18n.translate("michael.build.arg_max_verts"),
     )
 
-    return argument_parser.parse_args(custom_arguments)
+    parsed_args = argument_parser.parse_args(custom_arguments)
+    if parsed_args.lang and parsed_args.lang != "auto":
+        os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
+        i18n.set_active_language(parsed_args.lang)
+
+    michael_cfg = project_paths.get_character_paths("michael")
+    parsed_args.skeleton_yft = parsed_args.skeleton_yft or str(michael_cfg["skeleton_yft"])
+    parsed_args.shinano_fbx = parsed_args.shinano_fbx or str(michael_cfg["fbx_shinano"])
+    parsed_args.outfit_fbx = parsed_args.outfit_fbx or str(michael_cfg["fbx_outfit"])
+    parsed_args.watch_fbx = parsed_args.watch_fbx or str(michael_cfg["fbx_watch"])
+    parsed_args.hair_fbx = parsed_args.hair_fbx or str(michael_cfg["fbx_hair"])
+    parsed_args.face_anim = parsed_args.face_anim or str(michael_cfg["face_anim"])
+    parsed_args.texture_dir = parsed_args.texture_dir or str(michael_cfg["textures_dir"])
+    parsed_args.atlas_png = parsed_args.atlas_png or Path(michael_cfg["atlas_png"]).name
+    parsed_args.normal_png = parsed_args.normal_png or Path(michael_cfg["normal_png"]).name
+    parsed_args.spec_png = parsed_args.spec_png or Path(michael_cfg["spec_png"]).name
+    parsed_args.output_dir = parsed_args.output_dir or str(michael_cfg["exported_models_dir"])
+
+    return parsed_args
 
 
 if __name__ == "__main__":
