@@ -26,6 +26,7 @@ except ImportError:
 ROOT = paths.get_project_root()
 STAGING = paths.get_staging_dir()
 DUMMY_YDD_PATH = paths.get_dummy_ydd_path()
+PROP_DUMMY_YDD_PATH = paths.get_prop_dummy_ydd_path()
 
 RPF_PATHS_CFG = paths.get_rpf_paths()
 MICHAEL_CFG = paths.get_character_paths("michael")
@@ -56,6 +57,12 @@ TARGET_DIRS = [
     RPF_PATHS_CFG["streamedpeds_extracted"],
     RPF_PATHS_CFG["patchday4ng_models_extracted"],
 ]
+
+CHARACTER_PROPS_DIRS = {
+    str(MICHAEL_CFG["ped_name"]): MICHAEL_CFG["staging_streamed_props_dir"],
+    str(FRANKLIN_CFG["ped_name"]): FRANKLIN_CFG["staging_streamed_props_dir"],
+    str(TREVOR_CFG["ped_name"]): TREVOR_CFG["staging_streamed_props_dir"],
+}
 
 def patch_character_in_dir(char_id, config, ped_dir):
     if not ped_dir.is_dir():
@@ -108,6 +115,16 @@ def main():
         print(f"[ERRO] Dummy YDD não encontrado em: {DUMMY_YDD_PATH}")
         sys.exit(1)
 
+    if not PROP_DUMMY_YDD_PATH.exists():
+        print(f"[ERRO] Prop Dummy YDD nao encontrado em: {PROP_DUMMY_YDD_PATH}")
+        sys.exit(1)
+
+    try:
+        paths.ensure_streamedpedprops_extracted()
+    except Exception as props_error:
+        print(f"[ERRO] Falha ao extrair streamedpedprops.rpf: {props_error}")
+        sys.exit(1)
+
     for char_id, config in CHARACTERS.items():
         print(f"\n--- Aplicando {config['name']} ({char_id}) ---")
         if not config["model_ydd"].exists():
@@ -120,6 +137,12 @@ def main():
         for base_dir in TARGET_DIRS:
             ped_dir = base_dir / char_id
             patch_character_in_dir(char_id, config, ped_dir)
+
+        props_target_dir = CHARACTER_PROPS_DIRS.get(char_id)
+        if props_target_dir is not None:
+            paths.patch_character_glasses_props(
+                props_target_dir, PROP_DUMMY_YDD_PATH, f"{char_id}_p"
+            )
 
     print("\n[SUCESSO] Todos os 3 personagens foram aplicados com sucesso nos diretórios de staging!")
     print("Execute 'python3 repack_and_deploy_everything.py' para gerar os arquivos RPF e instalar no jogo.")

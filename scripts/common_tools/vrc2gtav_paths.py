@@ -310,6 +310,11 @@ def get_dummy_ydd_path() -> Path:
     return Path(get_config_path("common_assets", "dummy_ydd"))
 
 
+def get_prop_dummy_ydd_path() -> Path:
+    """Retorna o caminho do arquivo dummy p_eyes_dummy.ydd configurado em [common_assets]."""
+    return Path(get_config_path("common_assets", "prop_dummy_ydd"))
+
+
 def get_rage_cli() -> str:
     """Retorna o executavel ou caminho do RAGE CLI configurado em [executables] -> rage."""
     raw_rage_value = get_config_value("executables", "rage")
@@ -515,7 +520,7 @@ def get_character_paths(
             f"Secao [{character_section}] nao encontrada em {find_project_config_file()}."
         )
     root_directory = get_project_root()
-    non_path_keys = {"ped_name", "ytd_name"}
+    non_path_keys = {"ped_name", "prop_ped_name", "ytd_name"}
     list_path_keys = {"extra_model_ydds"}
 
     resolved_character: Dict[str, Union[Path, str, List[Union[Path, str]]]] = {}
@@ -542,6 +547,76 @@ def get_character_paths(
     return resolved_character
 
 
+def ensure_streamedpedprops_extracted() -> Path:
+    """
+    Garante que o arquivo streamedpedprops.rpf esteja extraido em staging.
+    Caso a pasta ainda nao exista ou esteja vazia, extrai automaticamente a
+    partir de x64v_extracted usando o RAGE CLI.
+    """
+    rpf_paths_cfg = get_rpf_paths()
+    props_extracted_dir = rpf_paths_cfg["streamedpedprops_extracted"]
+    if props_extracted_dir.is_dir() and any(props_extracted_dir.iterdir()):
+        return props_extracted_dir
+
+    nested_props_rpf = (
+        rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpedprops_rpf_relative"]
+    )
+    if not nested_props_rpf.is_file():
+        raise FileNotFoundError(
+            f"streamedpedprops.rpf nao encontrado para extracao em: {nested_props_rpf}"
+        )
+
+    props_extracted_dir.mkdir(parents=True, exist_ok=True)
+    rage_executable = get_rage_cli()
+    print(f"[INFO] Extraindo {nested_props_rpf} -> {props_extracted_dir}...")
+    subprocess.run(
+        [rage_executable, "extract", "-o", str(props_extracted_dir), str(nested_props_rpf)],
+        check=True,
+    )
+    return props_extracted_dir
+
+
+def patch_character_glasses_props(
+    target_props_directory: Union[str, Path],
+    prop_dummy_path: Union[str, Path],
+    character_label: str = "",
+) -> Dict[str, int]:
+    """
+    Substitui todos os drawables de oculos (p_eyes_*.ydd) dentro da pasta de props
+    do personagem (player_zero_p, player_one_p ou player_two_p) pelo dummy rigido
+    sem esqueleto (p_eyes_dummy.ydd), preservando .ytd e outros acessorios.
+    """
+    props_dir_path = Path(target_props_directory)
+    dummy_file_path = Path(prop_dummy_path)
+    if not dummy_file_path.is_file():
+        raise FileNotFoundError(
+            f"Prop Dummy YDD nao encontrado em: {dummy_file_path}"
+        )
+
+    if not props_dir_path.is_dir():
+        print(f"  [AVISO] Diretorio de props nao encontrado: {props_dir_path}")
+        return {"replaced_glasses": 0, "untouched": 0}
+
+    replaced_glasses = 0
+    untouched_props = 0
+    for entry_path in sorted(props_dir_path.iterdir()):
+        if not entry_path.is_file():
+            continue
+        lowercase_name = entry_path.name.lower()
+        if lowercase_name.startswith("p_eyes_") and lowercase_name.endswith(".ydd"):
+            shutil.copyfile(dummy_file_path, entry_path)
+            replaced_glasses += 1
+        else:
+            untouched_props += 1
+
+    label_text = character_label if character_label else props_dir_path.name
+    dummy_size_bytes = dummy_file_path.stat().st_size
+    print(f"  [{label_text}] {props_dir_path.parent.name}/{props_dir_path.name}:")
+    print(f"      Dummies de oculos (p_eyes_*.ydd, {dummy_size_bytes} B): {replaced_glasses}")
+    print(f"      Outros props/texturas intocados:         {untouched_props}")
+    return {"replaced_glasses": replaced_glasses, "untouched": untouched_props}
+
+
 def print_summary() -> None:
     """Imprime todos os caminhos principais carregados do vrc2gtav.cfg para diagnostico."""
     cfg_file = find_project_config_file()
@@ -558,6 +633,7 @@ def print_summary() -> None:
     print(f"Python Exe: {get_python_exe()}")
     print(f"FFmpeg Exe: {get_ffmpeg_exe()}")
     print(f"Dummy YDD: {get_dummy_ydd_path()}")
+    print(f"Prop Dummy YDD: {get_prop_dummy_ydd_path()}")
     print(f"x64v Mod RPF: {rpf_paths['x64v_game_rpf']}")
     print("============================================")
 

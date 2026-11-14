@@ -55,9 +55,13 @@ PATCHDAY4NG_DLC_RPF_FILE = RPF_PATHS_CONFIG["patchday4ng_modded_rpf"]
 TARGET_PATCHDAY4NG_DLC_PATH = RPF_PATHS_CONFIG["patchday4ng_game_rpf"]
 
 STREAMEDPEDS_EXTRACTED_DIR = RPF_PATHS_CONFIG["streamedpeds_extracted"]
+STREAMEDPEDPROPS_EXTRACTED_DIR = RPF_PATHS_CONFIG["streamedpedprops_extracted"]
 X64V_EXTRACTED_DIR = RPF_PATHS_CONFIG["x64v_extracted"]
 STREAMEDPEDS_RPF_FILE = (
     X64V_EXTRACTED_DIR / RPF_PATHS_CONFIG["streamedpeds_rpf_relative"]
+)
+STREAMEDPEDPROPS_RPF_FILE = (
+    X64V_EXTRACTED_DIR / RPF_PATHS_CONFIG["streamedpedprops_rpf_relative"]
 )
 X64V_MODDED_RPF_FILE = RPF_PATHS_CONFIG["x64v_modded_rpf"]
 TARGET_X64V_RPF_PATH = RPF_PATHS_CONFIG["x64v_game_rpf"]
@@ -264,6 +268,26 @@ def main():
             "Repacotando streamedpeds_players.rpf",
         )
         patch_rpf7_open_and_zero_compressed(STREAMEDPEDS_RPF_FILE)
+
+        # 4B. Repack streamedpedprops.rpf (props e dummies de oculos)
+        if STREAMEDPEDPROPS_EXTRACTED_DIR.is_dir():
+            if STREAMEDPEDPROPS_RPF_FILE.exists():
+                STREAMEDPEDPROPS_RPF_FILE.unlink()
+            execute_shell_command(
+                [
+                    RAGE_CLI_TOOL,
+                    "create",
+                    "-o",
+                    str(STREAMEDPEDPROPS_RPF_FILE),
+                    str(STREAMEDPEDPROPS_EXTRACTED_DIR),
+                ],
+                "Repacotando streamedpedprops.rpf",
+            )
+            patch_rpf7_open_and_zero_compressed(STREAMEDPEDPROPS_RPF_FILE)
+        else:
+            print(
+                f"[AVISO] Diretorio streamedpedprops_extracted ausente ({STREAMEDPEDPROPS_EXTRACTED_DIR}); pulando repack de props."
+            )
 
         # 5. Repack x64v_modded.rpf
         if X64V_MODDED_RPF_FILE.exists():

@@ -14,6 +14,8 @@ todas as texturas (uppr_diff) pelo atlas 2K correspondente, e todas as outras
 partes do corpo humano (cabeca, cabelo, barba, pernas, pes, maos, acessorios)
 por drawables dummy invisiveis (head_000_r.ydd de 629 bytes), eliminando
 completamente clipping e sobreposicao de partes dos personagens vanilla.
+Tambem substitui todos os oculos dos protagonistas (p_eyes_*.ydd em
+streamedpedprops.rpf) pelo prop dummy rigido (p_eyes_dummy.ydd de 515 bytes).
 
 Regras de Implementacao:
   - Zero variaveis de uma ou duas letras.
@@ -38,6 +40,7 @@ except ImportError:
 PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
 STAGING_DIRECTORY = project_paths.get_staging_dir()
 DUMMY_YDD_FILE_PATH = project_paths.get_dummy_ydd_path()
+PROP_DUMMY_YDD_FILE_PATH = project_paths.get_prop_dummy_ydd_path()
 
 RPF_PATHS_CONFIG = project_paths.get_rpf_paths()
 MICHAEL_CONFIG = project_paths.get_character_paths("michael")
@@ -68,6 +71,12 @@ STAGING_TARGET_DIRECTORIES = [
     RPF_PATHS_CONFIG["streamedpeds_extracted"],
     RPF_PATHS_CONFIG["patchday4ng_models_extracted"],
 ]
+
+CHARACTER_PROPS_DIRECTORY_MAP = {
+    str(MICHAEL_CONFIG["ped_name"]): MICHAEL_CONFIG["staging_streamed_props_dir"],
+    str(FRANKLIN_CONFIG["ped_name"]): FRANKLIN_CONFIG["staging_streamed_props_dir"],
+    str(TREVOR_CONFIG["ped_name"]): TREVOR_CONFIG["staging_streamed_props_dir"],
+}
 
 VANILLA_BODY_SLOT_PREFIXES = [
     "accs",
@@ -166,6 +175,16 @@ def apply_selected_characters(characters_to_apply: list) -> bool:
         print(f"[ERRO] Dummy YDD nao encontrado em: {DUMMY_YDD_FILE_PATH}")
         return False
 
+    if not PROP_DUMMY_YDD_FILE_PATH.exists():
+        print(f"[ERRO] Prop Dummy YDD nao encontrado em: {PROP_DUMMY_YDD_FILE_PATH}")
+        return False
+
+    try:
+        project_paths.ensure_streamedpedprops_extracted()
+    except Exception as props_extract_error:
+        print(f"[ERRO] Falha ao preparar streamedpedprops_extracted: {props_extract_error}")
+        return False
+
     for character_key in characters_to_apply:
         if character_key not in CHARACTER_REGISTRY:
             print(f"[ERRO] Personagem desconhecido: {character_key}")
@@ -190,6 +209,14 @@ def apply_selected_characters(characters_to_apply: list) -> bool:
             ped_subfolder_path = staging_base_path / character_key
             patch_single_character_directory(
                 character_key, character_data, ped_subfolder_path
+            )
+
+        props_subfolder_path = CHARACTER_PROPS_DIRECTORY_MAP.get(character_key)
+        if props_subfolder_path is not None:
+            project_paths.patch_character_glasses_props(
+                props_subfolder_path,
+                PROP_DUMMY_YDD_FILE_PATH,
+                f"{character_key}_p",
             )
 
     print("\n[SUCESSO] Personagens aplicados com sucesso nos diretorios de staging!")

@@ -99,19 +99,34 @@ def test_path_resolution() -> bool:
 
 
 def test_dummy_mesh_integrity() -> bool:
-    """Valida o tamanho e formato do dummy mesh universal."""
-    print("\n[TESTE 3] Integridade da Dummy Mesh Universal (head_000_r.ydd)")
+    """Valida o tamanho e formato das dummy meshes universais (ped e props)."""
+    print("\n[TESTE 3] Integridade das Dummy Meshes (head_000_r.ydd e p_eyes_dummy.ydd)")
     dummy_mesh_file = project_paths.get_dummy_ydd_path()
-    if not dummy_mesh_file.exists():
-        return print_status_result("head_000_r.ydd", False, "Arquivo nao encontrado!")
+    prop_dummy_file = project_paths.get_prop_dummy_ydd_path()
 
-    file_size_bytes = dummy_mesh_file.stat().st_size
-    is_exact_size = file_size_bytes == 629
-    return print_status_result(
-        "head_000_r.ydd",
-        is_exact_size,
-        f"Tamanho: {file_size_bytes} bytes (esperado: 629 bytes)",
-    )
+    head_dummy_ok = False
+    if not dummy_mesh_file.exists():
+        head_dummy_ok = print_status_result("head_000_r.ydd", False, "Arquivo nao encontrado!")
+    else:
+        file_size_bytes = dummy_mesh_file.stat().st_size
+        head_dummy_ok = print_status_result(
+            "head_000_r.ydd",
+            file_size_bytes == 629,
+            f"Tamanho: {file_size_bytes} bytes (esperado: 629 bytes)",
+        )
+
+    prop_dummy_ok = False
+    if not prop_dummy_file.exists():
+        prop_dummy_ok = print_status_result("p_eyes_dummy.ydd", False, "Arquivo nao encontrado!")
+    else:
+        prop_size_bytes = prop_dummy_file.stat().st_size
+        prop_dummy_ok = print_status_result(
+            "p_eyes_dummy.ydd",
+            prop_size_bytes == 515,
+            f"Tamanho: {prop_size_bytes} bytes (esperado: 515 bytes)",
+        )
+
+    return head_dummy_ok and prop_dummy_ok
 
 
 def test_compiled_drawables_and_textures() -> bool:
@@ -179,6 +194,37 @@ def test_deployed_rpf_encryption_headers() -> bool:
                 )
         except Exception as read_error:
             all_rpfs_valid &= print_status_result(rpf_file_path.name, False, str(read_error))
+
+    # Valida tambem se todos os p_eyes_*.ydd dos protagonistas em staging sao prop dummies
+    props_extracted_dir = rpf_paths_cfg["streamedpedprops_extracted"]
+    prop_dummy_file = project_paths.get_prop_dummy_ydd_path()
+    if props_extracted_dir.is_dir() and prop_dummy_file.exists():
+        total_glasses_checked = 0
+        mismatched_glasses = []
+        for character_section in ("michael", "franklin", "trevor"):
+            character_cfg = project_paths.get_character_paths(character_section)
+            character_props_dir = Path(character_cfg["staging_streamed_props_dir"])
+            if not character_props_dir.is_dir():
+                mismatched_glasses.append(f"{character_section}: pasta ausente")
+                continue
+            glasses_files = sorted(character_props_dir.glob("p_eyes_*.ydd"))
+            if not glasses_files:
+                mismatched_glasses.append(f"{character_section}: nenhum p_eyes_*.ydd")
+                continue
+            for glasses_path in glasses_files:
+                total_glasses_checked += 1
+                if not filecmp.cmp(glasses_path, prop_dummy_file, shallow=False):
+                    mismatched_glasses.append(
+                        f"{character_props_dir.name}/{glasses_path.name}"
+                    )
+
+        all_rpfs_valid &= print_status_result(
+            "Dummies de oculos em staging (streamedpedprops)",
+            len(mismatched_glasses) == 0 and total_glasses_checked == 35,
+            f"{total_glasses_checked}/35 p_eyes_*.ydd identicos a p_eyes_dummy.ydd"
+            if not mismatched_glasses
+            else f"Divergencias: {mismatched_glasses[:5]}",
+        )
 
     return all_rpfs_valid
 

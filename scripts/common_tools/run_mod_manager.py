@@ -216,6 +216,21 @@ def verify_system_prerequisites() -> bool:
     else:
         print(f"[AVISO] Pasta de mods do GTA V nao encontrada: {GTAV_MODS_DIRECTORY}")
 
+    # 6. Dummy meshes (ped e props de oculos)
+    dummy_ydd_path = project_paths.get_dummy_ydd_path()
+    prop_dummy_ydd_path = project_paths.get_prop_dummy_ydd_path()
+    if dummy_ydd_path.is_file():
+        print(f"[OK] Dummy YDD localizado: {dummy_ydd_path}")
+    else:
+        print(f"[ERRO] Dummy YDD nao encontrado: {dummy_ydd_path}")
+        verification_passed = False
+
+    if prop_dummy_ydd_path.is_file():
+        print(f"[OK] Prop Dummy YDD localizado: {prop_dummy_ydd_path}")
+    else:
+        print(f"[ERRO] Prop Dummy YDD nao encontrado: {prop_dummy_ydd_path}")
+        verification_passed = False
+
     return verification_passed
 
 

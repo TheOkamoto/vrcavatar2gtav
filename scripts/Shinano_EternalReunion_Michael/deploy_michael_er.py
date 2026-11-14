@@ -40,6 +40,7 @@ STAGING_DIR = project_paths.get_staging_dir()
 
 RAGE_TOOL_PATH = str(project_paths.get_rage_cli())
 DUMMY_SOURCE_PATH = str(project_paths.get_dummy_ydd_path())
+PROP_DUMMY_SOURCE_PATH = str(project_paths.get_prop_dummy_ydd_path())
 
 # Fontes do Michael (player_zero)
 MICHAEL_ER_DIR = str(MICHAEL_CFG["character_dir"])
@@ -52,13 +53,17 @@ FRANKLIN_DIR = str(FRANKLIN_CFG["character_dir"])
 FRANKLIN_UPPR_U = str(FRANKLIN_CFG["target_model_ydd"])
 FRANKLIN_YTD = str(FRANKLIN_CFG["ytd_file"])
 
-# Diretorios de trabalho em streamedpeds_players
+# Diretorios de trabalho em streamedpeds_players e streamedpedprops
 STREAMED_BASE_DIR = str(RPF_PATHS_CFG["streamedpeds_extracted"])
 PLAYER_ZERO_DIR = str(MICHAEL_CFG["staging_streamed_ped_dir"])
 PLAYER_ONE_DIR = str(FRANKLIN_CFG["staging_streamed_ped_dir"])
+STREAMEDPROPS_BASE_DIR = str(RPF_PATHS_CFG["streamedpedprops_extracted"])
+PLAYER_ZERO_PROPS_DIR = str(MICHAEL_CFG["staging_streamed_props_dir"])
+PLAYER_ONE_PROPS_DIR = str(FRANKLIN_CFG["staging_streamed_props_dir"])
 
 # Arquivos RPF do x64v
 STREAMED_TARGET_RPF = str(STAGING_DIR / "streamedpeds_players_shinano.rpf")
+STREAMEDPROPS_TARGET_RPF = str(STAGING_DIR / "streamedpedprops_shinano.rpf")
 X64V_EXTRACTED_DIR = str(RPF_PATHS_CFG["x64v_extracted"])
 X64V_MODDED_RPF = str(RPF_PATHS_CFG["x64v_modded_rpf"])
 GTAV_MODS_X64V_RPF = str(RPF_PATHS_CFG["x64v_game_rpf"])
@@ -179,6 +184,7 @@ def deploy_universal():
     assert os.path.exists(FRANKLIN_UPPR_U), f"Arquivo nao encontrado: {FRANKLIN_UPPR_U}"
     assert os.path.exists(FRANKLIN_YTD), f"Arquivo nao encontrado: {FRANKLIN_YTD}"
     assert os.path.exists(DUMMY_SOURCE_PATH), f"Arquivo nao encontrado: {DUMMY_SOURCE_PATH}"
+    assert os.path.exists(PROP_DUMMY_SOURCE_PATH), f"Arquivo nao encontrado: {PROP_DUMMY_SOURCE_PATH}"
 
     # 2. Aplica substituicao universal em streamedpeds_players_extracted
     apply_universal_slots_to_ped(
@@ -208,6 +214,33 @@ def deploy_universal():
     )
     shutil.copy2(STREAMED_TARGET_RPF, nested_streamed_dest)
     print(f"[INFO] Atualizado: {nested_streamed_dest}")
+
+    # 3B. Substitui oculos (p_eyes_*.ydd) em streamedpedprops e empacota streamedpedprops.rpf
+    project_paths.ensure_streamedpedprops_extracted()
+    project_paths.patch_character_glasses_props(
+        PLAYER_ZERO_PROPS_DIR, PROP_DUMMY_SOURCE_PATH, "player_zero_p"
+    )
+    project_paths.patch_character_glasses_props(
+        PLAYER_ONE_PROPS_DIR, PROP_DUMMY_SOURCE_PATH, "player_one_p"
+    )
+    execute_shell_task(
+        [
+            RAGE_TOOL_PATH,
+            "create",
+            "-o",
+            STREAMEDPROPS_TARGET_RPF,
+            STREAMEDPROPS_BASE_DIR,
+            "-e",
+            "open",
+        ],
+        "Empacotamento de streamedpedprops_shinano.rpf",
+    )
+    patch_rpf_table_of_contents(STREAMEDPROPS_TARGET_RPF)
+    nested_props_dest = str(
+        RPF_PATHS_CFG["x64v_extracted"] / RPF_PATHS_CFG["streamedpedprops_rpf_relative"]
+    )
+    shutil.copy2(STREAMEDPROPS_TARGET_RPF, nested_props_dest)
+    print(f"[INFO] Atualizado: {nested_props_dest}")
 
     # 4. Empacota x64v_modded.rpf e aplica correcao de TOC
     print("\n[INFO] Empacotando x64v_modded.rpf...")

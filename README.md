@@ -1,4 +1,5 @@
 # GUIA MESTRE DEFINITIVO: Implantação de Avatares VRChat no GTA V
+
 ## Conversão, Rigging, Lip Sync, Texturas 2K e Deploy dos Três Protagonistas
 
 ---
@@ -17,7 +18,7 @@
 
 Todo o projeto foi consolidado na pasta raiz **`vrc2gtav`**, estruturado de forma modular e independente de plataforma:
 
-```text
+```
 vrc2gtav/
 ├── 1_Franklin_Shinano_Casual/
 │   ├── 1_source/              # Referências dos FBX e texturas originais
@@ -41,7 +42,8 @@ vrc2gtav/
 │   └── 5_rpf_package/         # Script apply_miltina_to_trevor.py
 │
 ├── _deploy_tools/             # Ferramentas globais de deploy
-│   ├── head_000_r.ydd         # O Dummy Mesh universal (629 bytes)
+│   ├── head_000_r.ydd         # Dummy Mesh universal para corpo (629 bytes)
+│   ├── p_eyes_dummy.ydd       # Prop Dummy Mesh sem esqueleto para oculos (515 bytes)
 │   ├── apply_all_characters.py # Aplica os 3 personagens em todos os slots de uma vez
 │   ├── repack_and_deploy_everything.py # Repacota RPFs e instala no GTA V
 │   └── vrc2gtav_paths.py      # Leitor do vrc2gtav.cfg + conversor Win/WSL
@@ -57,13 +59,13 @@ vrc2gtav/
 
 ---
 
-## 2. Configuração Centralizada (`vrc2gtav.cfg`) & Multiplataforma
+## 2. Configuração Centralizada (`vrc2gtav.cfg`) \& Multiplataforma
 
-Todos os caminhos configuráveis (executáveis como Blender, RAGE CLI, Python e FFmpeg; diretórios do Unity `waifuv4`, pasta de mods do GTA V, RPFs extraídos/instalados, `.fbx`, `.anim`, `.yft`, texturas e scripts) ficam centralizados no arquivo [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg).
+Todos os caminhos configuráveis (executáveis como Blender, RAGE CLI, Python e FFmpeg; diretórios do Unity `waifuv4`, pasta de mods do GTA V, RPFs extraídos/instalados, `.fbx`, `.anim`, `.yft`, texturas e scripts) ficam centralizados no arquivo `vrc2gtav.cfg`.
 
-O módulo [`vrc2gtav_paths.py`](file:///mnt/e/vrc2gtav/scripts/common_tools/vrc2gtav_paths.py) lê o [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg) (ou um caminho customizado via variável de ambiente `VRC2GTAV_CFG`) e converte automaticamente entre caminhos Windows (`E:/...`, `D:/...`) e Linux/WSL (`/mnt/e/...`, `/mnt/d/...`):
+O módulo `vrc2gtav_paths.py` lê o `vrc2gtav.cfg` (ou um caminho customizado via variável de ambiente `VRC2GTAV_CFG`) e converte automaticamente entre caminhos Windows (`E:/...`, `D:/...`) e Linux/WSL (`/mnt/e/...`, `/mnt/d/...`):
 
-1. **Para mover o projeto, o GTA V ou o Blender para outro disco/pasta:** edite apenas as seções `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em [`vrc2gtav.cfg`](file:///mnt/e/vrc2gtav/vrc2gtav.cfg) — nenhum script `.py` precisa ser alterado.
+1. **Para mover o projeto, o GTA V ou o Blender para outro disco/pasta:** edite apenas as seções `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em `vrc2gtav.cfg` — nenhum script `.py` precisa ser alterado.
 2. **Suporte Windows Nativo + WSL:** Ao invocar o Blender Windows a partir do Linux/WSL, `build_blender_command()` propaga `VRC2GTAV_CFG` e detecta automaticamente um socket `WSL_INTEROP` ativo.
 3. **Variáveis de Ambiente Opcionais:** `VRC2GTAV_CFG` (aponta para outro `.cfg`), `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
 
@@ -72,22 +74,22 @@ O módulo [`vrc2gtav_paths.py`](file:///mnt/e/vrc2gtav/scripts/common_tools/vrc2
 ## 3. Arquitetura 3D no Blender e Rigging GTA V
 
 ### 3.1 Filtragem do Esqueleto (57 Ossos Essenciais)
-Os esqueletos originais do GTA V (`player_zero.yft`, `player_one.yft`, `player_two.yft`) contêm dezenas de ossos auxiliares e de física de tecido que desestabilizam avatares estilizados de anime.
-Cada personagem é filtrado estritamente para **57 ossos**:
+
+Os esqueletos originais do GTA V (`player_zero.yft`, `player_one.yft`, `player_two.yft`) contêm dezenas de ossos auxiliares e de física de tecido que desestabilizam avatares estilizados de anime. Cada personagem é filtrado estritamente para **57 ossos**:
+
 - **Coluna e Tronco:** `SKEL_ROOT`, `SKEL_Pelvis`, `SKEL_Spine_Root`, `SKEL_Spine0`, `SKEL_Spine1`, `SKEL_Spine2`, `SKEL_Spine3`, `SKEL_Neck_1`, `SKEL_Head`.
 - **Braços e Clavículas:** `SKEL_L_Clavicle`, `SKEL_L_UpperArm`, `SKEL_L_Forearm`, `SKEL_L_Hand` (e equivalentes `_R_`).
 - **Pernas e Pés:** `SKEL_L_Thigh`, `SKEL_L_Calf`, `SKEL_L_Foot`, `SKEL_L_Toe0` (e equivalentes `_R_`).
 - **Face / Lip Sync:** `FACIAL_facialRoot` (parentesco com `SKEL_Head`, tag 51105) e `FACIAL_jaw` (parentesco com `FACIAL_facialRoot`, tag 2849).
 
 ### 3.2 Correções Críticas de Rigging
+
 1. **Dedos das Mãos:** Mapear os 15 ossos de dedos VRChat para dedos complexos de GTA V causa achatamento dos dedos durante animações de armas. Todos os dedos foram consolidados com peso 1.0 no osso da mão (`SKEL_L_Hand` / `SKEL_R_Hand`), mantendo a pose relaxada e natural perfeita.
-2. **Marias-Chiquinhas e Cabelos Laterais (Twintails):** 
-   - *Problema:* Algoritmos ingênuos que buscam `"tail"` no nome dos ossos atribuíam as marias-chiquinhas da Miltina (`twin tail1_R`, `Twin tail ribbon`) ao osso `SKEL_Pelvis` (cauda do vestido), fazendo o cabelo esticar até o quadril ao caminhar.
-   - *Regra Estrita:*
-     ```python
-     if "twin" in low_name or "pony" in low_name or "twintail" in low_name:
-         return "SKEL_Head"
-     ```
+2. **Marias-Chiquinhas e Cabelos Laterais (Twintails):**
+    - *Problema:* Algoritmos ingênuos que buscam `"tail"` no nome dos ossos atribuíam as marias-chiquinhas da Miltina (`twin tail1_R`, `Twin tail ribbon`) ao osso `SKEL_Pelvis` (cauda do vestido), fazendo o cabelo esticar até o quadril ao caminhar.
+    - *Regra Estrita:*\
+      if "twin" in low\_name or "pony" in low\_name or "twintail" in low\_name:\
+         return "SKEL\_Head"
 3. **A-Pose (-55°):** Avatares de VRChat vêm em T-Pose rígida (braços a 90°). Para casar perfeitamente com a postura do GTA V, os braços são rotacionados em **-55° no eixo Y** em relação ao pivô dos ombros.
 
 ---
@@ -96,7 +98,7 @@ Cada personagem é filtrado estritamente para **57 ossos**:
 
 Para que as personagens mexam a boca ao falar durante cutscenes, ligações telefônicas e falas em gameplay:
 
-```mermaid
+```
 flowchart TD
     FaceMesh["Malha Facial (Body)"] --> Calibrate["1. Calcular Vértices da Boca (|Δy| < 0.05, z < boca_centro)"]
     Calibrate --> Formula["2. Fórmula de Ponderação Jaw: min(0.35, (|Δz| / 0.0075) * 0.35)"]
@@ -108,38 +110,44 @@ flowchart TD
 ```
 
 ### Fórmula de Decaimento Vertical:
-$$\text{peso}_{\text{jaw}} = \min\left(0.35, \frac{|\Delta z|}{0.0075} \times 0.35\right)$$
-$$\text{peso}_{\text{head}} = 1.0 - \text{peso}_{\text{jaw}}$$
 
-* **Por que o valor máximo é 0.35?** Aberturas ósseas no GTA V foram calibradas para humanos realistas com mandíbulas profundas. Um peso 1.0 em rostos estilizados de anime deforma e estica excessivamente a malha. O valor de 0.35 proporciona uma abertura suave, delicada e fidedigna aos animes.
+$$\\text{peso}*{\\text{jaw}} = \\min\\left(0.35, \\frac{\|\\Delta z\|}{0.0075} \\times 0.35\\right)$$ $$\\text{peso}*{\\text{head}} = 1.0 - \\text{peso}\_{\\text{jaw}}$$
+
+- **Por que o valor máximo é 0.35?** Aberturas ósseas no GTA V foram calibradas para humanos realistas com mandíbulas profundas. Um peso 1.0 em rostos estilizados de anime deforma e estica excessivamente a malha. O valor de 0.35 proporciona uma abertura suave, delicada e fidedigna aos animes.
 
 ---
 
 ## 5. Texturas e Dicionários .YTD (Padrão 2K e Hash JOAAT)
 
 ### 5.1 Limite Obrigatório de 2K (2048x2048)
+
 - Texturas em 4K no GTA V provocam estouro de buffer de streaming de memória e crash do jogo após poucos minutos de gameplay.
 - Todos os atlas foram formatados rigorosamente em **2048x2048 pixels**, comprimidos no formato **DXT5 (BC3)** com Mipmaps automáticos via `rage textures build`.
 
 ### 5.2 Regra Crítica do Hash JOAAT
+
 A RAGE Engine localiza texturas dentro do arquivo `.ytd` usando o hash numérico Jenkins One-at-a-Time (**JOAAT**). Se os nomes das texturas forem ordenados alfabeticamente no XML da Sollumz, o lookup de ponteiros internos quebra e o modelo fica completamente **preto** ou com texturas trocadas.
+
 - **Ordem Obrigatória de Inclusão no .YTD:**
-  1. `miltina_atlas_2k` (ou `shinano_atlas_2k`) — Diffuse Map
-  2. `miltina_spec` — Specular Map
-  3. `miltina_normal` — Normal Map
+    1. `miltina_atlas_2k` (ou `shinano_atlas_2k`) — Diffuse Map
+    2. `miltina_spec` — Specular Map
+    3. `miltina_normal` — Normal Map
 
 ---
 
-## 6. Estratégia de Deploy: Universal Slot Replacement & Dummies
+## 6. Estratégia de Deploy: Universal Slot Replacement \& Dummies
 
 No GTA V, as roupas dos personagens são compostas por múltiplos slots:
+
 - `uppr` (Tronco/Torso), `lowr` (Pernas), `feet` (Sapatos), `head` (Rosto), `hair` (Cabelo), `berd` (Barba), `hand` (Mãos), `teef` (Dentes), `accs` (Acessórios), `task` (Coletes/Armaduras), `jbib` (Jaquetas/Camisas internas).
 
 Se apenas o slot `uppr_000` for substituído, qualquer mudança de roupa nas missões ou safehouses faz com que os braços, calças, sapatos e cabeças masculinas dos protagonistas apareçam e atravessem a waifu.
 
 ### A Solução Definitiva:
-1. **Avatar Completo no Tronco (`uppr`):** O modelo compilado (`uppr_000_u.ydd`) contém o corpo inteiro (cabeça, cabelo, vestido, braços, pernas, sapatos). Esse modelo e seu `.ytd` são replicados em **todos os slots `uppr`** do personagem.
-2. **Dummy Mesh de 629 Bytes:** Todas as outras partes humanas (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) são substituídas pelo arquivo [`head_000_r.ydd`](file:///mnt/e/vrc2gtav/_deploy_tools/head_000_r.ydd). Trata-se de uma malha vazia e invisível (1 triângulo degenerado). Nenhuma parte vanilla tem como aparecer.
+
+1. **Avatar Completo no Tronco (`uppr`):** O modelo compilado (`uppr_000_u.ydd`) contém o corpo inteiro (cabeça, cabelo, vestido, braços, pernas, sapatos). Esse modelo e seu `.ytd` são replicados em **todos os slots** **`uppr`** do personagem.
+2. **Dummy Mesh de 629 Bytes:** Todas as outras partes humanas (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) são substituídas pelo arquivo `head_000_r.ydd`. Trata-se de uma malha vazia e invisível (1 triângulo degenerado). Nenhuma parte vanilla tem como aparecer.
+3. **Dummies de Óculos (`p_eyes_*.ydd` em `streamedpedprops.rpf`):** Todos os 35 drawables de óculos dos três protagonistas (`player_zero_p`: 11, `player_one_p`: 12, `player_two_p`: 12) são substituídos por `p_eyes_dummy.ydd` (515 bytes) — um drawable dictionary rígido dedicado (`HasSkin=0`, sem `<Skeleton>` e sem texturas embutidas), enquanto os `.ytd` de difusa permanecem intactos para preservar o lookup de metadados sem exibir óculos em cutscenes ou gameplay.
 
 ---
 
@@ -147,24 +155,26 @@ Se apenas o slot `uppr_000` for substituído, qualquer mudança de roupa nas mis
 
 O GTA V rejeita arquivos RPF modificados se não atenderem a duas condições fundamentais de baixo nível:
 
-1. **Cabeçalho `b'OPEN'` (Offset 12):** Os primeiros 16 bytes de cada arquivo RPF contêm o Magic `b'7FPR'` e o indicador de criptografia no offset 12. Os RPFs modificados devem ter esse valor setado para `b'OPEN'` (0x4E45504F), instruindo a engine e o OpenIV a não tentarem decriptação RSA.
-2. **Correção do TOC `f_size = 0`:** Quando uma ferramenta como o `rage` empacota um RPF dentro de outro RPF (ex: `mppatches.rpf` dentro de `dlc.rpf`), entradas binárias não comprimidas gravadas com tamanho comprimido diferente de zero ativam a exceção interna do zlib no executável do jogo, gerando a janela de erro fatal:
-   $$\text{ERR\_GEN\_ZLIB\_2} \quad \text{("zlib call failed")}$$
-   O script [`repack_and_deploy_everything.py`](file:///mnt/e/vrc2gtav/_deploy_tools/repack_and_deploy_everything.py) percorre a tabela de conteúdo (TOC) de cada RPF gerado e zera os bytes 2, 3 e 4 das entradas binárias, eliminando qualquer risco de travamento.
+1. **Cabeçalho** **`b'OPEN'`** **(Offset 12):** Os primeiros 16 bytes de cada arquivo RPF contêm o Magic `b'7FPR'` e o indicador de criptografia no offset 12. Os RPFs modificados devem ter esse valor setado para `b'OPEN'` (0x4E45504F), instruindo a engine e o OpenIV a não tentarem decriptação RSA.
+2. **Correção do TOC** **`f_size = 0`:** Quando uma ferramenta como o `rage` empacota um RPF dentro de outro RPF (ex: `mppatches.rpf` dentro de `dlc.rpf`), entradas binárias não comprimidas gravadas com tamanho comprimido diferente de zero ativam a exceção interna do zlib no executável do jogo, gerando a janela de erro fatal: $$\\text{ERR\_GEN\_ZLIB\_2} \\quad \\text{("zlib call failed")}$$ O script `repack_and_deploy_everything.py` percorre a tabela de conteúdo (TOC) de cada RPF gerado e zera os bytes 2, 3 e 4 das entradas binárias, eliminando qualquer risco de travamento.
 
 ---
 
 ## 8. Como Executar (O Orquestrador Mestre Unificado)
 
-Para facilitar a manutencao e evitar ter que rodar comandos manuais individuais, foi criado o script mestre [`run_mod_manager.py`](file:///mnt/e/vrc2gtav/run_mod_manager.py) (e o inicializador rápido [`EXECUTAR_GERENCIADOR.bat`](file:///mnt/e/vrc2gtav/EXECUTAR_GERENCIADOR.bat)).
+Para facilitar a manutenção e evitar ter que rodar comandos manuais individuais, foi criado o script mestre `run_mod_manager.py` (e o inicializador rápido `EXECUTAR_GERENCIADOR.bat`).
 
 ### 8.1 Modo Interativo (Recomendado)
-No Windows, dê um duplo clique em [`EXECUTAR_GERENCIADOR.bat`](file:///mnt/e/vrc2gtav/EXECUTAR_GERENCIADOR.bat), ou execute no terminal:
-```bash
+
+No Windows, dê um duplo clique em `EXECUTAR_GERENCIADOR.bat`, ou execute no terminal:
+
+```
 python run_mod_manager.py
 ```
+
 O menu interativo será exibido:
-```text
+
+```
 ======================================================================
          GERENCIADOR DE AVATARES VRChat PARA GTA V
 ======================================================================
@@ -177,11 +187,14 @@ Selecione qual personagem voce deseja trocar/atualizar:
   [0] Sair
 ----------------------------------------------------------------------
 ```
+
 Ao selecionar o personagem, o gerenciador pergunta quais etapas deseja executar (Geração de Texturas 2K, Compilação Blender, e Instalação/Deploy no jogo), permitindo atualizar apenas o que for necessário de forma rápida e segura.
 
 ### 8.2 Modo Linha de Comando (Automação / CLI)
+
 Você também pode invocar o script diretamente com argumentos:
-```bash
+
+```
 # Processar apenas o Trevor (Miltina Maid) por completo:
 python run_mod_manager.py --character trevor
 
@@ -202,7 +215,8 @@ python run_mod_manager.py --check-env
 Caso você queira rodar cada ferramenta de forma isolada sem o orquestrador:
 
 ### Passo 1: Gerar as Texturas e Atlas 2K
-```bash
+
+```
 # Franklin (Shinano Casual)
 python3 scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py
 
@@ -214,8 +228,10 @@ python3 scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
 ```
 
 ### Passo 2: Compilar os Modelos 3D no Blender
+
 Os wrappers abaixo lêem automaticamente o executável do Blender e os caminhos em `vrc2gtav.cfg`:
-```bash
+
+```
 # Franklin (player_one)
 python3 scripts/Shinano_Casual_Franklin/run_build_franklin.py
 
@@ -227,7 +243,8 @@ python3 scripts/Miltina_Maid_Trevor/run_pipeline.py
 ```
 
 ### Passo 3: Aplicar Personagens nos Diretórios de Staging
-```bash
+
+```
 # Aplica um personagem especifico (player_zero, player_one ou player_two):
 python3 scripts/common_tools/apply_characters.py --character player_two
 
@@ -236,7 +253,8 @@ python3 scripts/common_tools/apply_characters.py --character all
 ```
 
 ### Passo 4: Repacotar RPFs e Instalar no Jogo
-```bash
+
+```
 python3 scripts/common_tools/repack_and_deploy_everything.py
 ```
 

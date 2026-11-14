@@ -4,6 +4,7 @@ Replaces drawables and texture dictionaries across extracted mod directories.
 """
 
 import glob
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -18,12 +19,14 @@ import vrc2gtav_paths as project_paths
 
 TREVOR_CFG = project_paths.get_character_paths("trevor")
 DUMMY_YDD_PATH = str(project_paths.get_dummy_ydd_path())
+PROP_DUMMY_YDD_PATH = str(project_paths.get_prop_dummy_ydd_path())
 MILTINA_MODEL_YDD_PATH = str(TREVOR_CFG["target_model_ydd"])
 MILTINA_TEXTURE_YTD_PATH = str(TREVOR_CFG["ytd_file"])
 
 MPPATCHES_P2_DIR = str(TREVOR_CFG["staging_mppatches_ped_dir"])
 STREAMEDPEDS_P2_DIR = str(TREVOR_CFG["staging_streamed_ped_dir"])
 PATCHDAY4_P2_DIR = str(TREVOR_CFG["staging_patchday4_ped_dir"])
+STREAMEDPROPS_P2_DIR = str(TREVOR_CFG["staging_streamed_props_dir"])
 
 def patch_directory(target_dir, is_mppatches=False):
     print(f"=== Patching {target_dir} ===")
@@ -68,15 +71,21 @@ def patch_directory(target_dir, is_mppatches=False):
 def main():
     if not os.path.exists(DUMMY_YDD_PATH):
         raise FileNotFoundError(f"Dummy YDD not found at {DUMMY_YDD_PATH}")
+    if not os.path.exists(PROP_DUMMY_YDD_PATH):
+        raise FileNotFoundError(f"Prop Dummy YDD not found at {PROP_DUMMY_YDD_PATH}")
     if not os.path.exists(MILTINA_MODEL_YDD_PATH):
         raise FileNotFoundError(f"Miltina model not found at {MILTINA_MODEL_YDD_PATH}")
     if not os.path.exists(MILTINA_TEXTURE_YTD_PATH):
         raise FileNotFoundError(f"Miltina texture not found at {MILTINA_TEXTURE_YTD_PATH}")
 
+    project_paths.ensure_streamedpedprops_extracted()
     patch_directory(MPPATCHES_P2_DIR, is_mppatches=True)
     patch_directory(STREAMEDPEDS_P2_DIR, is_mppatches=False)
     if os.path.isdir(PATCHDAY4_P2_DIR):
         patch_directory(PATCHDAY4_P2_DIR, is_mppatches=False)
+    project_paths.patch_character_glasses_props(
+        STREAMEDPROPS_P2_DIR, PROP_DUMMY_YDD_PATH, "player_two_p"
+    )
     print("\nAll target directories successfully patched.")
 
 if __name__ == "__main__":
