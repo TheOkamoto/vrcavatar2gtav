@@ -39,16 +39,19 @@ CHARACTERS = {
         "name": "Michael De Santa -> Shinano Eternal Reunion",
         "model_ydd": MICHAEL_CFG["target_model_ydd"],
         "texture_ytd": MICHAEL_CFG["ytd_file"],
+        "target_yft": MICHAEL_CFG["target_yft"],
     },
     str(FRANKLIN_CFG["ped_name"]): {
         "name": "Franklin Clinton -> Shinano Casual",
         "model_ydd": FRANKLIN_CFG["target_model_ydd"],
         "texture_ytd": FRANKLIN_CFG["ytd_file"],
+        "target_yft": FRANKLIN_CFG["target_yft"],
     },
     str(TREVOR_CFG["ped_name"]): {
         "name": "Trevor Philips -> Miltina Maid",
         "model_ydd": TREVOR_CFG["target_model_ydd"],
         "texture_ytd": TREVOR_CFG["ytd_file"],
+        "target_yft": TREVOR_CFG["target_yft"],
     },
 }
 
@@ -133,10 +136,20 @@ def main():
         if not config["texture_ytd"].exists():
             print(f"[ERRO] Textura YTD não encontrada: {config['texture_ytd']}")
             sys.exit(1)
+        if not config["target_yft"].exists():
+            print(f"[ERRO] Esqueleto YFT não encontrado: {config['target_yft']}")
+            sys.exit(1)
 
         for base_dir in TARGET_DIRS:
             ped_dir = base_dir / char_id
             patch_character_in_dir(char_id, config, ped_dir)
+            yft_dest = base_dir / f"{char_id}.yft"
+            if (
+                base_dir == RPF_PATHS_CFG["streamedpeds_extracted"]
+                or yft_dest.exists()
+            ):
+                shutil.copyfile(config["target_yft"], yft_dest)
+                print(f"  [{char_id}] Esqueleto atualizado: {yft_dest.name}")
 
         props_target_dir = CHARACTER_PROPS_DIRS.get(char_id)
         if props_target_dir is not None:

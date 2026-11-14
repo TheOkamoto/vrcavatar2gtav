@@ -140,12 +140,15 @@ def test_compiled_drawables_and_textures() -> bool:
 
     expected_assets_list = [
         franklin_cfg["target_model_ydd"],
+        franklin_cfg["target_yft"],
         franklin_cfg["ytd_file"],
         michael_cfg["target_model_ydd"],
         michael_cfg["extra_model_ydds"][0],
+        michael_cfg["target_yft"],
         michael_cfg["ytd_file"],
         trevor_cfg["target_model_ydd"],
         trevor_cfg["extra_model_ydds"][0],
+        trevor_cfg["target_yft"],
         trevor_cfg["ytd_file"],
     ]
 
@@ -226,6 +229,28 @@ def test_deployed_rpf_encryption_headers() -> bool:
             else f"Divergencias: {mismatched_glasses[:5]}",
         )
 
+    # Valida se os esqueletos .yft em staging correspondem aos .yft compilados
+    streamedpeds_extracted_dir = rpf_paths_cfg["streamedpeds_extracted"]
+    if streamedpeds_extracted_dir.is_dir():
+        mismatched_yft_files = []
+        for character_section in ("michael", "franklin", "trevor"):
+            character_cfg = project_paths.get_character_paths(character_section)
+            ped_name = str(character_cfg["ped_name"])
+            compiled_yft = Path(character_cfg["target_yft"])
+            staged_yft = streamedpeds_extracted_dir / f"{ped_name}.yft"
+            if not compiled_yft.exists() or not staged_yft.exists():
+                mismatched_yft_files.append(f"{ped_name}.yft (ausente)")
+            elif not filecmp.cmp(compiled_yft, staged_yft, shallow=False):
+                mismatched_yft_files.append(f"{ped_name}.yft (desatualizado)")
+
+        all_rpfs_valid &= print_status_result(
+            "Esqueletos .yft de maos/dedos em staging (streamedpeds)",
+            len(mismatched_yft_files) == 0,
+            "player_zero/one/two.yft sincronizados"
+            if not mismatched_yft_files
+            else f"Divergencias: {mismatched_yft_files}",
+        )
+
     return all_rpfs_valid
 
 
@@ -289,6 +314,7 @@ def test_code_quality_and_mirror_sync() -> bool:
 
     mirror_pairs = [
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
+        (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
         (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
         (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
         (common_dir / "repack_and_deploy_everything.py", deploy_dir / "repack_and_deploy_everything.py"),

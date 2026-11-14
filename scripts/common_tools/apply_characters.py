@@ -53,16 +53,19 @@ CHARACTER_REGISTRY = {
         "display_name": "Michael De Santa -> Shinano Eternal Reunion",
         "model_ydd_path": MICHAEL_CONFIG["target_model_ydd"],
         "texture_ytd_path": MICHAEL_CONFIG["ytd_file"],
+        "skeleton_yft_path": MICHAEL_CONFIG["target_yft"],
     },
     str(FRANKLIN_CONFIG["ped_name"]): {
         "display_name": "Franklin Clinton -> Shinano Casual",
         "model_ydd_path": FRANKLIN_CONFIG["target_model_ydd"],
         "texture_ytd_path": FRANKLIN_CONFIG["ytd_file"],
+        "skeleton_yft_path": FRANKLIN_CONFIG["target_yft"],
     },
     str(TREVOR_CONFIG["ped_name"]): {
         "display_name": "Trevor Philips -> Miltina Maid",
         "model_ydd_path": TREVOR_CONFIG["target_model_ydd"],
         "texture_ytd_path": TREVOR_CONFIG["ytd_file"],
+        "skeleton_yft_path": TREVOR_CONFIG["target_yft"],
     },
 }
 
@@ -205,11 +208,28 @@ def apply_selected_characters(characters_to_apply: list) -> bool:
             )
             return False
 
+        if not character_data["skeleton_yft_path"].exists():
+            print(
+                f"[ERRO] Esqueleto YFT nao encontrado: {character_data['skeleton_yft_path']}"
+            )
+            return False
+
         for staging_base_path in STAGING_TARGET_DIRECTORIES:
             ped_subfolder_path = staging_base_path / character_key
             patch_single_character_directory(
                 character_key, character_data, ped_subfolder_path
             )
+            target_yft_destination = staging_base_path / f"{character_key}.yft"
+            if (
+                staging_base_path == RPF_PATHS_CONFIG["streamedpeds_extracted"]
+                or target_yft_destination.exists()
+            ):
+                shutil.copyfile(
+                    character_data["skeleton_yft_path"], target_yft_destination
+                )
+                print(
+                    f"  [{character_key}] Esqueleto atualizado: {target_yft_destination.name}"
+                )
 
         props_subfolder_path = CHARACTER_PROPS_DIRECTORY_MAP.get(character_key)
         if props_subfolder_path is not None:

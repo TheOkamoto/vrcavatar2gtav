@@ -24,6 +24,7 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
         sys.path.insert(0, str(_tools_dir))
 
 import vrc2gtav_paths as project_paths
+import hand_skeleton_helper
 
 TREVOR_CFG = project_paths.get_character_paths("trevor")
 
@@ -72,6 +73,7 @@ for side_code in ["L", "R"]:
     for finger_idx in range(5):
         for sub_idx in range(3):
             valid_gtav_bones.add(f"SKEL_{side_code}_Finger{finger_idx}{sub_idx}")
+valid_gtav_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
 
 bpy.context.view_layer.objects.active = ped_armature
 bpy.ops.object.mode_set(mode="EDIT")
@@ -390,14 +392,10 @@ BONE_MAP = {
     "LeftEye": "SKEL_Head",
     "RightEye": "SKEL_Head",
     
-    # Left Arm & Hand
+    # Left Arm & Hand (twists e dedos sao resolvidos via hand_skeleton_helper)
     "Shoulder_L": "SKEL_L_Clavicle",
     "Upper_arm_L": "SKEL_L_UpperArm",
-    "Upper_arm_Twist_L": "SKEL_L_UpperArm",
-    "Upper_arm_Cloth_Twist_L": "SKEL_L_UpperArm",
     "Lower_arm_L": "SKEL_L_Forearm",
-    "Lower_arm_Twist_L": "SKEL_L_Forearm",
-    "Lower_arm_Cloth_Twist_L": "SKEL_L_Forearm",
     "Hand_L": "SKEL_L_Hand",
     "Proximal_L": "SKEL_L_Hand",
     "Intermediate_L": "SKEL_L_Hand",
@@ -406,11 +404,7 @@ BONE_MAP = {
     # Right Arm & Hand
     "Shoulder_R": "SKEL_R_Clavicle",
     "Upper_arm_R": "SKEL_R_UpperArm",
-    "Upper_arm_Twist_R": "SKEL_R_UpperArm",
-    "Upper_arm_Cloth_Twist_R": "SKEL_R_UpperArm",
     "Lower_arm_R": "SKEL_R_Forearm",
-    "Lower_arm_Twist_R": "SKEL_R_Forearm",
-    "Lower_arm_Cloth_Twist_R": "SKEL_R_Forearm",
     "Hand_R": "SKEL_R_Hand",
     "Proximal_R": "SKEL_R_Hand",
     "Intermediate_R": "SKEL_R_Hand",
@@ -432,13 +426,16 @@ BONE_MAP = {
 }
 
 def resolve_target_bone(source_bone_name):
+    resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
+    if resolved_arm_or_finger is not None:
+        return resolved_arm_or_finger
+
     if source_bone_name in BONE_MAP:
         return BONE_MAP[source_bone_name]
         
     low_name = source_bone_name.lower()
     
-    # Fingers & Hands (including Proximal, Intermediate, Distal)
-    if any(keyword in low_name for keyword in ["thumb", "index", "middle", "ring", "little", "finger", "proximal", "intermediate", "distal"]):
+    if any(keyword in low_name for keyword in ["proximal", "intermediate", "distal"]):
         side_tag = "L" if ("_l" in low_name or ".l" in low_name or "left" in low_name) else "R"
         return f"SKEL_{side_tag}_Hand"
 
@@ -564,8 +561,18 @@ bpy.ops.object.vertex_group_limit_total(limit=4)
 bpy.ops.object.vertex_group_normalize_all()
 print(f"[INFO] Consolidated vertex groups count: {len(unified_obj.vertex_groups)}")
 
-# Remove VRChat armature
+# Realoca ossos de braco/mao/dedos da armature GTA V e remove a armature VRChat
+hand_bone_world_targets = {}
 if vrc_armature:
+    hand_bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
+        vrc_armature, uniform_scale, z_translation
+    )
+    relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
+        ped_armature, hand_bone_world_targets
+    )
+    print(
+        f"[OK] {relocated_arm_bones} ossos de braco/mao/dedos realocados na armature do Trevor."
+    )
     bpy.data.objects.remove(vrc_armature)
 
 # 11. Configure ped_default shader and assign textures
@@ -801,5 +808,15 @@ for drawable_name in export_drawables:
         limit_to_selected=False,
     )
     print(f"[INFO] Exported {drawable_name}.ydd -> {export_status}")
+
+if hand_bone_world_targets:
+    yft_output_path = Path(TREVOR_CFG["target_yft"])
+    updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(
+        skeleton_path, yft_output_path, hand_bone_world_targets
+    )
+    print(
+        f"[OK] Esqueleto .yft exportado em {yft_output_path} "
+        f"({updated_yft_bones}/{total_yft_bones} ossos, erro max={max_yft_delta:.6f} m)"
+    )
 
 print("[COMPLETE] Miltina Maid export pipeline completed successfully.")

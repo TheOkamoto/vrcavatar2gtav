@@ -58,6 +58,7 @@ for _tools_candidate in (
         sys.path.insert(0, str(_tools_candidate))
 
 import vrc2gtav_paths as project_paths
+import hand_skeleton_helper
 import mathutils
 
 
@@ -355,15 +356,13 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     if source_bone_name in HUMAN_TO_GTAV_BONE_MAP:
         return HUMAN_TO_GTAV_BONE_MAP[source_bone_name]
 
-    # 2. Dedos das maos e palmas
-    # Para eliminar distorcoes, achatamento como papel e dedos torcidos (onde as animacoes
-    # do Michael tentam rotacionar ossos masculinos 7.5cm distantes dos dedos de anime),
-    # consolidamos todos os vertices de dedos diretamente no pulso (SKEL_L_Hand e SKEL_R_Hand).
-    # Isso preserva a pose natural e relaxada original da Shinano em todas as animacoes.
-    if any(
-        finger_key in source_bone_name
-        for finger_key in ["Finger", "Thumb", "Index", "Middle", "Ring", "Little", "Hand"]
-    ):
+    # 2. Mapeamento 1:1 dos 30 ossos de dedos e ossos auxiliares de torcao (RB_*/Forearm/UpperArm)
+    resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
+    if resolved_arm_or_finger is not None:
+        return resolved_arm_or_finger
+
+    # Fallback para palmas ou nomes genericos de mao sem dedo especifico
+    if "hand" in source_bone_name.lower():
         side_code = (
             "L"
             if (".L" in source_bone_name or "Left" in source_bone_name or "_L" in source_bone_name)
@@ -600,6 +599,7 @@ def build_shinano_er_for_gtav(cli_args):
         for finger_idx in range(5):
             for sub_idx in range(3):
                 valid_gtav_bones.add(f"SKEL_{side_code}_Finger{finger_idx}{sub_idx}")
+    valid_gtav_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
 
     bpy.context.view_layer.objects.active = ped_armature
     bpy.ops.object.mode_set(mode="EDIT")
@@ -1144,6 +1144,16 @@ def build_shinano_er_for_gtav(cli_args):
 
         processed_objects.append(proc_obj)
 
+    if arm_base is None:
+        raise RuntimeError("Armature base da Shinano nao encontrada para realocar bracos/dedos.")
+    bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
+        arm_base, scale_factor, z_offset
+    )
+    relocated_armature_bones = hand_skeleton_helper.relocate_blender_armature_bones(
+        ped_armature, bone_world_targets
+    )
+    print(f"[OK] {relocated_armature_bones} ossos de bracos/maos/dedos realocados em ped_armature.")
+
     # 8. Limpa os objetos de armatures e malhas brutas
     for old_obj in list(bpy.data.objects):
         if old_obj != ped_armature and old_obj not in processed_objects:
@@ -1314,6 +1324,15 @@ def build_shinano_er_for_gtav(cli_args):
             limit_to_selected=False,
         )
         print(f"[INFO] Exportado {drawable_item_name}.ydd -> {export_status}")
+
+    yft_output_path = os.path.join(output_dir, f"{char_profile['ped_name']}.yft")
+    updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(
+        cli_args.skeleton_yft, yft_output_path, bone_world_targets
+    )
+    print(
+        f"[OK] Esqueleto .yft exportado em {yft_output_path} "
+        f"({updated_yft_bones}/{total_yft_bones} ossos, erro max={max_yft_delta:.6f} m)"
+    )
 
 
 def parse_blender_cli_args():

@@ -431,6 +431,8 @@ def build_blender_command(
         command_list = [
             blender_host_exe,
             "-b",
+            "--python-exit-code",
+            "1",
             "-P",
             str(blender_script_path),
         ]
@@ -465,6 +467,8 @@ def build_blender_command(
         command_list = [
             blender_host_exe,
             "-b",
+            "--python-exit-code",
+            "1",
             "-P",
             script_win_path,
         ]
@@ -478,6 +482,8 @@ def build_blender_command(
     command_list = [
         blender_host_exe,
         "-b",
+        "--python-exit-code",
+        "1",
         "-P",
         str(blender_script_path),
     ]

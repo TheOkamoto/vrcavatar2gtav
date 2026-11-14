@@ -22,6 +22,7 @@ for _tools_candidate in (
         sys.path.insert(0, str(_tools_candidate))
 
 import vrc2gtav_paths as project_paths
+import hand_skeleton_helper
 
 FRANKLIN_CFG = project_paths.get_character_paths("franklin")
 
@@ -164,6 +165,7 @@ for side in ['L', 'R']:
 
 target_bones.add('FACIAL_facialRoot')
 target_bones.add('FACIAL_jaw')
+target_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
 
 bpy.context.view_layer.objects.active = f_arm
 bpy.ops.object.mode_set(mode='EDIT')
@@ -173,12 +175,9 @@ for b_bone in list(f_arm.data.edit_bones):
 bpy.ops.object.mode_set(mode='OBJECT')
 print(f"[OK] Esqueleto do Franklin filtrado para {len(f_arm.data.bones)} ossos.")
 
-for cleanup_obj in [
-    bpy.data.objects.get(f"{skeleton_arm_name}.mesh"),
-    bpy.data.objects.get("player_one.mesh"),
-    bpy.data.objects.get("SKEL_ROOT"),
-]:
-    if cleanup_obj:
+for cleanup_name in (f"{skeleton_arm_name}.mesh", "player_one.mesh", "SKEL_ROOT"):
+    cleanup_obj = bpy.data.objects.get(cleanup_name)
+    if cleanup_obj is not None:
         bpy.data.objects.remove(cleanup_obj)
 
 # 3. Importa Shinano FBX
@@ -296,9 +295,10 @@ mapping = {
 def get_target_bone(name):
     if name in mapping:
         return mapping[name]
-    # FIX DE MAOS: Consolidacao direta de todos os vertices de dedos e maos em SKEL_L_Hand e SKEL_R_Hand
-    # para eliminar achatamento e torcao gerados pelos ossos masculinos do GTA V
-    if any(keyword in name for keyword in ['Finger', 'Thumb', 'Index', 'Middle', 'Ring', 'Little', 'Hand']):
+    resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(name)
+    if resolved_arm_or_finger is not None:
+        return resolved_arm_or_finger
+    if 'Hand' in name:
         side = 'L' if ('.L' in name or 'Left' in name or '_L' in name) else 'R'
         return f'SKEL_{side}_Hand'
     if name.startswith('Hair_') or name.startswith('Other_ear'):
@@ -443,6 +443,17 @@ for mesh_name in include_mesh_names:
         print(f"[OK] Pesos de FACIAL_jaw e SKEL_Head aplicados na malha processada do Body.")
 
     processed_objs.append(new_obj)
+
+# Realoca ossos de braco/mao/dedos da armature GTA V para as posicoes exatas da Shinano
+hand_bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
+    s_arm, scale_factor, z_offset
+)
+relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
+    f_arm, hand_bone_world_targets
+)
+print(
+    f"[OK] {relocated_arm_bones} ossos de braco/mao/dedos realocados na armature do Franklin."
+)
 
 # Limpa objetos temporarios
 for temp_obj in [s_arm] + [bpy.data.objects.get(mesh_name_item) for mesh_name_item in list(include_mesh_names) if bpy.data.objects.get(mesh_name_item)]:
@@ -660,4 +671,13 @@ res3 = bpy.ops.sollumz.export_assets(
     limit_to_selected=False
 )
 print('Export uppr_001_u result:', res3)
+
+yft_output_path = Path(FRANKLIN_CFG["target_yft"])
+updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(
+    skeleton_yft_path, yft_output_path, hand_bone_world_targets
+)
+print(
+    f"[OK] Esqueleto .yft exportado em {yft_output_path} "
+    f"({updated_yft_bones}/{total_yft_bones} ossos, erro max={max_yft_delta:.6f} m)"
+)
 print("[OK] Concluido com sucesso!")

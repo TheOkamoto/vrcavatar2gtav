@@ -193,6 +193,10 @@ def deploy_universal():
     apply_universal_slots_to_ped(
         PLAYER_ONE_DIR, FRANKLIN_UPPR_U, FRANKLIN_UPPR_U, FRANKLIN_YTD, "Franklin (player_one)"
     )
+    if os.path.exists(str(MICHAEL_CFG["target_yft"])):
+        shutil.copy2(str(MICHAEL_CFG["target_yft"]), os.path.join(STREAMED_BASE_DIR, "player_zero.yft"))
+    if os.path.exists(str(FRANKLIN_CFG["target_yft"])):
+        shutil.copy2(str(FRANKLIN_CFG["target_yft"]), os.path.join(STREAMED_BASE_DIR, "player_one.yft"))
 
     # 3. Empacota streamedpeds_players.rpf e insere no x64v_extracted
     print("\n[INFO] Empacotando streamedpeds_players_shinano.rpf...")
