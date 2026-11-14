@@ -42,6 +42,7 @@ def main() -> int:
     subprocess.run([python_exe, str(atlas_script)], check=True)
 
     # 2. Compilar modelo no Blender + renderizar previews
+    project_paths.ensure_character_skeleton_yft("trevor")
     blender_script = Path(trevor_cfg["blender_script"])
     if not blender_script.exists():
         print(f"[ERRO] Script Blender nao encontrado: {blender_script}")

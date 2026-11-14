@@ -23,12 +23,20 @@ from typing import Dict, List, Optional, Tuple, Union
 
 CONFIG_ENV_VAR_NAME = "VRC2GTAV_CFG"
 DEFAULT_CONFIG_FILENAME = "vrc2gtav.cfg"
+DEFAULT_CONFIG_EXAMPLE_FILENAME = "vrc2gtav.cfg.example"
 
 _CONFIG_CACHE: Dict[str, object] = {
     "config_path": None,
     "parser": None,
     "mtime": None,
 }
+
+
+def invalidate_config_cache() -> None:
+    """Limpa o cache interno do arquivo .cfg para forcar recarregamento imediato."""
+    _CONFIG_CACHE["config_path"] = None
+    _CONFIG_CACHE["parser"] = None
+    _CONFIG_CACHE["mtime"] = None
 
 
 def is_windows_host() -> bool:
@@ -140,6 +148,62 @@ def find_project_config_file(explicit_config_path: Optional[Union[str, Path]] = 
         f"Arquivo '{DEFAULT_CONFIG_FILENAME}' nao encontrado. "
         f"Certifique-se de que existe na raiz do projeto ou defina {CONFIG_ENV_VAR_NAME}."
     )
+
+
+def has_project_config_file(
+    explicit_config_path: Optional[Union[str, Path]] = None,
+) -> bool:
+    """Retorna True se vrc2gtav.cfg (ou caminho explicito/VRC2GTAV_CFG) existir."""
+    try:
+        find_project_config_file(explicit_config_path)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def find_project_config_example(
+    explicit_example_path: Optional[Union[str, Path]] = None,
+) -> Path:
+    """Localiza o template vrc2gtav.cfg.example na raiz do projeto."""
+    if explicit_example_path is not None:
+        explicit_file = Path(explicit_example_path).expanduser().resolve()
+        if explicit_file.is_file():
+            return explicit_file
+        raise FileNotFoundError(
+            f"Arquivo template especificado nao encontrado: {explicit_file}"
+        )
+
+    search_origins = [Path(__file__).resolve().parent, Path.cwd().resolve()]
+    for origin_dir in search_origins:
+        for candidate_dir in [origin_dir] + list(origin_dir.parents):
+            candidate_example = candidate_dir / DEFAULT_CONFIG_EXAMPLE_FILENAME
+            if candidate_example.is_file():
+                return candidate_example.resolve()
+
+    raise FileNotFoundError(
+        f"Arquivo template '{DEFAULT_CONFIG_EXAMPLE_FILENAME}' nao encontrado."
+    )
+
+
+def ensure_project_config_from_example(
+    project_root_hint: Optional[Path] = None,
+) -> Path:
+    """
+    Garante que vrc2gtav.cfg exista. Se nao existir, copia vrc2gtav.cfg.example
+    para vrc2gtav.cfg na raiz do projeto.
+    """
+    if has_project_config_file():
+        return find_project_config_file()
+
+    example_file = find_project_config_example()
+    target_root = (
+        Path(project_root_hint).resolve()
+        if project_root_hint is not None
+        else example_file.parent
+    )
+    target_cfg_file = target_root / DEFAULT_CONFIG_FILENAME
+    shutil.copy2(example_file, target_cfg_file)
+    return target_cfg_file.resolve()
 
 
 def load_project_config(
@@ -275,6 +339,11 @@ def get_staging_dir() -> Path:
     return Path(get_config_path("directories", "staging"))
 
 
+def get_gtav_root_dir() -> Path:
+    """Retorna o diretorio raiz da instalacao do GTA V configurado no .cfg."""
+    return Path(get_config_path("directories", "gtav_root"))
+
+
 def get_gtav_mods_dir() -> Path:
     """Retorna o diretorio mods do GTA V configurado no .cfg."""
     return Path(get_config_path("directories", "gtav_mods"))
@@ -296,7 +365,10 @@ def get_common_tools_dir() -> Path:
 
 
 def get_artifacts_dir() -> Path:
-    """Retorna o diretorio de artefatos configurado no .cfg."""
+    """Retorna o diretorio de artefatos configurado no .cfg (ou caminho inexistente se vazio)."""
+    raw_artifacts_value = get_config_value("directories", "artifacts").strip()
+    if not raw_artifacts_value:
+        return get_staging_dir() / "_no_artifacts_configured"
     return Path(get_config_path("directories", "artifacts"))
 
 
@@ -329,6 +401,15 @@ def get_rage_cli() -> str:
         # Fallback caso o usuario execute no Windows apontando para rage compilado no WSL
         return f"wsl {raw_rage_value}"
     return str(host_rage_path)
+
+
+def build_rage_command(*rage_args: str) -> List[str]:
+    """Constroi lista de argumentos para invocar o rage CLI no host ou via WSL."""
+    rage_executable = get_rage_cli()
+    if rage_executable.startswith("wsl "):
+        wsl_binary = rage_executable[4:].strip()
+        return ["wsl", wsl_binary, *rage_args]
+    return [rage_executable, *rage_args]
 
 
 def get_blender_exe(as_windows_path: bool = False) -> str:
@@ -573,13 +654,124 @@ def ensure_streamedpedprops_extracted() -> Path:
         )
 
     props_extracted_dir.mkdir(parents=True, exist_ok=True)
-    rage_executable = get_rage_cli()
-    print(f"[INFO] Extraindo {nested_props_rpf} -> {props_extracted_dir}...")
-    subprocess.run(
-        [rage_executable, "extract", "-o", str(props_extracted_dir), str(nested_props_rpf)],
-        check=True,
+    gtav_root_dir = get_gtav_root_dir()
+    rage_global_flags: List[str] = []
+    if (gtav_root_dir / "GTA5.exe").is_file():
+        rage_global_flags = ["--exe", str(gtav_root_dir)]
+    rage_command = build_rage_command(
+        *rage_global_flags,
+        "extract",
+        "-o",
+        str(props_extracted_dir),
+        str(nested_props_rpf),
     )
+    print(f"[INFO] Extraindo {nested_props_rpf} -> {props_extracted_dir}...")
+    subprocess.run(rage_command, check=True)
     return props_extracted_dir
+
+
+def ensure_character_skeleton_yft(character_section: str) -> Path:
+    """
+    Garante que o arquivo base player_*.yft exista na pasta 2_blender do personagem.
+    Caso esteja ausente (repositorio limpo pos-clone), restaura a partir de
+    backup_vanilla_skeletons ou extrai diretamente do streamedpeds_players.rpf.
+    """
+    character_cfg = get_character_paths(character_section)
+    skeleton_yft_path = Path(character_cfg["skeleton_yft"])
+    if skeleton_yft_path.is_file():
+        return skeleton_yft_path
+
+    ped_filename = f"{character_cfg['ped_name']}.yft"
+    rpf_paths_cfg = get_rpf_paths()
+    vanilla_backup_dir = rpf_paths_cfg.get(
+        "vanilla_skeletons_backup",
+        get_staging_dir() / "backup_vanilla_skeletons",
+    )
+    vanilla_backup_yft = vanilla_backup_dir / ped_filename
+
+    skeleton_yft_path.parent.mkdir(parents=True, exist_ok=True)
+    if vanilla_backup_yft.is_file():
+        shutil.copy2(vanilla_backup_yft, skeleton_yft_path)
+        print(
+            f"[OK] Esqueleto base restaurado de backup vanilla: "
+            f"{skeleton_yft_path.name}"
+        )
+        return skeleton_yft_path
+
+    vanilla_x64v_rpf = rpf_paths_cfg["x64v_vanilla_rpf"]
+    if vanilla_x64v_rpf.is_file():
+        temp_extract_dir = get_staging_dir() / "_tmp_vanilla_skeleton_fetch"
+        shutil.rmtree(temp_extract_dir, ignore_errors=True)
+        try:
+            gtav_root_dir = get_gtav_root_dir()
+            rage_global_flags: List[str] = []
+            if (gtav_root_dir / "GTA5.exe").is_file():
+                rage_global_flags = ["--exe", str(gtav_root_dir)]
+            streamed_rel_str = rpf_paths_cfg["streamedpeds_rpf_relative"].as_posix()
+            print(
+                f"[INFO] Extraindo esqueleto vanilla '{ped_filename}' de "
+                f"{vanilla_x64v_rpf.name}..."
+            )
+            subprocess.run(
+                build_rage_command(
+                    *rage_global_flags,
+                    "extract",
+                    str(vanilla_x64v_rpf),
+                    streamed_rel_str,
+                    "-o",
+                    str(temp_extract_dir),
+                ),
+                check=True,
+            )
+            temp_nested_rpf = temp_extract_dir / rpf_paths_cfg["streamedpeds_rpf_relative"]
+            vanilla_backup_dir.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                build_rage_command(
+                    *rage_global_flags,
+                    "extract",
+                    str(temp_nested_rpf),
+                    ped_filename,
+                    "-o",
+                    str(vanilla_backup_dir),
+                ),
+                check=True,
+            )
+            if vanilla_backup_yft.is_file():
+                shutil.copy2(vanilla_backup_yft, skeleton_yft_path)
+                return skeleton_yft_path
+        finally:
+            shutil.rmtree(temp_extract_dir, ignore_errors=True)
+
+    nested_streamedpeds_rpf = (
+        rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpeds_rpf_relative"]
+    )
+    if nested_streamedpeds_rpf.is_file():
+        vanilla_backup_dir.mkdir(parents=True, exist_ok=True)
+        gtav_root_dir = get_gtav_root_dir()
+        rage_global_flags: List[str] = []
+        if (gtav_root_dir / "GTA5.exe").is_file():
+            rage_global_flags = ["--exe", str(gtav_root_dir)]
+        rage_command = build_rage_command(
+            *rage_global_flags,
+            "extract",
+            str(nested_streamedpeds_rpf),
+            ped_filename,
+            "-o",
+            str(vanilla_backup_dir),
+        )
+        print(
+            f"[INFO] Extraindo esqueleto base '{ped_filename}' de "
+            f"{nested_streamedpeds_rpf.name}..."
+        )
+        subprocess.run(rage_command, check=True)
+        if vanilla_backup_yft.is_file():
+            shutil.copy2(vanilla_backup_yft, skeleton_yft_path)
+            return skeleton_yft_path
+
+    raise FileNotFoundError(
+        f"Esqueleto base '{skeleton_yft_path}' ausente. Execute o Setup Inicial "
+        f"(`python run_mod_manager.py --setup`) para extrair os arquivos vanilla do seu GTA V."
+    )
 
 
 def patch_character_glasses_props(

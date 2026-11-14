@@ -20,6 +20,7 @@ import vrc2gtav_paths as project_paths
 
 
 def main() -> int:
+    project_paths.ensure_character_skeleton_yft("franklin")
     franklin_cfg = project_paths.get_character_paths("franklin")
     blender_script = Path(franklin_cfg["blender_script"])
     if not blender_script.exists():

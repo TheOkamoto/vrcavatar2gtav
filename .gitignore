@@ -35,3 +35,28 @@ desktop.ini
 # Renderizacoes RAGE e Blender
 renders/
 
+# Arquivos do GTA V e Assets Proprietarios Compilados (Nao Versionar por Copyright)
+*.yft
+*.yft.xml
+*.ydd
+*.ydd.xml
+*.ytd
+*.dds
+*.backup_*
+
+# Unica excecao tecnica: dummy meshes vazias (sem geometria/textura protegida)
+!_deploy_tools/head_000_r.ydd
+!_deploy_tools/p_eyes_dummy.ydd
+
+# Configuracao local especifica da maquina (gerada a partir de vrc2gtav.cfg.example)
+vrc2gtav.cfg
+
+# Backups locais e outputs gerados em tempo de execucao
+backups/
+1_Franklin_Shinano_Casual/3_textures_gtav/textures/
+1_Franklin_Shinano_Casual/4_exported_models/
+2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas/
+2_Michael_Shinano_EternalReunion/4_exported_models/
+3_Trevor_Miltina_Maid/3_textures_gtav/*.png
+3_Trevor_Miltina_Maid/4_exported_models/
+

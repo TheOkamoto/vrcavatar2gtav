@@ -48,9 +48,10 @@ vrc2gtav/
 │   ├── p_eyes_dummy.ydd       # Prop Dummy Mesh sem esqueleto para oculos (515 bytes)
 │   ├── apply_all_characters.py # Aplica os 3 personagens em todos os slots de uma vez
 │   ├── repack_and_deploy_everything.py # Repacota RPFs e instala no GTA V
+│   ├── setup_first_run.py     # Assistente First-Run (cria vrc2gtav.cfg e extrai vanilla)
 │   └── vrc2gtav_paths.py      # Leitor do vrc2gtav.cfg + conversor Win/WSL
 │
-├── vrc2gtav.cfg               # Arquivo mestre INI com TODOS os caminhos (executaveis, FBX, RPFs, etc.)
+├── vrc2gtav.cfg.example       # Template portatil de caminhos (gera vrc2gtav.cfg no 1o uso)
 │
 └── scripts/                   # Central de scripts organizados por personagem
     ├── Shinano_Casual_Franklin/
@@ -59,17 +60,23 @@ vrc2gtav/
     └── common_tools/
 ```
 
+> **Aviso de Copyright e Primeira Execucao (First-Run):** Este repositorio versiona apenas o codigo-fonte das ferramentas, documentacao, template `vrc2gtav.cfg.example` e as duas dummy meshes tecnicas vazias (`head_000_r.ydd` e `p_eyes_dummy.ydd`). **Nenhum arquivo do GTA V** (`.rpf`, `.yft`, modelos/texturas da Rockstar) **nem assets pagos do VRChat/BOOTH** (`.fbx`, `.anim`, texturas, `.ydd`, `.ytd` compilados) sao distribuidos no GitHub. No primeiro uso, voce aponta a sua propria copia legal do GTA V e dos seus avatares, e o assistente extrai os RPFs e esqueletos base automaticamente para `staging/` e `*/2_blender/`.
+
 ---
 
-## 2. Configuração Centralizada (`vrc2gtav.cfg`) \& Multiplataforma
+## 2. Configuração Centralizada (`vrc2gtav.cfg`) & Setup Inicial (First-Run)
 
-Todos os caminhos configuráveis (executáveis como Blender, RAGE CLI, Python e FFmpeg; diretórios do Unity `waifuv4`, pasta de mods do GTA V, RPFs extraídos/instalados, `.fbx`, `.anim`, `.yft`, texturas e scripts) ficam centralizados no arquivo `vrc2gtav.cfg`.
+Todos os caminhos configuráveis (executáveis como Blender, RAGE CLI, Python e FFmpeg; diretórios do Unity `Assets`, instalação legal do GTA V Legacy `gtav_root`, pasta de `mods/`, RPFs extraídos/instalados, `.fbx`, `.anim`, `.yft`, texturas e scripts) ficam centralizados no arquivo local `vrc2gtav.cfg` (ignorado no Git e criado automaticamente a partir de [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) na primeira execução).
 
 O módulo `vrc2gtav_paths.py` lê o `vrc2gtav.cfg` (ou um caminho customizado via variável de ambiente `VRC2GTAV_CFG`) e converte automaticamente entre caminhos Windows (`E:/...`, `D:/...`) e Linux/WSL (`/mnt/e/...`, `/mnt/d/...`):
 
-1. **Para mover o projeto, o GTA V ou o Blender para outro disco/pasta:** edite apenas as seções `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em `vrc2gtav.cfg` — nenhum script `.py` precisa ser alterado.
-2. **Suporte Windows Nativo + WSL:** Ao invocar o Blender Windows a partir do Linux/WSL, `build_blender_command()` propaga `VRC2GTAV_CFG` e detecta automaticamente um socket `WSL_INTEROP` ativo.
-3. **Variáveis de Ambiente Opcionais:** `VRC2GTAV_CFG` (aponta para outro `.cfg`), `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
+1. **Setup Automático no Primeiro Uso:** Ao executar `EXECUTAR_GERENCIADOR.bat`, `python run_mod_manager.py`, ou `python run_mod_manager.py --setup`, o script detecta que ainda falta `vrc2gtav.cfg` ou a extração dos arquivos base em `staging/`:
+   - Copia `vrc2gtav.cfg.example` para `vrc2gtav.cfg` e detecta/pergunta os caminhos locais de `gtav_root` (contendo `GTA5.exe`), pasta `Assets` do Unity com os avatares adquiridos, `blender` (com Sollumz) e `rage` ([VIRUXE/rage](https://github.com/VIRUXE/rage)).
+   - Extrai automaticamente as chaves NG (`rage extract-keys`), `x64v.rpf`, `streamedpeds_players.rpf`, `streamedpedprops.rpf`, `mppatchesng/dlc.rpf` (`mppatches.rpf`) e `patchday4ng/dlc.rpf` (quando presente) para `staging/`.
+   - Popula os esqueletos vanilla base (`player_zero.yft`, `player_one.yft`, `player_two.yft`) em `*/2_blender/` e em `staging/backup_vanilla_skeletons/`.
+2. **Para mover o projeto, o GTA V ou o Blender para outro disco/pasta:** edite apenas as seções `[directories]`, `[executables]`, `[rpf_paths]`, `[franklin]`, `[michael]` e `[trevor]` em `vrc2gtav.cfg` — nenhum script `.py` precisa ser alterado.
+3. **Suporte Windows Nativo + WSL:** Ao invocar o Blender Windows a partir do Linux/WSL, `build_blender_command()` propaga `VRC2GTAV_CFG` e detecta automaticamente um socket `WSL_INTEROP` ativo.
+4. **Variáveis de Ambiente Opcionais:** `VRC2GTAV_CFG` (aponta para outro `.cfg`), `VRC2GTAV_ROOT`, `VRC_ASSETS_DIR`, `GTAV_MODS_DIR`, `RAGE_CLI`, `BLENDER_EXE`.
 
 ---
 
@@ -186,6 +193,7 @@ Selecione qual personagem voce deseja trocar/atualizar:
   [3] Trevor   (player_two)  -> Miltina Maid
   [4] Todos os 3 Personagens (Processo Completo)
   [5] Apenas Repacotar e Instalar RPFs no GTA V (Deploy Only)
+  [6] Configuracao Inicial e Extracao GTA V (First-Run Setup)
   [0] Sair
 ----------------------------------------------------------------------
 ```
@@ -197,6 +205,12 @@ Ao selecionar o personagem, o gerenciador pergunta quais etapas deseja executar 
 Você também pode invocar o script diretamente com argumentos:
 
 ```
+# Primeira execucao / configuracao inicial interativa (cria vrc2gtav.cfg e extrai RPFs vanilla):
+python run_mod_manager.py --setup
+
+# Primeira execucao nao-interativa informando caminhos:
+python run_mod_manager.py --setup --non-interactive --gtav-root D:/GTAV --unity-assets E:/waifuv4/Assets
+
 # Processar apenas o Trevor (Miltina Maid) por completo:
 python run_mod_manager.py --character trevor
 

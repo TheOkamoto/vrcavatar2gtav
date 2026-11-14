@@ -21,6 +21,7 @@ Regras de Implementacao:
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -30,54 +31,91 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "common_tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "_deploy_tools"))
 try:
+    import setup_first_run
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import setup_first_run
     from common_tools import vrc2gtav_paths as project_paths
 
-CONFIG_FILE_PATH = project_paths.find_project_config_file()
-PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
-SCRIPTS_DIRECTORY = project_paths.get_scripts_root_dir()
-BLENDER_EXECUTABLE = project_paths.get_blender_exe()
-RAGE_CLI_TOOL = project_paths.get_rage_cli()
-PYTHON_EXECUTABLE = project_paths.get_python_exe()
-GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
-UNITY_ASSETS_DIRECTORY = project_paths.get_vrc_assets_dir()
+CONFIG_FILE_PATH = None
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent
+SCRIPTS_DIRECTORY = None
+BLENDER_EXECUTABLE = ""
+RAGE_CLI_TOOL = ""
+PYTHON_EXECUTABLE = sys.executable
+GTAV_MODS_DIRECTORY = None
+UNITY_ASSETS_DIRECTORY = None
+APPLY_CHARACTERS_SCRIPT_PATH = None
+REPACK_DEPLOY_SCRIPT_PATH = None
+MICHAEL_CFG = None
+FRANKLIN_CFG = None
+TREVOR_CFG = None
+CHARACTER_PIPELINE_REGISTRY = {}
 
-APPLY_CHARACTERS_SCRIPT_PATH = project_paths.get_config_path(
-    "common_assets", "apply_characters_script"
-)
-REPACK_DEPLOY_SCRIPT_PATH = project_paths.get_config_path(
-    "common_assets", "repack_deploy_script"
-)
 
-MICHAEL_CFG = project_paths.get_character_paths("michael")
-FRANKLIN_CFG = project_paths.get_character_paths("franklin")
-TREVOR_CFG = project_paths.get_character_paths("trevor")
+def load_runtime_context(force_reload: bool = False) -> None:
+    """Carrega configuracoes e caminhos de runtime a partir de vrc2gtav.cfg."""
+    global CONFIG_FILE_PATH
+    global PROJECT_ROOT_DIRECTORY
+    global SCRIPTS_DIRECTORY
+    global BLENDER_EXECUTABLE
+    global RAGE_CLI_TOOL
+    global PYTHON_EXECUTABLE
+    global GTAV_MODS_DIRECTORY
+    global UNITY_ASSETS_DIRECTORY
+    global APPLY_CHARACTERS_SCRIPT_PATH
+    global REPACK_DEPLOY_SCRIPT_PATH
+    global MICHAEL_CFG
+    global FRANKLIN_CFG
+    global TREVOR_CFG
+    global CHARACTER_PIPELINE_REGISTRY
 
-# Configuracao descritiva e modular dos tres protagonistas via vrc2gtav.cfg
-CHARACTER_PIPELINE_REGISTRY = {
-    "michael": {
-        "character_key": str(MICHAEL_CFG["ped_name"]),
-        "display_name": "Michael De Santa -> Shinano Eternal Reunion",
-        "folder_name": MICHAEL_CFG["character_dir"].name,
-        "texture_script": MICHAEL_CFG["atlas_script"],
-        "blender_script": MICHAEL_CFG["blender_script"],
-    },
-    "franklin": {
-        "character_key": str(FRANKLIN_CFG["ped_name"]),
-        "display_name": "Franklin Clinton -> Shinano Casual",
-        "folder_name": FRANKLIN_CFG["character_dir"].name,
-        "texture_script": FRANKLIN_CFG["atlas_script"],
-        "blender_script": FRANKLIN_CFG["blender_script"],
-    },
-    "trevor": {
-        "character_key": str(TREVOR_CFG["ped_name"]),
-        "display_name": "Trevor Philips -> Miltina Maid",
-        "folder_name": TREVOR_CFG["character_dir"].name,
-        "texture_script": TREVOR_CFG["atlas_script"],
-        "blender_script": TREVOR_CFG["blender_script"],
-    },
-}
+    if force_reload:
+        project_paths.invalidate_config_cache()
+
+    CONFIG_FILE_PATH = project_paths.find_project_config_file()
+    PROJECT_ROOT_DIRECTORY = project_paths.get_project_root()
+    SCRIPTS_DIRECTORY = project_paths.get_scripts_root_dir()
+    BLENDER_EXECUTABLE = project_paths.get_blender_exe()
+    RAGE_CLI_TOOL = project_paths.get_rage_cli()
+    PYTHON_EXECUTABLE = project_paths.get_python_exe()
+    GTAV_MODS_DIRECTORY = project_paths.get_gtav_mods_dir()
+    UNITY_ASSETS_DIRECTORY = project_paths.get_vrc_assets_dir()
+
+    APPLY_CHARACTERS_SCRIPT_PATH = project_paths.get_config_path(
+        "common_assets", "apply_characters_script"
+    )
+    REPACK_DEPLOY_SCRIPT_PATH = project_paths.get_config_path(
+        "common_assets", "repack_deploy_script"
+    )
+
+    MICHAEL_CFG = project_paths.get_character_paths("michael")
+    FRANKLIN_CFG = project_paths.get_character_paths("franklin")
+    TREVOR_CFG = project_paths.get_character_paths("trevor")
+
+    CHARACTER_PIPELINE_REGISTRY = {
+        "michael": {
+            "character_key": str(MICHAEL_CFG["ped_name"]),
+            "display_name": "Michael De Santa -> Shinano Eternal Reunion",
+            "folder_name": MICHAEL_CFG["character_dir"].name,
+            "texture_script": MICHAEL_CFG["atlas_script"],
+            "blender_script": MICHAEL_CFG["blender_script"],
+        },
+        "franklin": {
+            "character_key": str(FRANKLIN_CFG["ped_name"]),
+            "display_name": "Franklin Clinton -> Shinano Casual",
+            "folder_name": FRANKLIN_CFG["character_dir"].name,
+            "texture_script": FRANKLIN_CFG["atlas_script"],
+            "blender_script": FRANKLIN_CFG["blender_script"],
+        },
+        "trevor": {
+            "character_key": str(TREVOR_CFG["ped_name"]),
+            "display_name": "Trevor Philips -> Miltina Maid",
+            "folder_name": TREVOR_CFG["character_dir"].name,
+            "texture_script": TREVOR_CFG["atlas_script"],
+            "blender_script": TREVOR_CFG["blender_script"],
+        },
+    }
 
 
 def print_section_header(section_title: str):
@@ -263,6 +301,7 @@ def execute_blender_build(selected_character_keys: list) -> bool:
     print_section_header("ETAPA 2: COMPILACAO DE MODELOS NO BLENDER (SOLLUMZ)")
 
     for character_key in selected_character_keys:
+        project_paths.ensure_character_skeleton_yft(character_key)
         character_data = CHARACTER_PIPELINE_REGISTRY[character_key]
         script_path = character_data["blender_script"]
 
@@ -342,6 +381,24 @@ def execute_rpf_repack_and_deploy() -> bool:
 
 def run_interactive_menu():
     """Exibe o menu interativo e solicita a escolha do usuario."""
+    if setup_first_run.is_first_run_needed():
+        print_section_header("PRIMEIRA EXECUCAO DETECTADA (FIRST-RUN SETUP)")
+        print(
+            "  Falta configurar o arquivo local vrc2gtav.cfg ou extrair os arquivos\n"
+            "  base vanilla do seu GTA V para staging/ e 2_blender/."
+        )
+        start_setup_answer = (
+            input("Deseja executar o Setup Inicial agora? (s/n) [padrao: s]: ")
+            .strip()
+            .lower()
+        )
+        if start_setup_answer != "n":
+            setup_ok = setup_first_run.run_first_run_setup(interactive=True)
+            if not setup_ok:
+                print("\n[ERRO] Setup inicial incompleto. Corrija os caminhos e tente novamente.")
+                sys.exit(1)
+            load_runtime_context(force_reload=True)
+
     separator_banner = "=" * 70
     print(f"\n{separator_banner}")
     print("         GERENCIADOR DE AVATARES VRChat PARA GTA V")
@@ -352,18 +409,29 @@ def run_interactive_menu():
     print("  [3] Trevor   (player_two)  -> Miltina Maid")
     print("  [4] Todos os 3 Personagens (Processo Completo)")
     print("  [5] Apenas Repacotar e Instalar RPFs no GTA V (Deploy Only)")
+    print("  [6] Configuracao Inicial e Extracao GTA V (First-Run Setup)")
     print("  [0] Sair")
     print(f"{'-' * 70}")
 
-    user_menu_choice = input("Digite a opcao desejada [0-5]: ").strip()
+    user_menu_choice = input("Digite a opcao desejada [0-6]: ").strip()
 
     if user_menu_choice == "0":
         print("[INFO] Operacao cancelada pelo usuario.")
         sys.exit(0)
 
+    if user_menu_choice == "6":
+        setup_ok = setup_first_run.run_first_run_setup(interactive=True)
+        sys.exit(0 if setup_ok else 1)
+
     if user_menu_choice == "5":
+        load_runtime_context(force_reload=True)
         execute_rpf_repack_and_deploy()
         sys.exit(0)
+
+    if not project_paths.has_project_config_file():
+        print("[ERRO] Arquivo vrc2gtav.cfg nao existe. Execute a opcao [6] primeiro.")
+        sys.exit(1)
+    load_runtime_context(force_reload=True)
 
     choice_to_characters_mapping = {
         "1": ["michael"],
@@ -451,22 +519,84 @@ def main():
         action="store_true",
         help="Apenas verifica os pre-requisitos do sistema e encerra",
     )
+    argument_parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Executa o configurador First-Run e extrai RPFs vanilla do GTA V",
+    )
+    argument_parser.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Forca re-extracao dos RPFs vanilla durante o setup",
+    )
+    argument_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Executa --setup sem perguntas interativas",
+    )
+    argument_parser.add_argument("--gtav-root", default=None, help="Pasta raiz do GTA V Legacy")
+    argument_parser.add_argument("--unity-assets", default=None, help="Pasta Assets do Unity/VRChat")
+    argument_parser.add_argument("--blender", default=None, help="Executavel do Blender")
+    argument_parser.add_argument("--rage", default=None, help="Executavel RAGE CLI (rage)")
 
     parsed_arguments = argument_parser.parse_args()
+
+    # Setup inicial explicito (First-Run)
+    if parsed_arguments.setup:
+        setup_ok = setup_first_run.run_first_run_setup(
+            interactive=not parsed_arguments.non_interactive,
+            force_reextract=parsed_arguments.force_setup,
+            gtav_root_override=parsed_arguments.gtav_root,
+            unity_assets_override=parsed_arguments.unity_assets,
+            blender_override=parsed_arguments.blender,
+            rage_override=parsed_arguments.rage,
+        )
+        if not setup_ok:
+            sys.exit(1)
+        if (
+            parsed_arguments.character is None
+            and not parsed_arguments.deploy_only
+            and not parsed_arguments.check_env
+        ):
+            sys.exit(0)
+
+    # Modo Interativo (quando nenhum personagem eh passado via CLI)
+    if (
+        parsed_arguments.character is None
+        and not parsed_arguments.deploy_only
+        and not parsed_arguments.check_env
+    ):
+        run_interactive_menu()
+        sys.exit(0)
+
+    if not project_paths.has_project_config_file() or setup_first_run.is_first_run_needed():
+        print("[INFO] Ambiente inicial incompleto detectado; executando setup automatico...")
+        setup_ok = setup_first_run.run_first_run_setup(
+            interactive=False,
+            force_reextract=False,
+            gtav_root_override=parsed_arguments.gtav_root,
+            unity_assets_override=parsed_arguments.unity_assets,
+            blender_override=parsed_arguments.blender,
+            rage_override=parsed_arguments.rage,
+        )
+        if not setup_ok:
+            print(
+                "[ERRO] Nao foi possivel concluir o First-Run automaticamente. "
+                "Execute `python run_mod_manager.py --setup` para configurar."
+            )
+            sys.exit(1)
+
+    load_runtime_context(force_reload=True)
 
     # Se solicitada apenas a verificacao do ambiente
     if parsed_arguments.check_env:
         prerequisites_valid = verify_system_prerequisites()
+        setup_first_run.print_setup_diagnostics()
         sys.exit(0 if prerequisites_valid else 1)
 
     # Modo Apenas Deploy
     if parsed_arguments.deploy_only:
         execute_rpf_repack_and_deploy()
-        sys.exit(0)
-
-    # Modo Interativo (quando nenhum personagem eh passado via CLI)
-    if parsed_arguments.character is None:
-        run_interactive_menu()
         sys.exit(0)
 
     # Modo Linha de Comando (CLI automatizado)

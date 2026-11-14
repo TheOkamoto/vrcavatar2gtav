@@ -14,6 +14,7 @@ Regras Verificadas:
   6. Conformidade de codigo (zero emojis e zero variaveis curtas de 1-2 letras).
 """
 
+import argparse
 import ast
 import filecmp
 import os
@@ -261,7 +262,11 @@ def test_code_quality_and_mirror_sync() -> bool:
     emoji_pattern = regex_module.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
     allowed_stdlib_short_names = {"_", "os", "re"}
 
-    root_dir = project_paths.get_project_root()
+    root_dir = (
+        project_paths.get_project_root()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR
+    )
     total_python_files = 0
     for python_file in sorted(root_dir.rglob("*.py")):
         if any(
@@ -305,15 +310,24 @@ def test_code_quality_and_mirror_sync() -> bool:
     )
 
     # Verifica se copias espelhadas estao byte-a-byte identicas
-    scripts_dir = project_paths.get_scripts_root_dir()
-    deploy_dir = project_paths.get_deploy_tools_dir()
-    common_dir = project_paths.get_common_tools_dir()
-    franklin_dir = project_paths.get_character_paths("franklin")["character_dir"]
-    michael_dir = project_paths.get_character_paths("michael")["character_dir"]
-    trevor_dir = project_paths.get_character_paths("trevor")["character_dir"]
+    if project_paths.has_project_config_file():
+        scripts_dir = project_paths.get_scripts_root_dir()
+        deploy_dir = project_paths.get_deploy_tools_dir()
+        common_dir = project_paths.get_common_tools_dir()
+        franklin_dir = project_paths.get_character_paths("franklin")["character_dir"]
+        michael_dir = project_paths.get_character_paths("michael")["character_dir"]
+        trevor_dir = project_paths.get_character_paths("trevor")["character_dir"]
+    else:
+        scripts_dir = root_dir / "scripts"
+        deploy_dir = root_dir / "_deploy_tools"
+        common_dir = scripts_dir / "common_tools"
+        franklin_dir = root_dir / "1_Franklin_Shinano_Casual"
+        michael_dir = root_dir / "2_Michael_Shinano_EternalReunion"
+        trevor_dir = root_dir / "3_Trevor_Miltina_Maid"
 
     mirror_pairs = [
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
+        (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
         (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
         (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
@@ -355,6 +369,57 @@ def test_code_quality_and_mirror_sync() -> bool:
     return quality_passed
 
 
+def test_source_templates_and_dummies() -> bool:
+    """Valida vrc2gtav.cfg.example, .gitignore e dummy meshes sem depender do setup local."""
+    print("\n[TESTE TEMPLATE] Templates e Politica Anti-Copyright")
+    cfg_example_path = project_paths.find_project_config_example()
+    gitignore_path = PROJECT_ROOT_DIR / ".gitignore"
+    dummy_head_path = PROJECT_ROOT_DIR / "_deploy_tools" / "head_000_r.ydd"
+    dummy_eyes_path = PROJECT_ROOT_DIR / "_deploy_tools" / "p_eyes_dummy.ydd"
+
+    template_ok = print_status_result(
+        "vrc2gtav.cfg.example", cfg_example_path.is_file(), str(cfg_example_path.name)
+    )
+    gitignore_ok = False
+    if gitignore_path.is_file():
+        gitignore_text = gitignore_path.read_text(encoding="utf-8")
+        gitignore_ok = (
+            "*.yft" in gitignore_text
+            and "*.ydd" in gitignore_text
+            and "vrc2gtav.cfg" in gitignore_text
+        )
+    gitignore_check = print_status_result(
+        ".gitignore regras copyright",
+        gitignore_ok,
+        "*.yft / *.ydd / vrc2gtav.cfg presentes",
+    )
+    dummies_ok = print_status_result(
+        "Dummies tecnicas em _deploy_tools/",
+        dummy_head_path.is_file() and dummy_eyes_path.is_file(),
+        "head_000_r.ydd e p_eyes_dummy.ydd presentes",
+    )
+    return template_ok and gitignore_check and dummies_ok
+
+
+def run_source_only_validation_suite():
+    """Executa validacoes de codigo-fonte, templates e espelhos (pre-First-Run)."""
+    separator_banner = "=" * 70
+    print(f"\n{separator_banner}")
+    print("      SUITE DE VALIDACAO DE REPOSITORIO LIMPO (SOURCE-ONLY)")
+    print(f"{separator_banner}")
+
+    test_results_summary = [
+        ("Sintaxe Python", test_python_syntax_compilation()),
+        ("Templates e Dummies", test_source_templates_and_dummies()),
+        ("Qualidade e Espelhos", test_code_quality_and_mirror_sync()),
+    ]
+    total_passed = sum(1 for _, success_status in test_results_summary if success_status)
+    total_tests = len(test_results_summary)
+    print(f"\nResultado Source-Only: {total_passed}/{total_tests} suites aprovadas.")
+    print(f"{separator_banner}\n")
+    return total_passed == total_tests
+
+
 def run_full_validation_suite():
     """Executa a bateria completa de validacoes do projeto."""
     separator_banner = "=" * 70
@@ -388,5 +453,17 @@ def run_full_validation_suite():
 
 
 if __name__ == "__main__":
-    test_suite_success = run_full_validation_suite()
+    arg_parser = argparse.ArgumentParser(
+        description="Suite de testes automatizados do projeto vrc2gtav"
+    )
+    arg_parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help="Valida sintaxe, templates, dummies e espelhos antes do First-Run",
+    )
+    parsed_args = arg_parser.parse_args()
+    if parsed_args.source_only:
+        test_suite_success = run_source_only_validation_suite()
+    else:
+        test_suite_success = run_full_validation_suite()
     sys.exit(0 if test_suite_success else 1)
