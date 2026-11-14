@@ -336,6 +336,122 @@ HUMAN_TO_GTAV_BONE_MAP = {
 }
 
 
+HEAD_ACCESSORY_MESH_NAMES = frozenset({
+    "Body",
+    "UN2_Beret",
+    "UN3_Glasses",
+    "Bangs",
+    "Top Back",
+    "Under Side",
+    "Back",
+    "Side Bangs",
+    "Side",
+    "In Hair",
+    "Ribbon",
+    "Ears",
+    "_Halo",
+    "_Pin.Back",
+    "_Pin.R",
+    "_Pin.L2",
+})
+
+
+def smoothstep_unit(scalar_val):
+    """Interpolacao Hermite suave limitada ao intervalo [0.0, 1.0]."""
+    clamped_val = max(0.0, min(1.0, float(scalar_val)))
+    return clamped_val * clamped_val * (3.0 - 2.0 * clamped_val)
+
+
+def compute_pocket_watch_align_matrix(arm_outfit, arm_watch):
+    """Calcula a matriz 4x4 para alinhar o Pocket Watch ao anel da cintura (Shinano.unity)."""
+    watch_bone_name = "Pocket Watch_Root"
+    if not arm_outfit or watch_bone_name not in arm_outfit.data.bones:
+        raise RuntimeError(
+            f"Osso '{watch_bone_name}' nao encontrado na armature do outfit Eternal Reunion."
+        )
+    if not arm_watch or watch_bone_name not in arm_watch.data.bones:
+        raise RuntimeError(
+            f"Osso '{watch_bone_name}' nao encontrado na armature do Pocket Watch."
+        )
+
+    outfit_bone = arm_outfit.data.bones[watch_bone_name]
+    watch_bone = arm_watch.data.bones[watch_bone_name]
+
+    outfit_matrix = arm_outfit.matrix_world @ outfit_bone.matrix_local
+    watch_matrix = arm_watch.matrix_world @ watch_bone.matrix_local
+
+    # Normaliza rotacoes 3x3 antes da inversao para isolar apenas orientacao e aplicar escala 1.10 de cena
+    outfit_rot_mat = outfit_matrix.to_3x3().normalized().to_4x4()
+    watch_rot_mat = watch_matrix.to_3x3().normalized().to_4x4()
+    watch_head_pos = arm_watch.matrix_world @ watch_bone.head_local
+
+    # Posicao exata do MA Pocket Watch_Root na cena Shinano.unity (alinha ao UN_Watchring com precisao < 0.5 mm)
+    unity_target_pos = mathutils.Vector((-0.05371, -0.07346, 0.82380))
+    return (
+        mathutils.Matrix.Translation(unity_target_pos)
+        @ outfit_rot_mat
+        @ mathutils.Matrix.Scale(1.10, 4)
+        @ watch_rot_mat.inverted()
+        @ mathutils.Matrix.Translation(-watch_head_pos)
+    )
+
+
+def compute_skirt_vertex_weights(
+    source_obj,
+    orig_vert_idx,
+    ydd_co,
+    vgroup_names_by_idx,
+    vgroup_target_names,
+):
+    """Calcula pesos anatomicos da saia (z_back28_high) evitando esticamento, split traseiro e clipping."""
+    remapped_weights = {}
+    skirt_weight = 0.0
+
+    if orig_vert_idx < len(source_obj.data.vertices):
+        src_vert = source_obj.data.vertices[orig_vert_idx]
+        for grp_elem in src_vert.groups:
+            if grp_elem.weight <= 0.001 or grp_elem.group not in vgroup_target_names:
+                continue
+            raw_name = vgroup_names_by_idx.get(grp_elem.group, "")
+            if "skirt" in raw_name.lower():
+                skirt_weight += grp_elem.weight
+            else:
+                target_bone = vgroup_target_names[grp_elem.group]
+                remapped_weights[target_bone] = remapped_weights.get(target_bone, 0.0) + grp_elem.weight
+
+    if skirt_weight > 0.0:
+        # Rampa vertical: cintura (+0.10) presa 100% ao Pelvis/Spine; barra/gluteos (<= +0.02) liberam ate 28% atras
+        z_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
+        # Rampa frontal->traseira: frente (y <= -0.02) fica 100% no Pelvis para nao afundar na barriga ao sentar
+        back_ramp = smoothstep_unit((ydd_co.y + 0.02) / 0.06)
+        # Interpolacao anatomica L/R (+X = perna esquerda SKEL_L_Thigh, -X = perna direita SKEL_R_Thigh)
+        lr_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
+
+        thigh_cap = z_ramp * 0.28 * back_ramp
+        thigh_weight = skirt_weight * thigh_cap
+        pelvis_weight = skirt_weight - thigh_weight
+
+        if pelvis_weight > 1e-6:
+            remapped_weights["SKEL_Pelvis"] = remapped_weights.get("SKEL_Pelvis", 0.0) + pelvis_weight
+        left_thigh_weight = thigh_weight * lr_mix
+        right_thigh_weight = thigh_weight * (1.0 - lr_mix)
+        if left_thigh_weight > 1e-6:
+            remapped_weights["SKEL_L_Thigh"] = remapped_weights.get("SKEL_L_Thigh", 0.0) + left_thigh_weight
+        if right_thigh_weight > 1e-6:
+            remapped_weights["SKEL_R_Thigh"] = remapped_weights.get("SKEL_R_Thigh", 0.0) + right_thigh_weight
+
+    # Garante no maximo 4 influencias por vertice para compatibilidade RAGE Engine
+    if len(remapped_weights) > 4:
+        sorted_weights = sorted(
+            remapped_weights.items(),
+            key=lambda weight_entry: weight_entry[1],
+            reverse=True,
+        )[:4]
+        remapped_weights = dict(sorted_weights)
+
+    return remapped_weights
+
+
 def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     # 1. Regras especificas por malha de acessorios
     if mesh_name == "UN3_Bag":
@@ -361,16 +477,15 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     if resolved_arm_or_finger is not None:
         return resolved_arm_or_finger
 
-    # Fallback para palmas ou nomes genericos de mao sem dedo especifico
-    if "hand" in source_bone_name.lower():
+    # Fallback para palmas ou nomes genericos de mao sem dedo especifico (evita capturar ponteiros do relogio)
+    lower_name = source_bone_name.lower()
+    if mesh_name != "Pocket Watch" and "hand" in lower_name:
         side_code = (
             "L"
             if (".L" in source_bone_name or "Left" in source_bone_name or "_L" in source_bone_name)
             else "R"
         )
         return f"SKEL_{side_code}_Hand"
-
-    lower_name = source_bone_name.lower()
 
     # Peito, lacos e ribbons de busto -> SKEL_Spine2
     if (
@@ -382,7 +497,9 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
         return "SKEL_Spine2"
 
     # Cabelo, orelhas, chapeu, presilhas, aureola e fita de cabelo -> SKEL_Head
-    if (
+    # Escopo restrito as malhas de cabeca para nao capturar 'heart' (ear), 'side' (UN_SideChain) ou 'gear' (ear)
+    allow_head_mapping = mesh_name is None or mesh_name in HEAD_ACCESSORY_MESH_NAMES
+    if allow_head_mapping and (
         "hair" in lower_name
         or "cooni" in lower_name
         or "bang" in lower_name
@@ -412,25 +529,21 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
             return f"SKEL_{side_code}_Forearm"
         return f"SKEL_{side_code}_UpperArm"
 
-    # Saia (UN_Skirt) -> Thighs para dinamica de pernas ou Pelvis
-    if "skirt" in lower_name:
-        if ".l" in lower_name or "_l" in lower_name:
-            return "SKEL_L_Thigh"
-        if ".r" in lower_name or "_r" in lower_name:
-            return "SKEL_R_Thigh"
-        return "SKEL_Pelvis"
-
-    # Bolsas, correntes de cintura e relogio de bolso -> SKEL_Pelvis
+    # Bolsas, correntes de cintura, coracao de quadril e relogio de bolso -> SKEL_Pelvis
     if (
         "bag" in lower_name
         or "chain" in lower_name
         or "coin" in lower_name
         or "watch" in lower_name
+        or "gear" in lower_name
+        or "cover" in lower_name
         or "tail" in lower_name
         or "belt" in lower_name
+        or "heart" in lower_name
     ):
         return "SKEL_Pelvis"
 
+    # Saia (UN_Skirt) sem mapeamento invertido .l/.r: fallback para SKEL_Pelvis
     return "SKEL_Pelvis"
 
 
@@ -683,6 +796,7 @@ def build_shinano_er_for_gtav(cli_args):
     hair_root_rest_pos = (
         arm_hair.matrix_world @ arm_hair.data.bones["Hair Root"].head_local
     ).copy()
+    watch_transform_matrix = compute_pocket_watch_align_matrix(arm_outfit, arm_watch)
 
     # 4. Carrega normais originais do rosto do FBX da Shinano
     fbx_face_normals = load_fbx_face_loop_normals(cli_args.shinano_fbx)
@@ -965,6 +1079,34 @@ def build_shinano_er_for_gtav(cli_args):
             bm_data.free()
             baked_mesh.update()
         else:
+            if mesh_name == "Pocket Watch":
+                # Remove lente de vidro opaca (Glass_Lenz) para revelar o mostrador romano e engrenagens no GTA V
+                watch_materials = (
+                    baked_mesh.materials
+                    if len(baked_mesh.materials) > 0
+                    else source_obj.data.materials
+                )
+                glass_mat_indices = {
+                    mat_idx
+                    for mat_idx, mat_obj in enumerate(watch_materials)
+                    if mat_obj and "glass" in mat_obj.name.lower()
+                }
+                if glass_mat_indices:
+                    bm_data.verts.ensure_lookup_table()
+                    glass_faces = [
+                        face_item
+                        for face_item in bm_data.faces
+                        if face_item.material_index in glass_mat_indices
+                    ]
+                    if glass_faces:
+                        bmesh.ops.delete(bm_data, geom=glass_faces, context="FACES")
+                        loose_verts = [vert for vert in bm_data.verts if not vert.link_faces]
+                        if loose_verts:
+                            bmesh.ops.delete(bm_data, geom=loose_verts, context="VERTS")
+                        print(
+                            f"[INFO] Removidas {len(glass_faces)} faces de vidro/lente de '{mesh_name}'."
+                        )
+
             if shrunk_vertex_indices:
                 bm_data.verts.ensure_lookup_table()
                 hidden_faces = [
@@ -1043,6 +1185,9 @@ def build_shinano_er_for_gtav(cli_args):
                 # Mapeia o cabelo do Hair Root em repouso do FBX para o MA Hair Root da cena Shinano.unity
                 rel_hair = (world_co - hair_root_rest_pos) * neko_hair_scale
                 world_co = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
+            elif mesh_name == "Pocket Watch":
+                # Aplica escala 1.10, rotacao e translacao de cena do Shinano.unity para prender no anel
+                world_co = watch_transform_matrix @ world_co
 
             vert_item.co.x = (world_co.x + offset_x) * scale_factor
             vert_item.co.y = (world_co.y + offset_y) * scale_factor
@@ -1084,19 +1229,34 @@ def build_shinano_er_for_gtav(cli_args):
                 loop_entry.uv = (u_offset + (orig_u * u_scale), v_offset + (orig_v * v_scale))
 
         # Atribui pesos de vertices aos 55 ossos validos do GTA V
+        vgroup_names_by_idx = {
+            vgroup.index: vgroup.name
+            for vgroup in source_obj.vertex_groups
+        }
         vgroup_target_names = {
             vgroup.index: resolve_gtav_target_bone(vgroup.name, mesh_name)
             for vgroup in source_obj.vertex_groups
         }
         vertex_weight_map = {vert_idx: {} for vert_idx in range(len(baked_mesh.vertices))}
-        for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
-            if orig_vert_idx < len(source_obj.data.vertices):
-                src_vert = source_obj.data.vertices[orig_vert_idx]
-                for grp_elem in src_vert.groups:
-                    if grp_elem.weight > 0.001 and grp_elem.group in vgroup_target_names:
-                        target_bone_name = vgroup_target_names[grp_elem.group]
-                        current_weight = vertex_weight_map[new_vert_idx].get(target_bone_name, 0.0)
-                        vertex_weight_map[new_vert_idx][target_bone_name] = current_weight + grp_elem.weight
+        if mesh_name == "UN1_Skirt":
+            for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+                ydd_vert_co = baked_mesh.vertices[new_vert_idx].co
+                vertex_weight_map[new_vert_idx] = compute_skirt_vertex_weights(
+                    source_obj,
+                    orig_vert_idx,
+                    ydd_vert_co,
+                    vgroup_names_by_idx,
+                    vgroup_target_names,
+                )
+        else:
+            for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+                if orig_vert_idx < len(source_obj.data.vertices):
+                    src_vert = source_obj.data.vertices[orig_vert_idx]
+                    for grp_elem in src_vert.groups:
+                        if grp_elem.weight > 0.001 and grp_elem.group in vgroup_target_names:
+                            target_bone_name = vgroup_target_names[grp_elem.group]
+                            current_weight = vertex_weight_map[new_vert_idx].get(target_bone_name, 0.0)
+                            vertex_weight_map[new_vert_idx][target_bone_name] = current_weight + grp_elem.weight
 
         for vert_idx, bone_weights in vertex_weight_map.items():
             weight_sum = sum(bone_weights.values())
