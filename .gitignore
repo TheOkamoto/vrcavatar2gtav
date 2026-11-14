@@ -31,3 +31,7 @@ desktop.ini
 # Backups do Blender
 *.blend1
 *.blend2
+
+# Renderizacoes RAGE e Blender
+renders/
+
