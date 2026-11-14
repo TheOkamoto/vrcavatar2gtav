@@ -12,6 +12,8 @@
 | **Franklin Clinton** | `player_one` | **Shinano** | Casual / Uniforme Escolar (Saia Vermelha, Cabelo Azul) | `1_Franklin_Shinano_Casual/` |
 | **Trevor Philips** | `player_two` | **Miltina** | Maid Clássica (Vestido Longo Preto/Branco, Avental) | `3_Trevor_Miltina_Maid/` |
 
+> **Créditos:** Consulte a [Seção 10 — Créditos dos Assets Utilizados](#10-créditos-dos-assets-utilizados) para a lista completa de criadores, links oficiais no BOOTH, avatares base, vestidos, cabelos, acessórios, texturas de olhos e ferramentas.
+
 ---
 
 ## 1. Estrutura de Diretórios Unificada (`E:\vrc2gtav` / `/mnt/e/vrc2gtav`)
@@ -259,3 +261,81 @@ python3 scripts/common_tools/repack_and_deploy_everything.py
 ```
 
 O script repacotará `mppatches.rpf`, `dlc.rpf`, `streamedpeds_players.rpf` e `x64v.rpf`, aplicará as assinaturas `OPEN` e corrigirá a tabela de conteúdo (TOC) para prevenir qualquer `ERR_GEN_ZLIB_2`.
+
+---
+
+## 10. Créditos dos Assets Utilizados
+
+Todos os avatares, vestidos, cabelos, acessórios, texturas e presets abaixo pertencem aos seus respectivos autores. Caso utilize ou adapte este mod, respeite os termos de licença de cada criador no BOOTH e nos repositórios oficiais.
+
+### Resumo Geral (Avatares, Roupas, Cabelos, Olhos e Acessórios)
+
+| Categoria | Asset / Item | Criador / Loja | Personagens no Mod | Link Oficial |
+| :--- | :--- | :--- | :--- | :--- |
+| **Avatar Base & Traje Casual** | オリジナル3Dモデル「しなの」 (*Shinano*) | ポンデロニウム研究所 (`ponderogen`) | Michael, Franklin | [BOOTH](https://ponderogen.booth.pm/items/6106863) / [Loja](https://ponderogen.booth.pm/) |
+| **Avatar Base & Traje Maid** | オリジナル3Dモデル『ミルティナ』 (*Milltina*) | DOLOS art (`dolosart`) | Trevor | [BOOTH](https://dolosart.booth.pm/items/6538026) / [Loja](https://dolosart.booth.pm/) |
+| **Vestido, Sapatos & Acessórios** | 【15アバター対応】エターナル・リユニオン【MA対応】 (*Eternal Reunion* + *Pocket Watch*) | VAGRANT (`Vagrant Brand`) | Michael | [BOOTH](https://vagrant.booth.pm/items/5634313) / [Loja](https://vagrant.booth.pm/) |
+| **Cabelo, Orelhas, Presilhas & Auréola** | ねこタイドボブヘア (*Neko Tied Bob hair*) | Li-ne (`Li-ne_Shop`) | Michael | [BOOTH](https://li-ne.booth.pm/items/7977491) / [Loja](https://li-ne.booth.pm/) |
+| **Textura de Olhos (Shinano)** | `[eye17アバター対応]MoonButterfly eye & Rurune Make` | ha-oa | Michael, Franklin | [BOOTH](https://ha-oa.booth.pm/items/8483652) / [Loja](https://ha-oa.booth.pm/) |
+| **Textura de Olhos (Milltina)** | お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】 (`Milltina_AWEyes`) | NAGIMA (`nagikawamart`) | Trevor | [BOOTH](https://nagikawamart.booth.pm/items/6837271) / [Loja](https://nagikawamart.booth.pm/) |
+
+---
+
+### 10.1 Michael De Santa (`player_zero`) — Shinano Eternal Reunion
+
+- **Avatar Base (Corpo, Rosto, Pele e Maquiagem):** [オリジナル3Dモデル「しなの」 (Shinano)](https://ponderogen.booth.pm/items/6106863) — [ポンデロニウム研究所](https://ponderogen.booth.pm/)
+  - *Origem:* `Shinano/FBX/Shinano.fbx` e `Shinano/Texture/` (`Shinano_body.png`, `Shinano_face_blue.png`, `Shinano_face_makeup1.png`, `Shinano_face_emission_mask.png`).
+  - *Meshes utilizadas:* `Body` (cabeça/rosto/olhos) e `Body_base` (corpo).
+- **Vestido, Sapatos, Meia-Calça e Acessórios (incluindo Relógio de Bolso):** [【15アバター対応】エターナル・リユニオン【MA対応】 (Eternal Reunion)](https://vagrant.booth.pm/items/5634313) — [VAGRANT](https://vagrant.booth.pm/)
+  - *Origem:* `Vagrant Brand/Eternal Reunion/Avatars/Shinano/FBX/ER_Shi.fbx`, `Pocket Watch/FBX/ER_PW.fbx` e texturas em `TEX/` (`V3_UN1.png`, `V3_UN2.png`, `V3_UN3.png`, `UN4.png`, `Masks/`, `Normal/`).
+  - *Vestido e Calçados:* `UN1_Shirt` (blusa), `UN1_Skirt` (saia), `UN2_Corset` (espartilho), `UN2_Stocking` (meia-calça), `UN2_Shoes` (sapatos).
+  - *Acessórios e Relógio:* `UN1_ChestRibbon` (laço do peito), `UN1_Choker` (gargantilha), `UN3_Bag` (bolsa tiracolo), `UN3_Glasses` (óculos), `UN3_WaistChain` (corrente de cintura) e `Pocket Watch` (relógio de bolso integrado ao pacote). *(Nota: a boina `UN2_Beret` não é incluída na versão final).*
+- **Cabelo, Orelhas de Gato, Laço, Presilhas e Auréola:** [ねこタイドボブヘア (Neko Tied Bob hair)](https://li-ne.booth.pm/items/7977491) — [Li-ne (`Li-ne_Shop`)](https://li-ne.booth.pm/)
+  - *Origem:* `Li-ne/Neko Tied Bob hair/_Fbx/Neko Tied Bob hair.fbx` e texturas em `_Mat/` e `Accessories/` (`Blue.png`, `Light Mask.png`, `Normal map.png`, `Pin Mat.png`, `Accessories Mat.png`).
+  - *Cabelo:* `Bangs`, `Top Back`, `Under Side`, `Back`, `Side Bangs`, `Side`, `In Hair`.
+  - *Orelhas e Acessórios:* `Ears` (orelhas de gato), `Ribbon` (laço lateral), `_Pin.Back`, `_Pin.R`, `_Pin.L2` (presilhas/grampos) e `_Halo` (auréola metálica flutuante).
+- **Textura de Olhos:** [[eye17アバター対応]MoonButterfly eye & Rurune Make](https://ha-oa.booth.pm/items/8483652) — [ha-oa](https://ha-oa.booth.pm/)
+  - *Origem:* `MoonButterfly eye/Sinano/Texture/` (`sky.png`, `Cloud.jpg`, `Eye-highlight.png`, `無題157_20260711214118.png`).
+- **Expressão Facial (Blendshapes):** Preset `ShinanoDefAdultNewv5.anim` criado com [FaceEmo](https://suzuryg.github.io/face-emo/) sobre as blendshapes do avatar Shinano.
+
+---
+
+### 10.2 Franklin Clinton (`player_one`) — Shinano Casual
+
+- **Avatar Base, Traje Casual, Cabelo Padrão, Orelhas e Cauda:** [オリジナル3Dモデル「しなの」 (Shinano)](https://ponderogen.booth.pm/items/6106863) — [ポンデロニウム研究所](https://ponderogen.booth.pm/)
+  - *Origem:* `Shinano/FBX/Shinano.fbx` e `Shinano/Texture/` (`Shinano_body.png`, `Shinano_costume.png`, `Shinano_hair.png` recolorida para azul anil no atlas, `Shinano_face_blue.png`, `Shinano_face_makeup1.png`).
+  - *Corpo e Rosto:* `Body`, `Body_base`.
+  - *Roupas e Calçados:* `Cloth_sweater` (suéter), `Cloth_skirt` (saia), `Cloth_tights` (meia-calça), `Cloth_boots` (botas).
+  - *Cabelo e Orelhas/Cauda:* `Hair_back`, `Hair_bang`, `Hair_base`, `Hair_side`, `Other_ear` (orelhas), `Other_tail` (cauda).
+- **Textura de Olhos:** [[eye17アバター対応]MoonButterfly eye & Rurune Make](https://ha-oa.booth.pm/items/8483652) — [ha-oa](https://ha-oa.booth.pm/)
+  - *Origem:* `MoonButterfly eye/Sinano/Texture/` (`sky.png`, `Cloud.jpg`, `Eye-highlight.png`, `無題157_20260711214118.png`).
+- **Expressão Facial (Blendshapes):** Preset `ShinanoDefAdultNewv5.anim` criado com [FaceEmo](https://suzuryg.github.io/face-emo/) sobre as blendshapes do avatar Shinano.
+
+---
+
+### 10.3 Trevor Philips (`player_two`) — Miltina Maid
+
+- **Avatar Base, Traje de Maid, Cabelo (Twintails) e Traços de Vaquinha:** [オリジナル3Dモデル『ミルティナ』 (Milltina)](https://dolosart.booth.pm/items/6538026) — [DOLOS art](https://dolosart.booth.pm/)
+  - *Origem:* `DOLOSart/1.Milltina/FBX/Milltina.fbx` e `Material/` (`Milltina_Face.png`, `Milltina_Body.png`, `Milltina_Costume.png`, `Milltina_Hair.png`, `Milltina_Costume_Normal.png`).
+  - *Corpo e Rosto:* `Body`, `Milltina_body`.
+  - *Vestido e Roupas de Maid:* `Milltina_cloth_dress`, `Milltina_cloth_apron` (avental), `Milltina_cloth_skirt`, `Milltina_cloth_panties`.
+  - *Acessórios e Calçados de Maid:* `Milltina_cloth_collar` (gola), `Milltina_cloth_hat` (touca/headdress), `Milltina_cloth_neck_ribbon` (laço do pescoço), `Milltina_cloth_wrist_cuffs` (punhos), `Milltina_cloth_garterbelt` (cinta-liga), `Milltina_cloth_hair_ribbon` (laços das marias-chiquinhas), `Milltina_cloth_tail_ribbon` (laço da cauda), `Milltina_cloth_tail_slit`, `Milltina_cloth_shoes` (sapatos).
+  - *Cabelo e Orelhas/Chifres/Cauda:* `Milltina_hair_base`, `Milltina_hair_side`, `Milltina_hair_front`, `Milltina_hair_front_side`, `Milltina_hair_twintail`, `Milltina_cow_ears`, `Milltina_cow_horns`, `Milltina_cow_tail`.
+- **Textura de Olhos:** [お魚が泳ぐ あわあわ水光 Eye Texture【10Color】【23Avatar】](https://nagikawamart.booth.pm/items/6837271) — [NAGIMA (`nagikawamart`)](https://nagikawamart.booth.pm/)
+  - *Origem:* `NAGIMA/AWEyes_Texture/Milltina_AWEyes/Material/` (`Texture/Milltina_AWEyes_Blue Sea.png` e `Osakana/Milltina_AWEyes_Osakana.png`).
+- **Expressão Facial (Blendshapes):** Preset `Miltina_close eyes_Base_adult.anim` via [FaceEmo](https://suzuryg.github.io/face-emo/) sobre as blendshapes do avatar Milltina.
+
+---
+
+### 10.4 Shaders, Pacotes Unity/VRChat e Ferramentas do Pipeline
+
+| Ferramenta / Pacote | Autor / Mantenedor | Uso no Projeto | Link |
+| :--- | :--- | :--- | :--- |
+| **lilToon** (v2.4.1) | `lilxyzw` | Referência de camadas/máscaras para o baking dos atlas 2K e materiais dos avatares | [GitHub](https://github.com/lilxyzw/lilToon) / [Docs](https://lilxyzw.github.io/lilToon/) |
+| **FaceEmo** (v1.7.0) | `suzuryg` | Configuração e exportação dos presets de expressão facial (`.anim`) | [GitHub](https://github.com/suzuryg/face-emo) / [Docs](https://suzuryg.github.io/face-emo/) |
+| **Modular Avatar** (v1.18.7) | `bd_` (Nadena) | Montagem não destrutiva das roupas e cabelos na cena Unity (`waifuv4`) | [GitHub](https://github.com/bdunderscore/modular-avatar) / [Site](https://modular-avatar.nadena.dev/) |
+| **Blender** (4.0.2) | Blender Foundation | Rigging, transferência de pesos, blendshapes e renderização de verificação | [Site Oficial](https://www.blender.org/) |
+| **Sollumz** (v2.9.0) | `Skylumz`, `Colton`, `alexguirre` | Add-on do Blender para importação/exportação `.ydd` / `.yft` / XML do GTA V | [GitHub](https://github.com/Sollumz/Sollumz) / [Docs](https://docs.sollumz.org/) |
+| **rage-cli** (`rage` 0.28.1) | `VIRUXE` | Extração/repacotamento `.rpf`, compilação `.ytd`, verificação e renders RAGE | [GitHub](https://github.com/VIRUXE/rage-cli) |
+| **RageOpenV** | `Chiheb-Bacha` | ASI para carregamento de RPFs da pasta `mods/` no GTA V | [GitHub](https://github.com/Chiheb-Bacha/RageOpenV) |
+| **Ultimate ASI Loader** | `ThirteenAG` | Proxy DLL (`dinput8.dll`) para carregamento de plugins `.asi` | [GitHub](https://github.com/ThirteenAG/Ultimate-ASI-Loader) |
