@@ -483,6 +483,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
+        (common_dir / "physbone_helper.py", deploy_dir / "physbone_helper.py"),
         (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
         (common_dir / "unity_hair_helper.py", deploy_dir / "unity_hair_helper.py"),
         (common_dir / "blender_hair_helper.py", deploy_dir / "blender_hair_helper.py"),

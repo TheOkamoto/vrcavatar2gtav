@@ -120,7 +120,7 @@ def apply_universal_slots_to_ped(
         target_path = os.path.join(ped_directory, filename)
 
         if filename.startswith("uppr_") and filename.endswith(".ydd"):
-            if "_r.ydd" in filename:
+            if filename.endswith("_r.ydd") or "_r_" in filename:
                 shutil.copy2(source_uppr_r, target_path)
             else:
                 shutil.copy2(source_uppr_u, target_path)
@@ -319,8 +319,28 @@ def deploy_universal():
         i18n.translate("michael.deploy.task_verify_target", path=gtav_mods_x64v_rpf),
     )
 
-    # 5. Update mppatchesng DLC
+    # 5. Update mppatchesng DLC and staging seed
     print(i18n.translate("michael.deploy.updating_mppatches"))
+    staging_mppatches_zero_dir = os.path.join(staging_mppatches_seed, "player_zero")
+    if os.path.exists(staging_mppatches_zero_dir):
+        apply_universal_slots_to_ped(
+            staging_mppatches_zero_dir,
+            michael_uppr_u,
+            michael_uppr_r,
+            michael_ytd,
+            dummy_source_path,
+            "Michael (mppatches staging)",
+        )
+    staging_mppatches_one_dir = os.path.join(staging_mppatches_seed, "player_one")
+    if os.path.exists(staging_mppatches_one_dir):
+        apply_universal_slots_to_ped(
+            staging_mppatches_one_dir,
+            franklin_uppr_u,
+            franklin_uppr_u,
+            franklin_ytd,
+            dummy_source_path,
+            "Franklin (mppatches staging)",
+        )
     os.makedirs(mppatches_work_dir, exist_ok=True)
     if not os.path.exists(mppatches_extracted_dir):
         shutil.copytree(staging_mppatches_seed, mppatches_extracted_dir)
@@ -436,14 +456,14 @@ def deploy_universal():
 
     michael_patchday3_dir = os.path.join(patchday3_extracted_dir, "player_zero")
     if os.path.exists(michael_patchday3_dir):
-        michael_target_ydd = os.path.join(michael_patchday3_dir, "uppr_029_u.ydd")
-        if os.path.exists(michael_target_ydd):
-            shutil.copy2(michael_uppr_u, michael_target_ydd)
-            print(i18n.translate("michael.deploy.updated_path", path=michael_target_ydd))
-        michael_decl_ydd = os.path.join(michael_patchday3_dir, "decl_003_u.ydd")
-        if os.path.exists(michael_decl_ydd):
-            shutil.copy2(dummy_source_path, michael_decl_ydd)
-            print(i18n.translate("michael.deploy.dummy_applied", path=michael_decl_ydd))
+        apply_universal_slots_to_ped(
+            michael_patchday3_dir,
+            michael_uppr_u,
+            michael_uppr_r,
+            michael_ytd,
+            dummy_source_path,
+            "Michael (patchday3ng)",
+        )
 
     execute_shell_task(
         [
@@ -490,6 +510,86 @@ def deploy_universal():
         [rage_tool_path, "verify", gtav_mods_patchday3ng_dlc_rpf],
         i18n.translate("michael.deploy.task_verify_target", path="patchday3ng/dlc.rpf"),
     )
+
+    # 7. Update patchday4ng DLC (e.g. player_zero/uppr_008_r.ydd)
+    patchday4_dlc_extracted = str(rpf_paths_cfg["patchday4ng_dlc_extracted"])
+    patchday4_models_dir = str(rpf_paths_cfg["patchday4ng_models_extracted"])
+    nested_patchday4_rpf_path = os.path.join(
+        patchday4_dlc_extracted, str(rpf_paths_cfg["patchday4ng_rpf_relative"])
+    )
+    patchday4_dlc_target_rpf = str(rpf_paths_cfg["patchday4ng_modded_rpf"])
+    gtav_mods_patchday4ng_dlc_rpf = str(rpf_paths_cfg["patchday4ng_game_rpf"])
+
+    if os.path.exists(patchday4_dlc_extracted) and os.path.exists(patchday4_models_dir):
+        michael_patchday4_dir = os.path.join(patchday4_models_dir, "player_zero")
+        if os.path.exists(michael_patchday4_dir):
+            apply_universal_slots_to_ped(
+                michael_patchday4_dir,
+                michael_uppr_u,
+                michael_uppr_r,
+                michael_ytd,
+                dummy_source_path,
+                "Michael (patchday4ng)",
+            )
+        franklin_patchday4_dir = os.path.join(patchday4_models_dir, "player_one")
+        if os.path.exists(franklin_patchday4_dir):
+            apply_universal_slots_to_ped(
+                franklin_patchday4_dir,
+                franklin_uppr_u,
+                franklin_uppr_u,
+                franklin_ytd,
+                dummy_source_path,
+                "Franklin (patchday4ng)",
+            )
+
+        if os.path.exists(nested_patchday4_rpf_path):
+            os.remove(nested_patchday4_rpf_path)
+        execute_shell_task(
+            [
+                rage_tool_path,
+                "create",
+                "-o",
+                nested_patchday4_rpf_path,
+                patchday4_models_dir,
+                "-e",
+                "open",
+            ],
+            "Pack patchday4ng.rpf",
+        )
+        patch_rpf_table_of_contents(nested_patchday4_rpf_path)
+
+        if os.path.exists(patchday4_dlc_target_rpf):
+            os.remove(patchday4_dlc_target_rpf)
+        execute_shell_task(
+            [
+                rage_tool_path,
+                "create",
+                "-o",
+                patchday4_dlc_target_rpf,
+                patchday4_dlc_extracted,
+                "-e",
+                "open",
+            ],
+            "Pack patchday4ng dlc.rpf",
+        )
+        patch_rpf_table_of_contents(patchday4_dlc_target_rpf)
+        execute_shell_task(
+            [rage_tool_path, "verify", patchday4_dlc_target_rpf],
+            i18n.translate("michael.deploy.task_verify_target", path="patchday4ng_dlc.rpf"),
+        )
+
+        print(
+            i18n.translate(
+                "michael.deploy.copying_to",
+                src="patchday4ng_dlc.rpf",
+                dest=gtav_mods_patchday4ng_dlc_rpf,
+            )
+        )
+        shutil.copy2(patchday4_dlc_target_rpf, gtav_mods_patchday4ng_dlc_rpf)
+        execute_shell_task(
+            [rage_tool_path, "verify", gtav_mods_patchday4ng_dlc_rpf],
+            i18n.translate("michael.deploy.task_verify_target", path="patchday4ng/dlc.rpf"),
+        )
 
     print("\n======================================================================")
     print(i18n.translate("michael.deploy.done"))

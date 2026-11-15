@@ -12,11 +12,13 @@ MoonButterfly shader color transforms:
 """
 
 import argparse
+import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 import numpy as numpy_lib
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 # Dynamic cross-platform helper resolution compatible with both repo mirrors
 _CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
@@ -33,6 +35,292 @@ import texture_calibration_helper as calibration_helper
 import unity_hair_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
+
+
+def read_binary_fbx_nodes(fbx_bytes: bytes) -> list:
+    """Parse binary FBX nodes to extract mesh UVs without requiring Blender."""
+    fbx_version = struct.unpack_from("<I", fbx_bytes, 23)[0]
+    is_64bit = fbx_version >= 7500
+    header_fmt = "<QQQB" if is_64bit else "<IIIB"
+    header_size = 25 if is_64bit else 13
+
+    def read_property(cursor_pos: int):
+        prop_type = chr(fbx_bytes[cursor_pos])
+        cursor_pos += 1
+        if prop_type == "Y":
+            return struct.unpack_from("<h", fbx_bytes, cursor_pos)[0], cursor_pos + 2
+        if prop_type == "C":
+            return bool(fbx_bytes[cursor_pos]), cursor_pos + 1
+        if prop_type == "I":
+            return struct.unpack_from("<i", fbx_bytes, cursor_pos)[0], cursor_pos + 4
+        if prop_type == "F":
+            return struct.unpack_from("<f", fbx_bytes, cursor_pos)[0], cursor_pos + 4
+        if prop_type == "D":
+            return struct.unpack_from("<d", fbx_bytes, cursor_pos)[0], cursor_pos + 8
+        if prop_type == "L":
+            return struct.unpack_from("<q", fbx_bytes, cursor_pos)[0], cursor_pos + 8
+        if prop_type in ("S", "R"):
+            str_len = struct.unpack_from("<I", fbx_bytes, cursor_pos)[0]
+            cursor_pos += 4
+            raw_slice = fbx_bytes[cursor_pos : cursor_pos + str_len]
+            val_out = (
+                raw_slice.decode("utf-8", errors="replace")
+                if prop_type == "S"
+                else raw_slice
+            )
+            return val_out, cursor_pos + str_len
+        if prop_type in ("f", "d", "l", "i", "b"):
+            arr_len, encoding_flag, comp_len = struct.unpack_from(
+                "<III", fbx_bytes, cursor_pos
+            )
+            cursor_pos += 12
+            raw_slice = fbx_bytes[cursor_pos : cursor_pos + comp_len]
+            cursor_pos += comp_len
+            if encoding_flag == 1:
+                raw_slice = zlib.decompress(raw_slice)
+            type_map = {"f": "f", "d": "d", "l": "q", "i": "i", "b": "B"}
+            return struct.unpack(f"<{arr_len}{type_map[prop_type]}", raw_slice), cursor_pos
+        raise ValueError(f"Unsupported FBX property type: {prop_type}")
+
+    def read_node(cursor_pos: int):
+        end_offset, num_props, prop_len, name_len = struct.unpack_from(
+            header_fmt, fbx_bytes, cursor_pos
+        )
+        if end_offset == 0:
+            return None, cursor_pos + header_size
+        cursor_pos += header_size
+        node_name = fbx_bytes[cursor_pos : cursor_pos + name_len].decode(
+            "utf-8", errors="replace"
+        )
+        cursor_pos += name_len
+        props_list = []
+        props_end = cursor_pos + prop_len
+        for _ in range(num_props):
+            prop_val, cursor_pos = read_property(cursor_pos)
+            props_list.append(prop_val)
+        cursor_pos = props_end
+        children_list = []
+        while cursor_pos < end_offset:
+            child_node, cursor_pos = read_node(cursor_pos)
+            if child_node is None:
+                break
+            children_list.append(child_node)
+        return (node_name, props_list, children_list), end_offset
+
+    scan_pos = 27
+    nodes_out = []
+    while scan_pos < len(fbx_bytes) - header_size:
+        parsed_node, scan_pos = read_node(scan_pos)
+        if parsed_node is None:
+            break
+        nodes_out.append(parsed_node)
+    return nodes_out
+
+
+def build_fbx_uv_island_masks(
+    source_fbx_path: Path,
+    target_mesh_names: list,
+    cell_dimension: int,
+    dilate_kernel: int = 9,
+) -> dict:
+    """Rasterize dilated UV polygon masks from source_fbx_path for per-mesh compositing."""
+    if not source_fbx_path or not source_fbx_path.is_file():
+        return {}
+    fbx_bytes = source_fbx_path.read_bytes()
+    if not fbx_bytes.startswith(b"Kaydara FBX Binary"):
+        return {}
+    nodes = read_binary_fbx_nodes(fbx_bytes)
+    objects_node = next((item for item in nodes if item[0] == "Objects"), None)
+    conns_node = next((item for item in nodes if item[0] == "Connections"), None)
+    if objects_node is None or conns_node is None:
+        return {}
+
+    geom_by_id = {}
+    model_by_id = {}
+    for obj_item in objects_node[2]:
+        if (
+            obj_item[0] == "Geometry"
+            and len(obj_item[1]) >= 3
+            and obj_item[1][2] == "Mesh"
+        ):
+            geom_by_id[obj_item[1][0]] = obj_item
+        elif obj_item[0] == "Model" and len(obj_item[1]) >= 2:
+            model_by_id[obj_item[1][0]] = obj_item[1][1].split("\x00")[0]
+
+    mesh_to_geom = {}
+    for conn_item in conns_node[2]:
+        props = conn_item[1]
+        if len(props) >= 3 and props[2] in model_by_id and props[1] in geom_by_id:
+            mesh_to_geom[model_by_id[props[2]]] = geom_by_id[props[1]]
+
+    island_masks = {}
+    for mesh_name in target_mesh_names:
+        geom_node = mesh_to_geom.get(mesh_name)
+        if geom_node is None:
+            continue
+        poly_indices_node = next(
+            (sub for sub in geom_node[2] if sub[0] == "PolygonVertexIndex"), None
+        )
+        uv_layer_node = next(
+            (sub for sub in geom_node[2] if sub[0] == "LayerElementUV"), None
+        )
+        if poly_indices_node is None or uv_layer_node is None:
+            continue
+        uv_coords_node = next(
+            (sub for sub in uv_layer_node[2] if sub[0] == "UV"), None
+        )
+        if uv_coords_node is None:
+            continue
+        uv_indices_node = next(
+            (sub for sub in uv_layer_node[2] if sub[0] == "UVIndex"), None
+        )
+
+        poly_vertex_indices = poly_indices_node[1][0]
+        uv_flat = uv_coords_node[1][0]
+        uv_index_map = uv_indices_node[1][0] if uv_indices_node is not None else None
+
+        mask_img = Image.new("L", (cell_dimension, cell_dimension), 0)
+        draw_ctx = ImageDraw.Draw(mask_img)
+        polygon_pts = []
+        loop_pos = 0
+        max_px = float(cell_dimension - 1)
+        for vert_idx in poly_vertex_indices:
+            resolved_uv_idx = (
+                uv_index_map[loop_pos]
+                if uv_index_map is not None
+                else (vert_idx if vert_idx >= 0 else ~vert_idx)
+            )
+            u_coord = uv_flat[resolved_uv_idx * 2]
+            v_coord = uv_flat[resolved_uv_idx * 2 + 1]
+            polygon_pts.append((u_coord * max_px, (1.0 - v_coord) * max_px))
+            loop_pos += 1
+            if vert_idx < 0:
+                if len(polygon_pts) >= 3:
+                    draw_ctx.polygon(polygon_pts, fill=255)
+                polygon_pts = []
+
+        if dilate_kernel >= 3:
+            mask_img = mask_img.filter(ImageFilter.MaxFilter(dilate_kernel))
+        island_masks[mesh_name] = numpy_lib.array(mask_img, dtype=numpy_lib.float32) / 255.0
+    return island_masks
+
+
+def build_hierarchy_costume_textures(
+    shinano_textures_directory: Path,
+    fallback_costume_path: Path,
+    source_fbx_path: Path,
+    cell_dimension: int,
+):
+    """
+    Composite Franklin's Costume quadrant matching the Unity hierarchy lilToon
+    materials:
+      - Cloth_sweater: Shinano_costume _kikyo.mat (Shinano_costume_kikyo.png)
+      - Cloth_dress & Cloth_skirt: Shinano_costume _winter.mat
+      - Cloth_tights: Shinano_costume _autumn.mat + tights_color2 * 0.8396
+      - Cloth_boots: Shinano_costume _summer.mat
+      - Normal map: Map/Shinano_costume_normal.png scaled by _BumpScale (0.5)
+    """
+    color_costume_dir = shinano_textures_directory / "Color" / "Costume"
+    mask_dir = shinano_textures_directory / "Mask"
+    map_dir = shinano_textures_directory / "Map"
+
+    kikyo_path = color_costume_dir / "Shinano_costume_kikyo.png"
+    winter_path = color_costume_dir / "Shinano_costume_winter.png"
+    autumn_path = color_costume_dir / "Shinano_costume_autumn.png"
+    summer_path = color_costume_dir / "Shinano_costume_summer.png"
+    tights_color2_path = color_costume_dir / "Shinano_costume_tights_color2.png"
+    tights_mask_path = mask_dir / "Shinano_costume_tights_mask.png"
+
+    costume_norm_array = None
+    costume_norm_path = map_dir / "Shinano_costume_normal.png"
+    if costume_norm_path.is_file():
+        norm_img = (
+            Image.open(costume_norm_path)
+            .convert("RGBA")
+            .resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+        )
+        norm_float = numpy_lib.array(norm_img, dtype=numpy_lib.float32)
+        # Apply Unity lilToon _BumpScale = 0.5 centered around tangent-flat (128, 128, 255)
+        norm_float[:, :, 0] = 128.0 + (norm_float[:, :, 0] - 128.0) * 0.5
+        norm_float[:, :, 1] = 128.0 + (norm_float[:, :, 1] - 128.0) * 0.5
+        norm_float[:, :, 2] = 255.0 - (255.0 - norm_float[:, :, 2]) * 0.5
+        norm_float[:, :, 3] = 255.0
+        costume_norm_array = numpy_lib.clip(norm_float, 0.0, 255.0).astype(numpy_lib.uint8)
+
+    base_source_path = (
+        kikyo_path if kikyo_path.is_file() else fallback_costume_path
+    )
+    if base_source_path is None or not Path(base_source_path).is_file():
+        return None, costume_norm_array
+
+    def load_resized_rgba(img_path: Path) -> numpy_lib.ndarray:
+        opened_img = (
+            Image.open(img_path)
+            .convert("RGBA")
+            .resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+        )
+        return numpy_lib.array(opened_img, dtype=numpy_lib.float32)
+
+    composite_array = load_resized_rgba(Path(base_source_path))
+    costume_mesh_names = [
+        "Cloth_sweater",
+        "Cloth_dress",
+        "Cloth_skirt",
+        "Cloth_tights",
+        "Cloth_boots",
+    ]
+    island_masks = build_fbx_uv_island_masks(
+        source_fbx_path, costume_mesh_names, cell_dimension, dilate_kernel=9
+    )
+
+    if island_masks:
+        if winter_path.is_file():
+            winter_array = load_resized_rgba(winter_path)
+            for piece_name in ("Cloth_dress", "Cloth_skirt"):
+                piece_mask = island_masks.get(piece_name)
+                if piece_mask is not None:
+                    alpha_weight = piece_mask[:, :, None]
+                    composite_array = (
+                        composite_array * (1.0 - alpha_weight)
+                        + winter_array * alpha_weight
+                    )
+
+        if autumn_path.is_file() and "Cloth_tights" in island_masks:
+            autumn_array = load_resized_rgba(autumn_path)
+            if tights_color2_path.is_file() and tights_mask_path.is_file():
+                tights_color2 = load_resized_rgba(tights_color2_path)
+                # Shinano_costume _autumn.mat: _Color2nd = (0.83962, 0.83962, 0.83962)
+                tights_color2[:, :, :3] *= 0.83962
+                tights_mask_img = (
+                    Image.open(tights_mask_path)
+                    .convert("L")
+                    .resize((cell_dimension, cell_dimension), Image.Resampling.LANCZOS)
+                )
+                tights_mask = (
+                    numpy_lib.array(tights_mask_img, dtype=numpy_lib.float32) / 255.0
+                )[:, :, None] * 0.65
+                autumn_array[:, :, :3] = (
+                    autumn_array[:, :, :3] * (1.0 - tights_mask)
+                    + tights_color2[:, :, :3] * tights_mask
+                )
+            tights_island = island_masks["Cloth_tights"][:, :, None]
+            composite_array = (
+                composite_array * (1.0 - tights_island)
+                + autumn_array * tights_island
+            )
+
+        if summer_path.is_file() and "Cloth_boots" in island_masks:
+            summer_array = load_resized_rgba(summer_path)
+            boots_island = island_masks["Cloth_boots"][:, :, None]
+            composite_array = (
+                composite_array * (1.0 - boots_island)
+                + summer_array * boots_island
+            )
+
+    composite_uint8 = numpy_lib.clip(composite_array, 0.0, 255.0).astype(
+        numpy_lib.uint8
+    )
+    return composite_uint8, costume_norm_array
 
 
 def build_franklin_atlas(
@@ -175,7 +463,7 @@ def build_franklin_atlas(
                 0:cell_dimension, cell_dimension : 2 * cell_dimension
             ] = numpy_lib.array(warm_body_image)
 
-        # 3. Costume (Shinano_costume) -> Bottom-Left quadrant
+        # 3. Costume -> Bottom-Left quadrant (Unity hierarchy lilToon variants or fallback)
         costume_source_candidates = [
             source_textures_directory / "shinano_costume.png",
             textures_subfolder / "shinano_costume.png",
@@ -185,17 +473,22 @@ def build_franklin_atlas(
         found_costume_path = calibration_helper.resolve_existing_file(
             None, costume_source_candidates
         )
-        if found_costume_path is not None:
-            costume_layer_image = (
-                Image.open(found_costume_path)
-                .convert("RGBA")
-                .resize(
-                    (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
-                )
-            )
+        source_fbx_raw = franklin_cfg.get("source_fbx")
+        source_fbx_path = Path(source_fbx_raw) if source_fbx_raw else None
+        composited_costume, costume_normal_quad = build_hierarchy_costume_textures(
+            shinano_textures_directory=shinano_textures_directory,
+            fallback_costume_path=found_costume_path,
+            source_fbx_path=source_fbx_path,
+            cell_dimension=cell_dimension,
+        )
+        if composited_costume is not None:
             diffuse_pixel_array[
                 cell_dimension : 2 * cell_dimension, 0:cell_dimension
-            ] = numpy_lib.array(costume_layer_image)
+            ] = composited_costume
+        if costume_normal_quad is not None:
+            normal_pixel_array[
+                cell_dimension : 2 * cell_dimension, 0:cell_dimension
+            ] = costume_normal_quad
 
         # 4. Hair (custom Unity hair or Shinano_hair default) -> Bottom-Right quadrant
         hair_spec_input = (
@@ -204,7 +497,7 @@ def build_franklin_atlas(
             else (
                 str(franklin_cfg.get("custom_hair", "")).strip()
                 or str(franklin_cfg.get("fbx_hair", "")).strip()
-                or "auto"
+                or "default"
             )
         )
         hair_spec = unity_hair_helper.resolve_custom_hair_spec(

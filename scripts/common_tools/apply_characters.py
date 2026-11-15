@@ -72,6 +72,7 @@ def _load_apply_runtime_config(
         if raw_avatar
     }
 
+    project_root_dir = project_paths.get_project_root()
     character_registry: Dict[str, Dict[str, object]] = {}
     character_props_map: Dict[str, Path] = {}
     for protagonist_key in project_paths.list_available_protagonists():
@@ -81,9 +82,30 @@ def _load_apply_runtime_config(
         )
         ped_key = str(char_cfg["ped_name"])
         avatar_id = str(char_cfg["avatar_id"])
+        extra_ydd_paths = [
+            Path(extra_path) for extra_path in (char_cfg.get("extra_model_ydds") or [])
+        ]
+        model_r_ydd_path = next(
+            (
+                item_path
+                for item_path in extra_ydd_paths
+                if item_path.name.lower() == "uppr_000_r.ydd"
+            ),
+            None,
+        )
+        if model_r_ydd_path is None:
+            model_r_ydd_path = next(
+                (
+                    item_path
+                    for item_path in extra_ydd_paths
+                    if item_path.stem.lower().endswith("_r") and item_path.exists()
+                ),
+                None,
+            )
         character_registry[ped_key] = {
             "display_name": _format_assignment_label(protagonist_key, avatar_id),
             "model_ydd_path": char_cfg["target_model_ydd"],
+            "model_r_ydd_path": model_r_ydd_path or char_cfg["target_model_ydd"],
             "texture_ytd_path": char_cfg["ytd_file"],
             "skeleton_yft_path": char_cfg["target_yft"],
         }
@@ -94,9 +116,15 @@ def _load_apply_runtime_config(
         rpf_paths_cfg["streamedpeds_extracted"],
         rpf_paths_cfg["patchday4ng_models_extracted"],
     ]
+    for optional_work_dir in (
+        project_root_dir / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "patchday3_work" / "patchday3_extracted",
+        project_root_dir / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "mppatches_work" / "mppatches_extracted",
+    ):
+        if optional_work_dir.is_dir() and optional_work_dir not in staging_target_dirs:
+            staging_target_dirs.append(optional_work_dir)
 
     return {
-        "project_root": project_paths.get_project_root(),
+        "project_root": project_root_dir,
         "staging_dir": project_paths.get_staging_dir(),
         "dummy_ydd": project_paths.get_dummy_ydd_path(),
         "prop_dummy_ydd": project_paths.get_prop_dummy_ydd_path(),
@@ -125,7 +153,13 @@ def patch_single_character_directory(
             "untouched": 0,
         }
 
-    source_model_path = character_configuration["model_ydd_path"]
+    source_model_path = Path(character_configuration["model_ydd_path"])
+    raw_model_r_path = character_configuration.get("model_r_ydd_path")
+    source_model_r_path = (
+        Path(raw_model_r_path)
+        if raw_model_r_path and Path(raw_model_r_path).exists()
+        else source_model_path
+    )
     source_texture_path = character_configuration["texture_ytd_path"]
 
     statistics_counter = {
@@ -146,7 +180,12 @@ def patch_single_character_directory(
 
         try:
             if filename_prefix == "uppr" and filename_extension == ".ydd":
-                shutil.copyfile(source_model_path, target_file_path)
+                lower_stem = target_file_path.stem.lower()
+                is_race_slot = lower_stem.endswith("_r") or "_r_" in lower_stem
+                chosen_model_path = (
+                    source_model_r_path if is_race_slot else source_model_path
+                )
+                shutil.copyfile(chosen_model_path, target_file_path)
                 statistics_counter["uppr_models"] += 1
             elif (
                 filename_prefix == "uppr"

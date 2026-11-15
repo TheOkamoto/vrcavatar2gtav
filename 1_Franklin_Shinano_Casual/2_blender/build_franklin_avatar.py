@@ -342,7 +342,7 @@ hair_spec_input = (
     else (
         str(FRANKLIN_CFG.get("custom_hair", "")).strip()
         or str(FRANKLIN_CFG.get("fbx_hair", "")).strip()
-        or "auto"
+        or "default"
     )
 )
 hair_spec = unity_hair_helper.resolve_custom_hair_spec(
@@ -432,6 +432,7 @@ if orig_body_obj and orig_body_obj.data.shape_keys:
 include_mesh_names = [
     "Body",
     "Body_base",
+    "Cloth_dress",
     "Cloth_sweater",
     "Cloth_skirt",
     "Cloth_tights",
@@ -544,6 +545,20 @@ elif hair_mode == "none":
 else:
     print(project_i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
 
+HEAD_ACCESSORY_MESH_NAMES = frozenset({
+    "Hair_back",
+    "Hair_bang",
+    "Hair_base",
+    "Hair_side",
+    "Other_ear",
+})
+
+SKIRT_WEIGHT_MESH_NAMES = frozenset({
+    "Cloth_skirt",
+    "Cloth_dress",
+    "Cloth_sweater",
+})
+
 bone_mapping_table = {
     "Hips": "SKEL_Pelvis",
     "Spine": "SKEL_Spine1",
@@ -571,8 +586,78 @@ bone_mapping_table = {
 }
 
 
-def get_target_bone(source_bone_name: str) -> str:
+def smoothstep_unit(scalar_val: float) -> float:
+    """Smooth Hermite interpolation clamped to [0.0, 1.0]."""
+    clamped_val = max(0.0, min(1.0, float(scalar_val)))
+    return clamped_val * clamped_val * (3.0 - 2.0 * clamped_val)
+
+
+def compute_skirt_vertex_weights(
+    source_obj,
+    orig_vert_idx: int,
+    ydd_co,
+    vgroup_names_by_idx: dict,
+    vgroup_target_names: dict,
+) -> dict:
+    """Compute anatomical skirt bone weights (z_back28_high) to avoid rear clipping."""
+    remapped_weights = {}
+    skirt_weight = 0.0
+
+    if orig_vert_idx < len(source_obj.data.vertices):
+        src_vert = source_obj.data.vertices[orig_vert_idx]
+        for grp_elem in src_vert.groups:
+            if grp_elem.weight <= 0.001 or grp_elem.group not in vgroup_target_names:
+                continue
+            raw_name = vgroup_names_by_idx.get(grp_elem.group, "")
+            if "skirt" in raw_name.lower():
+                skirt_weight += grp_elem.weight
+            else:
+                target_bone = vgroup_target_names[grp_elem.group]
+                remapped_weights[target_bone] = (
+                    remapped_weights.get(target_bone, 0.0) + grp_elem.weight
+                )
+
+    if skirt_weight > 0.0:
+        vertical_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
+        back_ramp = smoothstep_unit((ydd_co.y + 0.02) / 0.06)
+        left_right_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
+
+        thigh_cap = vertical_ramp * 0.28 * back_ramp
+        thigh_weight = skirt_weight * thigh_cap
+        pelvis_weight = skirt_weight - thigh_weight
+
+        if pelvis_weight > 1e-6:
+            remapped_weights["SKEL_Pelvis"] = (
+                remapped_weights.get("SKEL_Pelvis", 0.0) + pelvis_weight
+            )
+        left_thigh_weight = thigh_weight * left_right_mix
+        right_thigh_weight = thigh_weight * (1.0 - left_right_mix)
+        if left_thigh_weight > 1e-6:
+            remapped_weights["SKEL_L_Thigh"] = (
+                remapped_weights.get("SKEL_L_Thigh", 0.0) + left_thigh_weight
+            )
+        if right_thigh_weight > 1e-6:
+            remapped_weights["SKEL_R_Thigh"] = (
+                remapped_weights.get("SKEL_R_Thigh", 0.0) + right_thigh_weight
+            )
+
+    if len(remapped_weights) > 4:
+        sorted_weights = sorted(
+            remapped_weights.items(),
+            key=lambda weight_entry: weight_entry[1],
+            reverse=True,
+        )[:4]
+        remapped_weights = dict(sorted_weights)
+
+    return remapped_weights
+
+
+def get_target_bone(source_bone_name: str, mesh_name: str = None) -> str:
     """Resolve a Shinano source vertex group name to its GTA V bone name."""
+    if mesh_name in HEAD_ACCESSORY_MESH_NAMES:
+        return "SKEL_Head"
+    if mesh_name == "Cloth_tights" and source_bone_name == "Head":
+        return "SKEL_Pelvis"
     if source_bone_name in bone_mapping_table:
         return bone_mapping_table[source_bone_name]
     resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
@@ -583,6 +668,17 @@ def get_target_bone(source_bone_name: str) -> str:
         return f"SKEL_{side_tag}_Hand"
     if source_bone_name.startswith("Hair_") or source_bone_name.startswith("Other_ear"):
         return "SKEL_Head"
+    lower_name = source_bone_name.lower()
+    if lower_name.startswith("belta"):
+        return "SKEL_Spine2"
+    if lower_name.startswith("beltb"):
+        digits_str = "".join(ch_item for ch_item in lower_name if ch_item.isdigit())
+        chain_idx = int(digits_str) if digits_str else 1
+        if chain_idx <= 3:
+            return "SKEL_Spine2"
+        if chain_idx <= 6:
+            return "SKEL_Spine1"
+        return "SKEL_Pelvis"
     if source_bone_name.startswith("Breast_") or source_bone_name.startswith("Ribbon"):
         return "SKEL_Spine2"
     if source_bone_name.startswith("Butt.L"):
@@ -631,9 +727,13 @@ for mesh_name in include_mesh_names:
     eval_obj = src_obj.evaluated_get(depsgraph)
     new_mesh = bpy.data.meshes.new_from_object(eval_obj)
 
-    # Triangulate mesh and strip alpha eye-overlay faces on Body
+    # Triangulate mesh and strip alpha eye-overlay faces on Body while preserving orig_vert_idx
     bm_data = bmesh.new()
     bm_data.from_mesh(new_mesh)
+    orig_vert_layer = bm_data.verts.layers.int.new("orig_vert_idx")
+    for orig_vert_counter, vert_elem in enumerate(bm_data.verts):
+        vert_elem[orig_vert_layer] = orig_vert_counter
+
     if mesh_name == "Body":
         alpha_indices = [
             mat_idx
@@ -657,6 +757,8 @@ for mesh_name in include_mesh_names:
             face_elem.smooth = True
             for loop_item in face_elem.loops:
                 kept_loop_indices.append(loop_item[orig_loop_layer])
+        bm_data.verts.ensure_lookup_table()
+        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bm_data.verts]
         bm_data.to_mesh(new_mesh)
         bm_data.free()
         new_mesh.update()
@@ -669,6 +771,8 @@ for mesh_name in include_mesh_names:
         bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
         for face_elem in bm_data.faces:
             face_elem.smooth = True
+        bm_data.verts.ensure_lookup_table()
+        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bm_data.verts]
         bm_data.to_mesh(new_mesh)
         bm_data.free()
         new_mesh.update()
@@ -699,17 +803,32 @@ for mesh_name in include_mesh_names:
             continue
         new_obj.data.materials.append(mat_slot_item)
 
-    # Remap vertex groups to GTA V bones (custom hair stays 100% bound to SKEL_Head)
+    # Remap vertex groups to GTA V bones using preserved original vertex indices
+    vgroup_names_by_idx = {vgroup.index: vgroup.name for vgroup in src_obj.vertex_groups}
+    vgroup_target_names = {
+        vgroup.index: get_target_bone(vgroup.name, mesh_name)
+        for vgroup in src_obj.vertex_groups
+    }
     vert_weights = {vert_idx: {} for vert_idx in range(len(new_mesh.vertices))}
     if mesh_name not in custom_hair_mesh_names:
-        for vgroup in src_obj.vertex_groups:
-            target_bone_name = get_target_bone(vgroup.name)
-            for src_vert in src_obj.data.vertices:
-                if src_vert.index < len(new_mesh.vertices):
+        if mesh_name in SKIRT_WEIGHT_MESH_NAMES:
+            for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+                vert_weights[new_vert_idx] = compute_skirt_vertex_weights(
+                    src_obj,
+                    orig_vert_idx,
+                    new_mesh.vertices[new_vert_idx].co,
+                    vgroup_names_by_idx,
+                    vgroup_target_names,
+                )
+        else:
+            for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+                if orig_vert_idx < len(src_obj.data.vertices):
+                    src_vert = src_obj.data.vertices[orig_vert_idx]
                     for group_weight in src_vert.groups:
-                        if group_weight.group == vgroup.index and group_weight.weight > 0.001:
-                            vert_weights[src_vert.index][target_bone_name] = (
-                                vert_weights[src_vert.index].get(target_bone_name, 0.0) + group_weight.weight
+                        if group_weight.weight > 0.001 and group_weight.group in vgroup_target_names:
+                            target_bone_name = vgroup_target_names[group_weight.group]
+                            vert_weights[new_vert_idx][target_bone_name] = (
+                                vert_weights[new_vert_idx].get(target_bone_name, 0.0) + group_weight.weight
                             )
 
     for vertex_idx, weights in vert_weights.items():
@@ -723,7 +842,8 @@ for mesh_name in include_mesh_names:
         else:
             default_bone = (
                 "SKEL_Head"
-                if mesh_name in ["Body", "Hair_bang", "Hair_side", "Hair_back", "Hair_base", "Other_ear"]
+                if mesh_name == "Body"
+                or mesh_name in HEAD_ACCESSORY_MESH_NAMES
                 or mesh_name in custom_hair_mesh_names
                 else "SKEL_Pelvis"
             )
@@ -739,10 +859,11 @@ for mesh_name in include_mesh_names:
         head_vgroup = new_obj.vertex_groups.get("SKEL_Head")
         if not head_vgroup:
             head_vgroup = new_obj.vertex_groups.new(name="SKEL_Head")
-        for vertex_idx, jaw_weight in body_jaw_weights.items():
-            if vertex_idx < len(new_mesh.vertices):
-                jaw_vgroup.add([vertex_idx], jaw_weight, "REPLACE")
-                head_vgroup.add([vertex_idx], max(0.0, 1.0 - jaw_weight), "REPLACE")
+        for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
+            if orig_vert_idx in body_jaw_weights:
+                jaw_weight = body_jaw_weights[orig_vert_idx]
+                jaw_vgroup.add([new_vert_idx], jaw_weight, "REPLACE")
+                head_vgroup.add([new_vert_idx], max(0.0, 1.0 - jaw_weight), "REPLACE")
         print(project_i18n.translate("franklin.jaw_weights_applied"))
 
     processed_objs.append(new_obj)

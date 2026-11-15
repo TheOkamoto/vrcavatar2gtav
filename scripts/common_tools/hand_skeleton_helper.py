@@ -16,7 +16,7 @@ Ensures that:
 
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -314,6 +314,82 @@ def relocate_blender_armature_bones(
     return relocated_counter
 
 
+def inject_custom_bones_into_blender_armature(
+    armature_obj,
+    custom_bones: Sequence[Dict[str, object]],
+    bone_tag_fn: Optional[Callable[[str], int]] = None,
+    bone_flags: Sequence[str] = ("RotX", "RotY", "RotZ", "TransX", "TransY", "TransZ"),
+) -> int:
+    """
+    Inject custom articulated child bones (e.g., PB_Ear_L_0..2) into a Blender
+    Sollumz armature in topological order and configure manual bone tags/DOFs.
+    """
+    import bpy
+    import mathutils
+
+    if not custom_bones:
+        return 0
+
+    arm_data = armature_obj.data
+    bpy.context.view_layer.objects.active = armature_obj
+    bpy.ops.object.mode_set(mode="EDIT")
+
+    arm_inv_world = armature_obj.matrix_world.inverted()
+    injected_count = 0
+
+    for bone_desc in custom_bones:
+        bone_name = str(bone_desc["name"])
+        parent_name = str(bone_desc["parent_name"])
+        parent_edit = arm_data.edit_bones.get(parent_name)
+        if parent_edit is None:
+            raise KeyError(f"Parent bone '{parent_name}' missing for custom bone '{bone_name}'")
+
+        existing_edit = arm_data.edit_bones.get(bone_name)
+        if existing_edit is not None:
+            arm_data.edit_bones.remove(existing_edit)
+
+        edit_bone = arm_data.edit_bones.new(bone_name)
+        edit_bone.parent = parent_edit
+        edit_bone.use_connect = False
+
+        world_matrix = bone_desc["world_matrix"]
+        arm_local_matrix = arm_inv_world @ world_matrix
+        seg_length = max(0.01, float(bone_desc.get("length", 0.03)))
+
+        head_vec = arm_local_matrix.translation.copy()
+        rot_part = arm_local_matrix.to_3x3().normalized()
+        y_dir = rot_part.col[1].normalized()
+        if y_dir.length < 1e-6:
+            y_dir = mathutils.Vector((0.0, 1.0, 0.0))
+
+        edit_bone.head = head_vec
+        edit_bone.tail = head_vec + y_dir * seg_length
+        # Align exact 3D axes by assigning an orthonormal 4x4 local matrix
+        ortho_mat = rot_part.to_4x4()
+        ortho_mat.translation = head_vec
+        edit_bone.matrix = ortho_mat
+        injected_count += 1
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.update()
+
+    for bone_desc in custom_bones:
+        bone_name = str(bone_desc["name"])
+        blender_bone = arm_data.bones.get(bone_name)
+        if blender_bone is None:
+            continue
+        bone_props = blender_bone.bone_properties
+        resolved_tag = int(bone_desc["tag"]) if "tag" in bone_desc else int(bone_tag_fn(bone_name))
+        bone_props.manual_tag = resolved_tag
+        bone_props.use_manual_tag = True
+        bone_props.flags.clear()
+        for flag_name in bone_flags:
+            flag_item = bone_props.flags.add()
+            flag_item.name = flag_name
+
+    return injected_count
+
+
 def _build_bone_local_matrix(bone_node, translation_vec) -> "mathutils.Matrix":
     """Construct a 4x4 local matrix from default_translation, default_rotation, and default_scale."""
     import mathutils
@@ -335,16 +411,19 @@ def patch_yft_skeleton(
     source_yft_path: Path,
     output_yft_path: Path,
     bone_world_targets: Dict[str, "mathutils.Vector"],
+    custom_child_bones: Optional[Sequence[Dict[str, object]]] = None,
 ) -> Tuple[int, int, float]:
     """
     Update `default_translation` entries in the .yft fragment skeleton via PyMateria,
     preserving original rotations/scales and propagating deltas to unmapped children
-    inside SKEL_L_Clavicle and SKEL_R_Clavicle chains.
+    inside SKEL_L_Clavicle and SKEL_R_Clavicle chains. Optionally appends custom child
+    bones (e.g., articulated PhysBone ear chains under SKEL_Head).
 
     Also re-imports the exported .yft to verify exact round-trip target coordinates.
     """
     import mathutils
     import pymateria as pymateria_root
+    import pymateria.gta5 as gta5_module
     import pymateria.gta5.gen8 as gen8_module
 
     resolved_source = Path(source_yft_path)
@@ -429,12 +508,74 @@ def patch_yft_skeleton(
         False,
     )
 
+    expected_custom_positions: Dict[str, mathutils.Vector] = {}
+    if custom_child_bones:
+        bones_by_name: Dict[str, object] = {}
+        world_matrices: Dict[str, mathutils.Matrix] = {}
+        custom_names = {str(item["name"]) for item in custom_child_bones}
+
+        def index_skeleton_node(bone_node, parent_world: mathutils.Matrix) -> None:
+            # Prune pre-existing custom bones on re-runs for idempotency
+            kept_children = [
+                child_node
+                for child_node in bone_node.children
+                if child_node.name not in custom_names
+            ]
+            if len(kept_children) != len(bone_node.children):
+                bone_node.children[:] = kept_children
+            trans_raw = bone_node.default_translation
+            local_trans = mathutils.Vector(
+                (float(trans_raw.x), float(trans_raw.y), float(trans_raw.z))
+            )
+            world_mat = parent_world @ _build_bone_local_matrix(bone_node, local_trans)
+            bones_by_name[bone_node.name] = bone_node
+            world_matrices[bone_node.name] = world_mat
+            for child_node in bone_node.children:
+                index_skeleton_node(child_node, world_mat)
+
+        index_skeleton_node(skeleton_obj.root_bone, identity_matrix)
+        parent_set = {str(item["parent_name"]) for item in custom_child_bones}
+
+        for bone_desc in custom_child_bones:
+            bone_name = str(bone_desc["name"])
+            parent_name = str(bone_desc["parent_name"])
+            parent_bone = bones_by_name.get(parent_name)
+            parent_world = world_matrices.get(parent_name)
+            if parent_bone is None or parent_world is None:
+                raise KeyError(
+                    f"Cannot attach custom YFT bone '{bone_name}': parent '{parent_name}' missing"
+                )
+            parent_bone.degrees_of_freedom = int(parent_bone.degrees_of_freedom) | 0x1000
+            target_world = bone_desc["world_matrix"]
+            local_mat = parent_world.inverted() @ target_world
+            local_pos, local_rot, _local_scale = local_mat.decompose()
+
+            new_bone = gta5_module.Bone()
+            new_bone.name = bone_name
+            new_bone.id = int(bone_desc["tag"])
+            new_bone.degrees_of_freedom = 0x1077 if bone_name in parent_set else 0x0077
+            new_bone.default_translation = pymateria_root.Vector4f(
+                float(local_pos.x), float(local_pos.y), float(local_pos.z), 0.0
+            )
+            new_bone.default_rotation = pymateria_root.Quaternion(
+                float(local_rot.x), float(local_rot.y), float(local_rot.z), float(local_rot.w)
+            )
+            new_bone.default_scale = pymateria_root.Vector4f(1.0, 1.0, 1.0, 1.0)
+            parent_bone.children.append(new_bone)
+
+            bones_by_name[bone_name] = new_bone
+            world_matrices[bone_name] = target_world.copy()
+            expected_custom_positions[bone_name] = target_world.translation.copy()
+            total_bones_count += 1
+            updated_bones_count += 1
+
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
     gen8_module.Fragment.export_rsc(fragment_asset, str(resolved_output))
 
     # Round-trip validation after binary export
     verify_fragment = gen8_module.Fragment.import_rsc(str(resolved_output)).result
     verify_positions: Dict[str, mathutils.Vector] = {}
+    verify_tags: Dict[str, int] = {}
 
     def collect_verified_positions(bone_node, parent_world: mathutils.Matrix) -> None:
         trans_raw = bone_node.default_translation
@@ -443,6 +584,7 @@ def patch_yft_skeleton(
         )
         world_matrix = parent_world @ _build_bone_local_matrix(bone_node, local_trans)
         verify_positions[bone_node.name] = world_matrix.translation.copy()
+        verify_tags[bone_node.name] = int(bone_node.id)
         for child_bone_node in bone_node.children:
             collect_verified_positions(child_bone_node, world_matrix)
 
@@ -450,8 +592,11 @@ def patch_yft_skeleton(
         verify_fragment.drawable.skeleton.root_bone, identity_matrix
     )
 
+    combined_targets = dict(bone_world_targets)
+    combined_targets.update(expected_custom_positions)
+
     max_roundtrip_error = 0.0
-    for bone_name, expected_vec in bone_world_targets.items():
+    for bone_name, expected_vec in combined_targets.items():
         if bone_name not in verify_positions:
             raise RuntimeError(
                 translate(
@@ -466,6 +611,14 @@ def patch_yft_skeleton(
         diff_len = (verify_positions[bone_name] - target_vec).length
         if diff_len > max_roundtrip_error:
             max_roundtrip_error = diff_len
+
+    for bone_desc in custom_child_bones or ():
+        bone_name = str(bone_desc["name"])
+        if verify_tags.get(bone_name) != int(bone_desc["tag"]):
+            raise RuntimeError(
+                f"Custom YFT bone '{bone_name}' tag mismatch after export: "
+                f"expected {bone_desc['tag']}, got {verify_tags.get(bone_name)}"
+            )
 
     if max_roundtrip_error > 1e-3:
         raise RuntimeError(
