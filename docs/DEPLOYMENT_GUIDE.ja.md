@@ -25,6 +25,7 @@ vrc2gtav/
 ├── EXECUTAR_GERENCIADOR.bat                         # ポルトガル語名のランチャーエイリアス
 ├── run_mod_manager.py                               # マスターオーケストレーター (対話メニュー + CLI)
 ├── vrc2gtav.cfg.example                             # バージョン管理された INI 設定テンプレート
+├── configs/                                         # アバター別ポータブルブレンドシェイプ設定 (*_blendshapes.cfg)
 ├── README.md / README.pt-BR.md / README.ja.md       # GitHub トップページ用 README (3か国語)
 ├── docs/                                            # 詳細な技術・導入ドキュメント
 │   ├── DEPLOYMENT_GUIDE.md                          # 英語技術ガイド
@@ -68,7 +69,9 @@ vrc2gtav/
 3. **ローカル `vrc2gtav.cfg`:** First-Run (`setup_first_run.py`) により [`vrc2gtav.cfg.example`](../vrc2gtav.cfg.example) から生成
 4. **Windows / Linux (WSL) 自動変換:** ネイティブ Windows と WSL を判別し、`D:/GTAV` ↔ `/mnt/d/GTAV` を自動変換
 5. **等倍スケール `1.0` デフォルトと `.unity` 解析 (`unity_scene_helper.py`):** 初期構成 (`unity_scene =` 空欄) では体・頭・ボーン・小物のスケールをすべて `1.0` に保ちます。`[franklin]`・`[michael]`・`[trevor]` に `unity_scene`（必要に応じて `unity_avatar_name`）を設定すると、`Transform` / `PrefabInstance` の上書きスケールや `PhysBone`/Marshmallow の打ち消しを抽出して腕・指再配置前へ反映します
-6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `fbx_hair`（例: *ねこタイドボブヘア*）や任意の瞳・メイクパックが空欄または未配置でも、ベースアバター標準の髪 (`Hair_*` / `Shinano_hair.png`、`Milltina_hair_*` / 補正済み `Milltina_Hair.png`) と顔 (`Shinano_face.png`、`Milltina_Face.png`) へ安全にフォールバックします。`fbx_hair` のカスタム切り替えは Shinano と Miltina の双方に対応しています
+6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `custom_hair` / `fbx_hair`（例: *ねこタイドボブヘア*）や任意の瞳・メイクパックが空欄または未配置でも、ベースアバター標準の髪 (`Hair_*` / `Shinano_hair.png`、`Milltina_hair_*` / 補正済み `Milltina_Hair.png`) と顔 (`Shinano_face.png`、`Milltina_Face.png`) へ安全にフォールバックします
+7. **Unity 抽出 & `.cfg` ブレンドシェイプ管理 (`blendshape_helper.py`):** ビルドスクリプト内の固定ブレンドシェイプ辞書を廃止しました。表情（`.anim`）・素体シュリンク・衣装・小物・ヘアの全ウェイトは `unity_scene`（`.unity` / `.prefab` / FBX チャンネル名）から自動抽出するか、UTF-8 プリセット（`configs/shinano_blendshapes.cfg`・`configs/shinano_er_blendshapes.cfg`・`configs/miltina_blendshapes.cfg`）から `blendshapes_source = auto | unity | cfg` および `--blendshapes-source` / `--blendshapes-cfg` / `--save-blendshapes-cfg` / `--export-blendshapes` で読み書きします
+8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `shinano_casual`・`shinano_er`・`miltina_maid` すべてで、任意の `.prefab`・`m_SourcePrefab` 継承 `PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`.fbx` + `.mat` を `--hair` (`auto | default | none | <パス>`)、`vrc2gtav.cfg` の `custom_hair`、または対話メニュー `[8]` で指定できます。`unity_hair_helper.py` が `.fbx.meta` マテリアル対応表・非表示パーツ除外・lilToon 色調/HSV (`_Color`, `_MainTexHSVG`) を UV タイル (`custom_hair_manifest.json`) へベイクし、`blender_hair_helper.py` が頭部フィット (`--hair-scale`, `--hair-offset`) と `SKEL_Head` ウェイト転送、元ケモ耳保持を自動実行します
 
 ### 2.2 3か国語ローカライズ (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) により **英語 (`en`)**・**日本語 (`ja`)**・**ポルトガル語 (`pt`)** に完全対応しています:
@@ -178,6 +181,13 @@ python run_mod_manager.py --character all
 # 個別キャラクターのみ実行 (michael, franklin, trevor):
 python run_mod_manager.py --character michael --lang ja
 
+# 任意の主人公へ任意の VRChat プリセット (shinano_casual, shinano_er, miltina_maid) をビルド・保存:
+python run_mod_manager.py --character franklin --avatar miltina_maid --save-assignment
+
+# 任意の Unity カスタムヘア (.prefab, PrefabVariant, .fbx, default, none) を移植:
+python run_mod_manager.py --character michael --hair "/path/to/CustomHair.prefab" --save-hair
+# 対話メニュー [8] から custom_hair・hair_scale・hair_offset を対話形式で設定することも可能です。
+
 # テクスチャ/Blender をスキップし配置・RPF 再パックのみ実行:
 python run_mod_manager.py --deploy-only
 
@@ -189,10 +199,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) はソース規約とビルド済み出力の双方を検証します:
 
 ```bash
-# フルスイート (8項目: First-Run・ビルド・導入済み環境向け):
+# フルスイート (10項目: First-Run・ビルド・導入済み環境向け):
 python scripts/common_tools/test_mod_suite.py --lang ja
 
-# ソースのみ検証 (5項目: クローン直後・First-Run 前の環境でも実行可能):
+# ソースのみ検証 (7項目: クローン直後・First-Run 前の環境でも実行可能):
 python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ```
 
@@ -201,18 +211,19 @@ python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ## 9. 手動ステップ実行リファレンス
 
 ```bash
-# ステップ 1: 2K テクスチャアトラス (.dds / .ytd) 生成
+# ステップ 1: 2K テクスチャアトラス (.dds / .ytd) 生成 (--hair / --hair-mat / --hair-tex 指定でカスタムヘアもベイク)
 python scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py
 python scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py
 python scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
 
-# ステップ 2: Blender + Sollumz で 3D モデルをコンパイル
-python scripts/Shinano_Casual_Franklin/run_build_franklin.py
-python scripts/Shinano_EternalReunion_Michael/run_build_er.py
-python scripts/Miltina_Maid_Trevor/run_pipeline.py
+# ステップ 2: Blender + Sollumz で 3D モデルをコンパイル (--target-character と --hair / --hair-scale / --hair-offset 対応)
+python scripts/Shinano_Casual_Franklin/run_build_franklin.py --target-character franklin
+python scripts/Shinano_EternalReunion_Michael/run_build_er.py --target-character michael
+python scripts/Miltina_Maid_Trevor/run_pipeline.py --target-character trevor
 
-# ステップ 3: 展開済みステージングスロットへ反映 (単体または一括)
+# ステップ 3: 展開済みステージングスロットへ反映 (単体・--avatar 指定または一括)
 python scripts/common_tools/apply_characters.py --character player_zero
+python scripts/common_tools/apply_characters.py --character franklin --avatar miltina_maid
 python scripts/common_tools/apply_all_characters.py
 
 # ステップ 4: RPF 再パック (OPEN + TOC 修正) して mods/ へ配置

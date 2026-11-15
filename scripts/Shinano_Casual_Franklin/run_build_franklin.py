@@ -34,12 +34,83 @@ def main() -> int:
         default="auto",
         help=project_i18n.translate("common.language_option_help"),
     )
+    arg_parser.add_argument(
+        "--target-character",
+        default="franklin",
+        help=project_i18n.translate("franklin.build.arg_target_char"),
+    )
+    arg_parser.add_argument(
+        "--output-dir",
+        default=None,
+    )
+    arg_parser.add_argument(
+        "--texture-dir",
+        default=None,
+    )
+    arg_parser.add_argument(
+        "--hair",
+        default=None,
+        help=project_i18n.translate("common.hair_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--hair-mat",
+        default=None,
+        help=project_i18n.translate("common.hair_mat_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--hair-tex",
+        default=None,
+        help=project_i18n.translate("common.hair_tex_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--hair-scale",
+        type=float,
+        default=None,
+        help=project_i18n.translate("common.hair_scale_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--hair-offset",
+        default=None,
+        help=project_i18n.translate("common.hair_offset_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--unity-scene",
+        default=None,
+        help=project_i18n.translate("common.unity_scene_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--unity-avatar-name",
+        default=None,
+        help=project_i18n.translate("common.unity_avatar_cli_opt"),
+    )
+    arg_parser.add_argument(
+        "--blendshapes-cfg",
+        default=None,
+        help=project_i18n.translate("blendshapes.cli_cfg"),
+    )
+    arg_parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=project_i18n.translate("blendshapes.cli_source"),
+    )
+    arg_parser.add_argument(
+        "--save-blendshapes-cfg",
+        default=None,
+        help=project_i18n.translate("blendshapes.cli_save_cfg"),
+    )
     parsed_args = arg_parser.parse_args()
     active_lang = project_i18n.set_active_language(parsed_args.lang)
     os.environ[project_i18n.LANG_ENV_VAR] = active_lang
 
-    project_paths.ensure_character_skeleton_yft("franklin")
-    franklin_cfg = project_paths.get_character_paths("franklin")
+    target_protagonist = project_paths.normalize_protagonist_key(
+        parsed_args.target_character
+    )
+    project_paths.ensure_character_skeleton_yft(target_protagonist)
+    franklin_cfg = project_paths.get_character_paths(
+        target_protagonist,
+        avatar_override="shinano_casual",
+    )
     blender_script = Path(franklin_cfg["blender_script"])
     if not blender_script.exists():
         print(
@@ -49,7 +120,29 @@ def main() -> int:
         )
         return 1
 
-    blender_command, blender_env = project_paths.build_blender_command(blender_script)
+    extra_blender_args = ["--target-character", target_protagonist]
+    for flag_name, flag_val in (
+        ("--output-dir", parsed_args.output_dir),
+        ("--texture-dir", parsed_args.texture_dir),
+        ("--hair", parsed_args.hair),
+        ("--hair-mat", parsed_args.hair_mat),
+        ("--hair-tex", parsed_args.hair_tex),
+        ("--hair-offset", parsed_args.hair_offset),
+        ("--unity-scene", parsed_args.unity_scene),
+        ("--unity-avatar-name", parsed_args.unity_avatar_name),
+        ("--blendshapes-cfg", parsed_args.blendshapes_cfg),
+        ("--blendshapes-source", parsed_args.blendshapes_source),
+        ("--save-blendshapes-cfg", parsed_args.save_blendshapes_cfg),
+    ):
+        if flag_val:
+            extra_blender_args.extend([flag_name, str(flag_val)])
+    if parsed_args.hair_scale is not None:
+        extra_blender_args.extend(["--hair-scale", str(parsed_args.hair_scale)])
+
+    blender_command, blender_env = project_paths.build_blender_command(
+        blender_script,
+        extra_arguments=extra_blender_args,
+    )
     print(
         project_i18n.translate(
             "franklin.running_blender", command=" ".join(blender_command)

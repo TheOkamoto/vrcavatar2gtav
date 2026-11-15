@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -600,9 +600,73 @@ def build_blender_command(
             "-P",
             script_win_path,
         ]
+        path_value_flags = {
+            "--output-dir",
+            "--texture-dir",
+            "--skeleton-yft",
+            "--target-yft",
+            "--hair-fbx",
+            "--hair-mat",
+            "--hair-tex",
+            "--unity-scene",
+            "--blendshapes-cfg",
+            "--save-blendshapes-cfg",
+            "--face-anim",
+            "--shinano-fbx",
+            "--outfit-fbx",
+            "--watch-fbx",
+            "--miltina-fbx",
+            "--outfit-blend",
+            "--base-ydd",
+        }
+        non_path_hair_presets = {
+            "auto",
+            "default",
+            "none",
+            "bald",
+            "no_hair",
+            "default_er",
+        }
+
+        def _convert_cli_path_arg(raw_arg_val: str, is_hair_flag: bool = False) -> str:
+            trimmed_val = str(raw_arg_val).strip()
+            if not trimmed_val:
+                return raw_arg_val
+            if is_hair_flag and trimmed_val.lower() in non_path_hair_presets:
+                return raw_arg_val
+            return to_windows_path(trimmed_val)
+
         if extra_tokens:
+            converted_tokens = []
+            token_idx = 0
+            while token_idx < len(extra_tokens):
+                curr_tok = extra_tokens[token_idx]
+                if curr_tok in path_value_flags or curr_tok == "--hair":
+                    converted_tokens.append(curr_tok)
+                    if token_idx + 1 < len(extra_tokens):
+                        next_tok = extra_tokens[token_idx + 1]
+                        converted_tokens.append(
+                            _convert_cli_path_arg(
+                                next_tok,
+                                is_hair_flag=(curr_tok == "--hair"),
+                            )
+                        )
+                        token_idx += 2
+                        continue
+                elif "=" in curr_tok and curr_tok.startswith("--"):
+                    flag_name, flag_val = curr_tok.split("=", 1)
+                    if flag_name in path_value_flags or flag_name == "--hair":
+                        converted_val = _convert_cli_path_arg(
+                            flag_val,
+                            is_hair_flag=(flag_name == "--hair"),
+                        )
+                        converted_tokens.append(f"{flag_name}={converted_val}")
+                        token_idx += 1
+                        continue
+                converted_tokens.append(curr_tok)
+                token_idx += 1
             command_list.append("--")
-            command_list.extend(extra_tokens)
+            command_list.extend(converted_tokens)
         return command_list, custom_env
 
     # Native Linux Blender
@@ -658,48 +722,579 @@ def get_rpf_paths() -> Dict[str, Path]:
     return resolved_map
 
 
-def get_character_paths(
-    character_section: str,
+PROTAGONIST_ORDER: Tuple[str, ...] = ("michael", "franklin", "trevor")
+AVATAR_ORDER: Tuple[str, ...] = ("shinano_casual", "shinano_er", "miltina_maid")
+
+PROTAGONIST_PROFILES: Dict[str, Dict[str, Any]] = {
+    "michael": {
+        "protagonist": "michael",
+        "ped_name": "player_zero",
+        "prop_ped_name": "player_zero_p",
+        "skeleton_filename": "player_zero.yft",
+        "default_avatar": "shinano_er",
+        "primary_drawable": "uppr_000_u",
+        "export_drawables": ["uppr_000_r", "uppr_000_u", "uppr_001_u", "uppr_004_u"],
+        "target_z_min": -0.907,
+        "target_z_max": 0.645,
+        "arm_pose_degrees": -55.0,
+    },
+    "franklin": {
+        "protagonist": "franklin",
+        "ped_name": "player_one",
+        "prop_ped_name": "player_one_p",
+        "skeleton_filename": "player_one.yft",
+        "default_avatar": "shinano_casual",
+        "primary_drawable": "uppr_008_u",
+        "export_drawables": ["uppr_008_u", "uppr_000_u", "uppr_001_u"],
+        "target_z_min": -0.907,
+        "target_z_max": 0.640,
+        "arm_pose_degrees": -55.0,
+    },
+    "trevor": {
+        "protagonist": "trevor",
+        "ped_name": "player_two",
+        "prop_ped_name": "player_two_p",
+        "skeleton_filename": "player_two.yft",
+        "default_avatar": "miltina_maid",
+        "primary_drawable": "uppr_000_u",
+        "export_drawables": [
+            "uppr_000_u",
+            "uppr_000_r",
+            "uppr_001_u",
+            "uppr_002_u",
+            "uppr_003_r",
+            "uppr_010_u",
+            "uppr_027_u",
+        ],
+        "target_z_min": -0.908,
+        "target_z_max": 0.642,
+        "arm_pose_degrees": -55.0,
+    },
+}
+
+PROTAGONIST_ALIASES: Dict[str, str] = {
+    "michael": "michael",
+    "player_zero": "michael",
+    "franklin": "franklin",
+    "player_one": "franklin",
+    "trevor": "trevor",
+    "player_two": "trevor",
+}
+
+AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
+    "shinano_casual": {
+        "avatar_id": "shinano_casual",
+        "legacy_section": "franklin",
+        "default_character": "franklin",
+        "character_folder": "1_Franklin_Shinano_Casual",
+        "scripts_folder": "Shinano_Casual_Franklin",
+        "unity_hints": ("shinano",),
+        "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
+        "default_blendshapes_cfg": "configs/shinano_blendshapes.cfg",
+        "default_face_mesh": "Body",
+    },
+    "shinano_er": {
+        "avatar_id": "shinano_er",
+        "legacy_section": "michael",
+        "default_character": "michael",
+        "character_folder": "2_Michael_Shinano_EternalReunion",
+        "scripts_folder": "Shinano_EternalReunion_Michael",
+        "unity_hints": ("shinano", "reunion"),
+        "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
+        "default_blendshapes_cfg": "configs/shinano_er_blendshapes.cfg",
+        "default_face_mesh": "Body",
+    },
+    "miltina_maid": {
+        "avatar_id": "miltina_maid",
+        "legacy_section": "trevor",
+        "default_character": "trevor",
+        "character_folder": "3_Trevor_Miltina_Maid",
+        "scripts_folder": "Miltina_Maid_Trevor",
+        "unity_hints": ("milltina", "miltina"),
+        "default_anim_files": ("Miltina_close eyes_Base_adult.anim",),
+        "default_blendshapes_cfg": "configs/miltina_blendshapes.cfg",
+        "default_face_mesh": "Body",
+    },
+}
+
+AVATAR_ALIASES: Dict[str, str] = {
+    "shinano_casual": "shinano_casual",
+    "shinano": "shinano_casual",
+    "casual": "shinano_casual",
+    "shinano_uniform": "shinano_casual",
+    "shinano_er": "shinano_er",
+    "shinano_eternal_reunion": "shinano_er",
+    "eternal_reunion": "shinano_er",
+    "er": "shinano_er",
+    "miltina_maid": "miltina_maid",
+    "miltina": "miltina_maid",
+    "milltina": "miltina_maid",
+    "milltina_maid": "miltina_maid",
+}
+
+_PROTAGONIST_ONLY_KEYS = frozenset(
+    {
+        "avatar",
+        "ped_name",
+        "prop_ped_name",
+        "skeleton_yft",
+        "target_z_min",
+        "target_z_max",
+        "arm_pose_degrees",
+        "staging_streamed_ped_dir",
+        "staging_mppatches_ped_dir",
+        "staging_patchday4_ped_dir",
+        "staging_streamed_props_dir",
+    }
+)
+
+_BUILD_OUTPUT_KEYS = frozenset(
+    {
+        "exported_models_dir",
+        "target_model_ydd",
+        "target_yft",
+        "extra_model_ydds",
+    }
+)
+
+_NON_PATH_OPTION_KEYS = frozenset(
+    {
+        "avatar",
+        "ped_name",
+        "prop_ped_name",
+        "ytd_name",
+        "unity_avatar_name",
+        "blendshapes_source",
+        "hair_scale",
+        "hair_offset",
+        "target_z_min",
+        "target_z_max",
+        "arm_pose_degrees",
+        "primary_drawable",
+        "avatar_id",
+        "protagonist",
+    }
+)
+
+_HAIR_KEYWORD_OPTION_KEYS = frozenset({"custom_hair", "fbx_hair"})
+_HAIR_OVERRIDE_OPTION_KEYS = frozenset(
+    {"custom_hair", "fbx_hair", "hair_mat", "hair_tex", "hair_scale", "hair_offset"}
+)
+_HAIR_MODE_KEYWORDS = frozenset({"auto", "default", "none"})
+
+_LIST_PATH_OPTION_KEYS = frozenset({"extra_model_ydds"})
+
+
+def list_available_protagonists() -> Tuple[str, ...]:
+    """Return canonical GTA V protagonist keys in display order."""
+    return PROTAGONIST_ORDER
+
+
+def list_available_avatars() -> Tuple[str, ...]:
+    """Return canonical VRChat avatar preset IDs in display order."""
+    return AVATAR_ORDER
+
+
+def normalize_protagonist_key(raw_name: str) -> str:
+    """Normalize protagonist or ped identifier to 'michael', 'franklin', or 'trevor'."""
+    cleaned_name = str(raw_name).strip().lower()
+    if cleaned_name in PROTAGONIST_ALIASES:
+        return PROTAGONIST_ALIASES[cleaned_name]
+    raise KeyError(translate("paths.unknown_protagonist", name=raw_name))
+
+
+def normalize_avatar_id(raw_name: str) -> str:
+    """Normalize VRChat avatar preset name or alias to canonical preset ID."""
+    cleaned_name = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
+    if cleaned_name in AVATAR_ALIASES:
+        return AVATAR_ALIASES[cleaned_name]
+    raise KeyError(translate("paths.unknown_avatar", name=raw_name))
+
+
+def get_protagonist_profile(character_or_ped: str) -> Dict[str, Any]:
+    """Return static GTA V protagonist metadata (ped name, default drawables, Z range)."""
+    protagonist_key = normalize_protagonist_key(character_or_ped)
+    return dict(PROTAGONIST_PROFILES[protagonist_key])
+
+
+def get_avatar_preset_info(avatar_name: str) -> Dict[str, Any]:
+    """Return static metadata for a canonical VRChat avatar preset."""
+    avatar_id = normalize_avatar_id(avatar_name)
+    return dict(AVATAR_PRESETS[avatar_id])
+
+
+def _resolve_option_value(
+    option_key: str,
+    option_value: str,
+    root_directory: Path,
+    as_windows_path: bool,
+) -> Union[Path, str, List[Union[Path, str]]]:
+    """Resolve a raw .cfg option string into a path, list of paths, or plain string."""
+    cleaned_value = option_value.strip()
+    if option_key in _NON_PATH_OPTION_KEYS or not cleaned_value:
+        return cleaned_value
+    if (
+        option_key in _HAIR_KEYWORD_OPTION_KEYS
+        and cleaned_value.lower() in _HAIR_MODE_KEYWORDS
+    ):
+        return cleaned_value.lower()
+    if option_key in _LIST_PATH_OPTION_KEYS:
+        item_list: List[Union[Path, str]] = []
+        for raw_item in cleaned_value.split(","):
+            stripped_item = raw_item.strip()
+            if not stripped_item:
+                continue
+            item_path = to_host_path(stripped_item, project_root_dir=root_directory)
+            item_list.append(
+                to_windows_path(item_path) if as_windows_path else item_path
+            )
+        return item_list
+    host_path = to_host_path(cleaned_value, project_root_dir=root_directory)
+    return to_windows_path(host_path) if as_windows_path else host_path
+
+
+def get_avatar_paths(
+    avatar_name: str,
     as_windows_path: bool = False,
-) -> Dict[str, Union[Path, str, List[Union[Path, str]]]]:
+) -> Dict[str, Any]:
     """
-    Return a dictionary with all resolved keys for a protagonist section
-    ('franklin', 'michael', or 'trevor') from vrc2gtav.cfg.
+    Resolve all asset, Unity, blendshape, texture, and script paths for a
+    VRChat avatar preset (`shinano_casual`, `shinano_er`, or `miltina_maid`).
+
+    Reads `[avatar:<id>]` when present and falls back cleanly to legacy
+    character sections for older `vrc2gtav.cfg` files.
     """
+    avatar_id = normalize_avatar_id(avatar_name)
+    preset_info = AVATAR_PRESETS[avatar_id]
     parser = load_project_config()
-    if not parser.has_section(character_section):
+    root_directory = get_project_root()
+
+    avatar_section_underscore = f"avatar_{avatar_id}"
+    avatar_section_colon = f"avatar:{avatar_id}"
+    legacy_section = str(preset_info["legacy_section"])
+    if parser.has_section(avatar_section_underscore):
+        source_section = avatar_section_underscore
+    elif parser.has_section(avatar_section_colon):
+        source_section = avatar_section_colon
+    elif parser.has_section(avatar_id):
+        source_section = avatar_id
+    elif parser.has_section(legacy_section):
+        source_section = legacy_section
+    else:
         raise KeyError(
             translate(
                 "paths.section_not_found",
-                section=character_section,
+                section=avatar_section_underscore,
+                path=find_project_config_file(),
+            )
+        )
+
+    resolved_avatar: Dict[str, Any] = {
+        "avatar": avatar_id,
+        "avatar_id": avatar_id,
+        "legacy_section": legacy_section,
+    }
+    for option_key, option_value in parser.items(source_section):
+        if source_section == legacy_section and (
+            option_key in _PROTAGONIST_ONLY_KEYS or option_key in _BUILD_OUTPUT_KEYS
+        ):
+            continue
+        resolved_avatar[option_key] = _resolve_option_value(
+            option_key,
+            option_value,
+            root_directory,
+            as_windows_path,
+        )
+
+    if "character_dir" not in resolved_avatar:
+        fallback_char_dir = root_directory / str(preset_info["character_folder"])
+        resolved_avatar["character_dir"] = (
+            to_windows_path(fallback_char_dir) if as_windows_path else fallback_char_dir
+        )
+    if "scripts_dir" not in resolved_avatar:
+        fallback_scripts_dir = get_scripts_root_dir() / str(preset_info["scripts_folder"])
+        resolved_avatar["scripts_dir"] = (
+            to_windows_path(fallback_scripts_dir)
+            if as_windows_path
+            else fallback_scripts_dir
+        )
+    if "blendshapes_cfg" not in resolved_avatar:
+        fallback_cfg_path = root_directory / str(preset_info["default_blendshapes_cfg"])
+        resolved_avatar["blendshapes_cfg"] = (
+            to_windows_path(fallback_cfg_path) if as_windows_path else fallback_cfg_path
+        )
+    return resolved_avatar
+
+
+def _update_cfg_section_options(
+    section_name: str,
+    updates: Dict[str, str],
+    config_file_path: Optional[Union[str, Path]] = None,
+) -> Path:
+    """Update or insert key=value pairs in a specific INI section preserving comments."""
+    cfg_file = find_project_config_file(config_file_path)
+    raw_text = cfg_file.read_text(encoding="utf-8")
+    lines = raw_text.splitlines(keepends=True)
+    header_target = f"[{section_name}]"
+    section_start_idx: Optional[int] = None
+    section_end_idx = len(lines)
+
+    for line_idx, raw_line in enumerate(lines):
+        stripped_line = raw_line.strip()
+        if stripped_line.startswith("[") and stripped_line.endswith("]"):
+            if stripped_line.lower() == header_target.lower():
+                section_start_idx = line_idx
+            elif section_start_idx is not None:
+                section_end_idx = line_idx
+                break
+
+    if section_start_idx is None:
+        raise KeyError(
+            translate("paths.section_not_found", section=section_name, path=cfg_file)
+        )
+
+    newline_ending = "\n"
+    if lines[section_start_idx].endswith("\r\n"):
+        newline_ending = "\r\n"
+
+    remaining_keys = dict(updates)
+    for scan_idx in range(section_start_idx + 1, section_end_idx):
+        candidate_line = lines[scan_idx].lstrip()
+        if candidate_line.startswith("#") or candidate_line.startswith(";") or "=" not in candidate_line:
+            continue
+        key_part = candidate_line.split("=", 1)[0].strip()
+        if key_part in remaining_keys:
+            lines[scan_idx] = f"{key_part} = {remaining_keys.pop(key_part)}{newline_ending}"
+
+    if remaining_keys:
+        insert_pos = section_start_idx + 1
+        while insert_pos < section_end_idx and lines[insert_pos].lstrip().startswith(("#", ";")):
+            insert_pos += 1
+        for key_name, val_str in remaining_keys.items():
+            lines.insert(insert_pos, f"{key_name} = {val_str}{newline_ending}")
+            insert_pos += 1
+
+    cfg_file.write_text("".join(lines), encoding="utf-8")
+    invalidate_config_cache()
+    return cfg_file
+
+
+def set_protagonist_avatar(
+    character_or_ped: str,
+    avatar_name: str,
+    config_file_path: Optional[Union[str, Path]] = None,
+) -> str:
+    """Persist a protagonist's assigned VRChat avatar preset in vrc2gtav.cfg."""
+    protagonist_key = normalize_protagonist_key(character_or_ped)
+    avatar_id = normalize_avatar_id(avatar_name)
+    _update_cfg_section_options(
+        protagonist_key,
+        {"avatar": avatar_id},
+        config_file_path=config_file_path,
+    )
+    return avatar_id
+
+
+def set_character_custom_hair(
+    target_section_or_character: str,
+    hair_value: str,
+    hair_mat: Optional[str] = None,
+    hair_tex: Optional[str] = None,
+    hair_scale: Optional[str] = None,
+    hair_offset: Optional[str] = None,
+    config_file_path: Optional[Union[str, Path]] = None,
+) -> str:
+    """Persist custom hair overrides inside a protagonist or avatar section of vrc2gtav.cfg."""
+    cleaned_target = str(target_section_or_character).strip()
+    parser = load_project_config(config_file_path)
+    if parser.has_section(cleaned_target):
+        section_name = cleaned_target
+    else:
+        try:
+            section_name = normalize_protagonist_key(cleaned_target)
+        except KeyError:
+            avatar_id = normalize_avatar_id(cleaned_target)
+            section_name = f"avatar_{avatar_id}"
+            if not parser.has_section(section_name):
+                section_name = f"avatar:{avatar_id}"
+
+    updates: Dict[str, str] = {"custom_hair": str(hair_value).strip()}
+    if hair_mat is not None:
+        updates["hair_mat"] = str(hair_mat).strip()
+    if hair_tex is not None:
+        updates["hair_tex"] = str(hair_tex).strip()
+    if hair_scale is not None:
+        updates["hair_scale"] = str(hair_scale).strip()
+    if hair_offset is not None:
+        updates["hair_offset"] = str(hair_offset).strip()
+
+    _update_cfg_section_options(
+        section_name,
+        updates,
+        config_file_path=config_file_path,
+    )
+    return section_name
+
+
+def get_character_paths(
+    character_section: str,
+    as_windows_path: bool = False,
+    avatar_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Return a dictionary combining a GTA V protagonist slot ('michael',
+    'franklin', or 'trevor' / 'player_zero', 'player_one', 'player_two') with
+    its assigned or overridden VRChat avatar preset.
+    """
+    protagonist_key = normalize_protagonist_key(character_section)
+    profile = PROTAGONIST_PROFILES[protagonist_key]
+    parser = load_project_config()
+    if not parser.has_section(protagonist_key):
+        raise KeyError(
+            translate(
+                "paths.section_not_found",
+                section=protagonist_key,
                 path=find_project_config_file(),
             )
         )
     root_directory = get_project_root()
-    non_path_keys = {"ped_name", "prop_ped_name", "ytd_name", "unity_avatar_name"}
-    list_path_keys = {"extra_model_ydds"}
+    rpf_paths_cfg = get_rpf_paths()
 
-    resolved_character: Dict[str, Union[Path, str, List[Union[Path, str]]]] = {}
-    for option_key, option_value in parser.items(character_section):
-        cleaned_value = option_value.strip()
-        if option_key in non_path_keys or not cleaned_value:
-            resolved_character[option_key] = cleaned_value
-        elif option_key in list_path_keys:
-            item_list: List[Union[Path, str]] = []
-            for raw_item in cleaned_value.split(","):
-                stripped_item = raw_item.strip()
-                if not stripped_item:
-                    continue
-                item_path = to_host_path(stripped_item, project_root_dir=root_directory)
-                item_list.append(
-                    to_windows_path(item_path) if as_windows_path else item_path
-                )
-            resolved_character[option_key] = item_list
-        else:
-            host_path = to_host_path(cleaned_value, project_root_dir=root_directory)
-            resolved_character[option_key] = (
-                to_windows_path(host_path) if as_windows_path else host_path
+    configured_avatar = (
+        parser.get(protagonist_key, "avatar", fallback="").strip()
+        or str(profile["default_avatar"])
+    )
+    active_avatar = normalize_avatar_id(avatar_override or configured_avatar)
+    is_default_pairing = active_avatar == str(profile["default_avatar"])
+
+    avatar_paths_host = get_avatar_paths(active_avatar, as_windows_path=False)
+    avatar_paths = (
+        get_avatar_paths(active_avatar, as_windows_path=True)
+        if as_windows_path
+        else avatar_paths_host
+    )
+
+    resolved_character: Dict[str, Any] = dict(avatar_paths)
+    has_dedicated_avatar_section = (
+        parser.has_section(f"avatar_{active_avatar}")
+        or parser.has_section(f"avatar:{active_avatar}")
+        or parser.has_section(active_avatar)
+    )
+
+    for option_key, option_value in parser.items(protagonist_key):
+        if option_key in _PROTAGONIST_ONLY_KEYS:
+            resolved_character[option_key] = _resolve_option_value(
+                option_key,
+                option_value,
+                root_directory,
+                as_windows_path,
             )
+        elif option_key in _HAIR_OVERRIDE_OPTION_KEYS and option_value.strip():
+            resolved_character[option_key] = _resolve_option_value(
+                option_key,
+                option_value,
+                root_directory,
+                as_windows_path,
+            )
+        elif (
+            is_default_pairing
+            and avatar_override is None
+            and not has_dedicated_avatar_section
+        ):
+            resolved_character[option_key] = _resolve_option_value(
+                option_key,
+                option_value,
+                root_directory,
+                as_windows_path,
+            )
+
+    ped_name = str(resolved_character.get("ped_name") or profile["ped_name"])
+    prop_ped_name = str(
+        resolved_character.get("prop_ped_name") or profile["prop_ped_name"]
+    )
+    resolved_character["ped_name"] = ped_name
+    resolved_character["prop_ped_name"] = prop_ped_name
+    resolved_character["protagonist"] = protagonist_key
+    resolved_character["avatar"] = active_avatar
+    resolved_character["avatar_id"] = active_avatar
+
+    def _float_option(key_name: str, default_val: float) -> float:
+        raw_val = resolved_character.get(key_name, "")
+        try:
+            return float(str(raw_val).strip()) if str(raw_val).strip() else default_val
+        except ValueError:
+            return default_val
+
+    resolved_character["target_z_min"] = _float_option(
+        "target_z_min", float(profile["target_z_min"])
+    )
+    resolved_character["target_z_max"] = _float_option(
+        "target_z_max", float(profile["target_z_max"])
+    )
+    resolved_character["arm_pose_degrees"] = _float_option(
+        "arm_pose_degrees", float(profile["arm_pose_degrees"])
+    )
+    resolved_character["primary_drawable"] = str(profile["primary_drawable"])
+    resolved_character["export_drawables"] = list(profile["export_drawables"])
+
+    if "skeleton_yft" not in resolved_character or not str(
+        resolved_character["skeleton_yft"]
+    ).strip():
+        default_skel = rpf_paths_cfg["vanilla_skeletons_backup"] / f"{ped_name}.yft"
+        resolved_character["skeleton_yft"] = (
+            to_windows_path(default_skel) if as_windows_path else default_skel
+        )
+
+    default_staging_entries = {
+        "staging_streamed_ped_dir": rpf_paths_cfg["streamedpeds_extracted"] / ped_name,
+        "staging_mppatches_ped_dir": rpf_paths_cfg["mppatches_extracted"] / ped_name,
+        "staging_patchday4_ped_dir": rpf_paths_cfg["patchday4ng_models_extracted"]
+        / ped_name,
+        "staging_streamed_props_dir": rpf_paths_cfg["streamedpedprops_extracted"]
+        / prop_ped_name,
+    }
+    for stage_key, stage_default in default_staging_entries.items():
+        if stage_key not in resolved_character:
+            resolved_character[stage_key] = (
+                to_windows_path(stage_default) if as_windows_path else stage_default
+            )
+
+    explicit_default_outputs = (
+        is_default_pairing
+        and avatar_override is None
+        and "exported_models_dir" in resolved_character
+        and "target_model_ydd" in resolved_character
+        and "target_yft" in resolved_character
+    )
+    if not explicit_default_outputs:
+        avatar_char_dir = Path(avatar_paths_host["character_dir"])
+        exported_dir = (
+            avatar_char_dir / "4_exported_models"
+            if is_default_pairing
+            else avatar_char_dir / "4_exported_models" / ped_name
+        )
+        primary_drawable = str(profile["primary_drawable"])
+        drawables_list = list(profile["export_drawables"])
+        target_ydd_path = exported_dir / f"{primary_drawable}.ydd"
+        target_yft_path = exported_dir / f"{ped_name}.yft"
+        extra_ydd_paths = [
+            exported_dir / f"{drawable_name}.ydd"
+            for drawable_name in drawables_list
+            if drawable_name != primary_drawable
+        ]
+        if as_windows_path:
+            resolved_character["exported_models_dir"] = to_windows_path(exported_dir)
+            resolved_character["target_model_ydd"] = to_windows_path(target_ydd_path)
+            resolved_character["target_yft"] = to_windows_path(target_yft_path)
+            resolved_character["extra_model_ydds"] = [
+                to_windows_path(item_path) for item_path in extra_ydd_paths
+            ]
+        else:
+            resolved_character["exported_models_dir"] = exported_dir
+            resolved_character["target_model_ydd"] = target_ydd_path
+            resolved_character["target_yft"] = target_yft_path
+            resolved_character["extra_model_ydds"] = extra_ydd_paths
+
     return resolved_character
 
 

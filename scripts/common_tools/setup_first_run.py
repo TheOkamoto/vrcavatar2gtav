@@ -37,8 +37,39 @@ for tools_dir_candidate in (
     if tools_dir_candidate.is_dir() and str(tools_dir_candidate) not in sys.path:
         sys.path.insert(0, str(tools_dir_candidate))
 
+import blendshape_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
+
+AVATAR_BLENDSHAPE_PRESETS = {
+    "shinano_casual": "shinano_blendshapes.cfg",
+    "shinano_er": "shinano_er_blendshapes.cfg",
+    "miltina_maid": "miltina_blendshapes.cfg",
+}
+
+AVATAR_ANIM_FILES = {
+    "shinano_casual": ["ShinanoDefAdultNewv5.anim"],
+    "shinano_er": ["ShinanoDefAdultNewv5.anim"],
+    "miltina_maid": ["Miltina_close eyes_Base_adult.anim"],
+}
+
+AVATAR_SCENE_HINTS = {
+    "shinano_casual": ["shinano"],
+    "shinano_er": ["shinano"],
+    "miltina_maid": ["milltina", "miltina"],
+}
+
+DEFAULT_BLENDSHAPE_PRESETS = {
+    "franklin": AVATAR_BLENDSHAPE_PRESETS["shinano_casual"],
+    "michael": AVATAR_BLENDSHAPE_PRESETS["shinano_er"],
+    "trevor": AVATAR_BLENDSHAPE_PRESETS["miltina_maid"],
+}
+
+DEFAULT_CHARACTER_ANIM_FILES = {
+    "franklin": AVATAR_ANIM_FILES["shinano_casual"],
+    "michael": AVATAR_ANIM_FILES["shinano_er"],
+    "trevor": AVATAR_ANIM_FILES["miltina_maid"],
+}
 
 
 PLACEHOLDER_MARKERS = (
@@ -373,6 +404,118 @@ def detect_character_unity_scene(
         return format_path_for_cfg(str(matched_scene))
 
 
+def detect_character_face_anim(
+    unity_assets_path_str: str,
+    candidate_names: List[str],
+    current_value: str,
+) -> Optional[str]:
+    """Optionally locate a matching facial .anim preset under unity_assets."""
+    if current_value.strip():
+        resolved_existing = project_paths.to_host_path(
+            current_value.strip(), project_root_dir=PROJECT_ROOT_HINT
+        )
+        if resolved_existing.is_file():
+            return current_value.strip()
+
+    assets_host = project_paths.to_host_path(
+        unity_assets_path_str.strip(), project_root_dir=PROJECT_ROOT_HINT
+    )
+    if not assets_host.is_dir():
+        return None
+
+    found_path: Optional[Path] = None
+    for candidate_name in candidate_names:
+        direct_candidate = assets_host / candidate_name
+        if direct_candidate.is_file():
+            found_path = direct_candidate
+            break
+        try:
+            for entry in os.scandir(assets_host):
+                if entry.is_dir():
+                    nested_candidate = Path(entry.path) / candidate_name
+                    if nested_candidate.is_file():
+                        found_path = nested_candidate
+                        break
+        except OSError:
+            continue
+        if found_path is not None:
+            break
+
+    if found_path is None:
+        return None
+
+    try:
+        relative_part = found_path.relative_to(assets_host).as_posix()
+        return f"${{directories:unity_assets}}/{relative_part}"
+    except ValueError:
+        return format_path_for_cfg(str(found_path))
+
+
+def ensure_character_blendshape_presets() -> bool:
+    """
+    Ensure each character has a readable blendshapes .cfg preset (or Unity scene).
+    Never overwrites existing tracked presets under configs/*.cfg.
+    """
+    project_paths.invalidate_config_cache()
+    project_root_dir = project_paths.get_project_root_dir()
+    all_ready = True
+
+    for avatar_id in project_paths.list_available_avatars():
+        preset_filename = AVATAR_BLENDSHAPE_PRESETS.get(
+            avatar_id, f"{avatar_id}_blendshapes.cfg"
+        )
+        avatar_cfg = project_paths.get_avatar_paths(avatar_id)
+        cfg_raw = avatar_cfg.get("blendshapes_cfg", "").strip()
+        cfg_target = (
+            Path(cfg_raw)
+            if cfg_raw
+            else project_root_dir / "configs" / preset_filename
+        )
+        if cfg_target.is_file():
+            print(
+                project_i18n.translate(
+                    "setup.blendshapes_cfg_ready",
+                    char=avatar_id,
+                    path=cfg_target,
+                )
+            )
+            continue
+
+        unity_scene_str = avatar_cfg.get("unity_scene", "").strip()
+        unity_scene_path = Path(unity_scene_str) if unity_scene_str else None
+        if unity_scene_path is not None and unity_scene_path.is_file():
+            try:
+                exported_cfg = blendshape_helper.export_character_blendshapes_to_cfg(
+                    avatar_id,
+                    output_cfg_path=cfg_target,
+                    unity_scene_override=unity_scene_path,
+                )
+                if exported_cfg is not None and exported_cfg.is_file():
+                    print(
+                        project_i18n.translate(
+                            "setup.blendshapes_cfg_exported",
+                            char=avatar_id,
+                            path=exported_cfg,
+                        )
+                    )
+                    continue
+            except Exception as err:
+                print(
+                    f"[WARNING] {avatar_id}: could not export blendshapes .cfg from Unity: {err}"
+                )
+
+        print(
+            project_i18n.translate(
+                "setup.blendshapes_cfg_missing",
+                char=avatar_id,
+                path=cfg_target,
+            )
+        )
+        all_ready = False
+
+    return all_ready
+
+
 def configure_vrc2gtav_cfg(
     interactive: bool = True,
     gtav_root_override: Optional[str] = None,
@@ -476,24 +619,63 @@ def configure_vrc2gtav_cfg(
         },
     }
 
-    for char_section, scene_hints in (
-        ("franklin", ["shinano"]),
-        ("michael", ["shinano"]),
-        ("trevor", ["milltina", "miltina"]),
-    ):
+    for avatar_id in project_paths.list_available_avatars():
+        preset_info = project_paths.get_avatar_preset_info(avatar_id)
+        legacy_section = str(preset_info["legacy_section"])
+        target_section = legacy_section
+        for candidate_section in (
+            f"avatar_{avatar_id}",
+            f"avatar:{avatar_id}",
+            avatar_id,
+            legacy_section,
+        ):
+            if config_parser.has_section(candidate_section):
+                target_section = candidate_section
+                break
+
+        scene_hints = list(preset_info.get("unity_hints") or AVATAR_SCENE_HINTS.get(avatar_id, [avatar_id]))
+        anim_candidates = list(preset_info.get("default_anim_files") or AVATAR_ANIM_FILES.get(avatar_id, []))
+        preset_filename = str(
+            preset_info.get("default_blendshapes_cfg")
+            or AVATAR_BLENDSHAPE_PRESETS.get(avatar_id, f"{avatar_id}_blendshapes.cfg")
+        )
+
         existing_scene_val = (
-            config_parser.get(char_section, "unity_scene", fallback="")
-            if config_parser.has_section(char_section)
+            config_parser.get(target_section, "unity_scene", fallback="")
+            if config_parser.has_section(target_section)
             else ""
         )
         detected_scene = detect_character_unity_scene(
             chosen_unity_assets,
             scene_hints,
             existing_scene_val,
-            char_section,
+            avatar_id,
         )
         if detected_scene:
-            cfg_updates.setdefault(char_section, {})["unity_scene"] = detected_scene
+            cfg_updates.setdefault(target_section, {})["unity_scene"] = detected_scene
+
+        existing_anim_val = (
+            config_parser.get(target_section, "face_anim", fallback="")
+            if config_parser.has_section(target_section)
+            else ""
+        )
+        detected_anim = detect_character_face_anim(
+            chosen_unity_assets,
+            anim_candidates,
+            existing_anim_val,
+        )
+        if detected_anim and not existing_anim_val.strip():
+            cfg_updates.setdefault(target_section, {})["face_anim"] = detected_anim
+
+        existing_bs_cfg = (
+            config_parser.get(target_section, "blendshapes_cfg", fallback="")
+            if config_parser.has_section(target_section)
+            else ""
+        )
+        if not existing_bs_cfg.strip():
+            cfg_updates.setdefault(target_section, {})[
+                "blendshapes_cfg"
+            ] = f"${{directories:project_root}}/configs/{preset_filename}"
 
     update_cfg_values_in_place(config_file_path, cfg_updates)
     print(project_i18n.translate("setup.saved_cfg", path=config_file_path))
@@ -811,7 +993,15 @@ def diagnose_setup_state() -> Dict[str, bool]:
 
     skeletons_ok = all(
         Path(project_paths.get_character_paths(char_sec)["skeleton_yft"]).is_file()
-        for char_sec in ("franklin", "michael", "trevor")
+        for char_sec in project_paths.list_available_protagonists()
+    )
+    blendshapes_ok = all(
+        Path(project_paths.get_avatar_paths(avatar_id).get("blendshapes_cfg", "")).is_file()
+        or (
+            bool(project_paths.get_avatar_paths(avatar_id).get("unity_scene", "").strip())
+            and Path(project_paths.get_avatar_paths(avatar_id)["unity_scene"]).is_file()
+        )
+        for avatar_id in project_paths.list_available_avatars()
     )
 
     return {
@@ -820,6 +1010,7 @@ def diagnose_setup_state() -> Dict[str, bool]:
         "unity_assets_valid": assets_ok,
         "staging_ready": staging_ok,
         "skeletons_ready": skeletons_ok,
+        "blendshapes_ready": blendshapes_ok,
     }
 
 
@@ -879,6 +1070,7 @@ def run_first_run_setup(
     if not unity_assets_dir.is_dir():
         print(project_i18n.translate("setup.unity_assets_warning", path=unity_assets_dir))
 
+    ensure_character_blendshape_presets()
     extraction_ok = extract_vanilla_gtav_assets(force_reextract=force_reextract)
     print_setup_diagnostics()
     return extraction_ok

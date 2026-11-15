@@ -38,18 +38,21 @@
 - **First-Run セットアップ & 外部設定ファイル**: 対話型ウィザードと [`vrc2gtav.cfg`](vrc2gtav.cfg.example) により、ローカルパス設定を Git 管理外へ分離。
 - **3言語対応 (`en` / `ja` / `pt`)**: OS のロケールを自動判定し、`--lang` オプションでマネージャー・セットアップ・テスト出力を切り替え可能。
 - **スケール `1.0` 標準 + `.unity` シーン抽出**: GitHub 版の既定値として全身スケール `1.0` を採用しつつ、`.unity` シーンファイルが指定された場合は階層内のカスタムスケールを自動読み取り・反映。
-- **デフォルトヘア・表情への自動フォールバック**: 任意の BOOTH ヘア（*Neko Tied Bob Hair* / カスタム `fbx_hair`）や任意のアイテクスチャが存在しない場合、各素体アバターの標準ヘア・標準表情／瞳テクスチャへ自動でフォールバック。
-- **自動検証テストスイート**: クリーンなクローン環境で実行できるソース検証 (`5` スイート) と、ビルド・配置後に行うフル検証 (`8` スイート) を搭載。
+- **汎用 Unity カスタムヘア自動移植 (`.prefab` / `PrefabVariant` / `.fbx`)**: あらゆる VRChat Unity ヘア `.prefab`・Modular Avatar 構造・`.fbx` + `.mat` を解析し、lilToon 色調・HSV を 2K アトラスへ焼き込み、対象アバター頭部へ位置合わせします（未設定や `default` / `none` 指定時は標準ヘアへ安全にフォールバック）。
+- **アバター <-> 主人公の完全な相互切替**: 任意の VRChat アバター（`shinano_casual` / `shinano_er` / `miltina_maid`）をどの主人公（`michael` / `franklin` / `trevor`）にも自由に割り当て可能（対話メニュー `[7]`、`--avatar` / `--*-avatar`、または `vrc2gtav.cfg` で切り替え）。
+- **自動検証テストスイート**: クリーンなクローン環境で実行できるソース検証 (`7` スイート) と、ビルド・配置後に行うフル検証 (`10` スイート) を搭載。
 
 ---
 
 ## 対応主人公とアバター構成
 
-| GTA V スロット | 主人公 | VRChat アバター | 設定プリセット / 衣装 | 作業ディレクトリ |
+初期設定では下記の組み合わせが割り当てられていますが、すべての VRChat アバタープリセットを `michael`・`franklin`・`trevor` のどの主人公スロットへも自由に割り当てられます:
+
+| 既定 GTA V スロット | 主人公 | 既定 VRChat アバター (`avatar` ID) | 設定プリセット / 衣装 | 作業ディレクトリ |
 | :--- | :--- | :--- | :--- | :--- |
-| `player_zero` | **マイケル (Michael)** | **しなの (Shinano)** | *エターナル・リユニオン*（ゴシックドレス＋懐中時計＋任意の *ねこタイドボブヘア*、未指定時はしなの標準ヘアへフォールバック） | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
-| `player_one` | **フランクリン (Franklin)** | **しなの (Shinano)** | *カジュアル / 制服*（赤スカート＋色変え標準しなのヘア） | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
-| `player_two` | **トレバー (Trevor)** | **ミルティナ (Miltina)** | *クラシックメイド*（白黒メイドドレス＋エプロン＋ツインテール、任意の `fbx_hair` 指定に対応） | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
+| `player_zero` | **マイケル (Michael)** | **しなの (Shinano)** (`shinano_er`) | *エターナル・リユニオン*（ゴシックドレス＋懐中時計＋任意のカスタム Unity ヘアまたは *ねこタイドボブヘア*、未指定時はしなの標準ヘアへフォールバック） | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
+| `player_one` | **フランクリン (Franklin)** | **しなの (Shinano)** (`shinano_casual`) | *カジュアル / 制服*（赤スカート＋色変え標準しなのヘア、または任意のカスタム Unity ヘア） | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
+| `player_two` | **トレバー (Trevor)** | **ミルティナ (Miltina)** (`miltina_maid`) | *クラシックメイド*（白黒メイドドレス＋エプロン＋ツインテール＋任意のカスタム Unity ヘア） | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
 
 ---
 
@@ -98,9 +101,11 @@
 
 - **外部設定 (`vrc2gtav.cfg`)**: [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) を `vrc2gtav.cfg` としてコピー（または `--setup` で生成）することで、コードを編集せずに GTA V Legacy、Blender、`rage-cli`、およびローカル FBX/Unity アセットへのパスを指定できます。
 - **体格スケール (`1.0` 既定 + `.unity` 解析)**: 体格スケールは既定で `[1.0, 1.0, 1.0]` に設定されています。`.unity` シーンファイルを指定すると、`Transform` 階層のスケール値を自動抽出してビルドへ反映します。
-- **ヘア・フェイス自動フォールバック**:
-  - **しなの**: *ねこタイドボブヘア* がある場合はそちらを使用し、無い場合は自動的に標準ヘア（`Hair_base`、`Hair_bang`、`Hair_side`、`Hair_back`、`Other_ear`、`Other_tail`）および `ShinanoDefAdultNewv5.anim` / 標準アイテクスチャを使用します。
-  - **ミルティナ**: 任意の `fbx_hair` 上書きに対応し、未指定時は標準ツインテール（`Milltina_hair_*`）および `Miltina_close eyes_Base_adult.anim` / 標準アイテクスチャを使用します。
+- **ブレンドシェイプ設定 (`Unity` & `configs/*_blendshapes.cfg`)**: 顔・素体シュリンク・衣装・小物・ヘアのすべてのブレンドシェイプを [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) 経由で解決します。Unity プロジェクト（`.unity` + ネスト `.prefab` + `.anim`）からの自動取得、または [`configs/`](configs/) 配下の `.cfg` プリセット（`shinano_blendshapes.cfg` / `shinano_er_blendshapes.cfg` / `miltina_blendshapes.cfg`）を `blendshapes_source = auto | unity | cfg` と `blendshapes_cfg` で切り替えられます。
+- **汎用カスタムヘア & フォールバック仕様**:
+  - **全アバタープリセット対応**: `shinano_casual`・`shinano_er`・`miltina_maid` すべてで、`vrc2gtav.cfg` (`custom_hair = auto | default | none | <.prefab または .fbx パス>` および `hair_mat`, `hair_tex`, `hair_scale`, `hair_offset`)、対話メニュー `[8]`、または CLI の `--hair` フラグを利用できます。[`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) が `PrefabVariant` 継承、Modular Avatar 構造、`.fbx.meta` のマテリアル対応表、lilToon テクスチャ/色調補正を `custom_hair_manifest.json` へベイクし、[`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py) が頭部位置合わせ・UV リマップ・元ケモ耳保持を行います。
+  - **しなの**: `custom_hair` / *ねこタイドボブヘア* がある場合はそちらを使用し、無い場合は自動的に標準ヘア（`Hair_base`、`Hair_bang`、`Hair_side`、`Hair_back`、`Other_ear`、`Other_tail`）および `ShinanoDefAdultNewv5.anim` / 標準アイテクスチャを使用します。
+  - **ミルティナ**: 任意の `custom_hair`（または従来の `fbx_hair`）上書きに対応し、未指定時は標準ツインテール（`Milltina_hair_*`）および `Miltina_close eyes_Base_adult.anim` / 標準アイテクスチャを使用します。
 - **言語の自動判定**: システムロケールに応じて `en` / `ja` / `pt` を自動選択し、`--lang en|ja|pt` での明示指定も可能です。
 
 ---
@@ -115,9 +120,13 @@
 | `python scripts/common_tools/setup_first_run.py --check-only` | 環境と元アセットの有無を非破壊チェック |
 | `python run_mod_manager.py --character all` | 3人分の Blender 再構築・YDD/YTD 出力・RPF7 配置を一括実行 |
 | `python run_mod_manager.py --character {michael,franklin,trevor} --lang {en,ja,pt}` | 指定キャラクターのみを指定言語の UI でビルド／配置 |
+| `python run_mod_manager.py --character franklin --avatar miltina_maid` | 任意の VRChat プリセット (`shinano_casual`, `shinano_er`, `miltina_maid`) を任意の主人公へビルド／適用 (`--save-assignment` で `vrc2gtav.cfg` に保存) |
+| `python run_mod_manager.py --character michael --hair "/path/Hair.prefab" --save-hair` | 任意の Unity `.prefab` / `PrefabVariant` / `.fbx` ヘアを主人公へ自動移植 (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset` 対応) |
+| `python run_mod_manager.py --export-blendshapes` | 設定済みの `.unity` シーンから `configs/*_blendshapes.cfg` へ書き出す |
+| `python run_mod_manager.py --character all --blendshapes-source cfg` | Unity シーンではなく `.cfg` プリセットを使ってビルドを実行 |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド済みフォルダから `mods/x64v.rpf` へ再梱包・配置 |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・フォールバックの `5` スイートを実行（クローン直後対応） |
-| `python scripts/common_tools/test_mod_suite.py` | 全 `8` スイートの統合検証を実行（ビルド・配置済み環境が必要） |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・相互切替・カスタムヘアの `7` スイートを実行（クローン直後対応） |
+| `python scripts/common_tools/test_mod_suite.py` | 全 `10` スイートの統合検証を実行（ビルド・配置済み環境が必要） |
 
 ---
 
@@ -125,12 +134,13 @@
 
 ```text
 vrcavatar2gtav/
+├── configs/                         # アバター用ブレンドシェイプ設定ファイル (*_blendshapes.cfg)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # 技術・導入ガイド全文 (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # 技術・導入ガイド全文 (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # 内部設計・リギング・Sollumz・RPF7 技術ガイド (JA)
 ├── scripts/
-│   ├── common_tools/                # First-Run、.unity スケール解析、i18n、test_mod_suite.py
+│   ├── common_tools/                # First-Run、.unity/ヘア/ブレンドシェイプ解析、i18n、test_mod_suite.py
 │   ├── Shinano_Casual_Franklin/     # フランクリン (player_one) ビルドスクリプト
 │   ├── Shinano_EternalReunion_Michael/ # マイケル (player_zero) ビルドスクリプト
 │   └── Miltina_Maid_Trevor/         # トレバー (player_two) ビルドスクリプト
@@ -177,13 +187,13 @@ vrcavatar2gtav/
 - **フランクリン・クリントン (`player_one`) — しなの (*Casual / Uniform*)**
   - **素体**: `Body`, `Body_base` (*Shinano*)
   - **衣装**: `Cloth_sweater`, `Cloth_skirt`, `Cloth_tights`, `Cloth_boots` (*Shinano*)
-  - **ヘア**: `Hair_back`, `Hair_bang`, `Hair_base`, `Hair_side`, `Other_ear`, `Other_tail` (*Shinano* 標準ヘア)
+  - **ヘア**: `Hair_back`, `Hair_bang`, `Hair_base`, `Hair_side`, `Other_ear`, `Other_tail` (*Shinano* 標準ヘア、ケモ耳を維持したまま任意の `custom_hair` 上書きにも対応)
   - **アイテクスチャ & 表情 *(任意 / フォールバック)***: `MoonButterfly eye` & `ShinanoDefAdultNewv5.anim`
 
 - **トレバー・フィリップス (`player_two`) — ミルティナ (*Classic Maid*)**
   - **素体**: `Body`, `Milltina_body` (*Milltina*)
   - **衣装 & 小物**: `Milltina_cloth_dress`, `Milltina_cloth_apron`, `Milltina_cloth_skirt`, `Milltina_cloth_panties`, `Milltina_cloth_collar`, `Milltina_cloth_hat`, `Milltina_cloth_neck_ribbon`, `Milltina_cloth_wrist_cuffs`, `Milltina_cloth_garterbelt`, `Milltina_cloth_hair_ribbon`, `Milltina_cloth_tail_ribbon`, `Milltina_cloth_tail_slit`, `Milltina_cloth_shoes` (*Milltina*)
-  - **ヘア & 牛パーツ**: `Milltina_hair_base`, `Milltina_hair_side`, `Milltina_hair_front`, `Milltina_hair_front_side`, `Milltina_hair_twintail`, `Milltina_cow_ears`, `Milltina_cow_horns`, `Milltina_cow_tail` (*Milltina*、任意のカスタム `fbx_hair` 上書きにも対応)
+  - **ヘア & 牛パーツ**: `Milltina_hair_base`, `Milltina_hair_side`, `Milltina_hair_front`, `Milltina_hair_front_side`, `Milltina_hair_twintail`, `Milltina_cow_ears`, `Milltina_cow_horns`, `Milltina_cow_tail` (*Milltina*、任意のカスタム `custom_hair` / `fbx_hair` 上書きにも対応)
   - **アイテクスチャ & 表情 *(任意 / フォールバック)***: `Milltina_AWEyes` & `Miltina_close eyes_Base_adult.anim`
 
 </details>
@@ -205,4 +215,4 @@ vrcavatar2gtav/
 
 ## ライセンス
 
-本プロジェクトの自動化スクリプトおよびドキュメントは **MIT License** のもとで公開されています（詳細は [`LICENSE`](LICENSE) / `Copyright (c) 2026 Daniel M` を参照）。上記クレジットに記載されたサードパーティ製アセット・ツールの権利および利用規約は各配布元の定めに従います。
+本プロジェクトの自動化スクリプトおよびドキュメントは **MIT License** のもとで公開されています（詳細は [`LICENSE`](LICENSE) / `Copyright (c) 2026 TheOkamoto` を参照）。上記クレジットに記載されたサードパーティ製アセット・ツールの権利および利用規約は各配布元の定めに従います。

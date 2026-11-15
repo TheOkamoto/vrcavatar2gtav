@@ -236,11 +236,21 @@ def build_shinano_face_specular(
 
 
 def generate_directional_hair_normal(
-    luminance_array: numpy_lib.ndarray,
+    luminance_array: Union[numpy_lib.ndarray, Image.Image],
     strength: float = 2.0,
 ) -> Image.Image:
     """Generate a tangent-space normal map from hair luminance gradients."""
-    norm_luma = numpy_lib.asarray(luminance_array, dtype=numpy_lib.float32) / 255.0
+    raw_array = numpy_lib.asarray(luminance_array, dtype=numpy_lib.float32)
+    if raw_array.ndim == 3:
+        if raw_array.shape[2] >= 3:
+            raw_array = (
+                0.299 * raw_array[..., 0]
+                + 0.587 * raw_array[..., 1]
+                + 0.114 * raw_array[..., 2]
+            )
+        else:
+            raw_array = raw_array[..., 0]
+    norm_luma = raw_array / 255.0
     grad_y, grad_x = numpy_lib.gradient(norm_luma)
 
     normal_x = -grad_x * strength

@@ -42,7 +42,10 @@ def patch_directory(
     """Replace Trevor ped slots and dummy parts inside an extracted ped directory."""
     _ = is_mppatches
     if model_ydd_path is None or texture_ytd_path is None or dummy_ydd_path is None:
-        trevor_cfg = project_paths.get_character_paths("trevor")
+        trevor_cfg = project_paths.get_character_paths(
+            "trevor",
+            avatar_override="miltina_maid",
+        )
         model_ydd_path = model_ydd_path or str(trevor_cfg["target_model_ydd"])
         texture_ytd_path = texture_ytd_path or str(trevor_cfg["ytd_file"])
         dummy_ydd_path = dummy_ydd_path or str(project_paths.get_dummy_ydd_path())
@@ -103,9 +106,14 @@ def patch_directory(
     )
 
 
-def apply_miltina_slots() -> None:
-    """Validate artifacts and patch all configured Trevor staging directories."""
-    trevor_cfg = project_paths.get_character_paths("trevor")
+def apply_miltina_slots(target_character: str = "trevor") -> None:
+    """Validate artifacts and patch staging directories for the selected protagonist."""
+    target_protagonist = project_paths.normalize_protagonist_key(target_character)
+    trevor_cfg = project_paths.get_character_paths(
+        target_protagonist,
+        avatar_override="miltina_maid",
+    )
+    prop_ped_name = str(trevor_cfg.get("prop_ped_name", "player_two_p"))
     dummy_ydd_path = str(project_paths.get_dummy_ydd_path())
     prop_dummy_ydd_path = str(project_paths.get_prop_dummy_ydd_path())
     miltina_model_ydd_path = str(trevor_cfg["target_model_ydd"])
@@ -157,13 +165,13 @@ def apply_miltina_slots() -> None:
             is_mppatches=False,
         )
     project_paths.patch_character_glasses_props(
-        streamedprops_p2_dir, prop_dummy_ydd_path, "player_two_p"
+        streamedprops_p2_dir, prop_dummy_ydd_path, prop_ped_name
     )
     print(i18n.translate("trevor.apply.done"))
 
 
 def main() -> int:
-    """CLI entry point for patching Trevor slots with Miltina Maid."""
+    """CLI entry point for patching protagonist slots with Miltina Maid."""
     resolve_startup_language()
     parser = argparse.ArgumentParser(description=i18n.translate("trevor.apply.cli_desc"))
     parser.add_argument(
@@ -172,12 +180,17 @@ def main() -> int:
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        default="trevor",
+        help=i18n.translate("trevor.build.arg_target_char"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    apply_miltina_slots()
+    apply_miltina_slots(target_character=parsed_args.target_character)
     return 0
 
 

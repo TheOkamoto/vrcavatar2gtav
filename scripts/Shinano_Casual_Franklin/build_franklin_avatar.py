@@ -5,10 +5,9 @@ Assemble, rig, shade, and export Shinano Casual as GTA V drawable dictionaries
 and matching fragment skeleton for Franklin Clinton (player_one).
 """
 
-import json
+import argparse
 import math
 import os as operating_system
-import re as regex_module
 import struct
 import sys
 import zlib
@@ -29,41 +28,83 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import blender_hair_helper
+import blendshape_helper
+import hand_skeleton_helper
+import unity_hair_helper
+import unity_scene_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
-import hand_skeleton_helper
-import unity_scene_helper
-
-project_i18n.set_active_language()
-FRANKLIN_CFG = project_paths.get_character_paths("franklin")
 
 
-def load_anim_blendshapes(anim_filepath: str) -> dict:
-    """Extract static facial blendshape weights from a Unity YAML .anim file."""
-    shapes_map = {}
-    if not operating_system.path.exists(anim_filepath):
-        return shapes_map
-    with open(anim_filepath, "r", encoding="utf-8") as anim_handle:
-        raw_text = anim_handle.read()
-    animation_blocks = raw_text.split("  - serializedVersion: 2")
-    for curve_block in animation_blocks[1:]:
-        val_match = regex_module.search(r"value:\s*([-\d.]+)", curve_block)
-        attr_match = regex_module.search(r"attribute:\s*([^\n]+)", curve_block)
-        path_match = regex_module.search(r"path:\s*([^\n]+)", curve_block)
-        if val_match and attr_match and path_match:
-            raw_val = float(val_match.group(1))
-            attr_name = attr_match.group(1).strip()
-            shape_name = attr_name.replace("blendShape.", "").strip()
-            if shape_name.startswith('"'):
-                try:
-                    shape_name = json.loads(shape_name)
-                except Exception:
-                    shape_name = shape_name.strip('"')
-            if abs(raw_val) > 1e-4:
-                shapes_map[shape_name] = raw_val / 100.0
-            else:
-                shapes_map[shape_name] = 0.0
-    return shapes_map
+def parse_franklin_cli_args():
+    """Parse optional CLI flags passed to Blender after '--'."""
+    arg_parser = argparse.ArgumentParser(add_help=False)
+    arg_parser.add_argument(
+        "--lang",
+        choices=["auto", "en", "ja", "pt"],
+        default="auto",
+    )
+    arg_parser.add_argument(
+        "--target-character",
+        default="franklin",
+        help=project_i18n.translate("franklin.build.arg_target_char"),
+    )
+    arg_parser.add_argument("--skeleton-yft", default=None)
+    arg_parser.add_argument("--output-dir", default=None)
+    arg_parser.add_argument("--target-yft", default=None)
+    arg_parser.add_argument("--texture-dir", default=None)
+    arg_parser.add_argument("--blendshapes-cfg", default=None)
+    arg_parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+    )
+    arg_parser.add_argument("--save-blendshapes-cfg", default=None)
+    arg_parser.add_argument("--unity-scene", default=None)
+    arg_parser.add_argument("--unity-avatar-name", default=None)
+    arg_parser.add_argument("--face-anim", default=None)
+    arg_parser.add_argument("--hair", default=None)
+    arg_parser.add_argument("--hair-mat", default=None)
+    arg_parser.add_argument("--hair-tex", default=None)
+    arg_parser.add_argument("--hair-scale", type=float, default=None)
+    arg_parser.add_argument("--hair-offset", default=None)
+    parsed_args, _ = arg_parser.parse_known_args(
+        project_paths.extract_custom_blender_args()
+    )
+    return parsed_args
+
+
+CLI_ARGS = parse_franklin_cli_args()
+project_i18n.set_active_language(CLI_ARGS.lang)
+TARGET_PROTAGONIST = project_paths.normalize_protagonist_key(CLI_ARGS.target_character)
+FRANKLIN_CFG = dict(
+    project_paths.get_character_paths(
+        TARGET_PROTAGONIST,
+        avatar_override="shinano_casual",
+    )
+)
+if CLI_ARGS.unity_scene:
+    FRANKLIN_CFG["unity_scene"] = CLI_ARGS.unity_scene
+if CLI_ARGS.unity_avatar_name:
+    FRANKLIN_CFG["unity_avatar_name"] = CLI_ARGS.unity_avatar_name
+if CLI_ARGS.face_anim:
+    FRANKLIN_CFG["face_anim"] = CLI_ARGS.face_anim
+if CLI_ARGS.skeleton_yft:
+    FRANKLIN_CFG["skeleton_yft"] = project_paths.to_host_path(CLI_ARGS.skeleton_yft)
+if CLI_ARGS.texture_dir:
+    tex_override_dir = project_paths.to_host_path(CLI_ARGS.texture_dir)
+    FRANKLIN_CFG["textures_dir"] = tex_override_dir
+    FRANKLIN_CFG["atlas_png"] = tex_override_dir / Path(FRANKLIN_CFG["atlas_png"]).name
+    FRANKLIN_CFG["normal_png"] = tex_override_dir / Path(FRANKLIN_CFG["normal_png"]).name
+    FRANKLIN_CFG["spec_png"] = tex_override_dir / Path(FRANKLIN_CFG["spec_png"]).name
+if CLI_ARGS.output_dir:
+    output_dir_path = project_paths.to_host_path(CLI_ARGS.output_dir)
+    FRANKLIN_CFG["exported_models_dir"] = output_dir_path
+    if not CLI_ARGS.target_yft:
+        FRANKLIN_CFG["target_yft"] = output_dir_path / f"{FRANKLIN_CFG['ped_name']}.yft"
+if CLI_ARGS.target_yft:
+    FRANKLIN_CFG["target_yft"] = project_paths.to_host_path(CLI_ARGS.target_yft)
 
 
 def read_fbx_nodes(fbx_bytes: bytes) -> list:
@@ -152,7 +193,8 @@ for armature_block in list(bpy.data.armatures):
 for mat_block in list(bpy.data.materials):
     bpy.data.materials.remove(mat_block)
 
-# 2. Import Franklin skeleton from configured .yft
+# 2. Import protagonist skeleton from configured .yft
+ped_name = str(FRANKLIN_CFG.get("ped_name", "player_one"))
 skeleton_yft_path = Path(FRANKLIN_CFG["skeleton_yft"])
 print(project_i18n.translate("franklin.importing_skeleton", filename=skeleton_yft_path.name))
 bpy.ops.sollumz.import_assets(
@@ -160,7 +202,13 @@ bpy.ops.sollumz.import_assets(
     files=[{"name": skeleton_yft_path.name}],
 )
 skeleton_arm_name = skeleton_yft_path.stem
-franklin_armature = bpy.data.objects.get(skeleton_arm_name) or bpy.data.objects["player_one"]
+franklin_armature = (
+    bpy.data.objects.get(skeleton_arm_name)
+    or bpy.data.objects.get(ped_name)
+    or next((arm_obj for arm_obj in bpy.data.objects if arm_obj.type == "ARMATURE"), None)
+)
+if franklin_armature is None:
+    raise RuntimeError(f"Could not locate imported armature for {skeleton_yft_path}")
 
 target_bones = {
     "SKEL_ROOT",
@@ -210,7 +258,7 @@ print(
     )
 )
 
-for cleanup_name in (f"{skeleton_arm_name}.mesh", "player_one.mesh", "SKEL_ROOT"):
+for cleanup_name in (f"{skeleton_arm_name}.mesh", f"{ped_name}.mesh", "SKEL_ROOT"):
     cleanup_obj = bpy.data.objects.get(cleanup_name)
     if cleanup_obj is not None:
         bpy.data.objects.remove(cleanup_obj)
@@ -287,59 +335,79 @@ print(
     )
 )
 
-# Load and apply v5 facial blendshapes onto Body
-anim_path = str(FRANKLIN_CFG["face_anim"])
-face_shapes = load_anim_blendshapes(anim_path)
-print(
-    project_i18n.translate(
-        "franklin.loading_blendshapes", count=len(face_shapes), path=anim_path
+# Resolve and apply all avatar blendshapes + resolve custom hair specification
+hair_spec_input = (
+    CLI_ARGS.hair
+    if CLI_ARGS.hair is not None
+    else (
+        str(FRANKLIN_CFG.get("custom_hair", "")).strip()
+        or str(FRANKLIN_CFG.get("fbx_hair", "")).strip()
+        or "auto"
     )
 )
+hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+    hair_spec_input=hair_spec_input,
+    unity_scene=FRANKLIN_CFG.get("unity_scene"),
+    unity_avatar_name=str(FRANKLIN_CFG.get("unity_avatar_name", "Shinano")),
+    hair_mat_override=CLI_ARGS.hair_mat or FRANKLIN_CFG.get("hair_mat"),
+    hair_tex_override=CLI_ARGS.hair_tex or FRANKLIN_CFG.get("hair_tex"),
+    is_calibrated_er_default=False,
+)
+blendshape_fbx_paths = [source_fbx_path] + (
+    list(hair_spec.get("all_fbxs", [])) if hair_spec.get("mode") == "custom" else []
+)
+blendshape_resolution = blendshape_helper.resolve_character_blendshapes(
+    FRANKLIN_CFG,
+    fbx_paths=blendshape_fbx_paths,
+    character_hints=("shinano", "casual"),
+    default_face_mesh="Body",
+    override_source=CLI_ARGS.blendshapes_source,
+    override_cfg_path=CLI_ARGS.blendshapes_cfg,
+    override_unity_scene=CLI_ARGS.unity_scene,
+    override_avatar_name=CLI_ARGS.unity_avatar_name,
+    override_face_anim=CLI_ARGS.face_anim,
+    save_cfg_path=CLI_ARGS.save_blendshapes_cfg,
+)
+resolved_mesh_weights = blendshape_resolution["mesh_weights"]
+total_resolved_weights = sum(len(weights_map) for weights_map in resolved_mesh_weights.values())
+source_detail = (
+    blendshape_resolution.get("cfg_path")
+    or blendshape_resolution.get("unity_scene")
+    or blendshape_resolution.get("face_anim")
+    or "-"
+)
+print(
+    project_i18n.translate(
+        "blendshapes.loaded_source",
+        source=blendshape_resolution["source_used"],
+        meshes=len(resolved_mesh_weights),
+        weights=total_resolved_weights,
+        detail=source_detail,
+    )
+)
+if blendshape_resolution.get("saved_cfg_path"):
+    print(
+        project_i18n.translate(
+            "blendshapes.saved_cfg",
+            path=blendshape_resolution["saved_cfg_path"],
+        )
+    )
 
-body_obj = bpy.data.objects.get("Body")
-if body_obj and body_obj.data.shape_keys:
-    for key_block in body_obj.data.shape_keys.key_blocks:
-        key_block.value = 0.0
-    active_shape_count = 0
-    for shape_name, shape_val in face_shapes.items():
-        key_block = body_obj.data.shape_keys.key_blocks.get(shape_name)
-        if key_block:
-            key_block.value = shape_val
-            if shape_val > 0:
-                active_shape_count += 1
-    print(project_i18n.translate("franklin.applied_blendshapes", count=active_shape_count))
-
-# Enable clothing shrink blendshapes to prevent body clipping
-mesh_shape_presets = {
-    "Body_base": {
-        "Shrink_tights": 1.0,
-        "Shrink_boots": 1.0,
-        "Shrink_dress": 1.0,
-        "Shrink_skirt": 1.0,
-        "Shrink_sweater": 1.0,
-        "Corset": 1.0,
-        "Toe_heels": 1.0,
-    },
-    "Cloth_tights": {
-        "Shrink_boots": 1.0,
-        "Corset": 1.0,
-        "Toe_heels": 1.0,
-    },
-    "Cloth_dress": {
-        "Ribbon_OFF": 1.0,
-        "Corset_OFF": 1.0,
-    },
-    "Cloth_skirt": {
-        "Corset_OFF": 1.0,
-    },
-}
-for mesh_name, shape_dict in mesh_shape_presets.items():
-    target_obj = bpy.data.objects.get(mesh_name)
-    if target_obj and target_obj.data.shape_keys:
-        for shape_name, shape_value in shape_dict.items():
-            key_block = target_obj.data.shape_keys.key_blocks.get(shape_name)
-            if key_block:
-                key_block.value = shape_value
+applied_scene_summary = blendshape_helper.apply_blendshapes_to_blender_scene(
+    bpy,
+    resolved_mesh_weights,
+    lr_symmetry_meshes=(),
+    reset_unlisted=True,
+)
+body_active_count = applied_scene_summary.get("Body", (0, 0))[1]
+print(project_i18n.translate("franklin.applied_blendshapes", count=body_active_count))
+print(
+    project_i18n.translate(
+        "blendshapes.applied_scene",
+        meshes=len(applied_scene_summary),
+        slots=sum(counts[0] for counts in applied_scene_summary.values()),
+    )
+)
 
 bpy.context.view_layer.update()
 
@@ -376,47 +444,103 @@ include_mesh_names = [
     "Other_tail",
 ]
 
-hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
-    FRANKLIN_CFG.get("fbx_hair", ""),
-    unity_config=unity_config,
+hair_mode = hair_spec.get("mode", "default")
+hair_reason = hair_spec.get("source_input", "") or hair_mode
+skull_ref = blender_hair_helper.extract_skull_reference(
+    bpy,
+    shinano_armature,
+    [bpy.data.objects.get("Body")],
+    [bpy.data.objects.get(name_item) for name_item in ("Hair_base", "Hair_back", "Hair_bang", "Hair_side")],
 )
 custom_hair_mesh_names = set()
 custom_hair_armatures = []
+if hair_mode in ("custom", "none"):
+    blender_hair_helper.remove_default_hair_meshes(
+        bpy,
+        "shinano_casual",
+        name_list_to_prune=include_mesh_names,
+    )
+
 if hair_mode == "custom":
-    custom_hair_fbx = str(FRANKLIN_CFG["fbx_hair"]).strip()
     print(
         project_i18n.translate(
-            "unity_scene.hair_custom_active", reason=hair_reason, path=custom_hair_fbx
+            "unity_scene.hair_custom_active",
+            reason=hair_reason,
+            path=hair_spec.get("primary_fbx") or hair_spec.get("source_input", ""),
         )
     )
-    default_hair_material = None
-    default_hair_ref = bpy.data.objects.get("Hair_base")
-    if default_hair_ref and default_hair_ref.data.materials:
-        default_hair_material = default_hair_ref.data.materials[0]
-    for default_hair_name in ("Hair_back", "Hair_bang", "Hair_base", "Hair_side"):
-        if default_hair_name in include_mesh_names:
-            include_mesh_names.remove(default_hair_name)
-        default_hair_obj = bpy.data.objects.get(default_hair_name)
-        if default_hair_obj is not None:
-            bpy.data.objects.remove(default_hair_obj)
-
-    pre_import_objs = set(bpy.data.objects)
-    bpy.ops.import_scene.fbx(filepath=custom_hair_fbx)
-    for imported_obj in bpy.data.objects:
-        if imported_obj in pre_import_objs:
-            continue
-        if imported_obj.type == "ARMATURE":
-            custom_hair_armatures.append(imported_obj)
-            unity_scene_helper.apply_unity_bone_scales_to_pose(imported_obj, unity_config)
-        elif imported_obj.type == "MESH":
-            if "tail" in imported_obj.name.lower():
-                bpy.data.objects.remove(imported_obj)
-                continue
-            if default_hair_material is not None:
-                imported_obj.data.materials.clear()
-                imported_obj.data.materials.append(default_hair_material)
-            custom_hair_mesh_names.add(imported_obj.name)
-            include_mesh_names.append(imported_obj.name)
+    import_res = blender_hair_helper.import_and_filter_custom_hair_meshes(
+        bpy,
+        mathutils,
+        hair_spec,
+        unity_config=unity_config,
+        resolved_mesh_weights=resolved_mesh_weights,
+    )
+    custom_hair_objs = import_res["meshes"]
+    custom_hair_armatures.extend(import_res["armatures"])
+    eff_hair_scale = float(
+        CLI_ARGS.hair_scale
+        if CLI_ARGS.hair_scale is not None
+        else (FRANKLIN_CFG.get("hair_scale") or 1.0)
+    )
+    eff_hair_offset = blender_hair_helper.parse_offset_triple(
+        CLI_ARGS.hair_offset
+        if CLI_ARGS.hair_offset is not None
+        else FRANKLIN_CFG.get("hair_offset")
+    )
+    align_res = blender_hair_helper.align_custom_hair_to_avatar(
+        bpy,
+        mathutils,
+        custom_hair_objs,
+        skull_ref,
+        hair_spec,
+        import_res,
+        hair_scale_override=eff_hair_scale,
+        hair_offset_override=eff_hair_offset,
+    )
+    loaded_manifest = unity_hair_helper.load_custom_hair_manifest(FRANKLIN_CFG["textures_dir"])
+    if (
+        loaded_manifest is None
+        or loaded_manifest.get("mode") != "custom"
+        or loaded_manifest.get("source_input") != hair_spec.get("source_input")
+    ):
+        loaded_manifest = unity_hair_helper.build_inmemory_manifest_fallback(
+            hair_spec, quad_size=(1024, 1024), quad_uv_rect=(0.5, 0.0, 0.5, 0.5)
+        )
+    body_ref_obj = bpy.data.objects.get("Body")
+    body_uv_name = (
+        body_ref_obj.data.uv_layers[0].name
+        if body_ref_obj and body_ref_obj.data.uv_layers
+        else "UVMap"
+    )
+    blender_hair_helper.remap_custom_hair_uvs(
+        custom_hair_objs,
+        loaded_manifest,
+        fallback_rect=(0.5, 0.0, 0.5, 0.5),
+        target_uv_name=body_uv_name,
+    )
+    blender_hair_helper.retarget_custom_hair_weights_to_head(custom_hair_objs, "SKEL_Head")
+    prepacked_mat = bpy.data.materials.get("Shinano_hair_prepacked") or bpy.data.materials.new(
+        name="Shinano_hair_prepacked"
+    )
+    for imported_obj in custom_hair_objs:
+        imported_obj.data.materials.clear()
+        imported_obj.data.materials.append(prepacked_mat)
+        for poly_item in imported_obj.data.polygons:
+            poly_item.material_index = 0
+        custom_hair_mesh_names.add(imported_obj.name)
+        include_mesh_names.append(imported_obj.name)
+    print(
+        project_i18n.translate(
+            "common.hair_aligned_summary",
+            count=len(custom_hair_objs),
+            strategy=align_res.get("strategy", "unknown"),
+            scale=align_res.get("applied_scale", 1.0),
+        )
+    )
+    bpy.context.view_layer.update()
+elif hair_mode == "none":
+    print(project_i18n.translate("common.hair_none_active"))
 else:
     print(project_i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
 
@@ -481,13 +605,15 @@ def get_target_bone(source_bone_name: str) -> str:
     return "SKEL_Pelvis"
 
 
+target_z_min = float(FRANKLIN_CFG.get("target_z_min", -0.907))
+target_z_max = float(FRANKLIN_CFG.get("target_z_max", 0.640))
 scale_factor, z_offset = unity_scene_helper.compute_gtav_height_mapping(
     bpy,
     unity_config,
     include_mesh_names,
     ("Body", "Body_base", "Cloth_boots"),
-    -0.907,
-    0.640,
+    target_z_min,
+    target_z_max,
     0.106,
     1.132,
 )
@@ -573,17 +699,18 @@ for mesh_name in include_mesh_names:
             continue
         new_obj.data.materials.append(mat_slot_item)
 
-    # Remap vertex groups to GTA V bones
+    # Remap vertex groups to GTA V bones (custom hair stays 100% bound to SKEL_Head)
     vert_weights = {vert_idx: {} for vert_idx in range(len(new_mesh.vertices))}
-    for vgroup in src_obj.vertex_groups:
-        target_bone_name = get_target_bone(vgroup.name)
-        for src_vert in src_obj.data.vertices:
-            if src_vert.index < len(new_mesh.vertices):
-                for group_weight in src_vert.groups:
-                    if group_weight.group == vgroup.index and group_weight.weight > 0.001:
-                        vert_weights[src_vert.index][target_bone_name] = (
-                            vert_weights[src_vert.index].get(target_bone_name, 0.0) + group_weight.weight
-                        )
+    if mesh_name not in custom_hair_mesh_names:
+        for vgroup in src_obj.vertex_groups:
+            target_bone_name = get_target_bone(vgroup.name)
+            for src_vert in src_obj.data.vertices:
+                if src_vert.index < len(new_mesh.vertices):
+                    for group_weight in src_vert.groups:
+                        if group_weight.group == vgroup.index and group_weight.weight > 0.001:
+                            vert_weights[src_vert.index][target_bone_name] = (
+                                vert_weights[src_vert.index].get(target_bone_name, 0.0) + group_weight.weight
+                            )
 
     for vertex_idx, weights in vert_weights.items():
         total_weight = sum(weights.values())
@@ -719,6 +846,10 @@ slot_to_key = {}
 for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
     if not mat_item:
         continue
+    if "prepacked" in mat_item.name.lower():
+        joined_mesh_obj.data.materials[slot_idx] = shader_materials["Shinano_hair"]
+        slot_to_key[slot_idx] = "Shinano_hair_prepacked"
+        continue
     matched = False
     for mat_key, shader_material in shader_materials.items():
         if mat_key.lower() in mat_item.name.lower():
@@ -730,11 +861,13 @@ for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
         joined_mesh_obj.data.materials[slot_idx] = shader_materials["Shinano_costume"]
         slot_to_key[slot_idx] = "Shinano_costume"
 
-# Remap UVs into the 2x2 Atlas quadrants
+# Remap UVs into the 2x2 Atlas quadrants (skip already tile-packed custom hair polygons)
 uv_layer = joined_mesh_obj.data.uv_layers[0]
 uv_layer.name = "UVMap 0"
 for poly_item in joined_mesh_obj.data.polygons:
     material_key = slot_to_key.get(poly_item.material_index, "Shinano_costume")
+    if material_key == "Shinano_hair_prepacked":
+        continue
     uv_offset_u, uv_offset_v = quadrant_map[material_key]
     for loop_idx in poly_item.loop_indices:
         uv_coord = uv_layer.data[loop_idx].uv
@@ -792,12 +925,29 @@ import sollumz.ydr.ydrexport as ydrexport
 
 ydrexport.triangulate_mesh = lambda mesh_data: mesh_data
 
+# Split dense custom-hair or outfit geometries safely under RAGE uint16 vertex limits
+blender_hair_helper.split_oversized_material_geometries(
+    joined_mesh_obj, max_vertices_per_chunk=30000
+)
+
 # 7. Configure Sollumz Drawable Dictionary hierarchy
+export_drawables = [
+    str(slot_item) for slot_item in (FRANKLIN_CFG.get("export_drawables") or [])
+]
+if not export_drawables:
+    primary_drawable_name = str(FRANKLIN_CFG.get("primary_drawable") or "uppr_008_u")
+    export_drawables = [primary_drawable_name]
+    for extra_ydd_path in FRANKLIN_CFG.get("extra_model_ydds") or []:
+        extra_stem = Path(extra_ydd_path).stem
+        if extra_stem not in export_drawables:
+            export_drawables.append(extra_stem)
+
+first_drawable_name = export_drawables[0]
 drawable_dict_empty = create_empty_object(SollumType.DRAWABLE_DICTIONARY)
-drawable_dict_empty.name = "uppr_008_u"
+drawable_dict_empty.name = first_drawable_name
 
 franklin_armature.sollum_type = SollumType.DRAWABLE
-franklin_armature.name = "uppr_008_u"
+franklin_armature.name = first_drawable_name
 franklin_armature.parent = drawable_dict_empty
 franklin_armature.drawable_properties.lod_dist_high = 9998.0
 franklin_armature.drawable_properties.lod_dist_med = 9998.0
@@ -821,51 +971,22 @@ bpy.ops.object.select_all(action="DESELECT")
 drawable_dict_empty.select_set(True)
 bpy.context.view_layer.objects.active = drawable_dict_empty
 
-export_result_008 = bpy.ops.sollumz.export_assets(
-    directory=exported_dir,
-    direct_export=True,
-    use_custom_settings=True,
-    target_versions={"GEN8"},
-    target_formats={"NATIVE", "CWXML"},
-    limit_to_selected=False,
-)
-print(
-    project_i18n.translate(
-        "franklin.export_result", slot_name="uppr_008_u", result=export_result_008
+for slot_name in export_drawables:
+    drawable_dict_empty.name = slot_name
+    franklin_armature.name = slot_name
+    slot_export_result = bpy.ops.sollumz.export_assets(
+        directory=exported_dir,
+        direct_export=True,
+        use_custom_settings=True,
+        target_versions={"GEN8"},
+        target_formats={"NATIVE", "CWXML"},
+        limit_to_selected=False,
     )
-)
-
-drawable_dict_empty.name = "uppr_000_u"
-franklin_armature.name = "uppr_000_u"
-export_result_000 = bpy.ops.sollumz.export_assets(
-    directory=exported_dir,
-    direct_export=True,
-    use_custom_settings=True,
-    target_versions={"GEN8"},
-    target_formats={"NATIVE", "CWXML"},
-    limit_to_selected=False,
-)
-print(
-    project_i18n.translate(
-        "franklin.export_result", slot_name="uppr_000_u", result=export_result_000
+    print(
+        project_i18n.translate(
+            "franklin.export_result", slot_name=slot_name, result=slot_export_result
+        )
     )
-)
-
-drawable_dict_empty.name = "uppr_001_u"
-franklin_armature.name = "uppr_001_u"
-export_result_001 = bpy.ops.sollumz.export_assets(
-    directory=exported_dir,
-    direct_export=True,
-    use_custom_settings=True,
-    target_versions={"GEN8"},
-    target_formats={"NATIVE", "CWXML"},
-    limit_to_selected=False,
-)
-print(
-    project_i18n.translate(
-        "franklin.export_result", slot_name="uppr_001_u", result=export_result_001
-    )
-)
 
 yft_output_path = Path(FRANKLIN_CFG["target_yft"])
 updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(

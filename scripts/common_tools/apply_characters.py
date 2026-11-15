@@ -22,7 +22,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Add current directory to sys.path so common helpers import in both repo layouts.
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -52,45 +52,48 @@ VANILLA_BODY_SLOT_PREFIXES = (
 )
 
 
-def _load_apply_runtime_config() -> Dict[str, object]:
+def _format_assignment_label(protagonist_key: str, avatar_id: str) -> str:
+    """Return a localized 'Protagonist -> Avatar' display label."""
+    protagonist_label = project_i18n.translate(f"protagonist.{protagonist_key}")
+    avatar_label = project_i18n.translate(f"avatar.{avatar_id}")
+    return f"{protagonist_label} -> {avatar_label}"
+
+
+def _load_apply_runtime_config(
+    avatar_overrides: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
     """Load configured character, staging, and dummy paths from vrc2gtav.cfg."""
     rpf_paths_cfg = project_paths.get_rpf_paths()
-    michael_cfg = project_paths.get_character_paths("michael")
-    franklin_cfg = project_paths.get_character_paths("franklin")
-    trevor_cfg = project_paths.get_character_paths("trevor")
-
-    character_registry = {
-        str(michael_cfg["ped_name"]): {
-            "display_name": "Michael De Santa -> Shinano Eternal Reunion",
-            "model_ydd_path": michael_cfg["target_model_ydd"],
-            "texture_ytd_path": michael_cfg["ytd_file"],
-            "skeleton_yft_path": michael_cfg["target_yft"],
-        },
-        str(franklin_cfg["ped_name"]): {
-            "display_name": "Franklin Clinton -> Shinano Casual",
-            "model_ydd_path": franklin_cfg["target_model_ydd"],
-            "texture_ytd_path": franklin_cfg["ytd_file"],
-            "skeleton_yft_path": franklin_cfg["target_yft"],
-        },
-        str(trevor_cfg["ped_name"]): {
-            "display_name": "Trevor Philips -> Miltina Maid",
-            "model_ydd_path": trevor_cfg["target_model_ydd"],
-            "texture_ytd_path": trevor_cfg["ytd_file"],
-            "skeleton_yft_path": trevor_cfg["target_yft"],
-        },
+    normalized_overrides = {
+        project_paths.normalize_protagonist_key(raw_prot): project_paths.normalize_avatar_id(
+            raw_avatar
+        )
+        for raw_prot, raw_avatar in (avatar_overrides or {}).items()
+        if raw_avatar
     }
+
+    character_registry: Dict[str, Dict[str, object]] = {}
+    character_props_map: Dict[str, Path] = {}
+    for protagonist_key in project_paths.list_available_protagonists():
+        char_cfg = project_paths.get_character_paths(
+            protagonist_key,
+            avatar_override=normalized_overrides.get(protagonist_key),
+        )
+        ped_key = str(char_cfg["ped_name"])
+        avatar_id = str(char_cfg["avatar_id"])
+        character_registry[ped_key] = {
+            "display_name": _format_assignment_label(protagonist_key, avatar_id),
+            "model_ydd_path": char_cfg["target_model_ydd"],
+            "texture_ytd_path": char_cfg["ytd_file"],
+            "skeleton_yft_path": char_cfg["target_yft"],
+        }
+        character_props_map[ped_key] = char_cfg["staging_streamed_props_dir"]
 
     staging_target_dirs = [
         rpf_paths_cfg["mppatches_extracted"],
         rpf_paths_cfg["streamedpeds_extracted"],
         rpf_paths_cfg["patchday4ng_models_extracted"],
     ]
-
-    character_props_map = {
-        str(michael_cfg["ped_name"]): michael_cfg["staging_streamed_props_dir"],
-        str(franklin_cfg["ped_name"]): franklin_cfg["staging_streamed_props_dir"],
-        str(trevor_cfg["ped_name"]): trevor_cfg["staging_streamed_props_dir"],
-    }
 
     return {
         "project_root": project_paths.get_project_root(),
@@ -196,9 +199,12 @@ def patch_single_character_directory(
     return statistics_counter
 
 
-def apply_selected_characters(characters_to_apply: List[str]) -> bool:
+def apply_selected_characters(
+    characters_to_apply: List[str],
+    avatar_overrides: Optional[Dict[str, str]] = None,
+) -> bool:
     """Apply compiled models, textures, skeletons, and dummies for the given characters."""
-    runtime_cfg = _load_apply_runtime_config()
+    runtime_cfg = _load_apply_runtime_config(avatar_overrides=avatar_overrides)
     dummy_ydd_path = Path(runtime_cfg["dummy_ydd"])
     prop_dummy_ydd_path = Path(runtime_cfg["prop_dummy_ydd"])
     character_registry = runtime_cfg["character_registry"]
@@ -240,11 +246,21 @@ def apply_selected_characters(characters_to_apply: List[str]) -> bool:
         )
         return False
 
-    for character_key in characters_to_apply:
+    for raw_character_key in characters_to_apply:
+        if raw_character_key in character_registry:
+            character_key = raw_character_key
+        else:
+            try:
+                character_key = str(
+                    project_paths.get_protagonist_profile(raw_character_key)["ped_name"]
+                )
+            except KeyError:
+                character_key = raw_character_key
+
         if character_key not in character_registry:
             print(
                 project_i18n.translate(
-                    "apply.unknown_character", character_key=character_key
+                    "apply.unknown_character", character_key=raw_character_key
                 )
             )
             return False
@@ -326,9 +342,46 @@ def main() -> None:
     )
     argument_parser.add_argument(
         "--character",
-        choices=["player_zero", "player_one", "player_two", "all"],
+        choices=[
+            "player_zero",
+            "player_one",
+            "player_two",
+            "michael",
+            "franklin",
+            "trevor",
+            "all",
+        ],
         default="all",
         help=project_i18n.translate("apply.cli_character_help"),
+    )
+    argument_parser.add_argument(
+        "--avatar",
+        default=None,
+        help=project_i18n.translate("apply.cli_avatar"),
+    )
+    argument_parser.add_argument(
+        "--michael-avatar",
+        default=None,
+        help=project_i18n.translate(
+            "apply.cli_protagonist_avatar",
+            protagonist=project_i18n.translate("protagonist.michael"),
+        ),
+    )
+    argument_parser.add_argument(
+        "--franklin-avatar",
+        default=None,
+        help=project_i18n.translate(
+            "apply.cli_protagonist_avatar",
+            protagonist=project_i18n.translate("protagonist.franklin"),
+        ),
+    )
+    argument_parser.add_argument(
+        "--trevor-avatar",
+        default=None,
+        help=project_i18n.translate(
+            "apply.cli_protagonist_avatar",
+            protagonist=project_i18n.translate("protagonist.trevor"),
+        ),
     )
     argument_parser.add_argument(
         "--lang",
@@ -340,11 +393,37 @@ def main() -> None:
     project_i18n.set_active_language(parsed_arguments.lang)
 
     if parsed_arguments.character == "all":
-        selected_characters_list = ["player_zero", "player_one", "player_two"]
+        selected_protagonists = list(project_paths.list_available_protagonists())
     else:
-        selected_characters_list = [parsed_arguments.character]
+        selected_protagonists = [
+            project_paths.normalize_protagonist_key(parsed_arguments.character)
+        ]
 
-    operation_success = apply_selected_characters(selected_characters_list)
+    selected_characters_list = [
+        str(project_paths.get_protagonist_profile(prot_key)["ped_name"])
+        for prot_key in selected_protagonists
+    ]
+
+    avatar_overrides: Dict[str, str] = {}
+    if parsed_arguments.avatar:
+        normalized_avatar = project_paths.normalize_avatar_id(parsed_arguments.avatar)
+        for prot_key in selected_protagonists:
+            avatar_overrides[prot_key] = normalized_avatar
+    for prot_key, arg_attr in (
+        ("michael", "michael_avatar"),
+        ("franklin", "franklin_avatar"),
+        ("trevor", "trevor_avatar"),
+    ):
+        specific_avatar = getattr(parsed_arguments, arg_attr, None)
+        if specific_avatar:
+            avatar_overrides[prot_key] = project_paths.normalize_avatar_id(
+                specific_avatar
+            )
+
+    operation_success = apply_selected_characters(
+        selected_characters_list,
+        avatar_overrides=avatar_overrides,
+    )
     if not operation_success:
         sys.exit(1)
 

@@ -38,18 +38,21 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 - **Assistente First-Run e Configuração Externa**: Configuração guiada e arquivo [`vrc2gtav.cfg`](vrc2gtav.cfg.example) mantêm caminhos locais fora do controle de versão.
 - **Suporte Trilíngue (`en` / `ja` / `pt`)**: Detecção automática do idioma do sistema operacional com sobrescrita explícita via `--lang` nos gerenciadores, ferramentas e suítes de teste.
 - **Padrão de Escala `1.0` + Leitor de `.unity`**: Mantém as escalas corporais em `1.0` por padrão no GitHub e extrai automaticamente as escalas reais da hierarquia quando uma cena `.unity` do projeto é fornecida.
-- **Fallback Automático de Cabelo e Rosto**: Faz *fallback* automático para o cabelo padrão do avatar, expressões base e texturas de olhos padrão caso o cabelo customizado da BOOTH (*Neko Tied Bob Hair* / `fbx_hair`) ou texturas de olhos opcionais não estejam presentes.
-- **Testes Automatizados**: Inclui verificação rápida de código-fonte (`5` suítes, compatível com clone limpo do GitHub) e validação completa pós-build/deploy (`8` suítes).
+- **Porte Universal de Cabelo Customizado Unity (`.prefab` / `PrefabVariant` / `.fbx`)**: Analisa automaticamente qualquer *prefab* de cabelo VRChat, anexo *Modular Avatar* ou `.fbx` + `.mat`, assa cores/HSV do lilToon no atlas 2K, ajusta o encaixe no crânio do avatar e faz *fallback* automático para o cabelo padrão (`default` / `none` / ausente).
+- **Intercambiabilidade Completa Avatar <-> Protagonista**: Qualquer preset VRChat (`shinano_casual`, `shinano_er`, `miltina_maid`) pode ser atribuído a qualquer protagonista (`michael`, `franklin`, `trevor`) pela opção `[7]` do menu interativo, flags `--avatar` / `--*-avatar` na CLI ou em `vrc2gtav.cfg`.
+- **Testes Automatizados**: Inclui verificação rápida de código-fonte (`7` suítes, compatível com clone limpo do GitHub) e validação completa pós-build/deploy (`10` suítes).
 
 ---
 
 ## Protagonistas e Avatares
 
-| Slot do GTA V | Protagonista | Avatar VRChat | Visual Configurado | Pasta de Trabalho |
+Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares VRChat são totalmente intercambiáveis entre os slots de `michael`, `franklin` e `trevor`:
+
+| Slot Padrão | Protagonista | Avatar VRChat Padrão (`avatar` ID) | Visual Configurado | Pasta de Trabalho |
 | :--- | :--- | :--- | :--- | :--- |
-| `player_zero` | **Michael De Santa** | **Shinano** | *Eternal Reunion* (Vestido Gótico + Relógio de Bolso + *Neko Tied Bob Hair* opcional, com *fallback* para o cabelo padrão da Shinano) | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
-| `player_one` | **Franklin Clinton** | **Shinano** | *Casual / Uniform* (Saia Vermelha + Cabelo Padrão Recolorido) | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
-| `player_two` | **Trevor Philips** | **Miltina** | *Classic Maid* (Vestido Preto e Branco, Avental, Maria-Chiquinha; aceita `fbx_hair` opcional) | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
+| `player_zero` | **Michael De Santa** | **Shinano** (`shinano_er`) | *Eternal Reunion* (Vestido Gótico + Relógio de Bolso + cabelo customizado Unity ou *Neko Tied Bob Hair* opcional, com *fallback* para o cabelo padrão da Shinano) | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
+| `player_one` | **Franklin Clinton** | **Shinano** (`shinano_casual`) | *Casual / Uniform* (Saia Vermelha + Cabelo Padrão Recolorido, ou cabelo customizado Unity opcional) | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
+| `player_two` | **Trevor Philips** | **Miltina** (`miltina_maid`) | *Classic Maid* (Vestido Preto e Branco, Avental, Maria-Chiquinha + cabelo customizado Unity opcional) | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
 
 ---
 
@@ -98,9 +101,11 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 
 - **Configuração Externa (`vrc2gtav.cfg`)**: Copie [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) para `vrc2gtav.cfg` (ou crie via `--setup`) para definir os caminhos do GTA V Legacy, Blender, `rage-cli` e dos arquivos FBX/Unity sem editar o código-fonte.
 - **Escalas Corporais (`1.0` + Leitor de `.unity`)**: As proporções assumem `[1.0, 1.0, 1.0]` por padrão. Quando uma cena `.unity` é informada, os scripts leem a hierarquia de `Transform` do arquivo e aplicam as escalas customizadas automaticamente.
-- **Fallback de Cabelo e Rosto**:
-  - **Shinano**: Usa *Neko Tied Bob Hair* quando disponível; caso contrário, retorna automaticamente ao cabelo padrão (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim` e texturas base de olhos.
-  - **Miltina**: Suporta substituição opcional por `fbx_hair`; se ausente, usa automaticamente a maria-chiquinha padrão (`Milltina_hair_*`), `Miltina_close eyes_Base_adult.anim` e texturas base de olhos.
+- **Predefinições de Blendshapes (`Unity` e `configs/*_blendshapes.cfg`)**: Cada *blendshape* de rosto, encolhimento de corpo (*shrink*), roupa, acessório e cabelo é carregado via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) diretamente do seu projeto Unity (`.unity` + `.prefab` + `.anim`) ou de predefinições portáteis em [`configs/`](configs/) (`shinano_blendshapes.cfg`, `shinano_er_blendshapes.cfg`, `miltina_blendshapes.cfg`), controlados por `blendshapes_source = auto | unity | cfg` e `blendshapes_cfg`.
+- **Cabelo Customizado Universal e Fallbacks**:
+  - **Qualquer Avatar Preset**: Suporta `custom_hair = auto | default | none | <caminho .prefab ou .fbx>` (junto de `hair_mat`, `hair_tex`, `hair_scale`, `hair_offset`) no `vrc2gtav.cfg`, opção `[8]` do menu interativo ou flags `--hair` na CLI em `shinano_casual`, `shinano_er` e `miltina_maid`. O módulo [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) resolve cadeias de `PrefabVariant`, estruturas *Modular Avatar*, mapas de materiais `.fbx.meta` e cores/HSV lilToon em `custom_hair_manifest.json`, enquanto [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py) ajusta o encaixe no crânio, remapeia UVs e preserva orelhas animais base.
+  - **Shinano**: Usa `custom_hair` / *Neko Tied Bob Hair* quando disponível; caso contrário, retorna automaticamente ao cabelo padrão (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim` e texturas base de olhos.
+  - **Miltina**: Suporta qualquer `custom_hair` (ou `fbx_hair` legado); se ausente, usa automaticamente a maria-chiquinha padrão (`Milltina_hair_*`), `Miltina_close eyes_Base_adult.anim` e texturas base de olhos.
 - **Idioma Automático**: Os scripts detectam o idioma do sistema (`en`, `ja`, `pt`) automaticamente e aceitam `--lang en|ja|pt`.
 
 ---
@@ -115,9 +120,13 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 | `python scripts/common_tools/setup_first_run.py --check-only` | Auditoria não destrutiva de ambiente e arquivos de origem |
 | `python run_mod_manager.py --character all` | Reconstrói tudo no Blender, exporta YDD/YTD e implanta no `x64v.rpf` |
 | `python run_mod_manager.py --character {michael,franklin,trevor} --lang {en,ja,pt}` | Executa build/deploy de um único protagonista no idioma escolhido |
+| `python run_mod_manager.py --character franklin --avatar miltina_maid` | Compila e aplica qualquer avatar VRChat (`shinano_casual`, `shinano_er`, `miltina_maid`) em qualquer protagonista (`--save-assignment` salva no `vrc2gtav.cfg`) |
+| `python run_mod_manager.py --character michael --hair "/caminho/Hair.prefab" --save-hair` | Porta qualquer cabelo customizado `.prefab` / `PrefabVariant` / `.fbx` para um protagonista (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
+| `python run_mod_manager.py --export-blendshapes` | Exporta blendshapes das cenas `.unity` para `configs/*_blendshapes.cfg` |
+| `python run_mod_manager.py --character all --blendshapes-source cfg` | Compila usando os presets `.cfg` de blendshapes em vez das cenas Unity |
 | `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas já compiladas em `mods/x64v.rpf` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `5` suítes de código/config/i18n/fallback (clone limpo) |
-| `python scripts/common_tools/test_mod_suite.py` | Executa todas as `8` suítes de ponta a ponta (requer build e deploy concluídos) |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `7` suítes de código/config/i18n/intercambiabilidade/cabelo customizado (clone limpo) |
+| `python scripts/common_tools/test_mod_suite.py` | Executa todas as `10` suítes de ponta a ponta (requer build e deploy concluídos) |
 
 ---
 
@@ -125,12 +134,13 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 
 ```text
 vrcavatar2gtav/
+├── configs/                         # Predefinições portáteis de blendshapes (*_blendshapes.cfg)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # Guia técnico completo (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Arquitetura, rigging, Sollumz, shaders e RPF7 (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # Guia técnico completo (JA)
 ├── scripts/
-│   ├── common_tools/                # First-run, leitor de cena .unity, i18n, test_mod_suite.py
+│   ├── common_tools/                # First-run, leitores de .unity/cabelo/blendshapes, i18n, test_mod_suite.py
 │   ├── Shinano_Casual_Franklin/     # Scripts de build do Franklin (player_one)
 │   ├── Shinano_EternalReunion_Michael/ # Scripts de build do Michael (player_zero)
 │   └── Miltina_Maid_Trevor/         # Scripts de build do Trevor (player_two)
@@ -177,13 +187,13 @@ Todos os modelos 3D, roupas, cabelos, texturas oculares, pacotes Unity e ferrame
 - **Franklin Clinton (`player_one`) — Shinano (*Casual / Uniform*)**
   - **Corpo Base**: `Body`, `Body_base` (*Shinano*)
   - **Roupa**: `Cloth_sweater`, `Cloth_skirt`, `Cloth_tights`, `Cloth_boots` (*Shinano*)
-  - **Cabelo**: `Hair_back`, `Hair_bang`, `Hair_base`, `Hair_side`, `Other_ear`, `Other_tail` (*Shinano* padrão)
+  - **Cabelo**: `Hair_back`, `Hair_bang`, `Hair_base`, `Hair_side`, `Other_ear`, `Other_tail` (*Shinano* padrão; aceita `custom_hair` opcional preservando as orelhas)
   - **Olhos e Expressão *(Opcional / Fallback)***: `MoonButterfly eye` e `ShinanoDefAdultNewv5.anim`
 
 - **Trevor Philips (`player_two`) — Miltina (*Classic Maid*)**
   - **Corpo Base**: `Body`, `Milltina_body` (*Milltina*)
   - **Roupa e Acessórios**: `Milltina_cloth_dress`, `Milltina_cloth_apron`, `Milltina_cloth_skirt`, `Milltina_cloth_panties`, `Milltina_cloth_collar`, `Milltina_cloth_hat`, `Milltina_cloth_neck_ribbon`, `Milltina_cloth_wrist_cuffs`, `Milltina_cloth_garterbelt`, `Milltina_cloth_hair_ribbon`, `Milltina_cloth_tail_ribbon`, `Milltina_cloth_tail_slit`, `Milltina_cloth_shoes` (*Milltina*)
-  - **Cabelo e Partes de Vaca**: `Milltina_hair_base`, `Milltina_hair_side`, `Milltina_hair_front`, `Milltina_hair_front_side`, `Milltina_hair_twintail`, `Milltina_cow_ears`, `Milltina_cow_horns`, `Milltina_cow_tail` (*Milltina*; aceita substituição opcional por `fbx_hair`)
+  - **Cabelo e Partes de Vaca**: `Milltina_hair_base`, `Milltina_hair_side`, `Milltina_hair_front`, `Milltina_hair_front_side`, `Milltina_hair_twintail`, `Milltina_cow_ears`, `Milltina_cow_horns`, `Milltina_cow_tail` (*Milltina*; aceita substituição opcional por `custom_hair` / `fbx_hair`)
   - **Olhos e Expressão *(Opcional / Fallback)***: `Milltina_AWEyes` e `Miltina_close eyes_Base_adult.anim`
 
 </details>
@@ -205,4 +215,4 @@ Todos os modelos 3D, roupas, cabelos, texturas oculares, pacotes Unity e ferrame
 
 ## Licença
 
-Os scripts de automação e a documentação deste projeto são distribuídos sob a **Licença MIT** — consulte [`LICENSE`](LICENSE) (`Copyright (c) 2026 Daniel M`). Assets e ferramentas de terceiros permanecem regidos por suas respectivas licenças e termos de uso.
+Os scripts de automação e a documentação deste projeto são distribuídos sob a **Licença MIT** — consulte [`LICENSE`](LICENSE) (`Copyright (c) 2026 TheOkamoto`). Assets e ferramentas de terceiros permanecem regidos por suas respectivas licenças e termos de uso.

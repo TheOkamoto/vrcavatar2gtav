@@ -48,12 +48,79 @@ def main() -> int:
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        default="trevor",
+        help=i18n.translate("trevor.build.arg_target_char"),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+    )
+    parser.add_argument(
+        "--hair",
+        default=None,
+        help=i18n.translate("common.hair_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-mat",
+        default=None,
+        help=i18n.translate("common.hair_mat_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-tex",
+        default=None,
+        help=i18n.translate("common.hair_tex_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-scale",
+        type=float,
+        default=None,
+        help=i18n.translate("common.hair_scale_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-offset",
+        default=None,
+        help=i18n.translate("common.hair_offset_cli_opt"),
+    )
+    parser.add_argument(
+        "--unity-scene",
+        default=None,
+        help=i18n.translate("common.unity_scene_cli_opt"),
+    )
+    parser.add_argument(
+        "--unity-avatar-name",
+        default=None,
+        help=i18n.translate("common.unity_avatar_cli_opt"),
+    )
+    parser.add_argument(
+        "--blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_cfg"),
+    )
+    parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("blendshapes.cli_source"),
+    )
+    parser.add_argument(
+        "--save-blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_save_cfg"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    trevor_cfg = project_paths.get_character_paths("trevor")
+    target_protagonist = project_paths.normalize_protagonist_key(
+        parsed_args.target_character
+    )
+    trevor_cfg = project_paths.get_character_paths(
+        target_protagonist,
+        avatar_override="miltina_maid",
+    )
     python_exe = project_paths.get_python_exe()
     rage_cli = project_paths.get_rage_cli()
     artifacts_dir = project_paths.get_artifacts_dir()
@@ -66,15 +133,46 @@ def main() -> int:
     if not atlas_script.exists():
         print(i18n.translate("trevor.run.atlas_script_missing", path=atlas_script))
         return 1
-    subprocess.run([python_exe, str(atlas_script)], check=True)
+    atlas_cmd = [python_exe, str(atlas_script), "--target-character", target_protagonist]
+    for flag_name, flag_val in (
+        ("--hair", parsed_args.hair),
+        ("--hair-mat", parsed_args.hair_mat),
+        ("--hair-tex", parsed_args.hair_tex),
+        ("--unity-scene", parsed_args.unity_scene),
+        ("--unity-avatar-name", parsed_args.unity_avatar_name),
+    ):
+        if flag_val:
+            atlas_cmd.extend([flag_name, str(flag_val)])
+    subprocess.run(atlas_cmd, check=True)
 
     # 2. Compile model in Blender + render previews
-    project_paths.ensure_character_skeleton_yft("trevor")
+    project_paths.ensure_character_skeleton_yft(target_protagonist)
     blender_script = Path(trevor_cfg["blender_script"])
     if not blender_script.exists():
         print(i18n.translate("trevor.run.blender_script_missing", path=blender_script))
         return 1
-    blender_cmd, blender_env = project_paths.build_blender_command(blender_script)
+    extra_blender_args = ["--target-character", target_protagonist]
+    for flag_name, flag_val in (
+        ("--output-dir", parsed_args.output_dir),
+        ("--hair", parsed_args.hair),
+        ("--hair-mat", parsed_args.hair_mat),
+        ("--hair-tex", parsed_args.hair_tex),
+        ("--hair-offset", parsed_args.hair_offset),
+        ("--unity-scene", parsed_args.unity_scene),
+        ("--unity-avatar-name", parsed_args.unity_avatar_name),
+        ("--blendshapes-cfg", parsed_args.blendshapes_cfg),
+        ("--blendshapes-source", parsed_args.blendshapes_source),
+        ("--save-blendshapes-cfg", parsed_args.save_blendshapes_cfg),
+    ):
+        if flag_val:
+            extra_blender_args.extend([flag_name, str(flag_val)])
+    if parsed_args.hair_scale is not None:
+        extra_blender_args.extend(["--hair-scale", str(parsed_args.hair_scale)])
+
+    blender_cmd, blender_env = project_paths.build_blender_command(
+        blender_script,
+        extra_arguments=extra_blender_args,
+    )
     print(i18n.translate("trevor.run.running_blender"))
     subprocess.run(
         blender_cmd,
@@ -153,7 +251,14 @@ def main() -> int:
         "common_assets", "apply_characters_script"
     )
     subprocess.run(
-        [python_exe, str(apply_characters_script), "--character", str(trevor_cfg["ped_name"])],
+        [
+            python_exe,
+            str(apply_characters_script),
+            "--character",
+            str(trevor_cfg["ped_name"]),
+            "--avatar",
+            "miltina_maid",
+        ],
         check=True,
     )
 

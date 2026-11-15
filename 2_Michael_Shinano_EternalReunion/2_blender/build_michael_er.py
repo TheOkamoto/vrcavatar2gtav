@@ -12,8 +12,8 @@ Technical Rules & Features:
      and CooniBob / Neko Tied Bob Hair.
   2. Strict removal of EditorOnly / disabled Unity items (underwear, default
      hair, CooniBob_Tail, UN2_Beret, summer variants).
-  3. Shrink culling and indexed Unity blendshapes + 64 facial blendshapes from
-     ShinanoDefAdultNewv5.anim.
+  3. Shrink culling and Unity / .cfg-driven blendshapes across body, outfit,
+     accessories, and hair meshes.
   4. Universal bone mapping onto the Michael GTA V skeleton (`player_zero.yft`)
      and 1:1 arm/hand/finger relocation for RAGE animations.
   5. Unified 4x2 Texture Atlas (`ped_default.sps`).
@@ -21,10 +21,8 @@ Technical Rules & Features:
 """
 
 import argparse
-import json
 import math
 import os
-import re
 import struct
 import sys
 import zlib
@@ -44,8 +42,11 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import blender_hair_helper
+import blendshape_helper
 import hand_skeleton_helper
 import mathutils
+import unity_hair_helper
 import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
@@ -80,40 +81,6 @@ CHARACTER_PROFILES = {
         "arm_pose_degrees": -55.0,
     },
 }
-
-
-# ---------------------------------------------------------------------------
-# Standalone Unity .anim (YAML) parser for facial blendshapes
-# ---------------------------------------------------------------------------
-def load_unity_anim_blendshapes(anim_file_path):
-    """Parse normalized blendshape curve weights from a Unity .anim YAML file."""
-    blendshape_weights = {}
-    if not anim_file_path or not os.path.exists(anim_file_path):
-        return blendshape_weights
-
-    with open(anim_file_path, "r", encoding="utf-8", errors="ignore") as anim_file:
-        anim_text = anim_file.read()
-
-    curve_blocks = anim_text.split("  - serializedVersion: 2")
-    for block_text in curve_blocks[1:]:
-        val_match = re.search(r"value:\s*([-\d.]+)", block_text)
-        attr_match = re.search(r"attribute:\s*([^\n]+)", block_text)
-        path_match = re.search(r"path:\s*([^\n]+)", block_text)
-        if val_match and attr_match and path_match:
-            raw_value = float(val_match.group(1))
-            attr_text = attr_match.group(1).strip()
-            shape_name = attr_text.replace("blendShape.", "").strip()
-            if shape_name.startswith('"'):
-                try:
-                    shape_name = json.loads(shape_name)
-                except Exception:
-                    shape_name = shape_name.strip('"')
-            if abs(raw_value) > 1e-4:
-                blendshape_weights[shape_name] = raw_value / 100.0
-            else:
-                blendshape_weights[shape_name] = 0.0
-
-    return blendshape_weights
 
 
 # ---------------------------------------------------------------------------
@@ -559,87 +526,26 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
     return "SKEL_Pelvis"
 
 
-# ---------------------------------------------------------------------------
-# Oversized geometry splitter for RAGE uint16 vertex limits (< 30,000 verts)
-# ---------------------------------------------------------------------------
-def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=30000):
-    """Split dense material slots into multiple chunks under the uint16 limit."""
-    mesh_data = mesh_object.data
-    polys_by_material = {}
-    for poly_item in mesh_data.polygons:
-        polys_by_material.setdefault(poly_item.material_index, []).append(poly_item.index)
-
-    max_polys_per_chunk = max(10000, int(max_vertices_per_chunk * 0.65))
-
-    for mat_index, poly_indices in list(polys_by_material.items()):
-        if len(poly_indices) <= max_polys_per_chunk:
-            continue
-
-        base_material = mesh_data.materials[mat_index]
-        chunk_total = math.ceil(len(poly_indices) / max_polys_per_chunk)
-        print(
-            i18n.translate(
-                "michael.build.splitting_material",
-                name=base_material.name,
-                count=len(poly_indices),
-                chunks=chunk_total,
-            )
-        )
-
-        for chunk_idx in range(1, chunk_total):
-            cloned_mat = base_material.copy()
-            cloned_mat.name = f"{base_material.name}_chunk{chunk_idx}"
-            mesh_data.materials.append(cloned_mat)
-            new_slot_index = len(mesh_data.materials) - 1
-
-            start_pos = chunk_idx * max_polys_per_chunk
-            end_pos = min(len(poly_indices), (chunk_idx + 1) * max_polys_per_chunk)
-            for poly_idx in poly_indices[start_pos:end_pos]:
-                mesh_data.polygons[poly_idx].material_index = new_slot_index
-
-    mesh_data.update()
-
-
-def apply_shape_key_weights_by_index(mesh_obj, weights_by_index, label):
-    """Apply shape key weights by 0-based index (after Basis), zeroing others."""
-    if not mesh_obj or not mesh_obj.data.shape_keys:
-        raise RuntimeError(i18n.translate("michael.build.no_shape_keys", label=label))
-
-    key_blocks = mesh_obj.data.shape_keys.key_blocks
-    for key_block in key_blocks[1:]:
-        key_block.value = 0.0
-
-    applied_count = 0
-    for zero_based_idx, weight_val in weights_by_index.items():
-        target_slot = zero_based_idx + 1
-        if target_slot >= len(key_blocks):
-            raise IndexError(
-                i18n.translate(
-                    "michael.build.shape_key_oob",
-                    index=zero_based_idx,
-                    name=mesh_obj.name,
-                    available=len(key_blocks) - 1,
-                )
-            )
-        key_blocks[target_slot].value = weight_val
-        applied_count += 1
-
-    print(
-        i18n.translate(
-            "michael.build.applied_shape_keys", count=applied_count, name=mesh_obj.name
-        )
-    )
-
-
 def validate_build_inputs(cli_args):
-    """Verify required FBX, skeleton, animation, and texture inputs exist."""
+    """Verify required FBX, skeleton, texture, and blendshape inputs exist."""
     required_paths = [
         (i18n.translate("michael.build.input_skeleton_label"), cli_args.skeleton_yft),
         (i18n.translate("michael.build.input_shinano_fbx_label"), cli_args.shinano_fbx),
         (i18n.translate("michael.build.input_outfit_fbx_label"), cli_args.outfit_fbx),
         (i18n.translate("michael.build.input_watch_fbx_label"), cli_args.watch_fbx),
-        (i18n.translate("michael.build.input_face_anim_label"), cli_args.face_anim),
     ]
+    has_blendshapes_cfg = bool(
+        getattr(cli_args, "blendshapes_cfg", "")
+        and os.path.isfile(cli_args.blendshapes_cfg)
+    )
+    has_unity_scene = bool(
+        getattr(cli_args, "unity_scene", "")
+        and os.path.isfile(cli_args.unity_scene)
+    )
+    if not has_blendshapes_cfg and not has_unity_scene:
+        required_paths.append(
+            (i18n.translate("michael.build.input_face_anim_label"), cli_args.face_anim)
+        )
     for desc_label, file_path in required_paths:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(
@@ -678,10 +584,25 @@ def build_shinano_er_for_gtav(cli_args):
     from sollumz.ydr.shader_materials import create_shader
     import sollumz.ydr.ydrexport as ydrexport
 
-    char_key = cli_args.target_character.lower()
-    if char_key not in CHARACTER_PROFILES:
-        raise ValueError(i18n.translate("michael.build.invalid_character", name=char_key))
-    char_profile = CHARACTER_PROFILES[char_key]
+    char_key = project_paths.normalize_protagonist_key(cli_args.target_character)
+    target_cfg = getattr(cli_args, "target_cfg", None) or project_paths.get_character_paths(
+        char_key, avatar_override="shinano_er"
+    )
+    base_profile = dict(CHARACTER_PROFILES.get(char_key, {}))
+    merged_drawables = []
+    for drawable_slot in list(target_cfg.get("export_drawables") or []) + list(
+        base_profile.get("export_drawables") or []
+    ):
+        if str(drawable_slot) not in merged_drawables:
+            merged_drawables.append(str(drawable_slot))
+    char_profile = {
+        "ped_name": str(target_cfg.get("ped_name") or base_profile.get("ped_name", "player_zero")),
+        "skeleton_yft": Path(str(cli_args.skeleton_yft)).name,
+        "export_drawables": merged_drawables or ["uppr_000_r", "uppr_000_u", "uppr_001_u"],
+        "target_z_min": float(target_cfg.get("target_z_min", base_profile.get("target_z_min", -0.907))),
+        "target_z_max": float(target_cfg.get("target_z_max", base_profile.get("target_z_max", 0.645))),
+        "arm_pose_degrees": float(target_cfg.get("arm_pose_degrees", base_profile.get("arm_pose_degrees", -55.0))),
+    }
 
     # 1. Clear current Blender scene
     for obj_item in list(bpy.data.objects):
@@ -806,7 +727,8 @@ def build_shinano_er_for_gtav(cli_args):
 
     # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
     target_cfg = getattr(cli_args, "target_cfg", None) or project_paths.get_character_paths(
-        cli_args.target_character
+        cli_args.target_character,
+        avatar_override="shinano_er",
     )
     unity_scene_override = getattr(cli_args, "unity_scene", None)
     unity_avatar_override = getattr(cli_args, "unity_avatar_name", None)
@@ -821,20 +743,54 @@ def build_shinano_er_for_gtav(cli_args):
         i18n_module=i18n,
         character_hints=("shinano", "reunion"),
     )
-    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
-        cli_args.hair_fbx,
-        unity_config=unity_config,
+    hair_spec_input = getattr(cli_args, "hair", None)
+    if hair_spec_input is None:
+        if getattr(cli_args, "cli_hair_fbx_explicit", False) and getattr(
+            cli_args, "hair_fbx", None
+        ):
+            hair_spec_input = cli_args.hair_fbx
+        else:
+            hair_spec_input = (
+                str(effective_cfg.get("custom_hair", "")).strip()
+                or str(effective_cfg.get("fbx_hair", "")).strip()
+                or "auto"
+            )
+    hair_mat_override = getattr(cli_args, "hair_mat", None) or str(
+        effective_cfg.get("hair_mat", "") or ""
+    )
+    hair_tex_override = getattr(cli_args, "hair_tex", None) or str(
+        effective_cfg.get("hair_tex", "") or ""
+    )
+    hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+        hair_spec_input=hair_spec_input,
+        unity_scene=effective_cfg.get("unity_scene"),
+        unity_avatar_name=effective_cfg.get("unity_avatar_name", ""),
+        unity_assets_root=effective_cfg.get("unity_assets_root"),
+        hair_mat_override=hair_mat_override,
+        hair_tex_override=hair_tex_override,
+        is_calibrated_er_default=True,
+    )
+    hair_mode = hair_spec.get("mode", "default")
+    hair_reason = hair_spec.get("reason") or hair_spec.get("source_input", "") or hair_mode
+    is_calibrated_neko = (hair_mode == "custom") and bool(
+        hair_spec.get("is_neko_bob_calibrated", False)
+    )
+    is_arbitrary_custom_hair = (hair_mode == "custom") and (not is_calibrated_neko)
+    custom_hair_primary_fbx = str(
+        hair_spec.get("primary_fbx") or getattr(cli_args, "hair_fbx", "") or ""
     )
 
     arm_hair = None
-    if hair_mode == "custom":
+    if is_calibrated_neko and custom_hair_primary_fbx:
         print(
             i18n.translate(
-                "unity_scene.hair_custom_active", reason=hair_reason, path=cli_args.hair_fbx
+                "unity_scene.hair_custom_active",
+                reason=hair_reason,
+                path=custom_hair_primary_fbx,
             )
         )
-        print(i18n.translate("michael.build.importing_hair", path=cli_args.hair_fbx))
-        bpy.ops.import_scene.fbx(filepath=cli_args.hair_fbx)
+        print(i18n.translate("michael.build.importing_hair", path=custom_hair_primary_fbx))
+        bpy.ops.import_scene.fbx(filepath=custom_hair_primary_fbx)
         arm_hair = next(
             (
                 scene_obj
@@ -847,18 +803,22 @@ def build_shinano_er_for_gtav(cli_args):
         )
         if arm_hair:
             imported_armatures.append(arm_hair)
-    else:
+    elif not is_arbitrary_custom_hair:
         print(i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
 
-    # Apply Unity Armature scale, GTA V A-pose (-55 deg), and Unity bone pose scales
+    # Apply Unity Armature scale, GTA V A-pose (-55 deg), and Unity bone pose scales.
+    # Standalone asset armatures (arm_hair, arm_watch) keep their rest transforms here
+    # because their align transforms explicitly apply target position/scale in vertex space.
     arm_angle_rad = -math.radians(abs(char_profile["arm_pose_degrees"]))
     armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
+    pose_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit) if arm_obj}
     for arm_obj in imported_armatures:
-        arm_obj.scale = (
-            arm_obj.scale.x * armature_override_scale[0],
-            arm_obj.scale.y * armature_override_scale[1],
-            arm_obj.scale.z * armature_override_scale[2],
-        )
+        if arm_obj != arm_hair:
+            arm_obj.scale = (
+                arm_obj.scale.x * armature_override_scale[0],
+                arm_obj.scale.y * armature_override_scale[1],
+                arm_obj.scale.z * armature_override_scale[2],
+            )
         bpy.context.view_layer.objects.active = arm_obj
         bpy.ops.object.mode_set(mode="POSE")
         for left_arm_name in ["Upper_arm.L", "UpperArm.L", "LeftUpperArm"]:
@@ -871,11 +831,13 @@ def build_shinano_er_for_gtav(cli_args):
                 pose_bone = arm_obj.pose.bones[right_arm_name]
                 pose_bone.rotation_mode = "XYZ"
                 pose_bone.rotation_euler = (arm_angle_rad, 0.0, 0.0)
-        unity_scene_helper.apply_unity_bone_scales_to_pose(arm_obj, unity_config)
+        if arm_obj in pose_scaled_armatures:
+            unity_scene_helper.apply_unity_bone_scales_to_pose(arm_obj, unity_config)
         bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.update()
 
     hair_root_rest_pos = None
-    if hair_mode == "custom":
+    if is_calibrated_neko:
         if not arm_hair or "Hair Root" not in arm_hair.data.bones:
             raise RuntimeError(i18n.translate("michael.build.hair_root_missing"))
         hair_root_rest_pos = (
@@ -897,126 +859,110 @@ def build_shinano_er_for_gtav(cli_args):
     if fbx_face_normals:
         print(i18n.translate("michael.build.fbx_normals_loaded", count=len(fbx_face_normals)))
 
-    # 5. Apply facial blendshapes on Body
-    face_blendshapes = load_unity_anim_blendshapes(cli_args.face_anim)
-    body_mesh_obj = bpy.data.objects.get("Body")
-    if body_mesh_obj and body_mesh_obj.data.shape_keys:
-        for key_block in body_mesh_obj.data.shape_keys.key_blocks:
-            key_block.value = 0.0
-        for shape_name, shape_val in face_blendshapes.items():
-            key_block = body_mesh_obj.data.shape_keys.key_blocks.get(shape_name)
-            if key_block:
-                key_block.value = shape_val
-
-    # 6. Apply Body_base shaping & shrink keys
-    body_base_weights = {
-        0: 1.0,
-        6: 1.0,
-        7: 1.0,
-        14: 1.0,
-        25: 1.0,
-        26: 1.0,
-        30: 1.0,
-        31: 1.0,
-        32: 1.0,
-        33: 1.0,
-        34: 1.0,
-        35: 1.0,
-        36: 1.0,
-        41: 1.0,
-        42: 1.0,
-        43: 1.0,
-        44: 1.0,
-        45: 1.0,
-        46: 1.0,
-    }
-    apply_shape_key_weights_by_index(
-        bpy.data.objects.get("Body_base"), body_base_weights, "Body_base"
+    # 5-6B. Resolve and apply blendshapes (Body, Body_base, Outfit, Watch, Hair)
+    if getattr(cli_args, "face_anim", None):
+        effective_cfg["face_anim"] = cli_args.face_anim
+    neko_hair_mesh_names = (
+        "Bangs",
+        "Top Back",
+        "Under Side",
+        "Back",
+        "Side Bangs",
+        "Side",
+        "In Hair",
+        "Ribbon",
+        "Ears",
+        "_Pin.Back",
+        "_Pin.R",
+        "_Pin.L2",
+        "_Halo",
     )
-
-    # 6A. Apply Eternal Reunion outfit & Pocket Watch blendshapes
-    outfit_shape_keys_by_index = {
-        "UN1_Shirt": {0: 1.0, 4: 1.0},
-        "UN1_Skirt": {4: 1.0, 5: 1.0},
-        "UN1_ChestRibbon": {0: 1.0},
-        "UN2_Corset": {1: 1.0, 2: 1.0},
-        "UN2_Stocking": {0: 1.0, 1: 1.0},
-        "UN3_WaistChain": {0: 1.0, 1: 1.0},
-        "Pocket Watch": {5: 1.0},
-    }
-    for outfit_mesh_name, outfit_weights in outfit_shape_keys_by_index.items():
-        apply_shape_key_weights_by_index(
-            bpy.data.objects.get(outfit_mesh_name), outfit_weights, outfit_mesh_name
+    blendshape_fbx_paths = []
+    for fbx_item in (
+        cli_args.shinano_fbx,
+        cli_args.outfit_fbx,
+        cli_args.watch_fbx,
+        *(list(hair_spec.get("all_fbxs", [])) if hair_mode == "custom" else ()),
+        cli_args.hair_fbx if is_calibrated_neko else "",
+    ):
+        if fbx_item and fbx_item not in blendshape_fbx_paths:
+            blendshape_fbx_paths.append(fbx_item)
+    blendshape_resolution = blendshape_helper.resolve_character_blendshapes(
+        effective_cfg,
+        fbx_paths=blendshape_fbx_paths,
+        character_hints=("shinano", "reunion"),
+        default_face_mesh="Body",
+        override_source=getattr(cli_args, "blendshapes_source", None),
+        override_cfg_path=getattr(cli_args, "blendshapes_cfg", None),
+        override_unity_scene=getattr(cli_args, "unity_scene", None),
+        override_avatar_name=getattr(cli_args, "unity_avatar_name", None),
+        override_face_anim=getattr(cli_args, "face_anim", None),
+        save_cfg_path=getattr(cli_args, "save_blendshapes_cfg", None),
+        exclude_meshes_when_no_custom_hair=(not is_calibrated_neko),
+        custom_hair_mesh_names=neko_hair_mesh_names,
+    )
+    resolved_mesh_weights = blendshape_resolution["mesh_weights"]
+    total_weight_entries = sum(
+        len(weights_map) for weights_map in resolved_mesh_weights.values()
+    )
+    source_detail = (
+        blendshape_resolution.get("cfg_path")
+        or blendshape_resolution.get("unity_scene")
+        or blendshape_resolution.get("face_anim")
+        or "-"
+    )
+    print(
+        i18n.translate(
+            "blendshapes.loaded_source",
+            source=blendshape_resolution["source_used"],
+            meshes=len(resolved_mesh_weights),
+            weights=total_weight_entries,
+            detail=source_detail,
+        )
+    )
+    if blendshape_resolution.get("saved_cfg_path"):
+        print(
+            i18n.translate(
+                "blendshapes.saved_cfg",
+                path=blendshape_resolution["saved_cfg_path"],
+            )
         )
 
-    # 6B. Apply indexed Neko Tied Bob hair blendshapes (Shinano.unity / MA Shinano.prefab)
-    hair_shape_keys_by_index = {
-        "Bangs": {9: 0.284, 17: 1.0, 22: 1.0},
-        "Side Bangs": {0: 1.0, 4: 1.0},
-        "Side": {
-            5: 1.0,
-            28: 1.0,
-            31: 1.0,
-            34: 0.136,
-            35: 0.642,
-            37: 1.0,
-            40: 0.603,
-            41: 1.0,
-            42: 1.0,
-            43: 0.328,
-            44: 1.0,
-            45: 1.0,
-        },
-        "Back": {8: 1.0, 12: 0.47, 13: 0.072},
-        "Under Side": {
-            8: 1.0,
-            17: 0.778,
-            22: 0.203,
-            28: 0.788,
-            33: 0.425,
-            34: 1.0,
-            39: 0.317,
-            43: 0.510,
-        },
-        "In Hair": {
-            4: 0.725,
-            5: 0.075,
-            6: 0.40,
-            10: 1.0,
-            11: 1.0,
-            15: 1.0,
-            16: 0.485,
-            17: 0.796,
-            19: 0.945,
-            20: 0.117,
-            21: 0.10,
-            22: 0.315,
-            23: 0.166,
-            24: 0.427,
-            25: 0.475,
-            29: 1.0,
-            30: 0.639,
-            31: 1.0,
-            32: 1.0,
-            33: 1.0,
-            37: 0.399,
-            38: 0.221,
-            40: 0.393,
-            42: 0.126,
-            44: 1.0,
-            45: 1.0,
-            47: 0.488,
-        },
-    }
-    if hair_mode == "custom":
-        for hair_mesh_name, hair_weights in hair_shape_keys_by_index.items():
-            hair_mesh_obj = bpy.data.objects.get(hair_mesh_name)
-            if hair_mesh_obj and hair_mesh_obj.data.shape_keys:
-                apply_shape_key_weights_by_index(
-                    hair_mesh_obj, hair_weights, hair_mesh_name
-                )
+    applied_scene_summary = blendshape_helper.apply_blendshapes_to_blender_scene(
+        bpy,
+        resolved_mesh_weights,
+        exclude_meshes=() if hair_mode == "custom" else custom_hair_mesh_names,
+        lr_symmetry_meshes=(),
+        reset_unlisted=True,
+    )
+    for mesh_label, counts_pair in applied_scene_summary.items():
+        print(
+            i18n.translate(
+                "michael.build.applied_shape_keys",
+                count=counts_pair[0],
+                name=mesh_label,
+            )
+        )
 
     bpy.context.view_layer.update()
+
+    # Extract deformed cranial/head reference before optionally removing default hair
+    skull_ref = blender_hair_helper.extract_skull_reference(
+        bpy,
+        arm_base,
+        [bpy.data.objects.get("Body")],
+        [
+            bpy.data.objects.get(hair_item)
+            for hair_item in ("Hair_base", "Hair_back", "Hair_bang", "Hair_side")
+        ],
+    )
+
+    if (not is_calibrated_neko) and hair_mode in ("custom", "none"):
+        blender_hair_helper.remove_default_hair_meshes(
+            bpy,
+            "shinano_er",
+            remove_shinano_ears_if_replaced=True,
+        )
 
     # 7. Active mesh inventory and 4x2 Atlas quadrant mapping
     active_mesh_configs = {
@@ -1036,7 +982,7 @@ def build_shinano_er_for_gtav(cli_args):
         "Pocket Watch": {"atlas_col": 1, "atlas_row": 0, "shrink_cull": False},
     }
 
-    if hair_mode == "custom":
+    if is_calibrated_neko:
         active_mesh_configs.update(
             {
                 "Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
@@ -1080,6 +1026,83 @@ def build_shinano_er_for_gtav(cli_args):
                 },
             }
         )
+    elif is_arbitrary_custom_hair:
+        print(
+            i18n.translate(
+                "unity_scene.hair_custom_active",
+                reason=hair_reason,
+                path=custom_hair_primary_fbx or hair_spec.get("source_input", ""),
+            )
+        )
+        import_res = blender_hair_helper.import_and_filter_custom_hair_meshes(
+            bpy,
+            mathutils,
+            hair_spec,
+            unity_config=unity_config,
+            resolved_mesh_weights=resolved_mesh_weights,
+        )
+        custom_hair_objs = import_res["meshes"]
+        imported_armatures.extend(import_res["armatures"])
+        eff_hair_scale = float(
+            cli_args.hair_scale
+            if getattr(cli_args, "hair_scale", None) is not None
+            else (target_cfg.get("hair_scale") or 1.0)
+        )
+        eff_hair_offset = blender_hair_helper.parse_offset_triple(
+            cli_args.hair_offset
+            if getattr(cli_args, "hair_offset", None) is not None
+            else target_cfg.get("hair_offset")
+        )
+        blender_hair_helper.align_custom_hair_to_avatar(
+            bpy,
+            mathutils,
+            custom_hair_objs,
+            skull_ref,
+            hair_spec,
+            import_res,
+            hair_scale_override=eff_hair_scale,
+            hair_offset_override=eff_hair_offset,
+        )
+        use_double_cell = len(hair_spec.get("materials", [])) >= 2
+        er_quad_w = 1024 if use_double_cell else 512
+        er_quad_uv = (0.5, 0.0, 0.5, 0.5) if use_double_cell else (0.5, 0.0, 0.25, 0.5)
+        loaded_manifest = unity_hair_helper.load_custom_hair_manifest(cli_args.texture_dir)
+        if (
+            loaded_manifest is None
+            or loaded_manifest.get("mode") != "custom"
+            or loaded_manifest.get("source_input") != hair_spec.get("source_input")
+        ):
+            loaded_manifest = unity_hair_helper.build_inmemory_manifest_fallback(
+                hair_spec,
+                quad_size=(er_quad_w, 512),
+                quad_uv_rect=er_quad_uv,
+            )
+        body_ref_obj = bpy.data.objects.get("Body")
+        body_uv_name = (
+            body_ref_obj.data.uv_layers[0].name
+            if body_ref_obj and body_ref_obj.data.uv_layers
+            else "UVMap"
+        )
+        blender_hair_helper.remap_custom_hair_uvs(
+            custom_hair_objs,
+            loaded_manifest,
+            fallback_rect=er_quad_uv,
+            target_uv_name=body_uv_name,
+        )
+        blender_hair_helper.retarget_custom_hair_weights_to_head(
+            custom_hair_objs, "SKEL_Head"
+        )
+        for hair_obj in custom_hair_objs:
+            active_mesh_configs[hair_obj.name] = {
+                "uv_prepacked": True,
+                "is_custom_hair": True,
+                "shrink_cull": False,
+            }
+        print(
+            i18n.translate("common.hair_aligned_summary", count=len(custom_hair_objs))
+        )
+    elif hair_mode == "none":
+        print(i18n.translate("common.hair_none_active"))
     else:
         active_mesh_configs.update(
             {
@@ -1294,7 +1317,11 @@ def build_shinano_er_for_gtav(cli_args):
             hat_rot_matrix = mathutils.Matrix.Rotation(math.radians(-11.464), 4, "X")
             hat_pos_delta = mathutils.Vector((0.0, 0.02655, 0.01388))
 
-        is_neko_hair = (hair_mode == "custom") and (mesh_name in neko_hair_mesh_names)
+        is_neko_hair = is_calibrated_neko and (mesh_name in neko_hair_mesh_names)
+        # Unity calibration for Neko BoB_Lime was measured with Neck=0.9 (Head at (0, 0.012822, 1.128282)).
+        baseline_neck_scale = 0.9
+        baseline_hair_scale = 1.08696
+        baseline_head_to_hair_offset = mathutils.Vector((0.000653, -0.002032, 0.074354))
         neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
         custom_hair_node_scale = unity_scene_helper.get_uniform_scale(
             unity_config,
@@ -1302,26 +1329,14 @@ def build_shinano_er_for_gtav(cli_args):
             default_scale=1.0,
         )
         head_pose_bone = arm_base.pose.bones.get("Head") if arm_base else None
-        head_rest_bone = arm_base.data.bones.get("Head") if arm_base else None
-        head_world_scale = 1.0
         if head_pose_bone is not None and arm_base is not None:
             head_world_scale = (arm_base.matrix_world @ head_pose_bone.matrix).to_scale().x
-            if head_rest_bone is not None:
-                head_delta = (
-                    arm_base.matrix_world @ head_pose_bone.head
-                    - arm_base.matrix_world @ head_rest_bone.head_local
-                )
-                neko_target_hair_root = (
-                    mathutils.Vector(
-                        (
-                            0.000653 * armature_override_scale[0],
-                            0.010790 * armature_override_scale[1],
-                            1.202636 * armature_override_scale[2],
-                        )
-                    )
-                    + head_delta
-                )
-        neko_hair_scale = custom_hair_node_scale * head_world_scale
+            head_scale_ratio = head_world_scale / baseline_neck_scale
+            head_world_pos = arm_base.matrix_world @ head_pose_bone.head
+            neko_target_hair_root = head_world_pos + (baseline_head_to_hair_offset * head_scale_ratio)
+            neko_hair_scale = baseline_hair_scale * custom_hair_node_scale * head_scale_ratio
+        else:
+            neko_hair_scale = baseline_hair_scale * custom_hair_node_scale
         neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
 
         eval_world_matrix = evaluated_obj.matrix_world
@@ -1354,26 +1369,27 @@ def build_shinano_er_for_gtav(cli_args):
         bpy.context.collection.objects.link(proc_obj)
 
         # Remap UVs into the target quadrant or sub-quadrant of the 4x2 Atlas
-        u_scale = mesh_cfg.get("u_scale", 0.25)
-        v_scale = mesh_cfg.get("v_scale", 0.5)
-        if "u_offset" in mesh_cfg and "v_offset" in mesh_cfg:
-            u_offset = mesh_cfg["u_offset"]
-            v_offset = mesh_cfg["v_offset"]
-        else:
-            atlas_col = mesh_cfg["atlas_col"]
-            atlas_row = mesh_cfg["atlas_row"]
-            u_offset = atlas_col / 4.0
-            v_offset = atlas_row / 2.0
+        if not mesh_cfg.get("uv_prepacked"):
+            u_scale = mesh_cfg.get("u_scale", 0.25)
+            v_scale = mesh_cfg.get("v_scale", 0.5)
+            if "u_offset" in mesh_cfg and "v_offset" in mesh_cfg:
+                u_offset = mesh_cfg["u_offset"]
+                v_offset = mesh_cfg["v_offset"]
+            else:
+                atlas_col = mesh_cfg["atlas_col"]
+                atlas_row = mesh_cfg["atlas_row"]
+                u_offset = atlas_col / 4.0
+                v_offset = atlas_row / 2.0
 
-        clamp_v_flag = mesh_cfg.get("clamp_v", False)
+            clamp_v_flag = mesh_cfg.get("clamp_v", False)
 
-        if proc_obj.data.uv_layers:
-            uv_layer = proc_obj.data.uv_layers[0]
-            for loop_entry in uv_layer.data:
-                orig_u, orig_v = loop_entry.uv
-                if clamp_v_flag and orig_v > 1.0:
-                    orig_v = min(1.0, max(0.0, orig_v % 1.0))
-                loop_entry.uv = (u_offset + (orig_u * u_scale), v_offset + (orig_v * v_scale))
+            if proc_obj.data.uv_layers:
+                uv_layer = proc_obj.data.uv_layers[0]
+                for loop_entry in uv_layer.data:
+                    orig_u, orig_v = loop_entry.uv
+                    if clamp_v_flag and orig_v > 1.0:
+                        orig_v = min(1.0, max(0.0, orig_v % 1.0))
+                    loop_entry.uv = (u_offset + (orig_u * u_scale), v_offset + (orig_v * v_scale))
 
         # Assign vertex weights to valid GTA V bones
         vgroup_names_by_idx = {
@@ -1386,7 +1402,9 @@ def build_shinano_er_for_gtav(cli_args):
         vertex_weight_map = {
             vert_idx: {} for vert_idx in range(len(baked_mesh.vertices))
         }
-        if mesh_name == "UN1_Skirt":
+        if mesh_cfg.get("is_custom_hair"):
+            pass
+        elif mesh_name == "UN1_Skirt":
             for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
                 ydd_vert_co = baked_mesh.vertices[new_vert_idx].co
                 vertex_weight_map[new_vert_idx] = compute_skirt_vertex_weights(
@@ -1422,7 +1440,8 @@ def build_shinano_er_for_gtav(cli_args):
                 fallback_bone = (
                     "SKEL_Head"
                     if (
-                        "head" in mesh_name.lower()
+                        mesh_cfg.get("is_custom_hair")
+                        or "head" in mesh_name.lower()
                         or "hair" in mesh_name.lower()
                         or "glasses" in mesh_name.lower()
                         or "beret" in mesh_name.lower()
@@ -1596,8 +1615,17 @@ def build_shinano_er_for_gtav(cli_args):
         ydrexport.triangulate_mesh = lambda eval_mesh: eval_mesh
 
     # 11. Split large materials for the uint16 RAGE limit
-    split_oversized_material_geometries(
-        joined_mesh_obj, max_vertices_per_chunk=cli_args.max_verts_per_chunk
+    blender_hair_helper.split_oversized_material_geometries(
+        joined_mesh_obj,
+        max_vertices_per_chunk=cli_args.max_verts_per_chunk,
+        log_callback=lambda mat_name, poly_count, chunk_total: print(
+            i18n.translate(
+                "michael.build.splitting_material",
+                name=mat_name,
+                count=poly_count,
+                chunks=chunk_total,
+            )
+        ),
     )
 
     # 12. Build Sollumz Drawable Dictionary hierarchy
@@ -1720,6 +1748,32 @@ def parse_blender_cli_args():
         help=i18n.translate("michael.build.arg_hair_fbx"),
     )
     argument_parser.add_argument(
+        "--hair",
+        default=None,
+        help="Custom Unity hair selector (.prefab, .fbx, auto, default, none)",
+    )
+    argument_parser.add_argument(
+        "--hair-mat",
+        default=None,
+        help="Optional Unity .mat override for raw FBX hair",
+    )
+    argument_parser.add_argument(
+        "--hair-tex",
+        default=None,
+        help="Optional texture override for custom hair",
+    )
+    argument_parser.add_argument(
+        "--hair-scale",
+        type=float,
+        default=None,
+        help="Optional uniform scale multiplier for custom hair",
+    )
+    argument_parser.add_argument(
+        "--hair-offset",
+        default=None,
+        help="Optional X,Y,Z Unity offset tweak for custom hair",
+    )
+    argument_parser.add_argument(
         "--unity-scene",
         default=None,
         help="Optional Unity scene path override for scale extraction",
@@ -1733,6 +1787,22 @@ def parse_blender_cli_args():
         "--face-anim",
         default=None,
         help=i18n.translate("michael.build.arg_face_anim"),
+    )
+    argument_parser.add_argument(
+        "--blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_cfg"),
+    )
+    argument_parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("blendshapes.cli_source"),
+    )
+    argument_parser.add_argument(
+        "--save-blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_save_cfg"),
     )
     argument_parser.add_argument(
         "--texture-dir",
@@ -1771,7 +1841,14 @@ def parse_blender_cli_args():
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    target_cfg = project_paths.get_character_paths(parsed_args.target_character)
+    target_protagonist = project_paths.normalize_protagonist_key(
+        parsed_args.target_character
+    )
+    parsed_args.target_character = target_protagonist
+    target_cfg = project_paths.get_character_paths(
+        target_protagonist,
+        avatar_override="shinano_er",
+    )
     parsed_args.target_cfg = target_cfg
     parsed_args.skeleton_yft = parsed_args.skeleton_yft or str(target_cfg["skeleton_yft"])
     parsed_args.shinano_fbx = parsed_args.shinano_fbx or str(
@@ -1779,11 +1856,16 @@ def parse_blender_cli_args():
     )
     parsed_args.outfit_fbx = parsed_args.outfit_fbx or str(target_cfg.get("fbx_outfit", ""))
     parsed_args.watch_fbx = parsed_args.watch_fbx or str(target_cfg.get("fbx_watch", ""))
+    parsed_args.cli_hair_fbx_explicit = parsed_args.hair_fbx is not None
     parsed_args.hair_fbx = (
         parsed_args.hair_fbx
         if parsed_args.hair_fbx is not None
         else str(target_cfg.get("fbx_hair", ""))
     )
+    if parsed_args.hair_mat is None:
+        parsed_args.hair_mat = str(target_cfg.get("hair_mat", "") or "")
+    if parsed_args.hair_tex is None:
+        parsed_args.hair_tex = str(target_cfg.get("hair_tex", "") or "")
     parsed_args.unity_scene = (
         parsed_args.unity_scene
         if parsed_args.unity_scene is not None
@@ -1795,11 +1877,52 @@ def parse_blender_cli_args():
         else str(target_cfg.get("unity_avatar_name", ""))
     )
     parsed_args.face_anim = parsed_args.face_anim or str(target_cfg.get("face_anim", ""))
+    parsed_args.blendshapes_cfg = (
+        parsed_args.blendshapes_cfg
+        if parsed_args.blendshapes_cfg is not None
+        else str(target_cfg.get("blendshapes_cfg", ""))
+    )
+    parsed_args.blendshapes_source = (
+        parsed_args.blendshapes_source
+        if parsed_args.blendshapes_source is not None
+        else str(target_cfg.get("blendshapes_source", "auto"))
+    )
     parsed_args.texture_dir = parsed_args.texture_dir or str(target_cfg["textures_dir"])
     parsed_args.atlas_png = parsed_args.atlas_png or Path(target_cfg["atlas_png"]).name
     parsed_args.normal_png = parsed_args.normal_png or Path(target_cfg["normal_png"]).name
     parsed_args.spec_png = parsed_args.spec_png or Path(target_cfg["spec_png"]).name
     parsed_args.output_dir = parsed_args.output_dir or str(target_cfg["exported_models_dir"])
+
+    def _to_optional_host_path(raw_val: str) -> str:
+        trimmed = str(raw_val or "").strip()
+        if not trimmed:
+            return ""
+        if (
+            not os.path.isabs(trimmed)
+            and not trimmed.startswith("/mnt/")
+            and not (len(trimmed) >= 3 and trimmed[1:3] in (":/", ":\\"))
+        ):
+            return trimmed
+        return str(project_paths.to_host_path(trimmed))
+
+    for path_attr_name in (
+        "skeleton_yft",
+        "shinano_fbx",
+        "outfit_fbx",
+        "watch_fbx",
+        "hair_fbx",
+        "hair_mat",
+        "hair_tex",
+        "unity_scene",
+        "face_anim",
+        "blendshapes_cfg",
+        "save_blendshapes_cfg",
+        "texture_dir",
+        "output_dir",
+    ):
+        attr_val = getattr(parsed_args, path_attr_name, None)
+        if attr_val:
+            setattr(parsed_args, path_attr_name, _to_optional_host_path(attr_val))
 
     return parsed_args
 

@@ -10,6 +10,7 @@ meshes, deployed RPF headers, code quality rules, and mirror synchronization.
 import argparse
 import ast
 import filecmp
+import os
 import py_compile
 import re as regex_module
 import string
@@ -466,9 +467,9 @@ def test_code_quality_and_mirror_sync() -> bool:
         scripts_dir = project_paths.get_scripts_root_dir()
         deploy_dir = project_paths.get_deploy_tools_dir()
         common_dir = project_paths.get_common_tools_dir()
-        franklin_dir = project_paths.get_character_paths("franklin")["character_dir"]
-        michael_dir = project_paths.get_character_paths("michael")["character_dir"]
-        trevor_dir = project_paths.get_character_paths("trevor")["character_dir"]
+        franklin_dir = project_paths.get_avatar_paths("shinano_casual")["character_dir"]
+        michael_dir = project_paths.get_avatar_paths("shinano_er")["character_dir"]
+        trevor_dir = project_paths.get_avatar_paths("miltina_maid")["character_dir"]
     else:
         scripts_dir = root_dir / "scripts"
         deploy_dir = root_dir / "_deploy_tools"
@@ -483,6 +484,9 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
         (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
+        (common_dir / "unity_hair_helper.py", deploy_dir / "unity_hair_helper.py"),
+        (common_dir / "blender_hair_helper.py", deploy_dir / "blender_hair_helper.py"),
+        (common_dir / "blendshape_helper.py", deploy_dir / "blendshape_helper.py"),
         (
             common_dir / "texture_calibration_helper.py",
             deploy_dir / "texture_calibration_helper.py",
@@ -770,6 +774,702 @@ def test_unity_scene_and_fallbacks() -> bool:
             i18n.translate("tests.texture_fallback_ready"), tex_ok, "64x64 RGBA"
         )
 
+        import blendshape_helper
+
+        presets_dir = PROJECT_ROOT_DIR / "configs"
+        expected_presets = (
+            "shinano_blendshapes.cfg",
+            "shinano_er_blendshapes.cfg",
+            "miltina_blendshapes.cfg",
+        )
+        presets_ok = True
+        total_preset_meshes = 0
+        for preset_name in expected_presets:
+            preset_path = presets_dir / preset_name
+            if not preset_path.is_file():
+                presets_ok = False
+                continue
+            loaded_meshes, _loaded_meta = blendshape_helper.load_blendshapes_cfg(
+                preset_path
+            )
+            if not loaded_meshes:
+                presets_ok = False
+            total_preset_meshes += len(loaded_meshes)
+
+        roundtrip_cfg_path = temp_root / "roundtrip_blendshapes.cfg"
+        special_weights = {
+            "Body": {
+                "======Nail======": 0.0,
+                "(T1)highlight_main_x": 0.0,
+                "mouth_yaeba(tooth)_top_R": 1.0,
+                "index:5": 0.725,
+            },
+            "Milltina_cloth_hat": {
+                "Option_Twin tail": 1.0,
+            },
+        }
+        blendshape_helper.save_blendshapes_cfg(
+            roundtrip_cfg_path,
+            special_weights,
+            metadata={"avatar": "RoundTripTest", "source": "unit_test"},
+        )
+        parsed_roundtrip, parsed_meta = blendshape_helper.load_blendshapes_cfg(
+            roundtrip_cfg_path
+        )
+        presets_ok = (
+            presets_ok
+            and parsed_meta.get("avatar") == "RoundTripTest"
+            and abs(parsed_roundtrip["Body"]["mouth_yaeba(tooth)_top_R"] - 1.0) < 1e-6
+            and abs(parsed_roundtrip["Body"]["index:5"] - 0.725) < 1e-6
+            and abs(parsed_roundtrip["Body"]["(T1)highlight_main_x"]) < 1e-6
+            and "======Nail======" in parsed_roundtrip["Body"]
+            and abs(parsed_roundtrip["Milltina_cloth_hat"]["Option_Twin tail"] - 1.0)
+            < 1e-6
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_cfg_presets"),
+            presets_ok,
+            f"presets={len(expected_presets)}, meshes={total_preset_meshes}",
+        )
+
+        hair_guid = "11111111222222223333333344444444"
+        prefab_file = temp_root / "TestHair.prefab"
+        prefab_meta_file = temp_root / "TestHair.prefab.meta"
+        prefab_meta_file.write_text(
+            f"fileFormatVersion: 2\nguid: {hair_guid}\n",
+            encoding="utf-8",
+        )
+        prefab_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &1000",
+                    "GameObject:",
+                    "  m_Name: Bangs",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1001",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1000}",
+                    "  m_Children: []",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!137 &1002",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 1000}",
+                    "  m_Enabled: 1",
+                    "  m_BlendShapeWeights:",
+                    "  - 0",
+                    "  - 50",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        blend_scene_file = temp_root / "SyntheticBlendAvatar.unity"
+        blend_scene_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &100",
+                    "GameObject:",
+                    "  m_Name: BlendAvatar",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &101",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 100}",
+                    "  m_Children:",
+                    "  - {fileID: 301}",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!1 &300",
+                    "GameObject:",
+                    "  m_Name: Body_base",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &301",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 300}",
+                    "  m_Children: []",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!137 &302",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 300}",
+                    "  m_Enabled: 1",
+                    "  m_BlendShapeWeights:",
+                    "  - 100",
+                    "--- !u!1001 &900",
+                    "PrefabInstance:",
+                    "  m_Modification:",
+                    "    m_TransformParent: {fileID: 101}",
+                    "    m_Modifications:",
+                    "    - target: {fileID: 1002, guid: 11111111222222223333333344444444}",
+                    "      propertyPath: m_BlendShapeWeights.Array.data[0]",
+                    "      value: 75",
+                    f"  m_SourcePrefab: {{fileID: 100100000, guid: {hair_guid}}}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        anim_file = temp_root / "SyntheticFace.anim"
+        anim_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "  - serializedVersion: 2",
+                    "    curve:",
+                    "      m_Curve:",
+                    "      - serializedVersion: 3",
+                    "        value: 80",
+                    "    attribute: blendShape.eye_big",
+                    "    path: Body",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        extracted_blend = blendshape_helper.extract_unity_scene_blendshapes(
+            blend_scene_file,
+            avatar_name="BlendAvatar",
+            unity_assets_root=temp_root,
+        )
+        unity_extract_ok = (
+            extracted_blend["loaded"]
+            and abs(extracted_blend["mesh_weights"]["Body_base"]["index:0"] - 1.0)
+            < 1e-4
+            and abs(extracted_blend["mesh_weights"]["Bangs"]["index:0"] - 0.75) < 1e-4
+            and abs(extracted_blend["mesh_weights"]["Bangs"]["index:1"] - 0.5) < 1e-4
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_unity_extract"),
+            unity_extract_ok,
+            f"meshes={len(extracted_blend['mesh_weights'])}",
+        )
+
+        test_char_cfg = {
+            "blendshapes_source": "auto",
+            "blendshapes_cfg": str(roundtrip_cfg_path),
+            "unity_scene": str(blend_scene_file),
+            "unity_avatar_name": "BlendAvatar",
+            "face_anim": str(anim_file),
+        }
+        res_auto_unity = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+        )
+        res_forced_cfg = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+            override_source="cfg",
+        )
+        test_char_cfg["unity_scene"] = ""
+        res_auto_cfg = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+        )
+        resolution_ok = (
+            res_auto_unity["source_used"] == "unity"
+            and abs(res_auto_unity["mesh_weights"]["Body"]["eye_big"] - 0.8) < 1e-4
+            and res_forced_cfg["source_used"] == "cfg"
+            and "index:5" in res_forced_cfg["mesh_weights"]["Body"]
+            and res_auto_cfg["source_used"] == "cfg"
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_resolution_order"),
+            resolution_ok,
+            f"{res_auto_unity['source_used']}/{res_forced_cfg['source_used']}/{res_auto_cfg['source_used']}",
+        )
+
+    return suite_passed
+
+
+def test_avatar_interchangeability() -> bool:
+    """Validate 3x3 protagonist <-> VRChat avatar interchangeability matrix offline."""
+    import shutil
+    import tempfile
+
+    print(f"\n=== {i18n.translate('tests.suite_interchangeability')} ===")
+    suite_passed = True
+
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        temp_dir = Path(temp_dir_str)
+        example_cfg_path = project_paths.find_project_config_example()
+        temp_cfg_path = temp_dir / "vrc2gtav.cfg"
+        shutil.copy2(example_cfg_path, temp_cfg_path)
+        for subdir_name in (
+            "1_Franklin_Shinano_Casual",
+            "2_Michael_Shinano_EternalReunion",
+            "3_Trevor_Miltina_Maid",
+            "configs",
+            "scripts",
+            "_deploy_tools",
+        ):
+            (temp_dir / subdir_name).mkdir(parents=True, exist_ok=True)
+
+        previous_env_cfg = os.environ.get(project_paths.CONFIG_ENV_VAR_NAME)
+        os.environ[project_paths.CONFIG_ENV_VAR_NAME] = str(temp_cfg_path)
+        project_paths.invalidate_config_cache()
+        try:
+            protagonists = list(project_paths.list_available_protagonists())
+            avatars = list(project_paths.list_available_avatars())
+            expected_ped_map = {
+                "michael": ("player_zero", "uppr_000_u.ydd"),
+                "franklin": ("player_one", "uppr_008_u.ydd"),
+                "trevor": ("player_two", "uppr_000_u.ydd"),
+            }
+
+            matrix_ok = len(protagonists) == 3 and len(avatars) == 3
+            isolated_targets = set()
+            for prot_key in protagonists:
+                expected_ped, expected_ydd = expected_ped_map[prot_key]
+                for avatar_id in avatars:
+                    resolved_cfg = project_paths.get_character_paths(
+                        prot_key, avatar_override=avatar_id
+                    )
+                    preset_info = project_paths.get_avatar_preset_info(avatar_id)
+                    if resolved_cfg["ped_name"] != expected_ped:
+                        matrix_ok = False
+                    if Path(resolved_cfg["skeleton_yft"]).name != f"{expected_ped}.yft":
+                        matrix_ok = False
+                    if Path(resolved_cfg["target_model_ydd"]).name != expected_ydd:
+                        matrix_ok = False
+                    if Path(resolved_cfg["target_yft"]).name != f"{expected_ped}.yft":
+                        matrix_ok = False
+                    if prot_key != preset_info["default_character"]:
+                        if Path(resolved_cfg["exported_models_dir"]).name != expected_ped:
+                            matrix_ok = False
+                    isolated_targets.add(str(resolved_cfg["target_model_ydd"]))
+
+            if len(isolated_targets) != 9:
+                matrix_ok = False
+
+            suite_passed &= print_status_result(
+                i18n.translate("tests.interchangeability_config"),
+                matrix_ok,
+                f"3x3={len(isolated_targets)} targets",
+            )
+
+            project_paths.set_protagonist_avatar("michael", "miltina_maid", temp_cfg_path)
+            project_paths.set_protagonist_avatar("franklin", "shinano_er", temp_cfg_path)
+            project_paths.set_protagonist_avatar("trevor", "shinano_casual", temp_cfg_path)
+
+            import blendshape_helper
+
+            swapped_michael = project_paths.get_character_paths("michael")
+            swapped_franklin = project_paths.get_character_paths("franklin")
+            swapped_trevor = project_paths.get_character_paths("trevor")
+            miltina_preset_cfg = Path(project_paths.get_avatar_paths("miltina_maid")["blendshapes_cfg"])
+            presets_ok = (
+                swapped_michael["avatar_id"] == "miltina_maid"
+                and swapped_michael["ped_name"] == "player_zero"
+                and swapped_franklin["avatar_id"] == "shinano_er"
+                and swapped_franklin["ped_name"] == "player_one"
+                and swapped_trevor["avatar_id"] == "shinano_casual"
+                and swapped_trevor["ped_name"] == "player_two"
+                and Path(swapped_michael["blendshapes_cfg"]).name == "miltina_blendshapes.cfg"
+                and Path(swapped_franklin["blendshapes_cfg"]).name == "shinano_er_blendshapes.cfg"
+                and Path(swapped_trevor["blendshapes_cfg"]).name == "shinano_blendshapes.cfg"
+                and miltina_preset_cfg.name == "miltina_blendshapes.cfg"
+                and blendshape_helper.AVATAR_PRESET_RELATIVE_PATHS["miltina_maid"].endswith(
+                    "miltina_blendshapes.cfg"
+                )
+            )
+            suite_passed &= print_status_result(
+                i18n.translate("tests.interchangeability_presets"),
+                presets_ok,
+                "michael->miltina, franklin->er, trevor->casual",
+            )
+        finally:
+            if previous_env_cfg is None:
+                os.environ.pop(project_paths.CONFIG_ENV_VAR_NAME, None)
+            else:
+                os.environ[project_paths.CONFIG_ENV_VAR_NAME] = previous_env_cfg
+            project_paths.invalidate_config_cache()
+
+    scripts_root = (
+        project_paths.get_scripts_root_dir()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR / "scripts"
+    )
+    required_cli_tokens = [
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--target-character"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--target-character"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--target-character"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--target-character"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--target-character"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--target-character"),
+        (scripts_root / "common_tools" / "apply_characters.py", "--avatar"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--save-assignment"),
+    ]
+    builders_ok = all(
+        file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
+        for file_path, expected_token in required_cli_tokens
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.interchangeability_builders"),
+        builders_ok,
+        f"{len(required_cli_tokens)}/{len(required_cli_tokens)} CLI handlers",
+    )
+    return suite_passed
+
+
+def test_custom_unity_hair_support() -> bool:
+    """Validate CLI flags, Prefab/PrefabVariant resolution, UDIM remap & tail filtering."""
+    print(i18n.translate("tests.sec_custom_hair_title"))
+    import tempfile
+    import types
+    import blender_hair_helper
+    import unity_hair_helper
+    from PIL import Image
+
+    suite_passed = True
+    scripts_root = (
+        project_paths.get_scripts_root_dir()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR / "scripts"
+    )
+    required_hair_cli_files = [
+        scripts_root / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py",
+        scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py",
+        scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py",
+        scripts_root / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py",
+        scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py",
+        scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py",
+        scripts_root / "common_tools" / "run_mod_manager.py",
+    ]
+    cli_ok = all(
+        file_item.is_file() and '"--hair"' in file_item.read_text(encoding="utf-8")
+        for file_item in required_hair_cli_files
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.hair_cli_flags"),
+        cli_ok,
+        f"{len(required_hair_cli_files)}/{len(required_hair_cli_files)} files",
+    )
+
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_hair_test_") as temp_root_str:
+        temp_root = Path(temp_root_str)
+        assets_dir = temp_root / "Assets"
+        hair_dir = assets_dir / "TestHairPkg"
+        hair_dir.mkdir(parents=True, exist_ok=True)
+
+        fbx_path = hair_dir / "TestHair.fbx"
+        fbx_path.write_bytes(b"Kaydara FBX Binary  \x00")
+        (hair_dir / "TestHair.fbx.meta").write_text(
+            "fileFormatVersion: 2\nguid: 11111111111111111111111111111111\n",
+            encoding="utf-8",
+        )
+
+        main_tex_path = hair_dir / "hair_main.png"
+        Image.new("RGBA", (8, 8), (220, 80, 120, 255)).save(main_tex_path)
+        (hair_dir / "hair_main.png.meta").write_text(
+            "fileFormatVersion: 2\nguid: 22222222222222222222222222222222\n",
+            encoding="utf-8",
+        )
+
+        alpha_mask_img = Image.new("RGBA", (8, 8), (255, 255, 255, 255))
+        for px_idx in range(4, 8):
+            for py_idx in range(4, 8):
+                alpha_mask_img.putpixel((px_idx, py_idx), (0, 0, 0, 255))
+        alpha_mask_path = hair_dir / "hair_alpha.png"
+        alpha_mask_img.save(alpha_mask_path)
+        (hair_dir / "hair_alpha.png.meta").write_text(
+            "fileFormatVersion: 2\nguid: 33333333333333333333333333333333\n",
+            encoding="utf-8",
+        )
+
+        mat_main_path = hair_dir / "HairMain.mat"
+        mat_main_path.write_text(
+            "%YAML 1.1\n"
+            "--- !u!21 &2100000\n"
+            "Material:\n"
+            "  m_Name: HairMain\n"
+            "  m_SavedProperties:\n"
+            "    m_TexEnvs:\n"
+            "    - _MainTex:\n"
+            "        m_Texture: {fileID: 2800000, guid: 22222222222222222222222222222222, type: 3}\n"
+            "    - _AlphaMask:\n"
+            "        m_Texture: {fileID: 2800000, guid: 33333333333333333333333333333333, type: 3}\n"
+            "    m_Floats:\n"
+            "    - _Metallic: 0.0\n"
+            "    m_Colors:\n"
+            "    - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "HairMain.mat.meta").write_text(
+            "fileFormatVersion: 2\nguid: 44444444444444444444444444444444\n",
+            encoding="utf-8",
+        )
+
+        mat_pin_path = hair_dir / "GoldPin.mat"
+        mat_pin_path.write_text(
+            "%YAML 1.1\n"
+            "--- !u!21 &2100000\n"
+            "Material:\n"
+            "  m_Name: GoldPin\n"
+            "  m_SavedProperties:\n"
+            "    m_TexEnvs:\n"
+            "    - _MainTex:\n"
+            "        m_Texture: {fileID: 0}\n"
+            "    m_Floats:\n"
+            "    - _Metallic: 0.95\n"
+            "    m_Colors:\n"
+            "    - _Color: {r: 0.8, g: 0.6, b: 0.1, a: 1}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "GoldPin.mat.meta").write_text(
+            "fileFormatVersion: 2\nguid: 55555555555555555555555555555555\n",
+            encoding="utf-8",
+        )
+
+        base_prefab = hair_dir / "BaseHair.prefab"
+        base_prefab.write_text(
+            "%YAML 1.1\n"
+            "--- !u!1 &10\n"
+            "GameObject:\n"
+            "  m_Name: BaseHair\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &11\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 10}\n"
+            "  m_LocalScale: {x: 1.05, y: 1.05, z: 1.05}\n"
+            "  m_Children:\n"
+            "  - {fileID: 21}\n"
+            "  - {fileID: 31}\n"
+            "  - {fileID: 41}\n"
+            "--- !u!1 &20\n"
+            "GameObject:\n"
+            "  m_Name: Bangs\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &21\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 20}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!137 &22\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 20}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 44444444444444444444444444444444, type: 2}\n"
+            "  m_Mesh: {fileID: 4300000, guid: 11111111111111111111111111111111, type: 3}\n"
+            "--- !u!1 &30\n"
+            "GameObject:\n"
+            "  m_Name: Side.R braided\n"
+            "  m_IsActive: 0\n"
+            "--- !u!4 &31\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 30}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!137 &32\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 30}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 44444444444444444444444444444444, type: 2}\n"
+            "  m_Mesh: {fileID: 4300002, guid: 11111111111111111111111111111111, type: 3}\n"
+            "--- !u!1 &40\n"
+            "GameObject:\n"
+            "  m_Name: HairPin\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &41\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!23 &42\n"
+            "MeshRenderer:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 55555555555555555555555555555555, type: 2}\n"
+            "--- !u!33 &43\n"
+            "MeshFilter:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Mesh: {fileID: 4300004, guid: 11111111111111111111111111111111, type: 3}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "BaseHair.prefab.meta").write_text(
+            "fileFormatVersion: 2\nguid: 66666666666666666666666666666666\n",
+            encoding="utf-8",
+        )
+
+        variant_prefab = hair_dir / "VariantHair.prefab"
+        variant_prefab.write_text(
+            "%YAML 1.1\n"
+            "--- !u!1001 &100100000\n"
+            "PrefabInstance:\n"
+            "  m_Modification:\n"
+            "    m_Modifications:\n"
+            "    - target: {fileID: 10, guid: 66666666666666666666666666666666, type: 3}\n"
+            "      propertyPath: m_Name\n"
+            "      value: VariantHair\n"
+            "  m_SourcePrefab: {fileID: 100100000, guid: 66666666666666666666666666666666, type: 3}\n",
+            encoding="utf-8",
+        )
+
+        spec_base = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=str(base_prefab),
+            unity_assets_root=str(assets_dir),
+        )
+        spec_variant = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=str(variant_prefab),
+            unity_assets_root=str(assets_dir),
+        )
+        suppressed_names = sorted(
+            {
+                name_item.lower()
+                for name_item in (
+                    list(spec_variant.get("inactive_meshes", []))
+                    + list(spec_variant.get("editor_only_meshes", []))
+                )
+            }
+        )
+        prefab_ok = (
+            spec_base.get("mode") == "custom"
+            and spec_variant.get("mode") == "custom"
+            and spec_variant.get("primary_fbx") == str(fbx_path)
+            and "side.r braided" in set(suppressed_names)
+            and "bangs" not in set(suppressed_names)
+            and len(spec_variant.get("materials", [])) >= 2
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.hair_prefab_variant"),
+            prefab_ok,
+            f"materials={len(spec_variant.get('materials', []))}, suppressed={suppressed_names}",
+        )
+
+        quad_diff, quad_norm, quad_spec, tile_entries = (
+            unity_hair_helper.pack_hair_materials_into_quadrant(
+                spec_variant["materials"],
+                quad_size=(1024, 1024),
+                quad_uv_rect=(0.5, 0.0, 0.5, 0.5),
+                gutter_px=4,
+            )
+        )
+        unity_hair_helper.save_custom_hair_manifest(temp_root, spec_variant, tile_entries)
+        loaded_manifest = unity_hair_helper.load_custom_hair_manifest(temp_root)
+        bangs_rect = unity_hair_helper.resolve_tile_uv_for_mesh_slot(
+            mesh_name="Bangs",
+            slot_index=0,
+            slot_count=1,
+            blender_mat_name="HairMain",
+            manifest=loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+        )
+        pin_rect = unity_hair_helper.resolve_tile_uv_for_mesh_slot(
+            mesh_name="HairPin",
+            slot_index=0,
+            slot_count=1,
+            blender_mat_name="GoldPin",
+            manifest=loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+        )
+
+        class _FakeUV:
+            def __init__(self, u_coord: float, v_coord: float):
+                self.x = u_coord
+                self.y = v_coord
+
+        fake_uv_data = [
+            types.SimpleNamespace(uv=_FakeUV(1.25, -0.20)),
+            types.SimpleNamespace(uv=_FakeUV(1.35, -0.10)),
+            types.SimpleNamespace(uv=_FakeUV(1.45, -0.15)),
+        ]
+        fake_mesh = types.SimpleNamespace(
+            name="Bangs",
+            data=types.SimpleNamespace(
+                uv_layers=types.SimpleNamespace(
+                    active=types.SimpleNamespace(name="map1", data=fake_uv_data),
+                ),
+                materials=[types.SimpleNamespace(name="HairMain")],
+                polygons=[types.SimpleNamespace(material_index=0, loop_indices=[0, 1, 2])],
+                remove=lambda *_args: None,
+            ),
+        )
+        # Keep __iter__ / __bool__ valid on fake_uv_layers for remap_custom_hair_uvs
+        class _FakeUVLayersList(list):
+            def __init__(self, layer_obj):
+                super().__init__([layer_obj])
+                self.active = layer_obj
+
+            def remove(self, layer_obj):
+                super().remove(layer_obj)
+
+        fake_mesh.data.uv_layers = _FakeUVLayersList(fake_mesh.data.uv_layers.active)
+        blender_hair_helper.remap_custom_hair_uvs(
+            [fake_mesh],
+            loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+            target_uv_name="UVMap",
+        )
+        u_after = fake_uv_data[0].uv.x
+        v_after = fake_uv_data[0].uv.y
+        uv_in_bangs_rect = (
+            bangs_rect[0] <= u_after <= bangs_rect[0] + bangs_rect[2]
+            and bangs_rect[1] <= v_after <= bangs_rect[1] + bangs_rect[3]
+            and bangs_rect != pin_rect
+            and fake_mesh.data.uv_layers[0].name == "UVMap"
+        )
+
+        ponytail_obj = types.SimpleNamespace(
+            name="tail",
+            vertex_groups=[types.SimpleNamespace(name="Hair_01")],
+        )
+        animal_tail_obj = types.SimpleNamespace(
+            name="Neko_Tail",
+            vertex_groups=[types.SimpleNamespace(name="Hips")],
+        )
+        tail_filter_ok = (
+            blender_hair_helper._is_hip_tail_not_hair_ponytail(
+                None, ponytail_obj, {"mesh_root_bones": {"tail": "Hair"}}
+            )
+            is False
+            and blender_hair_helper._is_hip_tail_not_hair_ponytail(
+                None, animal_tail_obj, {}
+            )
+            is True
+        )
+        pack_ok = (
+            quad_diff.size == (1024, 1024)
+            and quad_norm.size == (1024, 1024)
+            and quad_spec.size == (1024, 1024)
+            and uv_in_bangs_rect
+            and tail_filter_ok
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.hair_uv_packing"),
+            pack_ok,
+            f"u={u_after:.4f}, v={v_after:.4f}, uv_layer={fake_mesh.data.uv_layers[0].name}",
+        )
+
+        # Verify vrc2gtav_paths preserves keyword overrides without wrapping via to_host_path
+        temp_cfg = temp_root / "test_hair.cfg"
+        cfg_source = (
+            Path(project_paths.find_project_config_file())
+            if project_paths.has_project_config_file()
+            else PROJECT_ROOT_DIR / "vrc2gtav.cfg.example"
+        )
+        temp_cfg.write_text(cfg_source.read_text(encoding="utf-8"), encoding="utf-8")
+        previous_env_cfg = os.environ.get(project_paths.CONFIG_ENV_VAR_NAME)
+        os.environ[project_paths.CONFIG_ENV_VAR_NAME] = str(temp_cfg)
+        project_paths.invalidate_config_cache()
+        try:
+            project_paths.set_character_custom_hair("franklin", "none")
+            project_paths.set_character_custom_hair("trevor", "default", hair_scale="1.15")
+            fr_cfg = project_paths.get_character_paths("franklin")
+            tr_cfg = project_paths.get_character_paths("trevor")
+            kw_ok = (
+                fr_cfg.get("custom_hair") == "none"
+                and tr_cfg.get("custom_hair") == "default"
+                and str(tr_cfg.get("hair_scale")) == "1.15"
+            )
+            suite_passed &= print_status_result(
+                i18n.translate("tests.hair_cfg_keywords"),
+                kw_ok,
+                f"franklin={fr_cfg.get('custom_hair')}, trevor={tr_cfg.get('custom_hair')}",
+            )
+        finally:
+            if previous_env_cfg is None:
+                os.environ.pop(project_paths.CONFIG_ENV_VAR_NAME, None)
+            else:
+                os.environ[project_paths.CONFIG_ENV_VAR_NAME] = previous_env_cfg
+            project_paths.invalidate_config_cache()
+
     return suite_passed
 
 
@@ -784,6 +1484,8 @@ def run_source_only_validation_suite() -> bool:
         (i18n.translate("tests.suite_syntax"), test_python_syntax_compilation()),
         (i18n.translate("tests.suite_templates"), test_source_templates_and_dummies()),
         (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
+        (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
+        (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -806,6 +1508,8 @@ def run_full_validation_suite() -> bool:
         (i18n.translate("tests.suite_paths"), test_path_resolution()),
         (i18n.translate("tests.suite_dummies"), test_dummy_mesh_integrity()),
         (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
+        (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
+        (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

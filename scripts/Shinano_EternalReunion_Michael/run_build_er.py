@@ -42,19 +42,112 @@ def main() -> int:
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        default="michael",
+        help=i18n.translate("trevor.build.arg_target_char"),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+    )
+    parser.add_argument(
+        "--texture-dir",
+        default=None,
+    )
+    parser.add_argument(
+        "--hair",
+        default=None,
+        help=i18n.translate("common.hair_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-mat",
+        default=None,
+        help=i18n.translate("common.hair_mat_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-tex",
+        default=None,
+        help=i18n.translate("common.hair_tex_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-scale",
+        type=float,
+        default=None,
+        help=i18n.translate("common.hair_scale_cli_opt"),
+    )
+    parser.add_argument(
+        "--hair-offset",
+        default=None,
+        help=i18n.translate("common.hair_offset_cli_opt"),
+    )
+    parser.add_argument(
+        "--unity-scene",
+        default=None,
+        help=i18n.translate("common.unity_scene_cli_opt"),
+    )
+    parser.add_argument(
+        "--unity-avatar-name",
+        default=None,
+        help=i18n.translate("common.unity_avatar_cli_opt"),
+    )
+    parser.add_argument(
+        "--blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_cfg"),
+    )
+    parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("blendshapes.cli_source"),
+    )
+    parser.add_argument(
+        "--save-blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_save_cfg"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    project_paths.ensure_character_skeleton_yft("michael")
-    michael_cfg = project_paths.get_character_paths("michael")
+    target_protagonist = project_paths.normalize_protagonist_key(
+        parsed_args.target_character
+    )
+    project_paths.ensure_character_skeleton_yft(target_protagonist)
+    michael_cfg = project_paths.get_character_paths(
+        target_protagonist,
+        avatar_override="shinano_er",
+    )
     blender_script = michael_cfg["blender_script"]
     if not blender_script.exists():
         print(i18n.translate("michael.blender_missing", path=blender_script))
         return 1
 
-    blender_command, blender_env = project_paths.build_blender_command(blender_script)
+    extra_blender_args = ["--target-character", target_protagonist]
+    for flag_name, flag_val in (
+        ("--output-dir", parsed_args.output_dir),
+        ("--texture-dir", parsed_args.texture_dir),
+        ("--hair", parsed_args.hair),
+        ("--hair-mat", parsed_args.hair_mat),
+        ("--hair-tex", parsed_args.hair_tex),
+        ("--hair-offset", parsed_args.hair_offset),
+        ("--unity-scene", parsed_args.unity_scene),
+        ("--unity-avatar-name", parsed_args.unity_avatar_name),
+        ("--blendshapes-cfg", parsed_args.blendshapes_cfg),
+        ("--blendshapes-source", parsed_args.blendshapes_source),
+        ("--save-blendshapes-cfg", parsed_args.save_blendshapes_cfg),
+    ):
+        if flag_val:
+            extra_blender_args.extend([flag_name, str(flag_val)])
+    if parsed_args.hair_scale is not None:
+        extra_blender_args.extend(["--hair-scale", str(parsed_args.hair_scale)])
+
+    blender_command, blender_env = project_paths.build_blender_command(
+        blender_script,
+        extra_arguments=extra_blender_args,
+    )
     print(i18n.translate("michael.running_blender", command=" ".join(blender_command)))
     result = subprocess.run(
         blender_command,

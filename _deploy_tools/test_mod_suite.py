@@ -1,0 +1,1564 @@
+#!/usr/bin/env python3
+"""
+test_mod_suite.py
+=================
+Automated validation suite for verifying all Python scripts, trilingual
+translation catalogs, path resolution, compiled assets (.ydd, .ytd), dummy
+meshes, deployed RPF headers, code quality rules, and mirror synchronization.
+"""
+
+import argparse
+import ast
+import filecmp
+import os
+import py_compile
+import re as regex_module
+import string
+import struct
+import sys
+from pathlib import Path
+
+CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT_DIR = CURRENT_SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(CURRENT_SCRIPT_DIR))
+sys.path.insert(0, str(PROJECT_ROOT_DIR / "_deploy_tools"))
+
+try:
+    import vrc2gtav_i18n as i18n
+    import vrc2gtav_paths as project_paths
+except ImportError:
+    from common_tools import vrc2gtav_i18n as i18n
+    from common_tools import vrc2gtav_paths as project_paths
+
+
+def resolve_startup_language() -> None:
+    """Resolve UI language from CLI arguments, environment variables, or config."""
+    configured_language = None
+    try:
+        configured_language = project_paths.get_configured_language()
+    except FileNotFoundError:
+        configured_language = None
+    i18n.set_active_language(configured_language, cli_args=sys.argv[1:])
+
+
+def print_status_result(
+    test_label: str, success_condition: bool, detail_message: str = ""
+) -> bool:
+    """Print an ASCII-tagged pass/fail line using the active UI language."""
+    status_tag = i18n.translate(
+        "tests.status_pass" if success_condition else "tests.status_fail"
+    )
+    detail_suffix = f" - {detail_message}" if detail_message else ""
+    print(f"  {status_tag} {test_label}{detail_suffix}")
+    return success_condition
+
+
+def test_python_syntax_compilation() -> bool:
+    """Compile every tracked Python file to verify valid syntax."""
+    print(i18n.translate("tests.sec1_title"))
+    all_compiled_cleanly = True
+    python_files_found = sorted(PROJECT_ROOT_DIR.glob("**/*.py"))
+
+    for python_file_path in python_files_found:
+        if any(
+            ignored in python_file_path.parts
+            for ignored in ("staging", ".git", "__pycache__", ".venv")
+        ):
+            continue
+        try:
+            py_compile.compile(str(python_file_path), doraise=True)
+            print_status_result(
+                python_file_path.name,
+                True,
+                str(python_file_path.relative_to(PROJECT_ROOT_DIR)),
+            )
+        except py_compile.PyCompileError as compile_error:
+            print_status_result(python_file_path.name, False, str(compile_error))
+            all_compiled_cleanly = False
+
+    return all_compiled_cleanly
+
+
+def test_path_resolution() -> bool:
+    """Verify dynamic path resolution from vrc2gtav.cfg."""
+    print(i18n.translate("tests.sec2_title"))
+    resolution_success = True
+
+    try:
+        config_file_path = project_paths.find_project_config_file()
+        resolution_success &= print_status_result(
+            i18n.translate("tests.cfg_central"),
+            config_file_path.exists(),
+            str(config_file_path),
+        )
+    except Exception as config_error:
+        resolution_success &= print_status_result(
+            i18n.translate("tests.cfg_central"), False, str(config_error)
+        )
+
+    resolved_root = project_paths.get_project_root()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.project_root"), resolved_root.exists(), str(resolved_root)
+    )
+
+    staging_directory = project_paths.get_staging_dir()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.staging_dir"),
+        staging_directory.exists(),
+        str(staging_directory),
+    )
+
+    blender_executable = project_paths.get_blender_exe()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.blender_exe"),
+        Path(blender_executable).exists() or bool(blender_executable),
+        str(blender_executable),
+    )
+
+    python_executable = project_paths.get_python_exe()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.python_exe"),
+        Path(python_executable).exists(),
+        str(python_executable),
+    )
+
+    rage_cli_tool = project_paths.get_rage_cli()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.rage_cli"),
+        Path(rage_cli_tool).exists(),
+        str(rage_cli_tool),
+    )
+
+    unity_assets_directory = project_paths.get_vrc_assets_dir()
+    resolution_success &= print_status_result(
+        i18n.translate("tests.unity_assets"),
+        unity_assets_directory.exists(),
+        str(unity_assets_directory),
+    )
+
+    return resolution_success
+
+
+def test_dummy_mesh_integrity() -> bool:
+    """Verify byte sizes of the universal ped and prop dummy meshes."""
+    print(i18n.translate("tests.sec3_title"))
+    dummy_mesh_file = project_paths.get_dummy_ydd_path()
+    prop_dummy_file = project_paths.get_prop_dummy_ydd_path()
+
+    if not dummy_mesh_file.exists():
+        head_dummy_ok = print_status_result(
+            "head_000_r.ydd", False, i18n.translate("tests.file_not_found")
+        )
+    else:
+        file_size_bytes = dummy_mesh_file.stat().st_size
+        head_dummy_ok = print_status_result(
+            "head_000_r.ydd",
+            file_size_bytes == 629,
+            i18n.translate("tests.byte_size", actual=file_size_bytes, expected=629),
+        )
+
+    if not prop_dummy_file.exists():
+        prop_dummy_ok = print_status_result(
+            "p_eyes_dummy.ydd", False, i18n.translate("tests.file_not_found")
+        )
+    else:
+        prop_size_bytes = prop_dummy_file.stat().st_size
+        prop_dummy_ok = print_status_result(
+            "p_eyes_dummy.ydd",
+            prop_size_bytes == 515,
+            i18n.translate("tests.byte_size", actual=prop_size_bytes, expected=515),
+        )
+
+    return head_dummy_ok and prop_dummy_ok
+
+
+def test_compiled_drawables_and_textures() -> bool:
+    """Verify all compiled .ydd, .yft, and .ytd assets exist for each character."""
+    print(i18n.translate("tests.sec4_title"))
+    all_assets_present = True
+
+    franklin_cfg = project_paths.get_character_paths("franklin")
+    michael_cfg = project_paths.get_character_paths("michael")
+    trevor_cfg = project_paths.get_character_paths("trevor")
+
+    expected_assets_list = [
+        franklin_cfg["target_model_ydd"],
+        franklin_cfg["target_yft"],
+        franklin_cfg["ytd_file"],
+        michael_cfg["target_model_ydd"],
+        michael_cfg["extra_model_ydds"][0],
+        michael_cfg["target_yft"],
+        michael_cfg["ytd_file"],
+        trevor_cfg["target_model_ydd"],
+        trevor_cfg["extra_model_ydds"][0],
+        trevor_cfg["target_yft"],
+        trevor_cfg["ytd_file"],
+    ]
+
+    for asset_file_path in expected_assets_list:
+        file_exists = asset_file_path.exists()
+        file_size_mb = (
+            (asset_file_path.stat().st_size / (1024 * 1024)) if file_exists else 0.0
+        )
+        all_assets_present &= print_status_result(
+            asset_file_path.name,
+            file_exists,
+            i18n.translate(
+                "tests.asset_detail",
+                size=file_size_mb,
+                parent=asset_file_path.parent.name,
+            ),
+        )
+
+    return all_assets_present
+
+
+def test_deployed_rpf_encryption_headers() -> bool:
+    """Verify OPEN headers in deployed GTA V RPFs and staged dummy/skeleton parity."""
+    print(i18n.translate("tests.sec5_title"))
+    mods_directory = project_paths.get_gtav_mods_dir()
+    if not mods_directory.exists():
+        print(i18n.translate("tests.mods_inaccessible"))
+        return True
+
+    all_rpfs_valid = True
+    rpf_paths_cfg = project_paths.get_rpf_paths()
+    rpf_paths_to_check = [
+        rpf_paths_cfg["mppatches_game_rpf"],
+        rpf_paths_cfg["patchday3ng_game_rpf"],
+        rpf_paths_cfg["patchday4ng_game_rpf"],
+        rpf_paths_cfg["x64v_game_rpf"],
+    ]
+
+    for rpf_file_path in rpf_paths_to_check:
+        if not rpf_file_path.exists():
+            continue
+        try:
+            with open(rpf_file_path, "rb") as rpf_handle:
+                header_data = rpf_handle.read(16)
+                _magic_number, entry_count, _names_size, encryption_flag = struct.unpack(
+                    "<IIII", header_data
+                )
+                encryption_bytes = struct.pack("<I", encryption_flag)
+                has_open_encryption = encryption_bytes == b"OPEN"
+                all_rpfs_valid &= print_status_result(
+                    f"{rpf_file_path.parent.name}/{rpf_file_path.name}",
+                    has_open_encryption,
+                    f"enc={encryption_bytes} entries={entry_count}",
+                )
+        except Exception as read_error:
+            all_rpfs_valid &= print_status_result(rpf_file_path.name, False, str(read_error))
+
+    props_extracted_dir = rpf_paths_cfg["streamedpedprops_extracted"]
+    prop_dummy_file = project_paths.get_prop_dummy_ydd_path()
+    if props_extracted_dir.is_dir() and prop_dummy_file.exists():
+        total_glasses_checked = 0
+        mismatched_glasses = []
+        for character_section in ("michael", "franklin", "trevor"):
+            character_cfg = project_paths.get_character_paths(character_section)
+            character_props_dir = Path(character_cfg["staging_streamed_props_dir"])
+            if not character_props_dir.is_dir():
+                mismatched_glasses.append(
+                    i18n.translate("tests.missing_folder", character=character_section)
+                )
+                continue
+            glasses_files = sorted(character_props_dir.glob("p_eyes_*.ydd"))
+            if not glasses_files:
+                mismatched_glasses.append(
+                    i18n.translate("tests.no_glasses", character=character_section)
+                )
+                continue
+            for glasses_path in glasses_files:
+                total_glasses_checked += 1
+                if not filecmp.cmp(glasses_path, prop_dummy_file, shallow=False):
+                    mismatched_glasses.append(
+                        f"{character_props_dir.name}/{glasses_path.name}"
+                    )
+
+        all_rpfs_valid &= print_status_result(
+            i18n.translate("tests.glasses_label"),
+            len(mismatched_glasses) == 0 and total_glasses_checked == 35,
+            i18n.translate("tests.glasses_ok", count=total_glasses_checked)
+            if not mismatched_glasses
+            else i18n.translate("tests.mismatches", items=mismatched_glasses[:5]),
+        )
+
+    streamedpeds_extracted_dir = rpf_paths_cfg["streamedpeds_extracted"]
+    if streamedpeds_extracted_dir.is_dir():
+        mismatched_yft_files = []
+        for character_section in ("michael", "franklin", "trevor"):
+            character_cfg = project_paths.get_character_paths(character_section)
+            ped_name = str(character_cfg["ped_name"])
+            compiled_yft = Path(character_cfg["target_yft"])
+            staged_yft = streamedpeds_extracted_dir / f"{ped_name}.yft"
+            if not compiled_yft.exists() or not staged_yft.exists():
+                mismatched_yft_files.append(
+                    i18n.translate("tests.yft_missing", name=f"{ped_name}.yft")
+                )
+            elif not filecmp.cmp(compiled_yft, staged_yft, shallow=False):
+                mismatched_yft_files.append(
+                    i18n.translate("tests.yft_stale", name=f"{ped_name}.yft")
+                )
+
+        all_rpfs_valid &= print_status_result(
+            i18n.translate("tests.yft_label"),
+            len(mismatched_yft_files) == 0,
+            i18n.translate("tests.yft_ok")
+            if not mismatched_yft_files
+            else i18n.translate("tests.mismatches", items=mismatched_yft_files),
+        )
+
+    return all_rpfs_valid
+
+
+def extract_placeholder_fields(template_text: str) -> tuple:
+    """Return sorted format field names referenced inside a translation string."""
+    formatter = string.Formatter()
+    fields = []
+    for _literal_text, field_name, _format_spec, _conversion in formatter.parse(template_text):
+        if field_name is not None:
+            fields.append(field_name)
+    return tuple(sorted(fields))
+
+
+def test_i18n_catalog_integrity() -> bool:
+    """Validate that every i18n message key provides non-empty matching en/ja/pt text."""
+    print(i18n.translate("tests.sec_i18n_title"))
+    catalog_issues = []
+    required_languages = tuple(i18n.SUPPORTED_LANGUAGES)
+
+    for message_key, translations in i18n.MESSAGES.items():
+        missing_langs = [lang for lang in required_languages if lang not in translations]
+        if missing_langs:
+            catalog_issues.append(f"{message_key}: missing {missing_langs}")
+            continue
+
+        placeholder_sets = {}
+        for lang_code in required_languages:
+            text_value = translations[lang_code]
+            if not isinstance(text_value, str) or not text_value.strip():
+                catalog_issues.append(f"{message_key}[{lang_code}]: empty translation")
+                continue
+            placeholder_sets[lang_code] = extract_placeholder_fields(text_value)
+
+        if len(set(placeholder_sets.values())) > 1:
+            catalog_issues.append(
+                f"{message_key}: placeholder mismatch {placeholder_sets}"
+            )
+
+    helper_checks_ok = (
+        i18n.normalize_language_code("pt_BR.UTF-8") == "pt"
+        and i18n.normalize_language_code("ja-JP") == "ja"
+        and i18n.normalize_language_code("en_US.UTF-8") == "en"
+        and i18n.is_affirmative_answer("sim")
+        and i18n.is_affirmative_answer("yes")
+        and i18n.is_affirmative_answer("はい")
+        and not i18n.is_affirmative_answer("não")
+        and not i18n.is_affirmative_answer("no")
+        and not i18n.is_affirmative_answer("いいえ")
+    )
+    if not helper_checks_ok:
+        catalog_issues.append("Language normalization or affirmative parser check failed")
+
+    translation_func_names = {"translate", "translate_message", "get_text"}
+    for python_file in sorted(PROJECT_ROOT_DIR.rglob("*.py")):
+        if any(
+            ignored_part in python_file.parts
+            for ignored_part in ("__pycache__", "staging", "backups")
+        ):
+            continue
+        parsed_tree = ast.parse(
+            python_file.read_text(encoding="utf-8"), filename=str(python_file)
+        )
+        for ast_node in ast.walk(parsed_tree):
+            if isinstance(ast_node, ast.Call) and ast_node.args:
+                callee = ast_node.func
+                callee_name = (
+                    callee.attr
+                    if isinstance(callee, ast.Attribute)
+                    else (callee.id if isinstance(callee, ast.Name) else None)
+                )
+                first_arg = ast_node.args[0]
+                if (
+                    callee_name in translation_func_names
+                    and isinstance(first_arg, ast.Constant)
+                    and isinstance(first_arg.value, str)
+                    and first_arg.value not in i18n.MESSAGES
+                ):
+                    catalog_issues.append(
+                        f"{python_file.name}:{ast_node.lineno} unknown key {first_arg.value}"
+                    )
+
+    catalog_ok = len(catalog_issues) == 0
+    return print_status_result(
+        i18n.translate("tests.i18n_catalog_label"),
+        catalog_ok,
+        i18n.translate(
+            "tests.i18n_catalog_ok",
+            count=len(i18n.MESSAGES),
+            langs="/".join(required_languages),
+        )
+        if catalog_ok
+        else i18n.translate(
+            "tests.i18n_issues", total=len(catalog_issues), sample=catalog_issues[:5]
+        ),
+    )
+
+
+def test_code_quality_and_mirror_sync() -> bool:
+    """Verify zero emojis, >=3-char AST identifiers, and byte-identical mirrors."""
+    print(i18n.translate("tests.sec6_title"))
+    quality_passed = True
+    emoji_pattern = regex_module.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
+    allowed_stdlib_short_names = {"_", "os", "re"}
+
+    root_dir = (
+        project_paths.get_project_root()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR
+    )
+    total_python_files = 0
+    for python_file in sorted(root_dir.rglob("*.py")):
+        if any(
+            ignored in python_file.parts
+            for ignored in (".git", "__pycache__", "extracted_rpfs", "backups", "staging", ".venv")
+        ):
+            continue
+        total_python_files += 1
+        file_content = python_file.read_text(encoding="utf-8", errors="ignore")
+        if emoji_pattern.search(file_content):
+            quality_passed &= print_status_result(
+                i18n.translate("tests.no_emojis", name=python_file.name),
+                False,
+                str(python_file),
+            )
+
+        syntax_tree = ast.parse(file_content, filename=str(python_file))
+        invalid_short_names = sorted(
+            {
+                node.id
+                for node in ast.walk(syntax_tree)
+                if isinstance(node, ast.Name)
+                and len(node.id) <= 2
+                and node.id not in allowed_stdlib_short_names
+            }
+            | {
+                node.arg
+                for node in ast.walk(syntax_tree)
+                if isinstance(node, ast.arg) and len(node.arg) <= 2
+            }
+        )
+        if invalid_short_names:
+            quality_passed &= print_status_result(
+                i18n.translate(
+                    "tests.vars_min_len", path=python_file.relative_to(root_dir)
+                ),
+                False,
+                i18n.translate("tests.found_short_vars", items=invalid_short_names),
+            )
+
+    quality_passed &= print_status_result(
+        i18n.translate("tests.ast_emoji_scan"),
+        quality_passed,
+        i18n.translate("tests.ast_emoji_detail", count=total_python_files),
+    )
+
+    if project_paths.has_project_config_file():
+        scripts_dir = project_paths.get_scripts_root_dir()
+        deploy_dir = project_paths.get_deploy_tools_dir()
+        common_dir = project_paths.get_common_tools_dir()
+        franklin_dir = project_paths.get_avatar_paths("shinano_casual")["character_dir"]
+        michael_dir = project_paths.get_avatar_paths("shinano_er")["character_dir"]
+        trevor_dir = project_paths.get_avatar_paths("miltina_maid")["character_dir"]
+    else:
+        scripts_dir = root_dir / "scripts"
+        deploy_dir = root_dir / "_deploy_tools"
+        common_dir = scripts_dir / "common_tools"
+        franklin_dir = root_dir / "1_Franklin_Shinano_Casual"
+        michael_dir = root_dir / "2_Michael_Shinano_EternalReunion"
+        trevor_dir = root_dir / "3_Trevor_Miltina_Maid"
+
+    mirror_pairs = [
+        (common_dir / "vrc2gtav_i18n.py", deploy_dir / "vrc2gtav_i18n.py"),
+        (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
+        (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
+        (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
+        (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
+        (common_dir / "unity_hair_helper.py", deploy_dir / "unity_hair_helper.py"),
+        (common_dir / "blender_hair_helper.py", deploy_dir / "blender_hair_helper.py"),
+        (common_dir / "blendshape_helper.py", deploy_dir / "blendshape_helper.py"),
+        (
+            common_dir / "texture_calibration_helper.py",
+            deploy_dir / "texture_calibration_helper.py",
+        ),
+        (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
+        (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
+        (
+            common_dir / "repack_and_deploy_everything.py",
+            deploy_dir / "repack_and_deploy_everything.py",
+        ),
+        (common_dir / "run_mod_manager.py", deploy_dir / "run_mod_manager.py"),
+        (common_dir / "run_mod_manager.py", root_dir / "run_mod_manager.py"),
+        (
+            scripts_dir / "Shinano_Casual_Franklin" / "build_franklin_avatar.py",
+            franklin_dir / "2_blender" / "build_franklin_avatar.py",
+        ),
+        (
+            scripts_dir / "Shinano_Casual_Franklin" / "run_build_franklin.py",
+            franklin_dir / "2_blender" / "run_build.py",
+        ),
+        (
+            scripts_dir / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py",
+            franklin_dir / "3_textures_gtav" / "generate_franklin_atlas.py",
+        ),
+        (
+            scripts_dir / "Shinano_EternalReunion_Michael" / "build_michael_er.py",
+            michael_dir / "2_blender" / "build_michael_er.py",
+        ),
+        (
+            scripts_dir / "Shinano_EternalReunion_Michael" / "run_build_er.py",
+            michael_dir / "2_blender" / "run_build.py",
+        ),
+        (
+            scripts_dir / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py",
+            michael_dir / "3_textures_gtav" / "generate_er_atlas.py",
+        ),
+        (
+            scripts_dir / "Shinano_EternalReunion_Michael" / "deploy_michael_er.py",
+            michael_dir / "5_rpf_package" / "deploy_michael_er.py",
+        ),
+        (
+            scripts_dir / "Miltina_Maid_Trevor" / "build_trevor_miltina.py",
+            trevor_dir / "2_blender" / "build_trevor_miltina.py",
+        ),
+        (
+            scripts_dir / "Miltina_Maid_Trevor" / "run_pipeline.py",
+            trevor_dir / "2_blender" / "run_pipeline.py",
+        ),
+        (
+            scripts_dir / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py",
+            trevor_dir / "3_textures_gtav" / "generate_miltina_atlas.py",
+        ),
+        (
+            scripts_dir / "Miltina_Maid_Trevor" / "apply_miltina_to_trevor.py",
+            trevor_dir / "5_rpf_package" / "apply_miltina_to_trevor.py",
+        ),
+    ]
+
+    mirrors_in_sync = True
+    for primary_file, mirror_file in mirror_pairs:
+        is_synced = (
+            primary_file.exists()
+            and mirror_file.exists()
+            and filecmp.cmp(primary_file, mirror_file, shallow=False)
+        )
+        if not is_synced:
+            mirrors_in_sync &= print_status_result(
+                i18n.translate(
+                    "tests.mirror_desync", mirror=mirror_file.relative_to(root_dir)
+                ),
+                False,
+                i18n.translate(
+                    "tests.must_match", primary=primary_file.relative_to(root_dir)
+                ),
+            )
+
+    quality_passed &= print_status_result(
+        i18n.translate("tests.mirror_sync_label"),
+        mirrors_in_sync,
+        i18n.translate("tests.mirror_sync_detail", count=len(mirror_pairs)),
+    )
+    return quality_passed
+
+
+def test_source_templates_and_dummies() -> bool:
+    """Validate vrc2gtav.cfg.example, .gitignore, and technical dummies offline."""
+    print(i18n.translate("tests.sec_template_title"))
+    cfg_example_path = project_paths.find_project_config_example()
+    gitignore_path = PROJECT_ROOT_DIR / ".gitignore"
+    dummy_head_path = PROJECT_ROOT_DIR / "_deploy_tools" / "head_000_r.ydd"
+    dummy_eyes_path = PROJECT_ROOT_DIR / "_deploy_tools" / "p_eyes_dummy.ydd"
+
+    template_ok = print_status_result(
+        "vrc2gtav.cfg.example", cfg_example_path.is_file(), str(cfg_example_path.name)
+    )
+    gitignore_ok = False
+    if gitignore_path.is_file():
+        gitignore_text = gitignore_path.read_text(encoding="utf-8")
+        gitignore_ok = (
+            "*.yft" in gitignore_text
+            and "*.ydd" in gitignore_text
+            and "vrc2gtav.cfg" in gitignore_text
+        )
+    gitignore_check = print_status_result(
+        i18n.translate("tests.gitignore_rules"),
+        gitignore_ok,
+        i18n.translate("tests.gitignore_detail"),
+    )
+    dummies_ok = print_status_result(
+        i18n.translate("tests.dummies_label"),
+        dummy_head_path.is_file() and dummy_eyes_path.is_file(),
+        i18n.translate("tests.dummies_detail"),
+    )
+    return template_ok and gitignore_check and dummies_ok
+
+
+def test_unity_scene_and_fallbacks() -> bool:
+    """Validate Unity scene scale extraction, unit defaults, and hair/texture fallbacks."""
+    import tempfile
+    from PIL import Image as pil_image
+    import texture_calibration_helper as calibration_helper
+    import unity_scene_helper
+
+    print(f"\n=== {i18n.translate('tests.suite_unity')} ===")
+    suite_passed = True
+
+    empty_cfg = unity_scene_helper.extract_unity_avatar_config("")
+    missing_cfg = unity_scene_helper.extract_unity_avatar_config(
+        "/tmp/vrc2gtav_nonexistent_scene.unity"
+    )
+    empty_ok = (
+        not empty_cfg["loaded"]
+        and not missing_cfg["loaded"]
+        and empty_cfg["root_scale"] == (1.0, 1.0, 1.0)
+        and empty_cfg["armature_scale"] == (1.0, 1.0, 1.0)
+        and empty_cfg["bone_scales"] == {}
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.unity_empty_unit_scales"), empty_ok, "scale=1.0"
+    )
+
+    synthetic_unity_yaml = "\n".join(
+        [
+            "%YAML 1.1",
+            "%TAG !u! tag:unity3d.com,2011:",
+            "--- !u!1 &100",
+            "GameObject:",
+            "  m_Name: TestAvatar",
+            "  m_IsActive: 1",
+            "--- !u!4 &101",
+            "Transform:",
+            "  m_GameObject: {fileID: 100}",
+            "  m_LocalScale: {x: 1, y: 1, z: 1}",
+            "  m_Father: {fileID: 0}",
+            "--- !u!1 &200",
+            "GameObject:",
+            "  m_Name: Armature",
+            "  m_IsActive: 1",
+            "--- !u!4 &201",
+            "Transform:",
+            "  m_GameObject: {fileID: 200}",
+            "  m_LocalScale: {x: 1.125, y: 1.125, z: 1.125}",
+            "  m_Father: {fileID: 101}",
+            "--- !u!1 &300",
+            "GameObject:",
+            "  m_Name: Neck",
+            "  m_IsActive: 1",
+            "--- !u!4 &301",
+            "Transform:",
+            "  m_GameObject: {fileID: 300}",
+            "  m_LocalScale: {x: 0.9, y: 0.9, z: 0.9}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &400",
+            "GameObject:",
+            "  m_Name: lower_leg_L",
+            "  m_IsActive: 1",
+            "--- !u!4 &401",
+            "Transform:",
+            "  m_GameObject: {fileID: 400}",
+            "  m_LocalScale: {x: 1, y: 1.2, z: 1}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &500",
+            "GameObject:",
+            "  m_Name: Breast_1.L",
+            "  m_IsActive: 1",
+            "--- !u!4 &501",
+            "Transform:",
+            "  m_GameObject: {fileID: 500}",
+            "  m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}",
+            "  m_Father: {fileID: 201}",
+            "--- !u!1 &502",
+            "GameObject:",
+            "  m_Name: Breast_1.L",
+            "  m_IsActive: 1",
+            "--- !u!4 &503",
+            "Transform:",
+            "  m_GameObject: {fileID: 502}",
+            "  m_LocalScale: {x: 2.0, y: 2.0, z: 2.0}",
+            "  m_Father: {fileID: 501}",
+        ]
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        temp_root = Path(temp_dir_name)
+        scene_file = temp_root / "SyntheticAvatar.unity"
+        scene_file.write_text(synthetic_unity_yaml, encoding="utf-8")
+
+        parsed_cfg = unity_scene_helper.extract_unity_avatar_config(
+            scene_file, avatar_name="TestAvatar"
+        )
+        neck_scale = parsed_cfg["bone_scales"].get("Neck", (1.0, 1.0, 1.0))
+        leg_scale = parsed_cfg["bone_scales"].get("lower_leg_L", (1.0, 1.0, 1.0))
+        scene_ok = (
+            parsed_cfg["loaded"]
+            and abs(parsed_cfg["armature_scale"][0] - 1.125) < 1e-4
+            and abs(neck_scale[0] - 0.9) < 1e-4
+            and abs(leg_scale[1] - 1.2) < 1e-4
+            and "Breast_1.L" not in parsed_cfg["bone_scales"]
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.unity_extracts_scene_scales"),
+            scene_ok,
+            f"bones={len(parsed_cfg['bone_scales'])}",
+        )
+
+        hair_blank_mode, _ = unity_scene_helper.resolve_hair_mode("", parsed_cfg)
+        hair_missing_mode, _ = unity_scene_helper.resolve_hair_mode(
+            str(temp_root / "missing_hair.fbx"), parsed_cfg
+        )
+        hair_ok = hair_blank_mode == "default" and hair_missing_mode == "default"
+        suite_passed &= print_status_result(
+            i18n.translate("tests.unity_hair_fallback_mode"),
+            hair_ok,
+            f"{hair_blank_mode}/{hair_missing_mode}",
+        )
+
+        base_face_file = temp_root / "Shinano_face.png"
+        base_hair_file = temp_root / "Shinano_hair.png"
+        miltina_face_file = temp_root / "Milltina_Face.png"
+        miltina_hair_file = temp_root / "Milltina_Hair.png"
+        sample_img = pil_image.new("RGBA", (64, 64), (210, 200, 195, 255))
+        for sample_path in (
+            base_face_file,
+            base_hair_file,
+            miltina_face_file,
+            miltina_hair_file,
+        ):
+            sample_img.save(sample_path, "PNG")
+
+        shinano_face_out, missing_layers = (
+            calibration_helper.composite_shinano_face_with_fallback(
+                face_path=base_face_file,
+                target_size=64,
+                makeup_path=str(temp_root / "missing_makeup.png"),
+                eye_sky_path=str(temp_root / "missing_sky.png"),
+            )
+        )
+        shi_diff, shi_spec, shi_norm = calibration_helper.calibrate_shinano_default_hair(
+            base_hair_file, temp_root, 64
+        )
+        mil_diff, mil_spec, mil_norm = calibration_helper.calibrate_miltina_default_hair(
+            miltina_hair_file, temp_root, 64
+        )
+        mil_face_out, mil_eye_spec, used_custom_eyes = (
+            calibration_helper.composite_miltina_eyes_with_fallback(
+                pil_image.open(miltina_face_file),
+                str(temp_root / "missing_aw_eyes.png"),
+                str(temp_root / "missing_aw_hl.png"),
+            )
+        )
+        tex_ok = (
+            shinano_face_out.size == (64, 64)
+            and "makeup" in missing_layers
+            and shi_diff.size == (64, 64)
+            and shi_spec.size == (64, 64)
+            and shi_norm.size == (64, 64)
+            and mil_diff.size == (64, 64)
+            and mil_spec.size == (64, 64)
+            and mil_norm.size == (64, 64)
+            and mil_face_out.size == (64, 64)
+            and mil_eye_spec is None
+            and not used_custom_eyes
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.texture_fallback_ready"), tex_ok, "64x64 RGBA"
+        )
+
+        import blendshape_helper
+
+        presets_dir = PROJECT_ROOT_DIR / "configs"
+        expected_presets = (
+            "shinano_blendshapes.cfg",
+            "shinano_er_blendshapes.cfg",
+            "miltina_blendshapes.cfg",
+        )
+        presets_ok = True
+        total_preset_meshes = 0
+        for preset_name in expected_presets:
+            preset_path = presets_dir / preset_name
+            if not preset_path.is_file():
+                presets_ok = False
+                continue
+            loaded_meshes, _loaded_meta = blendshape_helper.load_blendshapes_cfg(
+                preset_path
+            )
+            if not loaded_meshes:
+                presets_ok = False
+            total_preset_meshes += len(loaded_meshes)
+
+        roundtrip_cfg_path = temp_root / "roundtrip_blendshapes.cfg"
+        special_weights = {
+            "Body": {
+                "======Nail======": 0.0,
+                "(T1)highlight_main_x": 0.0,
+                "mouth_yaeba(tooth)_top_R": 1.0,
+                "index:5": 0.725,
+            },
+            "Milltina_cloth_hat": {
+                "Option_Twin tail": 1.0,
+            },
+        }
+        blendshape_helper.save_blendshapes_cfg(
+            roundtrip_cfg_path,
+            special_weights,
+            metadata={"avatar": "RoundTripTest", "source": "unit_test"},
+        )
+        parsed_roundtrip, parsed_meta = blendshape_helper.load_blendshapes_cfg(
+            roundtrip_cfg_path
+        )
+        presets_ok = (
+            presets_ok
+            and parsed_meta.get("avatar") == "RoundTripTest"
+            and abs(parsed_roundtrip["Body"]["mouth_yaeba(tooth)_top_R"] - 1.0) < 1e-6
+            and abs(parsed_roundtrip["Body"]["index:5"] - 0.725) < 1e-6
+            and abs(parsed_roundtrip["Body"]["(T1)highlight_main_x"]) < 1e-6
+            and "======Nail======" in parsed_roundtrip["Body"]
+            and abs(parsed_roundtrip["Milltina_cloth_hat"]["Option_Twin tail"] - 1.0)
+            < 1e-6
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_cfg_presets"),
+            presets_ok,
+            f"presets={len(expected_presets)}, meshes={total_preset_meshes}",
+        )
+
+        hair_guid = "11111111222222223333333344444444"
+        prefab_file = temp_root / "TestHair.prefab"
+        prefab_meta_file = temp_root / "TestHair.prefab.meta"
+        prefab_meta_file.write_text(
+            f"fileFormatVersion: 2\nguid: {hair_guid}\n",
+            encoding="utf-8",
+        )
+        prefab_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &1000",
+                    "GameObject:",
+                    "  m_Name: Bangs",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1001",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1000}",
+                    "  m_Children: []",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!137 &1002",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 1000}",
+                    "  m_Enabled: 1",
+                    "  m_BlendShapeWeights:",
+                    "  - 0",
+                    "  - 50",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        blend_scene_file = temp_root / "SyntheticBlendAvatar.unity"
+        blend_scene_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &100",
+                    "GameObject:",
+                    "  m_Name: BlendAvatar",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &101",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 100}",
+                    "  m_Children:",
+                    "  - {fileID: 301}",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!1 &300",
+                    "GameObject:",
+                    "  m_Name: Body_base",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &301",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 300}",
+                    "  m_Children: []",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!137 &302",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 300}",
+                    "  m_Enabled: 1",
+                    "  m_BlendShapeWeights:",
+                    "  - 100",
+                    "--- !u!1001 &900",
+                    "PrefabInstance:",
+                    "  m_Modification:",
+                    "    m_TransformParent: {fileID: 101}",
+                    "    m_Modifications:",
+                    "    - target: {fileID: 1002, guid: 11111111222222223333333344444444}",
+                    "      propertyPath: m_BlendShapeWeights.Array.data[0]",
+                    "      value: 75",
+                    f"  m_SourcePrefab: {{fileID: 100100000, guid: {hair_guid}}}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        anim_file = temp_root / "SyntheticFace.anim"
+        anim_file.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "  - serializedVersion: 2",
+                    "    curve:",
+                    "      m_Curve:",
+                    "      - serializedVersion: 3",
+                    "        value: 80",
+                    "    attribute: blendShape.eye_big",
+                    "    path: Body",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        extracted_blend = blendshape_helper.extract_unity_scene_blendshapes(
+            blend_scene_file,
+            avatar_name="BlendAvatar",
+            unity_assets_root=temp_root,
+        )
+        unity_extract_ok = (
+            extracted_blend["loaded"]
+            and abs(extracted_blend["mesh_weights"]["Body_base"]["index:0"] - 1.0)
+            < 1e-4
+            and abs(extracted_blend["mesh_weights"]["Bangs"]["index:0"] - 0.75) < 1e-4
+            and abs(extracted_blend["mesh_weights"]["Bangs"]["index:1"] - 0.5) < 1e-4
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_unity_extract"),
+            unity_extract_ok,
+            f"meshes={len(extracted_blend['mesh_weights'])}",
+        )
+
+        test_char_cfg = {
+            "blendshapes_source": "auto",
+            "blendshapes_cfg": str(roundtrip_cfg_path),
+            "unity_scene": str(blend_scene_file),
+            "unity_avatar_name": "BlendAvatar",
+            "face_anim": str(anim_file),
+        }
+        res_auto_unity = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+        )
+        res_forced_cfg = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+            override_source="cfg",
+        )
+        test_char_cfg["unity_scene"] = ""
+        res_auto_cfg = blendshape_helper.resolve_character_blendshapes(
+            test_char_cfg,
+            unity_assets_root=temp_root,
+        )
+        resolution_ok = (
+            res_auto_unity["source_used"] == "unity"
+            and abs(res_auto_unity["mesh_weights"]["Body"]["eye_big"] - 0.8) < 1e-4
+            and res_forced_cfg["source_used"] == "cfg"
+            and "index:5" in res_forced_cfg["mesh_weights"]["Body"]
+            and res_auto_cfg["source_used"] == "cfg"
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_resolution_order"),
+            resolution_ok,
+            f"{res_auto_unity['source_used']}/{res_forced_cfg['source_used']}/{res_auto_cfg['source_used']}",
+        )
+
+    return suite_passed
+
+
+def test_avatar_interchangeability() -> bool:
+    """Validate 3x3 protagonist <-> VRChat avatar interchangeability matrix offline."""
+    import shutil
+    import tempfile
+
+    print(f"\n=== {i18n.translate('tests.suite_interchangeability')} ===")
+    suite_passed = True
+
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        temp_dir = Path(temp_dir_str)
+        example_cfg_path = project_paths.find_project_config_example()
+        temp_cfg_path = temp_dir / "vrc2gtav.cfg"
+        shutil.copy2(example_cfg_path, temp_cfg_path)
+        for subdir_name in (
+            "1_Franklin_Shinano_Casual",
+            "2_Michael_Shinano_EternalReunion",
+            "3_Trevor_Miltina_Maid",
+            "configs",
+            "scripts",
+            "_deploy_tools",
+        ):
+            (temp_dir / subdir_name).mkdir(parents=True, exist_ok=True)
+
+        previous_env_cfg = os.environ.get(project_paths.CONFIG_ENV_VAR_NAME)
+        os.environ[project_paths.CONFIG_ENV_VAR_NAME] = str(temp_cfg_path)
+        project_paths.invalidate_config_cache()
+        try:
+            protagonists = list(project_paths.list_available_protagonists())
+            avatars = list(project_paths.list_available_avatars())
+            expected_ped_map = {
+                "michael": ("player_zero", "uppr_000_u.ydd"),
+                "franklin": ("player_one", "uppr_008_u.ydd"),
+                "trevor": ("player_two", "uppr_000_u.ydd"),
+            }
+
+            matrix_ok = len(protagonists) == 3 and len(avatars) == 3
+            isolated_targets = set()
+            for prot_key in protagonists:
+                expected_ped, expected_ydd = expected_ped_map[prot_key]
+                for avatar_id in avatars:
+                    resolved_cfg = project_paths.get_character_paths(
+                        prot_key, avatar_override=avatar_id
+                    )
+                    preset_info = project_paths.get_avatar_preset_info(avatar_id)
+                    if resolved_cfg["ped_name"] != expected_ped:
+                        matrix_ok = False
+                    if Path(resolved_cfg["skeleton_yft"]).name != f"{expected_ped}.yft":
+                        matrix_ok = False
+                    if Path(resolved_cfg["target_model_ydd"]).name != expected_ydd:
+                        matrix_ok = False
+                    if Path(resolved_cfg["target_yft"]).name != f"{expected_ped}.yft":
+                        matrix_ok = False
+                    if prot_key != preset_info["default_character"]:
+                        if Path(resolved_cfg["exported_models_dir"]).name != expected_ped:
+                            matrix_ok = False
+                    isolated_targets.add(str(resolved_cfg["target_model_ydd"]))
+
+            if len(isolated_targets) != 9:
+                matrix_ok = False
+
+            suite_passed &= print_status_result(
+                i18n.translate("tests.interchangeability_config"),
+                matrix_ok,
+                f"3x3={len(isolated_targets)} targets",
+            )
+
+            project_paths.set_protagonist_avatar("michael", "miltina_maid", temp_cfg_path)
+            project_paths.set_protagonist_avatar("franklin", "shinano_er", temp_cfg_path)
+            project_paths.set_protagonist_avatar("trevor", "shinano_casual", temp_cfg_path)
+
+            import blendshape_helper
+
+            swapped_michael = project_paths.get_character_paths("michael")
+            swapped_franklin = project_paths.get_character_paths("franklin")
+            swapped_trevor = project_paths.get_character_paths("trevor")
+            miltina_preset_cfg = Path(project_paths.get_avatar_paths("miltina_maid")["blendshapes_cfg"])
+            presets_ok = (
+                swapped_michael["avatar_id"] == "miltina_maid"
+                and swapped_michael["ped_name"] == "player_zero"
+                and swapped_franklin["avatar_id"] == "shinano_er"
+                and swapped_franklin["ped_name"] == "player_one"
+                and swapped_trevor["avatar_id"] == "shinano_casual"
+                and swapped_trevor["ped_name"] == "player_two"
+                and Path(swapped_michael["blendshapes_cfg"]).name == "miltina_blendshapes.cfg"
+                and Path(swapped_franklin["blendshapes_cfg"]).name == "shinano_er_blendshapes.cfg"
+                and Path(swapped_trevor["blendshapes_cfg"]).name == "shinano_blendshapes.cfg"
+                and miltina_preset_cfg.name == "miltina_blendshapes.cfg"
+                and blendshape_helper.AVATAR_PRESET_RELATIVE_PATHS["miltina_maid"].endswith(
+                    "miltina_blendshapes.cfg"
+                )
+            )
+            suite_passed &= print_status_result(
+                i18n.translate("tests.interchangeability_presets"),
+                presets_ok,
+                "michael->miltina, franklin->er, trevor->casual",
+            )
+        finally:
+            if previous_env_cfg is None:
+                os.environ.pop(project_paths.CONFIG_ENV_VAR_NAME, None)
+            else:
+                os.environ[project_paths.CONFIG_ENV_VAR_NAME] = previous_env_cfg
+            project_paths.invalidate_config_cache()
+
+    scripts_root = (
+        project_paths.get_scripts_root_dir()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR / "scripts"
+    )
+    required_cli_tokens = [
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--target-character"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--target-character"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--target-character"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--target-character"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--target-character"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--target-character"),
+        (scripts_root / "common_tools" / "apply_characters.py", "--avatar"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--save-assignment"),
+    ]
+    builders_ok = all(
+        file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
+        for file_path, expected_token in required_cli_tokens
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.interchangeability_builders"),
+        builders_ok,
+        f"{len(required_cli_tokens)}/{len(required_cli_tokens)} CLI handlers",
+    )
+    return suite_passed
+
+
+def test_custom_unity_hair_support() -> bool:
+    """Validate CLI flags, Prefab/PrefabVariant resolution, UDIM remap & tail filtering."""
+    print(i18n.translate("tests.sec_custom_hair_title"))
+    import tempfile
+    import types
+    import blender_hair_helper
+    import unity_hair_helper
+    from PIL import Image
+
+    suite_passed = True
+    scripts_root = (
+        project_paths.get_scripts_root_dir()
+        if project_paths.has_project_config_file()
+        else PROJECT_ROOT_DIR / "scripts"
+    )
+    required_hair_cli_files = [
+        scripts_root / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py",
+        scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py",
+        scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py",
+        scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py",
+        scripts_root / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py",
+        scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py",
+        scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py",
+        scripts_root / "common_tools" / "run_mod_manager.py",
+    ]
+    cli_ok = all(
+        file_item.is_file() and '"--hair"' in file_item.read_text(encoding="utf-8")
+        for file_item in required_hair_cli_files
+    )
+    suite_passed &= print_status_result(
+        i18n.translate("tests.hair_cli_flags"),
+        cli_ok,
+        f"{len(required_hair_cli_files)}/{len(required_hair_cli_files)} files",
+    )
+
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_hair_test_") as temp_root_str:
+        temp_root = Path(temp_root_str)
+        assets_dir = temp_root / "Assets"
+        hair_dir = assets_dir / "TestHairPkg"
+        hair_dir.mkdir(parents=True, exist_ok=True)
+
+        fbx_path = hair_dir / "TestHair.fbx"
+        fbx_path.write_bytes(b"Kaydara FBX Binary  \x00")
+        (hair_dir / "TestHair.fbx.meta").write_text(
+            "fileFormatVersion: 2\nguid: 11111111111111111111111111111111\n",
+            encoding="utf-8",
+        )
+
+        main_tex_path = hair_dir / "hair_main.png"
+        Image.new("RGBA", (8, 8), (220, 80, 120, 255)).save(main_tex_path)
+        (hair_dir / "hair_main.png.meta").write_text(
+            "fileFormatVersion: 2\nguid: 22222222222222222222222222222222\n",
+            encoding="utf-8",
+        )
+
+        alpha_mask_img = Image.new("RGBA", (8, 8), (255, 255, 255, 255))
+        for px_idx in range(4, 8):
+            for py_idx in range(4, 8):
+                alpha_mask_img.putpixel((px_idx, py_idx), (0, 0, 0, 255))
+        alpha_mask_path = hair_dir / "hair_alpha.png"
+        alpha_mask_img.save(alpha_mask_path)
+        (hair_dir / "hair_alpha.png.meta").write_text(
+            "fileFormatVersion: 2\nguid: 33333333333333333333333333333333\n",
+            encoding="utf-8",
+        )
+
+        mat_main_path = hair_dir / "HairMain.mat"
+        mat_main_path.write_text(
+            "%YAML 1.1\n"
+            "--- !u!21 &2100000\n"
+            "Material:\n"
+            "  m_Name: HairMain\n"
+            "  m_SavedProperties:\n"
+            "    m_TexEnvs:\n"
+            "    - _MainTex:\n"
+            "        m_Texture: {fileID: 2800000, guid: 22222222222222222222222222222222, type: 3}\n"
+            "    - _AlphaMask:\n"
+            "        m_Texture: {fileID: 2800000, guid: 33333333333333333333333333333333, type: 3}\n"
+            "    m_Floats:\n"
+            "    - _Metallic: 0.0\n"
+            "    m_Colors:\n"
+            "    - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "HairMain.mat.meta").write_text(
+            "fileFormatVersion: 2\nguid: 44444444444444444444444444444444\n",
+            encoding="utf-8",
+        )
+
+        mat_pin_path = hair_dir / "GoldPin.mat"
+        mat_pin_path.write_text(
+            "%YAML 1.1\n"
+            "--- !u!21 &2100000\n"
+            "Material:\n"
+            "  m_Name: GoldPin\n"
+            "  m_SavedProperties:\n"
+            "    m_TexEnvs:\n"
+            "    - _MainTex:\n"
+            "        m_Texture: {fileID: 0}\n"
+            "    m_Floats:\n"
+            "    - _Metallic: 0.95\n"
+            "    m_Colors:\n"
+            "    - _Color: {r: 0.8, g: 0.6, b: 0.1, a: 1}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "GoldPin.mat.meta").write_text(
+            "fileFormatVersion: 2\nguid: 55555555555555555555555555555555\n",
+            encoding="utf-8",
+        )
+
+        base_prefab = hair_dir / "BaseHair.prefab"
+        base_prefab.write_text(
+            "%YAML 1.1\n"
+            "--- !u!1 &10\n"
+            "GameObject:\n"
+            "  m_Name: BaseHair\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &11\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 10}\n"
+            "  m_LocalScale: {x: 1.05, y: 1.05, z: 1.05}\n"
+            "  m_Children:\n"
+            "  - {fileID: 21}\n"
+            "  - {fileID: 31}\n"
+            "  - {fileID: 41}\n"
+            "--- !u!1 &20\n"
+            "GameObject:\n"
+            "  m_Name: Bangs\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &21\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 20}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!137 &22\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 20}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 44444444444444444444444444444444, type: 2}\n"
+            "  m_Mesh: {fileID: 4300000, guid: 11111111111111111111111111111111, type: 3}\n"
+            "--- !u!1 &30\n"
+            "GameObject:\n"
+            "  m_Name: Side.R braided\n"
+            "  m_IsActive: 0\n"
+            "--- !u!4 &31\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 30}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!137 &32\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 30}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 44444444444444444444444444444444, type: 2}\n"
+            "  m_Mesh: {fileID: 4300002, guid: 11111111111111111111111111111111, type: 3}\n"
+            "--- !u!1 &40\n"
+            "GameObject:\n"
+            "  m_Name: HairPin\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &41\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Father: {fileID: 11}\n"
+            "--- !u!23 &42\n"
+            "MeshRenderer:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Materials:\n"
+            "  - {fileID: 2100000, guid: 55555555555555555555555555555555, type: 2}\n"
+            "--- !u!33 &43\n"
+            "MeshFilter:\n"
+            "  m_GameObject: {fileID: 40}\n"
+            "  m_Mesh: {fileID: 4300004, guid: 11111111111111111111111111111111, type: 3}\n",
+            encoding="utf-8",
+        )
+        (hair_dir / "BaseHair.prefab.meta").write_text(
+            "fileFormatVersion: 2\nguid: 66666666666666666666666666666666\n",
+            encoding="utf-8",
+        )
+
+        variant_prefab = hair_dir / "VariantHair.prefab"
+        variant_prefab.write_text(
+            "%YAML 1.1\n"
+            "--- !u!1001 &100100000\n"
+            "PrefabInstance:\n"
+            "  m_Modification:\n"
+            "    m_Modifications:\n"
+            "    - target: {fileID: 10, guid: 66666666666666666666666666666666, type: 3}\n"
+            "      propertyPath: m_Name\n"
+            "      value: VariantHair\n"
+            "  m_SourcePrefab: {fileID: 100100000, guid: 66666666666666666666666666666666, type: 3}\n",
+            encoding="utf-8",
+        )
+
+        spec_base = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=str(base_prefab),
+            unity_assets_root=str(assets_dir),
+        )
+        spec_variant = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=str(variant_prefab),
+            unity_assets_root=str(assets_dir),
+        )
+        suppressed_names = sorted(
+            {
+                name_item.lower()
+                for name_item in (
+                    list(spec_variant.get("inactive_meshes", []))
+                    + list(spec_variant.get("editor_only_meshes", []))
+                )
+            }
+        )
+        prefab_ok = (
+            spec_base.get("mode") == "custom"
+            and spec_variant.get("mode") == "custom"
+            and spec_variant.get("primary_fbx") == str(fbx_path)
+            and "side.r braided" in set(suppressed_names)
+            and "bangs" not in set(suppressed_names)
+            and len(spec_variant.get("materials", [])) >= 2
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.hair_prefab_variant"),
+            prefab_ok,
+            f"materials={len(spec_variant.get('materials', []))}, suppressed={suppressed_names}",
+        )
+
+        quad_diff, quad_norm, quad_spec, tile_entries = (
+            unity_hair_helper.pack_hair_materials_into_quadrant(
+                spec_variant["materials"],
+                quad_size=(1024, 1024),
+                quad_uv_rect=(0.5, 0.0, 0.5, 0.5),
+                gutter_px=4,
+            )
+        )
+        unity_hair_helper.save_custom_hair_manifest(temp_root, spec_variant, tile_entries)
+        loaded_manifest = unity_hair_helper.load_custom_hair_manifest(temp_root)
+        bangs_rect = unity_hair_helper.resolve_tile_uv_for_mesh_slot(
+            mesh_name="Bangs",
+            slot_index=0,
+            slot_count=1,
+            blender_mat_name="HairMain",
+            manifest=loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+        )
+        pin_rect = unity_hair_helper.resolve_tile_uv_for_mesh_slot(
+            mesh_name="HairPin",
+            slot_index=0,
+            slot_count=1,
+            blender_mat_name="GoldPin",
+            manifest=loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+        )
+
+        class _FakeUV:
+            def __init__(self, u_coord: float, v_coord: float):
+                self.x = u_coord
+                self.y = v_coord
+
+        fake_uv_data = [
+            types.SimpleNamespace(uv=_FakeUV(1.25, -0.20)),
+            types.SimpleNamespace(uv=_FakeUV(1.35, -0.10)),
+            types.SimpleNamespace(uv=_FakeUV(1.45, -0.15)),
+        ]
+        fake_mesh = types.SimpleNamespace(
+            name="Bangs",
+            data=types.SimpleNamespace(
+                uv_layers=types.SimpleNamespace(
+                    active=types.SimpleNamespace(name="map1", data=fake_uv_data),
+                ),
+                materials=[types.SimpleNamespace(name="HairMain")],
+                polygons=[types.SimpleNamespace(material_index=0, loop_indices=[0, 1, 2])],
+                remove=lambda *_args: None,
+            ),
+        )
+        # Keep __iter__ / __bool__ valid on fake_uv_layers for remap_custom_hair_uvs
+        class _FakeUVLayersList(list):
+            def __init__(self, layer_obj):
+                super().__init__([layer_obj])
+                self.active = layer_obj
+
+            def remove(self, layer_obj):
+                super().remove(layer_obj)
+
+        fake_mesh.data.uv_layers = _FakeUVLayersList(fake_mesh.data.uv_layers.active)
+        blender_hair_helper.remap_custom_hair_uvs(
+            [fake_mesh],
+            loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+            target_uv_name="UVMap",
+        )
+        u_after = fake_uv_data[0].uv.x
+        v_after = fake_uv_data[0].uv.y
+        uv_in_bangs_rect = (
+            bangs_rect[0] <= u_after <= bangs_rect[0] + bangs_rect[2]
+            and bangs_rect[1] <= v_after <= bangs_rect[1] + bangs_rect[3]
+            and bangs_rect != pin_rect
+            and fake_mesh.data.uv_layers[0].name == "UVMap"
+        )
+
+        ponytail_obj = types.SimpleNamespace(
+            name="tail",
+            vertex_groups=[types.SimpleNamespace(name="Hair_01")],
+        )
+        animal_tail_obj = types.SimpleNamespace(
+            name="Neko_Tail",
+            vertex_groups=[types.SimpleNamespace(name="Hips")],
+        )
+        tail_filter_ok = (
+            blender_hair_helper._is_hip_tail_not_hair_ponytail(
+                None, ponytail_obj, {"mesh_root_bones": {"tail": "Hair"}}
+            )
+            is False
+            and blender_hair_helper._is_hip_tail_not_hair_ponytail(
+                None, animal_tail_obj, {}
+            )
+            is True
+        )
+        pack_ok = (
+            quad_diff.size == (1024, 1024)
+            and quad_norm.size == (1024, 1024)
+            and quad_spec.size == (1024, 1024)
+            and uv_in_bangs_rect
+            and tail_filter_ok
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.hair_uv_packing"),
+            pack_ok,
+            f"u={u_after:.4f}, v={v_after:.4f}, uv_layer={fake_mesh.data.uv_layers[0].name}",
+        )
+
+        # Verify vrc2gtav_paths preserves keyword overrides without wrapping via to_host_path
+        temp_cfg = temp_root / "test_hair.cfg"
+        cfg_source = (
+            Path(project_paths.find_project_config_file())
+            if project_paths.has_project_config_file()
+            else PROJECT_ROOT_DIR / "vrc2gtav.cfg.example"
+        )
+        temp_cfg.write_text(cfg_source.read_text(encoding="utf-8"), encoding="utf-8")
+        previous_env_cfg = os.environ.get(project_paths.CONFIG_ENV_VAR_NAME)
+        os.environ[project_paths.CONFIG_ENV_VAR_NAME] = str(temp_cfg)
+        project_paths.invalidate_config_cache()
+        try:
+            project_paths.set_character_custom_hair("franklin", "none")
+            project_paths.set_character_custom_hair("trevor", "default", hair_scale="1.15")
+            fr_cfg = project_paths.get_character_paths("franklin")
+            tr_cfg = project_paths.get_character_paths("trevor")
+            kw_ok = (
+                fr_cfg.get("custom_hair") == "none"
+                and tr_cfg.get("custom_hair") == "default"
+                and str(tr_cfg.get("hair_scale")) == "1.15"
+            )
+            suite_passed &= print_status_result(
+                i18n.translate("tests.hair_cfg_keywords"),
+                kw_ok,
+                f"franklin={fr_cfg.get('custom_hair')}, trevor={tr_cfg.get('custom_hair')}",
+            )
+        finally:
+            if previous_env_cfg is None:
+                os.environ.pop(project_paths.CONFIG_ENV_VAR_NAME, None)
+            else:
+                os.environ[project_paths.CONFIG_ENV_VAR_NAME] = previous_env_cfg
+            project_paths.invalidate_config_cache()
+
+    return suite_passed
+
+
+def run_source_only_validation_suite() -> bool:
+    """Run source-only checks (syntax, templates, i18n, quality, and mirrors)."""
+    separator_banner = "=" * 70
+    print(f"\n{separator_banner}")
+    print(f"      {i18n.translate('tests.source_banner')}")
+    print(f"{separator_banner}")
+
+    test_results_summary = [
+        (i18n.translate("tests.suite_syntax"), test_python_syntax_compilation()),
+        (i18n.translate("tests.suite_templates"), test_source_templates_and_dummies()),
+        (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
+        (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
+        (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
+        (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
+        (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
+    ]
+    total_passed = sum(1 for _title, success_status in test_results_summary if success_status)
+    total_tests = len(test_results_summary)
+    print(i18n.translate("tests.source_result", passed=total_passed, total=total_tests))
+    print(f"{separator_banner}\n")
+    return total_passed == total_tests
+
+
+def run_full_validation_suite() -> bool:
+    """Run the full validation suite against the local workspace and mods folder."""
+    separator_banner = "=" * 70
+    print(f"\n{separator_banner}")
+    print(f"      {i18n.translate('tests.full_banner')}")
+    print(f"{separator_banner}")
+
+    test_results_summary = [
+        (i18n.translate("tests.suite_syntax"), test_python_syntax_compilation()),
+        (i18n.translate("tests.suite_paths"), test_path_resolution()),
+        (i18n.translate("tests.suite_dummies"), test_dummy_mesh_integrity()),
+        (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
+        (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
+        (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
+        (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
+        (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
+        (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
+        (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
+    ]
+
+    print(f"\n{separator_banner}")
+    print(i18n.translate("tests.summary_header"))
+    print(f"{separator_banner}")
+
+    total_passed = sum(1 for _title, success_status in test_results_summary if success_status)
+    total_tests = len(test_results_summary)
+
+    for test_title, success_status in test_results_summary:
+        result_label = i18n.translate(
+            "tests.suite_passed" if success_status else "tests.suite_failed"
+        )
+        print(f"  {result_label:12} : {test_title}")
+
+    print(i18n.translate("tests.full_result", passed=total_passed, total=total_tests))
+    print(f"{separator_banner}\n")
+    return total_passed == total_tests
+
+
+def main() -> int:
+    """CLI entry point for running the automated validation suite."""
+    resolve_startup_language()
+    arg_parser = argparse.ArgumentParser(description=i18n.translate("tests.cli_desc"))
+    arg_parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help=i18n.translate("tests.arg_source_only"),
+    )
+    arg_parser.add_argument(
+        "--lang",
+        choices=list(i18n.SUPPORTED_LANGUAGES) + ["auto"],
+        default=None,
+        help=i18n.translate("common.language_option_help"),
+    )
+    parsed_args = arg_parser.parse_args()
+    if parsed_args.lang and parsed_args.lang != "auto":
+        i18n.set_active_language(parsed_args.lang)
+
+    if parsed_args.source_only:
+        test_suite_success = run_source_only_validation_suite()
+    else:
+        test_suite_success = run_full_validation_suite()
+    return 0 if test_suite_success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

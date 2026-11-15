@@ -156,7 +156,8 @@ def deploy_universal():
 
     michael_er_dir = str(michael_cfg["character_dir"])
     michael_uppr_u = str(michael_cfg["target_model_ydd"])
-    michael_uppr_r = str(michael_cfg["extra_model_ydds"][0])
+    extra_michael_ydds = list(michael_cfg.get("extra_model_ydds") or [])
+    michael_uppr_r = str(extra_michael_ydds[0]) if extra_michael_ydds else michael_uppr_u
     michael_ytd = str(michael_cfg["ytd_file"])
 
     franklin_dir = str(franklin_cfg["character_dir"])

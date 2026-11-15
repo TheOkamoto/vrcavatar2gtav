@@ -30,17 +30,41 @@ for _tools_candidate in (
         sys.path.insert(0, str(_tools_candidate))
 
 import texture_calibration_helper as calibration_helper
+import unity_hair_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
 
 
-def build_franklin_atlas() -> bool:
+def build_franklin_atlas(
+    target_character: str = None,
+    hair_override: str = None,
+    hair_mat_override: str = None,
+    hair_tex_override: str = None,
+    unity_scene_override: str = None,
+    unity_avatar_override: str = None,
+    output_dir_override: str = None,
+) -> bool:
     """Build the 2048x2048 2x2 texture atlas and compile Franklin's .ytd archive."""
     try:
-        franklin_cfg = project_paths.get_character_paths("franklin")
+        franklin_cfg = (
+            project_paths.get_character_paths(
+                target_character,
+                avatar_override="shinano_casual",
+            )
+            if target_character
+            else project_paths.get_avatar_paths("shinano_casual")
+        )
 
-        output_directory = Path(franklin_cfg["ytd_dir"])
-        textures_subfolder = Path(franklin_cfg["textures_dir"])
+        output_directory = (
+            Path(output_dir_override)
+            if output_dir_override
+            else Path(franklin_cfg["ytd_dir"])
+        )
+        textures_subfolder = (
+            Path(output_dir_override)
+            if output_dir_override
+            else Path(franklin_cfg["textures_dir"])
+        )
         output_directory.mkdir(parents=True, exist_ok=True)
         textures_subfolder.mkdir(parents=True, exist_ok=True)
 
@@ -173,47 +197,115 @@ def build_franklin_atlas() -> bool:
                 cell_dimension : 2 * cell_dimension, 0:cell_dimension
             ] = numpy_lib.array(costume_layer_image)
 
-        # 4. Hair (Shinano_hair or optional custom override) -> Bottom-Right quadrant
-        configured_hair_path = str(franklin_cfg.get("tex_hair", "")).strip()
-        hair_source_candidates = [
-            source_textures_directory / "shinano_hair.png",
-            textures_subfolder / "shinano_hair.png",
-            configured_hair_path,
-            shinano_textures_directory / "Shinano_hair.png",
-        ]
-        found_hair_path = calibration_helper.resolve_existing_file(
-            None, hair_source_candidates
+        # 4. Hair (custom Unity hair or Shinano_hair default) -> Bottom-Right quadrant
+        hair_spec_input = (
+            hair_override
+            if hair_override is not None
+            else (
+                str(franklin_cfg.get("custom_hair", "")).strip()
+                or str(franklin_cfg.get("fbx_hair", "")).strip()
+                or "auto"
+            )
         )
-        base_shinano_hair = shinano_textures_directory / "Shinano_hair.png"
-        if configured_hair_path and not Path(configured_hair_path).is_file():
-            print(project_i18n.translate("franklin.atlas.hair_fallback"))
+        hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=hair_spec_input,
+            unity_scene=unity_scene_override or franklin_cfg.get("unity_scene"),
+            unity_avatar_name=unity_avatar_override
+            or str(franklin_cfg.get("unity_avatar_name", "Shinano")),
+            hair_mat_override=hair_mat_override or franklin_cfg.get("hair_mat"),
+            hair_tex_override=hair_tex_override or franklin_cfg.get("hair_tex"),
+            is_calibrated_er_default=False,
+        )
 
-        if found_hair_path is not None:
-            hair_diffuse_quad, hair_spec_quad, hair_norm_quad = (
-                calibration_helper.calibrate_shinano_default_hair(
-                    base_hair_path=base_shinano_hair if base_shinano_hair.is_file() else found_hair_path,
-                    shinano_tex_root=shinano_textures_directory,
-                    output_size=cell_dimension,
-                    target_tint_path=found_hair_path,
+        if hair_spec.get("mode") == "custom":
+            print(
+                project_i18n.translate(
+                    "common.hair_custom_packed",
+                    source=hair_spec.get("source_input", ""),
+                    tiles=len(hair_spec.get("materials", [])),
+                )
+            )
+            quad_diff, quad_norm, quad_spec, tile_entries = (
+                unity_hair_helper.pack_hair_materials_into_quadrant(
+                    hair_spec.get("materials", []),
+                    quad_size=(cell_dimension, cell_dimension),
+                    quad_uv_rect=(0.5, 0.0, 0.5, 0.5),
+                    gutter_px=4,
                 )
             )
             diffuse_pixel_array[
                 cell_dimension : 2 * cell_dimension,
                 cell_dimension : 2 * cell_dimension,
-            ] = numpy_lib.array(hair_diffuse_quad)
+            ] = numpy_lib.array(quad_diff.convert("RGBA"))
             specular_pixel_array[
                 cell_dimension : 2 * cell_dimension,
                 cell_dimension : 2 * cell_dimension,
-            ] = numpy_lib.array(hair_spec_quad)
+            ] = numpy_lib.array(quad_spec.convert("RGBA"))
             normal_pixel_array[
                 cell_dimension : 2 * cell_dimension,
                 cell_dimension : 2 * cell_dimension,
-            ] = numpy_lib.array(hair_norm_quad)
+            ] = numpy_lib.array(quad_norm.convert("RGBA"))
+            unity_hair_helper.save_custom_hair_manifest(
+                textures_subfolder, hair_spec, tile_entries
+            )
+        else:
+            configured_hair_path = str(franklin_cfg.get("tex_hair", "")).strip()
+            hair_source_candidates = [
+                source_textures_directory / "shinano_hair.png",
+                textures_subfolder / "shinano_hair.png",
+                configured_hair_path,
+                shinano_textures_directory / "Shinano_hair.png",
+            ]
+            found_hair_path = calibration_helper.resolve_existing_file(
+                None, hair_source_candidates
+            )
+            base_shinano_hair = shinano_textures_directory / "Shinano_hair.png"
+            if configured_hair_path and not Path(configured_hair_path).is_file():
+                print(project_i18n.translate("franklin.atlas.hair_fallback"))
+
+            if found_hair_path is not None:
+                hair_diffuse_quad, hair_spec_quad, hair_norm_quad = (
+                    calibration_helper.calibrate_shinano_default_hair(
+                        base_hair_path=base_shinano_hair
+                        if base_shinano_hair.is_file()
+                        else found_hair_path,
+                        shinano_tex_root=shinano_textures_directory,
+                        output_size=cell_dimension,
+                        target_tint_path=found_hair_path,
+                    )
+                )
+                diffuse_pixel_array[
+                    cell_dimension : 2 * cell_dimension,
+                    cell_dimension : 2 * cell_dimension,
+                ] = numpy_lib.array(hair_diffuse_quad)
+                specular_pixel_array[
+                    cell_dimension : 2 * cell_dimension,
+                    cell_dimension : 2 * cell_dimension,
+                ] = numpy_lib.array(hair_spec_quad)
+                normal_pixel_array[
+                    cell_dimension : 2 * cell_dimension,
+                    cell_dimension : 2 * cell_dimension,
+                ] = numpy_lib.array(hair_norm_quad)
+            unity_hair_helper.save_custom_hair_manifest(
+                textures_subfolder, hair_spec, []
+            )
 
         # Save final PNG channels configured via vrc2gtav.cfg
-        diffuse_final_path = Path(franklin_cfg["atlas_png"])
-        specular_final_path = Path(franklin_cfg["spec_png"])
-        normal_final_path = Path(franklin_cfg["normal_png"])
+        diffuse_final_path = (
+            textures_subfolder / Path(franklin_cfg["atlas_png"]).name
+            if output_dir_override
+            else Path(franklin_cfg["atlas_png"])
+        )
+        specular_final_path = (
+            textures_subfolder / Path(franklin_cfg["spec_png"]).name
+            if output_dir_override
+            else Path(franklin_cfg["spec_png"])
+        )
+        normal_final_path = (
+            textures_subfolder / Path(franklin_cfg["normal_png"]).name
+            if output_dir_override
+            else Path(franklin_cfg["normal_png"])
+        )
 
         Image.fromarray(diffuse_pixel_array, "RGBA").save(
             diffuse_final_path, format="PNG"
@@ -229,7 +321,11 @@ def build_franklin_atlas() -> bool:
 
         # Compile the .ytd texture dictionary
         rage_cli_binary = project_paths.get_rage_cli()
-        output_ytd_file = Path(franklin_cfg["ytd_file"])
+        output_ytd_file = (
+            output_directory / Path(franklin_cfg["ytd_file"]).name
+            if output_dir_override
+            else Path(franklin_cfg["ytd_file"])
+        )
 
         texture_build_command = [
             rage_cli_binary,
@@ -270,9 +366,33 @@ def main() -> int:
         default="auto",
         help=project_i18n.translate("common.language_option_help"),
     )
+    arg_parser.add_argument(
+        "--target-character",
+        choices=["michael", "franklin", "trevor"],
+        default=None,
+        help=project_i18n.translate("franklin.build.arg_target_char"),
+    )
+    arg_parser.add_argument("--output-dir", default=None)
+    arg_parser.add_argument("--hair", default=None)
+    arg_parser.add_argument("--hair-mat", default=None)
+    arg_parser.add_argument("--hair-tex", default=None)
+    arg_parser.add_argument("--unity-scene", default=None)
+    arg_parser.add_argument("--unity-avatar-name", default=None)
     parsed_args = arg_parser.parse_args()
     project_i18n.set_active_language(parsed_args.lang)
-    return 0 if build_franklin_atlas() else 1
+    return (
+        0
+        if build_franklin_atlas(
+            target_character=parsed_args.target_character,
+            hair_override=parsed_args.hair,
+            hair_mat_override=parsed_args.hair_mat,
+            hair_tex_override=parsed_args.hair_tex,
+            unity_scene_override=parsed_args.unity_scene,
+            unity_avatar_override=parsed_args.unity_avatar_name,
+            output_dir_override=parsed_args.output_dir,
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

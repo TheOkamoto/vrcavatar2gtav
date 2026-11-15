@@ -41,6 +41,7 @@ for _tools_candidate in (
         sys.path.insert(0, str(_tools_candidate))
 
 import texture_calibration_helper as calibration_helper
+import unity_hair_helper
 import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
@@ -146,28 +147,70 @@ def build_texture_sources(michael_cfg):
     return main_sources, accessory_sources
 
 
-def build_liltoon_er_textures(output_directory, cell_dimension=512):
+def build_liltoon_er_textures(
+    output_directory,
+    cell_dimension=512,
+    target_character=None,
+    hair_override=None,
+    hair_mat_override=None,
+    hair_tex_override=None,
+    unity_scene_override=None,
+    unity_avatar_override=None,
+    custom_output_dir_mode=False,
+):
     """
     Build the Diffuse, Specular, and Normal maps for the 4x2 Texture Atlas
     (up to 2048x1024) and compile the GTA V .ytd archive via RAGE CLI.
     """
-    michael_cfg = project_paths.get_character_paths("michael")
+    michael_cfg = (
+        project_paths.get_character_paths(
+            target_character,
+            avatar_override="shinano_er",
+        )
+        if target_character
+        else project_paths.get_avatar_paths("shinano_er")
+    )
     main_sources, accessory_sources = build_texture_sources(michael_cfg)
     shinano_tex_dir = Path(michael_cfg["tex_shinano_dir"])
 
-    unity_scene_path = str(michael_cfg.get("unity_scene", "")).strip()
-    unity_avatar_name = str(michael_cfg.get("unity_avatar_name", "")).strip() or None
+    unity_scene_path = str(
+        unity_scene_override or michael_cfg.get("unity_scene", "")
+    ).strip()
+    unity_avatar_name = (
+        str(unity_avatar_override or michael_cfg.get("unity_avatar_name", "")).strip()
+        or "Shinano"
+    )
     unity_config = unity_scene_helper.extract_unity_avatar_config(
         unity_scene_path,
         avatar_name=unity_avatar_name,
         character_hints=("shinano", "reunion"),
     )
-    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
-        michael_cfg.get("fbx_hair", ""),
-        unity_config=unity_config,
+
+    hair_spec_input = (
+        hair_override
+        if hair_override is not None
+        else (
+            str(michael_cfg.get("custom_hair", "")).strip()
+            or str(michael_cfg.get("fbx_hair", "")).strip()
+            or "auto"
+        )
     )
+    hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+        hair_spec_input=hair_spec_input,
+        unity_scene=unity_scene_path,
+        unity_avatar_name=unity_avatar_name,
+        hair_mat_override=hair_mat_override or michael_cfg.get("hair_mat"),
+        hair_tex_override=hair_tex_override or michael_cfg.get("hair_tex"),
+        is_calibrated_er_default=True,
+    )
+    is_calibrated_neko = bool(hair_spec.get("is_neko_bob_calibrated", False))
+    is_arbitrary_custom_hair = bool(
+        hair_spec.get("mode") == "custom" and not is_calibrated_neko
+    )
+    hair_mode = hair_spec.get("mode", "default")
+    hair_reason = hair_spec.get("source_input", "") or hair_mode
     custom_hair_tex_ready = bool(
-        hair_mode == "custom"
+        is_calibrated_neko
         and os.path.exists(main_sources["hair_main"]["diffuse_path"])
     )
 
@@ -208,7 +251,42 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
         start_y = pillow_row_index * cell_dimension
         end_y = start_y + cell_dimension
 
-        # 1C. Default Shinano hair fallback when custom hair FBX or texture is absent
+        # 1C. Custom arbitrary Unity hair OR Default Shinano hair fallback
+        if source_key == "hair_main" and is_arbitrary_custom_hair:
+            mats_list = hair_spec.get("materials", [])
+            use_double_cell = len(mats_list) >= 2
+            quad_w = (2 * cell_dimension) if use_double_cell else cell_dimension
+            quad_h = cell_dimension
+            quad_uv = (0.5, 0.0, 0.5, 0.5) if use_double_cell else (0.5, 0.0, 0.25, 0.5)
+            print(
+                i18n.translate(
+                    "common.hair_custom_packed",
+                    source=hair_spec.get("source_input", ""),
+                    tiles=len(mats_list),
+                )
+            )
+            quad_diff, quad_norm, quad_spec, er_tile_entries = (
+                unity_hair_helper.pack_hair_materials_into_quadrant(
+                    mats_list,
+                    quad_size=(quad_w, quad_h),
+                    quad_uv_rect=quad_uv,
+                    gutter_px=4,
+                )
+            )
+            diffuse_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+                quad_diff.convert("RGBA")
+            )
+            specular_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+                quad_spec.convert("RGBA")
+            )
+            normal_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+                quad_norm.convert("RGBA")
+            )
+            unity_hair_helper.save_custom_hair_manifest(
+                output_path_obj, hair_spec, er_tile_entries
+            )
+            continue
+
         if source_key == "hair_main" and not custom_hair_tex_ready:
             fallback_reason = (
                 hair_reason if hair_mode == "default" else "tex_hair_diffuse_missing"
@@ -224,14 +302,15 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
                         path=shinano_tex_dir / "Shinano_hair.png",
                     )
                 )
-            hair_diff, hair_spec, hair_norm = calibration_helper.calibrate_shinano_default_hair(
+            hair_diff, hair_spec_img, hair_norm = calibration_helper.calibrate_shinano_default_hair(
                 base_hair_path=default_hair_src,
                 shinano_tex_root=shinano_tex_dir,
                 output_size=cell_dimension,
             )
             diffuse_array[start_y:end_y, start_x:end_x] = numpy.array(hair_diff)
-            specular_array[start_y:end_y, start_x:end_x] = numpy.array(hair_spec)
+            specular_array[start_y:end_y, start_x:end_x] = numpy.array(hair_spec_img)
             normal_array[start_y:end_y, start_x:end_x] = numpy.array(hair_norm)
+            unity_hair_helper.save_custom_hair_manifest(output_path_obj, hair_spec, [])
             continue
 
         diffuse_path = source_info["diffuse_path"]
@@ -420,7 +499,8 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
     cell_base_y = 1 * cell_dimension
     sub_dimension = cell_dimension // 2
 
-    if custom_hair_tex_ready:
+    if custom_hair_tex_ready and not is_arbitrary_custom_hair:
+        unity_hair_helper.save_custom_hair_manifest(output_path_obj, hair_spec, [])
         for accessory_key, accessory_info in accessory_sources.items():
             accessory_path = accessory_info["diffuse_path"]
             if not accessory_path or not os.path.exists(accessory_path):
@@ -496,7 +576,11 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
 
     # 4. Compile .ytd texture dictionary via RAGE CLI
     rage_cli_path = project_paths.get_rage_cli()
-    output_ytd_file = michael_cfg["ytd_file"]
+    output_ytd_file = (
+        output_path_obj / Path(michael_cfg["ytd_file"]).name
+        if custom_output_dir_mode
+        else michael_cfg["ytd_file"]
+    )
     backup_ytd_file = michael_cfg["ytd_backup_file"]
 
     print(i18n.translate("michael.atlas.compiling_ytd"))
@@ -517,7 +601,8 @@ def build_liltoon_er_textures(output_directory, cell_dimension=512):
         stderr=subprocess.PIPE,
         text=True,
     )
-    shutil.copy2(output_ytd_file, backup_ytd_file)
+    if not custom_output_dir_mode:
+        shutil.copy2(output_ytd_file, backup_ytd_file)
     print(i18n.translate("michael.atlas.ytd_done", path=output_ytd_file))
     return True
 
@@ -533,19 +618,52 @@ def main() -> int:
         help=i18n.translate("michael.atlas.output_dir_help"),
     )
     parser.add_argument(
+        "--output-dir",
+        dest="output_dir_flag",
+        default=None,
+        help=i18n.translate("michael.atlas.output_dir_help"),
+    )
+    parser.add_argument(
         "--lang",
         choices=list(i18n.SUPPORTED_LANGUAGES) + ["auto"],
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        choices=["michael", "franklin", "trevor"],
+        default=None,
+    )
+    parser.add_argument("--hair", default=None)
+    parser.add_argument("--hair-mat", default=None)
+    parser.add_argument("--hair-tex", default=None)
+    parser.add_argument("--unity-scene", default=None)
+    parser.add_argument("--unity-avatar-name", default=None)
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    michael_cfg = project_paths.get_character_paths("michael")
-    target_output_directory = parsed_args.output_dir or str(michael_cfg["textures_dir"])
-    build_liltoon_er_textures(target_output_directory)
+    active_cfg = (
+        project_paths.get_character_paths(
+            parsed_args.target_character,
+            avatar_override="shinano_er",
+        )
+        if parsed_args.target_character
+        else project_paths.get_avatar_paths("shinano_er")
+    )
+    explicit_output = parsed_args.output_dir_flag or parsed_args.output_dir
+    target_output_directory = explicit_output or str(active_cfg["textures_dir"])
+    build_liltoon_er_textures(
+        target_output_directory,
+        target_character=parsed_args.target_character,
+        hair_override=parsed_args.hair,
+        hair_mat_override=parsed_args.hair_mat,
+        hair_tex_override=parsed_args.hair_tex,
+        unity_scene_override=parsed_args.unity_scene,
+        unity_avatar_override=parsed_args.unity_avatar_name,
+        custom_output_dir_mode=bool(explicit_output),
+    )
     return 0
 
 

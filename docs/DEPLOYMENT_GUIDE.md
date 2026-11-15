@@ -25,6 +25,7 @@ vrc2gtav/
 ├── EXECUTAR_GERENCIADOR.bat                         # Portuguese-named launcher mirror
 ├── run_mod_manager.py                               # Master orchestrator (interactive menu + CLI)
 ├── vrc2gtav.cfg.example                             # Versioned INI configuration template
+├── configs/                                         # Portable per-avatar blendshape presets (*_blendshapes.cfg)
 ├── README.md / README.pt-BR.md / README.ja.md       # Trilingual GitHub landing READMEs
 ├── docs/                                            # Deep-dive deployment & architecture guides
 │   ├── DEPLOYMENT_GUIDE.md                          # This technical guide in English
@@ -68,7 +69,9 @@ Paths are never hardcoded in scripts. [`scripts/common_tools/vrc2gtav_paths.py`]
 3. **Local `vrc2gtav.cfg` file:** initialized from [`vrc2gtav.cfg.example`](../vrc2gtav.cfg.example) during First-Run (`setup_first_run.py`).
 4. **Cross-platform auto-detection:** detects native **Windows** vs. **Linux / WSL** execution and converts drive-letter paths (e.g., `D:/GTAV` ↔ `/mnt/d/GTAV`) via `pathlib.Path`.
 5. **Unit `1.0` default scales & `.unity` extraction (`unity_scene_helper.py`):** Clean repository defaults (`unity_scene =` blank) keep all avatar body, head, bone, and prop scales at `1.0`. Setting `unity_scene` (and optional `unity_avatar_name`) under `[franklin]`, `[michael]`, or `[trevor]` extracts customized `Transform` / `PrefabInstance` scales (canceling `PhysBone`/Marshmallow scale wrappers) and height-normalizes bones before arm/hand retargeting.
-6. **Default hair & texture fallback (`texture_calibration_helper.py`):** Blank or missing `fbx_hair` (*Neko Tied Bob hair*) or optional eye/makeup packs automatically fall back to the base avatar's built-in hair (`Hair_*` / `Shinano_hair.png` for Shinano, `Milltina_hair_*` / calibrated `Milltina_Hair.png` for Miltina) and base face texture (`Shinano_face.png`, `Milltina_Face.png`). Custom `fbx_hair` is also supported on Miltina.
+6. **Default hair & texture fallback (`texture_calibration_helper.py`):** Blank or missing `custom_hair` / `fbx_hair` (*Neko Tied Bob hair*) or optional eye/makeup packs automatically fall back to the base avatar's built-in hair (`Hair_*` / `Shinano_hair.png` for Shinano, `Milltina_hair_*` / calibrated `Milltina_Hair.png` for Miltina) and base face texture (`Shinano_face.png`, `Milltina_Face.png`).
+7. **Unity & `.cfg` blendshape resolution (`blendshape_helper.py`):** Hardcoded blendshape tables are removed from build scripts. Per-mesh blendshapes (facial `.anim` curves, body shrinks, outfit, accessory, and hair keys) are extracted live from `unity_scene` (+ nested `.prefab`s and FBX channel tables) or loaded from portable UTF-8 `.cfg` presets (`configs/shinano_blendshapes.cfg`, `configs/shinano_er_blendshapes.cfg`, `configs/miltina_blendshapes.cfg`) according to `blendshapes_source = auto | unity | cfg` and `--blendshapes-source` / `--blendshapes-cfg` / `--save-blendshapes-cfg` / `--export-blendshapes`.
+8. **Universal custom Unity hair porting (`unity_hair_helper.py` + `blender_hair_helper.py`):** Any VRChat Unity hair (`.prefab`, `PrefabVariant` chains via `m_SourcePrefab`, Modular Avatar `MergeArmature`/`BoneProxy` setups, or raw `.fbx` + `.mat`) can be assigned via `--hair` (`auto | default | none | <path>`), `custom_hair` in `vrc2gtav.cfg`, or interactive menu option `[8]` on `shinano_casual`, `shinano_er`, or `miltina_maid`. `unity_hair_helper.py` resolves `.fbx.meta` material maps, suppresses inactive/editor-only hair parts, bakes lilToon textures/`_Color`/`_MainTexHSVG` tints into UV tiles (`custom_hair_manifest.json`), and `blender_hair_helper.py` fits the mesh to the avatar skull (with `--hair-scale` and `--hair-offset`), transfers `SKEL_Head` skinning, and preserves base animal ears.
 
 ### 2.2 Trilingual Localization (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) provides full runtime translations in **English (`en`)**, **Japanese (`ja`)**, and **Portuguese (`pt`)**:
@@ -180,6 +183,13 @@ python run_mod_manager.py --character all
 # Build a single character (michael, franklin, or trevor) in English:
 python run_mod_manager.py --character michael --lang en
 
+# Assign & build any VRChat preset on any protagonist (shinano_casual, shinano_er, miltina_maid):
+python run_mod_manager.py --character franklin --avatar miltina_maid --save-assignment
+
+# Port any Unity custom hair (.prefab, PrefabVariant, .fbx, default, or none) onto any protagonist:
+python run_mod_manager.py --character michael --hair "/path/to/CustomHair.prefab" --save-hair
+# Interactive menu option [8] provides guided selection for custom_hair, hair_scale, and hair_offset.
+
 # Skip texture & Blender stages and run deployment + RPF repack only:
 python run_mod_manager.py --deploy-only
 
@@ -191,10 +201,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) validates both source invariants and compiled game outputs:
 
 ```bash
-# Full suite (8 checks; requires First-Run, build, and deploy):
+# Full suite (10 checks; requires First-Run, build, and deploy):
 python scripts/common_tools/test_mod_suite.py --lang en
 
-# Source-only suite (5 checks; runs on a fresh clone prior to First-Run):
+# Source-only suite (7 checks; runs on a fresh clone prior to First-Run):
 python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ```
 
@@ -203,18 +213,19 @@ python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ## 9. Manual Step-by-Step Reference
 
 ```bash
-# Step 1: Generate 2K texture atlases (.dds and .ytd)
+# Step 1: Generate 2K texture atlases (.dds and .ytd; add --hair / --hair-mat / --hair-tex to bake custom hair)
 python scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py
 python scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py
 python scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
 
-# Step 2: Compile 3D models in Blender + Sollumz
-python scripts/Shinano_Casual_Franklin/run_build_franklin.py
-python scripts/Shinano_EternalReunion_Michael/run_build_er.py
-python scripts/Miltina_Maid_Trevor/run_pipeline.py
+# Step 2: Compile 3D models in Blender + Sollumz (supports --target-character and --hair / --hair-scale / --hair-offset)
+python scripts/Shinano_Casual_Franklin/run_build_franklin.py --target-character franklin
+python scripts/Shinano_EternalReunion_Michael/run_build_er.py --target-character michael
+python scripts/Miltina_Maid_Trevor/run_pipeline.py --target-character trevor
 
-# Step 3: Populate staging slots (single protagonist or all three)
+# Step 3: Populate staging slots (single protagonist, optional --avatar override, or all three)
 python scripts/common_tools/apply_characters.py --character player_zero
+python scripts/common_tools/apply_characters.py --character franklin --avatar miltina_maid
 python scripts/common_tools/apply_all_characters.py
 
 # Step 4: Repack RPFs (OPEN header + TOC fix) and install into mods/

@@ -1168,15 +1168,25 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "  [6] 初期設定と GTA V バニラ抽出 (First-Run Setup)",
         "pt": "  [6] Configuração Inicial e Extração GTA V (First-Run Setup)",
     },
+    "manager.menu_opt_7": {
+        "en": "  [7] Change / Swap VRChat Avatar Assignment",
+        "ja": "  [7] VRChat アバター割り当ての変更 / 入れ替え",
+        "pt": "  [7] Trocar / Alternar Avatar VRChat por Personagem",
+    },
     "manager.menu_opt_0": {
         "en": "  [0] Exit",
         "ja": "  [0] 終了",
         "pt": "  [0] Sair",
     },
+    "manager.menu_opt_slot": {
+        "en": "  [{opt}] {protagonist} ({ped_name}) -> {avatar}",
+        "ja": "  [{opt}] {protagonist} ({ped_name}) -> {avatar}",
+        "pt": "  [{opt}] {protagonist} ({ped_name}) -> {avatar}",
+    },
     "manager.menu_input_choice": {
-        "en": "Enter desired option [0-6]: ",
-        "ja": "オプション番号を入力してください [0-6]: ",
-        "pt": "Digite a opção desejada [0-6]: ",
+        "en": "Enter desired option [0-7]: ",
+        "ja": "オプション番号を入力してください [0-7]: ",
+        "pt": "Digite a opção desejada [0-7]: ",
     },
     "manager.cancelled": {
         "en": "[INFO] Operation cancelled by user.",
@@ -2854,5 +2864,405 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "No Unity scene configured for {char}; default 1.0 body scales will be used.",
         "ja": "{char} 用の Unity シーン未設定のため標準 1.0 ボディスケールを使用します。",
         "pt": "Nenhuma cena Unity configurada para {char}; escalas corporais padrão 1.0 serão usadas.",
+    },
+    "setup.blendshapes_cfg_ready": {
+        "en": "[OK] Blendshape preset for {char} ready: {path}",
+        "ja": "[OK] {char} 用のブレンドシェイプ設定ファイルを確認しました: {path}",
+        "pt": "[OK] Predefinição de blendshapes para {char} pronta: {path}",
+    },
+    "setup.blendshapes_cfg_exported": {
+        "en": "[OK] Exported Unity blendshapes for {char} -> {path}",
+        "ja": "[OK] Unity から {char} のブレンドシェイプを書き出しました -> {path}",
+        "pt": "[OK] Blendshapes do Unity exportados para {char} -> {path}",
+    },
+    "setup.blendshapes_cfg_missing": {
+        "en": "[WARNING] No blendshape .cfg or Unity scene found for {char}: {path}",
+        "ja": "[警告] {char} 用のブレンドシェイプ .cfg も Unity シーンも見つかりません: {path}",
+        "pt": "[AVISO] Nenhum arquivo .cfg de blendshapes ou cena Unity encontrado para {char}: {path}",
+    },
+    "blendshapes.loaded_source": {
+        "en": "[INFO] Blendshapes resolved via '{source}': {meshes} mesh(es), {weights} weight(s) ({detail})",
+        "ja": "[情報] '{source}' からブレンドシェイプを読み込みました: {meshes} メッシュ / {weights} ウェイト ({detail})",
+        "pt": "[INFO] Blendshapes carregados via '{source}': {meshes} malha(s), {weights} peso(s) ({detail})",
+    },
+    "blendshapes.saved_cfg": {
+        "en": "[OK] Saved blendshape preset file: {path}",
+        "ja": "[OK] ブレンドシェイプ設定ファイルを保存しました: {path}",
+        "pt": "[OK] Arquivo .cfg de blendshapes salvo: {path}",
+    },
+    "blendshapes.applied_scene": {
+        "en": "[INFO] Applied blendshape presets to {meshes} Blender mesh(es) ({slots} key slots updated).",
+        "ja": "[情報] {meshes} 個の Blender メッシュにブレンドシェイプを適用しました ({slots} スロット更新)。",
+        "pt": "[INFO] Predefinições de blendshapes aplicadas em {meshes} malha(s) no Blender ({slots} chaves atualizadas).",
+    },
+    "blendshapes.cli_cfg": {
+        "en": "Path to a blendshapes .cfg preset file",
+        "ja": "ブレンドシェイプ .cfg プリセットファイルへのパス",
+        "pt": "Caminho para o arquivo de predefinição .cfg de blendshapes",
+    },
+    "blendshapes.cli_source": {
+        "en": "Blendshape source priority: auto, unity, or cfg",
+        "ja": "ブレンドシェイプの取得元優先順: auto, unity, または cfg",
+        "pt": "Origem prioritária dos blendshapes: auto, unity ou cfg",
+    },
+    "blendshapes.cli_save_cfg": {
+        "en": "Save resolved blendshape weights to this .cfg preset file",
+        "ja": "解決済みブレンドシェイプウェイトをこの .cfg ファイルに保存",
+        "pt": "Salvar os blendshapes resolvidos neste arquivo .cfg",
+    },
+    "blendshapes.cli_face_anim": {
+        "en": "Optional Unity facial .anim file override",
+        "ja": "オプションの Unity 表情 .anim ファイル上書き",
+        "pt": "Sobrescrita opcional do arquivo .anim facial do Unity",
+    },
+    "manager.cli_export_blendshapes": {
+        "en": "Export avatar blendshapes from Unity scenes into configs/*_blendshapes.cfg",
+        "ja": "Unity シーンから configs/*_blendshapes.cfg へアバターのブレンドシェイプを書き出す",
+        "pt": "Exportar os blendshapes dos avatares das cenas Unity para configs/*_blendshapes.cfg",
+    },
+    "manager.export_blendshapes_ok": {
+        "en": "[OK] Exported blendshapes for {char}: {path}",
+        "ja": "[OK] {char} のブレンドシェイプを書き出しました: {path}",
+        "pt": "[OK] Blendshapes exportados para {char}: {path}",
+    },
+    "manager.export_blendshapes_skipped": {
+        "en": "[WARNING] Skipped {char}: no Unity scene configured or no blendshapes extracted.",
+        "ja": "[警告] {char} をスキップしました: Unity シーン未設定またはブレンドシェイプ未検出。",
+        "pt": "[AVISO] {char} ignorado: nenhuma cena Unity configurada ou nenhum blendshape extraído.",
+    },
+    "tests.blendshapes_cfg_presets": {
+        "en": "Tracked configs/*_blendshapes.cfg & UTF-8 round-trip serialization",
+        "ja": "configs/*_blendshapes.cfg プリセット群と UTF-8 ラウンドトリップ読込/保存",
+        "pt": "Presets configs/*_blendshapes.cfg e leitura/gravação UTF-8",
+    },
+    "tests.blendshapes_unity_extract": {
+        "en": "Unity scene + nested prefab blendshape weight extraction",
+        "ja": "Unity シーンおよびネスト Prefab からのブレンドシェイプウェイト抽出",
+        "pt": "Extração de pesos de blendshapes de cena Unity e Prefab aninhado",
+    },
+    "tests.blendshapes_resolution_order": {
+        "en": "Blendshape source resolution order (auto / unity / cfg)",
+        "ja": "ブレンドシェイプ取得元の優先解決順 (auto / unity / cfg)",
+        "pt": "Ordem de resolução da origem dos blendshapes (auto / unity / cfg)",
+    },
+    "protagonist.michael": {
+        "en": "Michael De Santa",
+        "ja": "マイケル・デ・サンタ",
+        "pt": "Michael De Santa",
+    },
+    "protagonist.franklin": {
+        "en": "Franklin Clinton",
+        "ja": "フランクリン・クリントン",
+        "pt": "Franklin Clinton",
+    },
+    "protagonist.trevor": {
+        "en": "Trevor Philips",
+        "ja": "トレバー・フィリップス",
+        "pt": "Trevor Philips",
+    },
+    "avatar.shinano_casual": {
+        "en": "Shinano Casual",
+        "ja": "しなの (カジュアル)",
+        "pt": "Shinano Casual",
+    },
+    "avatar.shinano_er": {
+        "en": "Shinano Eternal Reunion",
+        "ja": "しなの (Eternal Reunion)",
+        "pt": "Shinano Eternal Reunion",
+    },
+    "avatar.miltina_maid": {
+        "en": "Miltina Maid",
+        "ja": "ミルティナ (メイド)",
+        "pt": "Miltina Maid",
+    },
+    "paths.unknown_protagonist": {
+        "en": "Unknown GTA V protagonist '{name}'. Expected: michael, franklin, or trevor.",
+        "ja": "不明な GTA V 主人公 '{name}' です。michael, franklin, trevor を指定してください。",
+        "pt": "Protagonista desconhecido do GTA V '{name}'. Esperado: michael, franklin ou trevor.",
+    },
+    "paths.unknown_avatar": {
+        "en": "Unknown VRChat avatar preset '{name}'. Expected: shinano_casual, shinano_er, or miltina_maid.",
+        "ja": "不明な VRChat アバタープリセット '{name}' です。shinano_casual, shinano_er, miltina_maid を指定してください。",
+        "pt": "Preset de avatar VRChat desconhecido '{name}'. Esperado: shinano_casual, shinano_er ou miltina_maid.",
+    },
+    "manager.cli_avatar": {
+        "en": "VRChat avatar preset to build/apply (shinano_casual, shinano_er, miltina_maid)",
+        "ja": "ビルド/適用する VRChat アバタープリセット (shinano_casual, shinano_er, miltina_maid)",
+        "pt": "Preset de avatar VRChat para compilar/aplicar (shinano_casual, shinano_er, miltina_maid)",
+    },
+    "manager.cli_protagonist_avatar": {
+        "en": "Override VRChat avatar preset specifically for {protagonist}",
+        "ja": "{protagonist} に使用する VRChat アバタープリセットを上書き指定",
+        "pt": "Sobrescrever o preset de avatar VRChat especificamente para {protagonist}",
+    },
+    "manager.cli_save_assignment": {
+        "en": "Persist --avatar overrides into vrc2gtav.cfg",
+        "ja": "--avatar の割り当て変更を vrc2gtav.cfg に保存",
+        "pt": "Salvar as atribuições de --avatar no arquivo vrc2gtav.cfg",
+    },
+    "manager.swap_header": {
+        "en": "SWAP VRCHAT AVATAR ASSIGNMENT",
+        "ja": "VRChat アバター割り当ての変更",
+        "pt": "TROCAR ATRIBUIÇÃO DE AVATAR VRCHAT",
+    },
+    "manager.swap_select_protagonist": {
+        "en": "Select which GTA V protagonist you want to customize:",
+        "ja": "カスタマイズする GTA V の主人公を選択してください:",
+        "pt": "Selecione qual protagonista do GTA V deseja personalizar:",
+    },
+    "manager.swap_select_avatar": {
+        "en": "Select which VRChat avatar to assign to {protagonist}:",
+        "ja": "{protagonist} に割り当てる VRChat アバターを選択してください:",
+        "pt": "Selecione qual avatar VRChat atribuir a {protagonist}:",
+    },
+    "manager.swap_prompt_choice": {
+        "en": "Enter choice [0-3]: ",
+        "ja": "番号を入力してください [0-3]: ",
+        "pt": "Digite a opção [0-3]: ",
+    },
+    "manager.swap_saved": {
+        "en": "[OK] Assigned '{avatar}' to {protagonist} and saved vrc2gtav.cfg.",
+        "ja": "[OK] {protagonist} に '{avatar}' を割り当てて vrc2gtav.cfg に保存しました。",
+        "pt": "[OK] Avatar '{avatar}' atribuído a {protagonist} e salvo em vrc2gtav.cfg.",
+    },
+    "apply.cli_avatar": {
+        "en": "Optional VRChat avatar preset override for single-character deployment",
+        "ja": "単一キャラクター適用時の VRChat アバタープリセット上書き",
+        "pt": "Sobrescrita opcional do preset de avatar VRChat para um único personagem",
+    },
+    "apply.cli_protagonist_avatar": {
+        "en": "Override VRChat avatar preset for {protagonist}",
+        "ja": "{protagonist} に適用する VRChat アバタープリセットを上書き",
+        "pt": "Sobrescrever preset de avatar VRChat para {protagonist}",
+    },
+    "franklin.build.cli_desc": {
+        "en": "Shinano Casual to GTA V Blender compiler (interchangeable across protagonists)",
+        "ja": "Shinano Casual -> GTA V Blender コンパイラ (主人公切替対応)",
+        "pt": "Compilador Shinano Casual para GTA V no Blender (intercambiável entre protagonistas)",
+    },
+    "franklin.build.arg_target_char": {
+        "en": "Target GTA V protagonist slot (michael, franklin, trevor)",
+        "ja": "ビルド先の GTA V 主人公スロット (michael, franklin, trevor)",
+        "pt": "Protagonista alvo do GTA V (michael, franklin, trevor)",
+    },
+    "trevor.build.arg_target_char": {
+        "en": "Target GTA V protagonist slot (michael, franklin, trevor)",
+        "ja": "ビルド先の GTA V 主人公スロット (michael, franklin, trevor)",
+        "pt": "Protagonista alvo do GTA V (michael, franklin, trevor)",
+    },
+    "tests.suite_interchangeability": {
+        "en": "Avatar <-> Protagonist Interchangeability",
+        "ja": "アバター <-> 主人公の相互切替テスト",
+        "pt": "Intercambiabilidade Avatar <-> Protagonista",
+    },
+    "tests.interchangeability_config": {
+        "en": "All 9 (protagonist x avatar) combinations resolve isolated outputs & skeletons",
+        "ja": "全 9 通りの (主人公 x アバター) 組み合わせで独立出力とスケルトンを解決",
+        "pt": "Todas as 9 combinações (protagonista x avatar) resolvem saídas e skeletons isolados",
+    },
+    "tests.interchangeability_presets": {
+        "en": "Blendshape/Unity preset hints follow active avatar across protagonist swaps",
+        "ja": "主人公切替時もブレンドシェイプ/Unity プリセットが選択アバターに追従",
+        "pt": "Presets de blendshape/Unity seguem o avatar ativo ao trocar protagonistas",
+    },
+    "tests.interchangeability_builders": {
+        "en": "All 3 builders & runners expose --target-character across michael/franklin/trevor",
+        "ja": "全 3 ビルド/ランナースクリプトが michael/franklin/trevor 向け --target-character に対応",
+        "pt": "Todos os 3 builders e runners aceitam --target-character para michael/franklin/trevor",
+    },
+    "common.hair_custom_packed": {
+        "en": "[HAIR] Packing custom Unity hair '{source}' ({tiles} tile(s)) into atlas...",
+        "ja": "[HAIR] カスタム Unity ヘア '{source}' ({tiles} タイル) をアトラスにパッキング中...",
+        "pt": "[HAIR] Empacotando cabelo customizado Unity '{source}' ({tiles} bloco(s)) no atlas...",
+    },
+    "common.hair_aligned_summary": {
+        "en": "[HAIR] Aligned {count} custom hair mesh(es) onto avatar skull.",
+        "ja": "[HAIR] カスタムヘアーメッシュ {count} 個をアバター頭部に整列しました。",
+        "pt": "[HAIR] {count} malha(s) de cabelo customizado alinhada(s) ao crânio do avatar.",
+    },
+    "common.hair_none_active": {
+        "en": "[HAIR] Hair removed (--hair none); exporting without hair meshes.",
+        "ja": "[HAIR] ヘアなし (--hair none); ヘアーメッシュを除外してエクスポートします。",
+        "pt": "[HAIR] Sem cabelo (--hair none); exportando avatar sem malhas de cabelo.",
+    },
+    "common.hair_cli_opt": {
+        "en": "Custom Unity hair (.prefab, PrefabVariant, .fbx, auto, default, or none)",
+        "ja": "カスタム Unity ヘア指定 (.prefab, PrefabVariant, .fbx, auto, default, none)",
+        "pt": "Seletor de cabelo Unity (.prefab, PrefabVariant, .fbx, auto, default ou none)",
+    },
+    "common.hair_mat_cli_opt": {
+        "en": "Optional Unity .mat override for raw FBX custom hair",
+        "ja": "FBX ヘア用のオプション Unity .mat 上書きパス",
+        "pt": "Caminho opcional de material Unity .mat para cabelo FBX avulso",
+    },
+    "common.hair_tex_cli_opt": {
+        "en": "Optional diffuse texture override for custom hair",
+        "ja": "カスタムヘア用のオプション拡散テクスチャ上書きパス",
+        "pt": "Caminho opcional de textura difusa para o cabelo customizado",
+    },
+    "common.hair_scale_cli_opt": {
+        "en": "Optional uniform scale multiplier for custom hair alignment",
+        "ja": "カスタムヘア整列時のオプション均一スケール倍率",
+        "pt": "Multiplicador opcional de escala uniforme para ajuste do cabelo",
+    },
+    "common.hair_offset_cli_opt": {
+        "en": "Optional X,Y,Z Unity offset tweak for custom hair (e.g. 0,0.01,-0.02)",
+        "ja": "カスタムヘア用のオプション X,Y,Z オフセット補正 (例: 0,0.01,-0.02)",
+        "pt": "Ajuste opcional X,Y,Z em espaço Unity para o cabelo (ex: 0,0.01,-0.02)",
+    },
+    "common.unity_scene_cli_opt": {
+        "en": "Optional Unity .unity scene path override",
+        "ja": "オプションの Unity .unity シーンパス上書き",
+        "pt": "Caminho opcional de cena Unity (.unity) para sobrescrita",
+    },
+    "common.unity_avatar_cli_opt": {
+        "en": "Optional Unity root GameObject name override",
+        "ja": "オプションの Unity ルート GameObject 名上書き",
+        "pt": "Nome opcional do GameObject raiz na cena Unity",
+    },
+    "manager.menu_opt_8": {
+        "en": "8. Configure custom Unity hair (.prefab / .fbx / auto)",
+        "ja": "8. カスタム Unity ヘアを設定 (.prefab / .fbx / auto)",
+        "pt": "8. Configurar cabelo customizado do Unity (.prefab / .fbx / auto)",
+    },
+    "manager.cli_hair": {
+        "en": "Override hair across texture + Blender build (auto, default, none, .prefab, .fbx)",
+        "ja": "テクスチャ+Blender ビルド用ヘア上書き (auto, default, none, .prefab, .fbx)",
+        "pt": "Sobrescrever cabelo no atlas e Blender (auto, default, none, .prefab, .fbx)",
+    },
+    "manager.cli_hair_mat": {
+        "en": "Optional Unity .mat path passed to hair material extractor",
+        "ja": "ヘアマテリアル抽出に渡すオプション Unity .mat パス",
+        "pt": "Caminho opcional de .mat Unity para extração de material do cabelo",
+    },
+    "manager.cli_hair_tex": {
+        "en": "Optional texture image path override for custom hair",
+        "ja": "カスタムヘア用オプションテクスチャ画像パス",
+        "pt": "Caminho opcional de imagem de textura para cabelo customizado",
+    },
+    "manager.cli_hair_scale": {
+        "en": "Optional uniform scale multiplier passed to custom hair alignment",
+        "ja": "カスタムヘア整列に渡すオプション均一スケール倍率",
+        "pt": "Multiplicador de escala uniforme para alinhamento de cabelo customizado",
+    },
+    "manager.cli_hair_offset": {
+        "en": "Optional X,Y,Z Unity offset passed to custom hair alignment",
+        "ja": "カスタムヘア整列に渡すオプション X,Y,Z オフセット",
+        "pt": "Deslocamento opcional X,Y,Z em Unity para alinhamento do cabelo",
+    },
+    "manager.cli_save_hair": {
+        "en": "Persist --hair* overrides into vrc2gtav.cfg",
+        "ja": "--hair* の指定内容を vrc2gtav.cfg に保存",
+        "pt": "Salvar sobrescritas --hair* no arquivo vrc2gtav.cfg",
+    },
+    "manager.hair_header": {
+        "en": "CONFIGURE CUSTOM UNITY HAIR",
+        "ja": "カスタム Unity ヘアの設定",
+        "pt": "CONFIGURAR CABELO CUSTOMIZADO DO UNITY",
+    },
+    "manager.hair_select_protagonist": {
+        "en": "Select which GTA V protagonist's hair to configure:",
+        "ja": "ヘアを設定する GTA V の主人公を選択してください:",
+        "pt": "Selecione qual protagonista do GTA V terá o cabelo configurado:",
+    },
+    "manager.hair_current": {
+        "en": "Current hair configuration for {protagonist}: {current}",
+        "ja": "{protagonist} の現在のヘア設定: {current}",
+        "pt": "Configuração atual de cabelo para {protagonist}: {current}",
+    },
+    "manager.hair_scanning": {
+        "en": "Scanning Unity Assets folder for hair prefabs and FBXs...",
+        "ja": "Unity Assets フォルダ内のヘア Prefab / FBX をスキャン中...",
+        "pt": "Escaneando pasta Unity Assets por prefabs e FBXs de cabelo...",
+    },
+    "manager.hair_select_source": {
+        "en": "Choose a hair source for {protagonist}:",
+        "ja": "{protagonist} に使用するヘアソースを選択してください:",
+        "pt": "Escolha a fonte de cabelo para {protagonist}:",
+    },
+    "manager.hair_opt_auto": {
+        "en": "  [1] Auto (detect Modular Avatar / VRCFury / Head attachment in .unity scene)",
+        "ja": "  [1] Auto (.unity シーン内の Modular Avatar / VRCFury / Head 装着ヘアを自動検出)",
+        "pt": "  [1] Auto (detectar Modular Avatar / VRCFury / Head na cena .unity)",
+    },
+    "manager.hair_opt_default": {
+        "en": "  [2] Default avatar hair (use base avatar's native hair)",
+        "ja": "  [2] デフォルトヘア (ベースアバター標準の髪を使用)",
+        "pt": "  [2] Cabelo padrão do avatar (usar o cabelo nativo do avatar base)",
+    },
+    "manager.hair_opt_none": {
+        "en": "  [3] None (export without hair meshes)",
+        "ja": "  [3] なし (ヘアーメッシュなしでエクスポート)",
+        "pt": "  [3] Nenhum (exportar avatar sem cabelo)",
+    },
+    "manager.hair_opt_manual": {
+        "en": "  [M] Enter custom .prefab or .fbx path manually",
+        "ja": "  [M] .prefab または .fbx のパスを手入力する",
+        "pt": "  [M] Digitar caminho manual de arquivo .prefab ou .fbx",
+    },
+    "manager.hair_no_candidates": {
+        "en": "  (No extra hair prefabs detected automatically in Unity Assets.)",
+        "ja": "  (Unity Assets 内に追加のヘア Prefab は自動検出されませんでした。)",
+        "pt": "  (Nenhum prefab extra de cabelo encontrado automaticamente em Unity Assets.)",
+    },
+    "manager.hair_prompt_choice": {
+        "en": "Enter option number, 'M', or '0' to cancel: ",
+        "ja": "番号、'M'、またはキャンセル '0' を入力してください: ",
+        "pt": "Digite o número, 'M', ou '0' para cancelar: ",
+    },
+    "manager.hair_prompt_manual_path": {
+        "en": "Enter path to hair .prefab or .fbx: ",
+        "ja": "ヘア用 .prefab または .fbx のパスを入力してください: ",
+        "pt": "Digite o caminho para o arquivo .prefab ou .fbx do cabelo: ",
+    },
+    "manager.hair_prompt_scale": {
+        "en": "Optional hair scale multiplier [default 1.0]: ",
+        "ja": "ヘアのスケール倍率 [既定 1.0]: ",
+        "pt": "Multiplicador de escala opcional do cabelo [padrão 1.0]: ",
+    },
+    "manager.hair_prompt_offset": {
+        "en": "Optional X,Y,Z Unity offset [default 0,0,0]: ",
+        "ja": "オプションの X,Y,Z Unity オフセット [既定 0,0,0]: ",
+        "pt": "Deslocamento opcional X,Y,Z em Unity [padrão 0,0,0]: ",
+    },
+    "manager.hair_path_missing": {
+        "en": "[WARNING] Custom hair file not found: {path}",
+        "ja": "[警告] 指定されたヘアファイルが見つかりません: {path}",
+        "pt": "[AVISO] Arquivo de cabelo não encontrado: {path}",
+    },
+    "manager.hair_saved": {
+        "en": "[OK] Saved custom_hair='{hair}' into [{section}] in vrc2gtav.cfg.",
+        "ja": "[OK] custom_hair='{hair}' を vrc2gtav.cfg の [{section}] に保存しました。",
+        "pt": "[OK] Salvo custom_hair='{hair}' em [{section}] no vrc2gtav.cfg.",
+    },
+    "tests.sec_custom_hair_title": {
+        "en": "\n[TEST] Validating Universal Unity Custom Hair Support...",
+        "ja": "\n[TEST] 汎用 Unity カスタムヘア対応を検証中...",
+        "pt": "\n[TEST] Validando Suporte Universal a Cabelos Customizados do Unity...",
+    },
+    "tests.suite_custom_hair": {
+        "en": "Universal Unity Custom Hair Porting",
+        "ja": "汎用 Unity カスタムヘア自動移植",
+        "pt": "Porte Automático de Cabelo Customizado Unity",
+    },
+    "tests.hair_cli_flags": {
+        "en": "All atlas generators, Blender builders, runners & manager expose --hair CLI options",
+        "ja": "全アトラス生成・Blender ビルド・ランナー・マネージャーが --hair オプションに対応",
+        "pt": "Todos os geradores de atlas, builders Blender, runners e manager expõem --hair",
+    },
+    "tests.hair_prefab_variant": {
+        "en": "Unity .prefab / PrefabVariant parser, inactive gimmick filter & lilToon compositor",
+        "ja": "Unity .prefab / PrefabVariant 解析・非表示メッシュ除外・lilToon 合成",
+        "pt": "Parser .prefab / PrefabVariant, filtro m_IsActive e compositor lilToon",
+    },
+    "tests.hair_uv_packing": {
+        "en": "Multi-tile atlas packing, UDIM centroid remap, gutter padding & tail filter",
+        "ja": "マルチタイルアトラス配置・UDIM 重心リマップ・余白パディング・尻尾判定",
+        "pt": "Empacotamento multi-tile, remap UDIM por centroide, gutter e filtro tail",
+    },
+    "tests.hair_cfg_keywords": {
+        "en": "Per-protagonist custom_hair keywords (auto/default/none) preserved in vrc2gtav_paths",
+        "ja": "主人公別 custom_hair キーワード (auto/default/none) が vrc2gtav_paths で保持",
+        "pt": "Palavras-chave por protagonista custom_hair (auto/default/none) preservadas",
     },
 }

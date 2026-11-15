@@ -32,6 +32,7 @@ for _tools_candidate in (
         sys.path.insert(0, str(_tools_candidate))
 
 import texture_calibration_helper as calibration_helper
+import unity_hair_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
@@ -46,14 +47,33 @@ def resolve_startup_language() -> None:
     i18n.set_active_language(configured_language, cli_args=sys.argv[1:])
 
 
-def generate_miltina_texture_atlas() -> bool:
+def generate_miltina_texture_atlas(
+    target_character: str = None,
+    hair_override: str = None,
+    hair_mat_override: str = None,
+    hair_tex_override: str = None,
+    unity_scene_override: str = None,
+    unity_avatar_override: str = None,
+    output_dir_override: str = None,
+) -> bool:
     """
-    Load source textures from vrc2gtav.cfg [trevor], calibrate luminance and
-    sapphire hair tint, compose the 2K atlas maps, and build the .ytd file.
+    Load source textures from vrc2gtav.cfg, calibrate luminance and
+    hair tint (default or custom Unity hair), compose the 2K atlas maps, and build the .ytd file.
     """
     try:
-        trevor_cfg = project_paths.get_character_paths("trevor")
-        output_directory = Path(trevor_cfg["textures_dir"])
+        trevor_cfg = (
+            project_paths.get_character_paths(
+                target_character,
+                avatar_override="miltina_maid",
+            )
+            if target_character
+            else project_paths.get_avatar_paths("miltina_maid")
+        )
+        output_directory = (
+            Path(output_dir_override)
+            if output_dir_override
+            else Path(trevor_cfg["textures_dir"])
+        )
         output_directory.mkdir(parents=True, exist_ok=True)
 
         source_face_path = calibration_helper.resolve_existing_file(
@@ -115,22 +135,47 @@ def generate_miltina_texture_atlas() -> bool:
         face_pixel_array[:, :, :3] = numpy_lib.clip(lifted_face_pixels * 255.0, 0.0, 255.0)
         face_quadrant = Image.fromarray(face_pixel_array.astype(numpy_lib.uint8))
 
-        # 2. Calibrate hair (custom override if explicitly provided, else Milltina_Hair.mat calibration)
-        custom_hair_fbx = str(trevor_cfg.get("fbx_hair", "")).strip()
-        if custom_hair_fbx and Path(custom_hair_fbx).is_file() and custom_hair_override is not None:
-            print(i18n.translate("trevor.atlas.hair_custom", path=custom_hair_override))
-            raw_custom_hair = (
-                Image.open(custom_hair_override)
-                .convert("RGBA")
-                .resize((half_dimension, half_dimension), Image.Resampling.LANCZOS)
+        # 2. Calibrate hair (custom Unity hair via resolver, or Milltina_Hair default)
+        hair_spec_input = (
+            hair_override
+            if hair_override is not None
+            else (
+                str(trevor_cfg.get("custom_hair", "")).strip()
+                or str(trevor_cfg.get("fbx_hair", "")).strip()
+                or "auto"
             )
-            hair_quadrant = calibration_helper.apply_shinano_vibrant_hair_tint(raw_custom_hair)
-            hair_specular_quadrant = Image.new(
-                "RGBA", (half_dimension, half_dimension), (140, 140, 140, 255)
+        )
+        hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+            hair_spec_input=hair_spec_input,
+            unity_scene=unity_scene_override or trevor_cfg.get("unity_scene"),
+            unity_avatar_name=unity_avatar_override
+            or str(trevor_cfg.get("unity_avatar_name", "Milltina")),
+            hair_mat_override=hair_mat_override or trevor_cfg.get("hair_mat"),
+            hair_tex_override=hair_tex_override or trevor_cfg.get("hair_tex"),
+            is_calibrated_er_default=False,
+        )
+
+        if hair_spec.get("mode") == "custom":
+            print(
+                i18n.translate(
+                    "common.hair_custom_packed",
+                    source=hair_spec.get("source_input", ""),
+                    tiles=len(hair_spec.get("materials", [])),
+                )
             )
-            hair_luma = numpy_lib.array(raw_custom_hair.convert("L"), dtype=numpy_lib.float32)
-            hair_normal_quadrant = calibration_helper.generate_directional_hair_normal(
-                hair_luma, strength=2.0
+            quad_diff, quad_norm, quad_spec, tile_entries = (
+                unity_hair_helper.pack_hair_materials_into_quadrant(
+                    hair_spec.get("materials", []),
+                    quad_size=(half_dimension, half_dimension),
+                    quad_uv_rect=(0.5, 0.0, 0.5, 0.5),
+                    gutter_px=4,
+                )
+            )
+            hair_quadrant = quad_diff.convert("RGBA")
+            hair_normal_quadrant = quad_norm.convert("RGBA")
+            hair_specular_quadrant = quad_spec.convert("RGBA")
+            unity_hair_helper.save_custom_hair_manifest(
+                output_directory, hair_spec, tile_entries
             )
         else:
             if default_hair_path is None:
@@ -145,6 +190,9 @@ def generate_miltina_texture_atlas() -> bool:
                     output_size=half_dimension,
                 )
             )
+            unity_hair_helper.save_custom_hair_manifest(
+                output_directory, hair_spec, []
+            )
 
         # 3. Compose Diffuse Atlas
         diffuse_atlas_image = Image.new(
@@ -155,7 +203,11 @@ def generate_miltina_texture_atlas() -> bool:
         diffuse_atlas_image.paste(costume_quadrant, (0, half_dimension))
         diffuse_atlas_image.paste(hair_quadrant, (half_dimension, half_dimension))
 
-        diffuse_output_path = Path(trevor_cfg["atlas_png"])
+        diffuse_output_path = (
+            output_directory / Path(trevor_cfg["atlas_png"]).name
+            if output_dir_override
+            else Path(trevor_cfg["atlas_png"])
+        )
         diffuse_atlas_image.save(diffuse_output_path, "PNG")
         print(i18n.translate("trevor.atlas.saved_diffuse", path=diffuse_output_path))
 
@@ -186,7 +238,11 @@ def generate_miltina_texture_atlas() -> bool:
         specular_atlas_image.paste(costume_specular_quadrant, (0, half_dimension))
         specular_atlas_image.paste(hair_specular_quadrant, (half_dimension, half_dimension))
 
-        specular_output_path = Path(trevor_cfg["spec_png"])
+        specular_output_path = (
+            output_directory / Path(trevor_cfg["spec_png"]).name
+            if output_dir_override
+            else Path(trevor_cfg["spec_png"])
+        )
         specular_atlas_image.save(specular_output_path, "PNG")
         print(i18n.translate("trevor.atlas.saved_spec", path=specular_output_path))
 
@@ -202,13 +258,21 @@ def generate_miltina_texture_atlas() -> bool:
             normal_atlas_image.paste(costume_normal_quadrant, (0, half_dimension))
         normal_atlas_image.paste(hair_normal_quadrant, (half_dimension, half_dimension))
 
-        normal_output_path = Path(trevor_cfg["normal_png"])
+        normal_output_path = (
+            output_directory / Path(trevor_cfg["normal_png"]).name
+            if output_dir_override
+            else Path(trevor_cfg["normal_png"])
+        )
         normal_atlas_image.save(normal_output_path, "PNG")
         print(i18n.translate("trevor.atlas.saved_normal", path=normal_output_path))
 
         # 6. Compile .ytd texture dictionary via RAGE CLI (preserving JOAAT hash order)
         rage_cli_binary = project_paths.get_rage_cli()
-        output_ytd_file = Path(trevor_cfg["ytd_file"])
+        output_ytd_file = (
+            output_directory / Path(trevor_cfg["ytd_file"]).name
+            if output_dir_override
+            else Path(trevor_cfg["ytd_file"])
+        )
 
         texture_build_command = [
             rage_cli_binary,
@@ -245,12 +309,36 @@ def main() -> int:
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        choices=["michael", "franklin", "trevor"],
+        default=None,
+        help=i18n.translate("trevor.build.arg_target_char"),
+    )
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--hair", default=None)
+    parser.add_argument("--hair-mat", default=None)
+    parser.add_argument("--hair-tex", default=None)
+    parser.add_argument("--unity-scene", default=None)
+    parser.add_argument("--unity-avatar-name", default=None)
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    return 0 if generate_miltina_texture_atlas() else 1
+    return (
+        0
+        if generate_miltina_texture_atlas(
+            target_character=parsed_args.target_character,
+            hair_override=parsed_args.hair,
+            hair_mat_override=parsed_args.hair_mat,
+            hair_tex_override=parsed_args.hair_tex,
+            unity_scene_override=parsed_args.unity_scene,
+            unity_avatar_override=parsed_args.unity_avatar_name,
+            output_dir_override=parsed_args.output_dir,
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

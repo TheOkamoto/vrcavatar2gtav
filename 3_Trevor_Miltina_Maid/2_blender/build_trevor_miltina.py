@@ -27,7 +27,10 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
     if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
 
+import blender_hair_helper
+import blendshape_helper
 import hand_skeleton_helper
+import unity_hair_helper
 import unity_scene_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
@@ -79,102 +82,6 @@ HEAD_MESH_NAMES = {
     "Milltina_hair_front",
     "Milltina_hair_front_side",
     "Milltina_hair_twintail",
-}
-
-# Exact adult resting expression from FaceEmo 'Miltina_close eyes_Base_adult.anim'
-EXACT_ANIM_FACIAL_BLENDSHAPES = {
-    "brow_down": 0.76,
-    "brow_down_head_up": 0.40,
-    "eye_big": 1.00,
-    "eye_horizontal": 0.50,
-    "eye_joy": 0.14,
-    "eye_look_up": 0.15,
-    "eye_pleasure_1": 0.70,
-    "eye_position_down": 0.07,
-    "eye_position_near": 0.50,
-    "eye_position_up": 1.00,
-    "eye_size_narrow": 0.25,
-    "eye_size_small": 0.35,
-    "eye_size_top_wide": 1.00,
-    "eye_tsuri_1": 0.65,
-    "eye_vertical": 1.00,
-    "eye_zitome_1": 0.65,
-    "eyelash_main_top1_big": 1.00,
-    "eyelash_main_top2_big": 1.00,
-    "eyelash_main_top3_big": 1.00,
-    "eyelash_main_top4_big": 1.00,
-    "eyelash_main_top_thin": 1.00,
-    "eyelash_under_sub1_x": 1.00,
-    "eyelash_under_sub2_x": 1.00,
-    "eyelash_under_sub3_x": 1.00,
-    "eyelid_center_down_1": 1.00,
-    "eyelid_center_up_1": 0.70,
-    "eyelid_down": 0.035,
-    "eyelid_head_sharp": 1.00,
-    "eyelid_sub1_x": 1.00,
-    "eyelid_tail_long": 1.00,
-    "eyelid_thin": 1.00,
-    "eyelid_top_line_x": 1.00,
-    "eye_under_center_up": 0.12,
-    "eye_under_down": 1.00,
-    "eye_under_head_up": 0.80,
-    "eye_under_up": 1.00,
-    "mouth_V_1": 0.20,
-    "mouth_center_down_1": 0.15,
-    "mouth_narrow": 0.25,
-    "mouth_position_up": 0.20,
-    "mouth_small": 0.07,
-    "mouth_yaeba(tooth)_top_L": 1.00,
-    "mouth_yaeba(tooth)_top_R": 1.00,
-    "option_face_down": 1.00,
-    "option_face_otona": 1.00,
-    "option_jaw_narrow": 0.50,
-    "option_morph_narrow": 1.00,
-    "option_morph_sharp": 1.00,
-    "option_nose_up": 0.30,
-    "eye_x": 0.0,
-    "eye_type2": 0.0,
-    "(T1)highlight_main_x": 0.0,
-}
-
-# Only Shrink_Clothes_on + Foot_heel are enabled on Milltina_body to preserve neck/arms
-CLOTHING_BLENDSHAPES = {
-    "Milltina_body": {
-        "Shrink_Clothes_on": 1.0,
-        "Foot_heel": 1.0,
-    },
-    "Milltina_cloth_dress": {
-        "Cuff_shrink": 1.0,
-        "Apron_set": 1.0,
-        "Breasts_Cow": 0.0,
-        "Breasts_Big": 0.0,
-    },
-    "Milltina_cloth_skirt": {
-        "Apron_set": 1.0,
-        "Breasts_Cow": 0.0,
-        "Breasts_Big": 0.0,
-    },
-    "Milltina_cloth_apron": {
-        "Breasts_Cow": 0.0,
-        "Breasts_Big": 0.0,
-    },
-    "Milltina_cloth_hat": {
-        "Option_Twin tail": 1.0,
-    },
-    "Milltina_cloth_garterbelt": {
-        "Panty_squeeze": 1.0,
-        "Foot_heel": 1.0,
-        "Sock_squeeze": 1.0,
-        "Garters_squeeze": 1.0,
-    },
-    "Milltina_cloth_panties": {
-        "Option_Thigh_small": 1.0,
-        "Bandage_x": 1.0,
-        "Option_Tail_set": 1.0,
-    },
-    "Milltina_hair_side": {
-        "Ears_on": 1.0,
-    },
 }
 
 BONE_MAP = {
@@ -287,48 +194,42 @@ def resolve_target_bone(source_bone_name):
     return "SKEL_Pelvis"
 
 
-def split_oversized_material_geometries(mesh_object, max_vertices_per_chunk=30000):
-    """Split dense material slots into chunks under the RAGE uint16 vertex limit."""
-    mesh_data_elem = mesh_object.data
-    polys_by_material = {}
-    for poly_item in mesh_data_elem.polygons:
-        polys_by_material.setdefault(poly_item.material_index, []).append(poly_item.index)
-
-    max_polys_per_chunk = max(10000, int(max_vertices_per_chunk * 0.65))
-
-    for mat_index, poly_indices in list(polys_by_material.items()):
-        if len(poly_indices) <= max_polys_per_chunk:
-            continue
-
-        base_material = mesh_data_elem.materials[mat_index]
-        chunk_total = math.ceil(len(poly_indices) / max_polys_per_chunk)
-        print(
-            i18n.translate(
-                "trevor.build.splitting_material",
-                name=base_material.name,
-                count=len(poly_indices),
-                chunks=chunk_total,
-            )
-        )
-
-        sub_materials = [base_material]
-        for chunk_idx in range(1, chunk_total):
-            duplicated_mat = base_material.copy()
-            duplicated_mat.name = f"{base_material.name}_chunk{chunk_idx}"
-            mesh_data_elem.materials.append(duplicated_mat)
-            sub_materials.append(duplicated_mat)
-
-        for poly_seq, poly_idx in enumerate(poly_indices):
-            chunk_assignment = poly_seq // max_polys_per_chunk
-            target_mat = sub_materials[chunk_assignment]
-            mesh_data_elem.polygons[poly_idx].material_index = mesh_data_elem.materials.find(
-                target_mat.name
-            )
-
-
-def build_trevor_miltina_avatar():
+def build_trevor_miltina_avatar(cli_args=None):
     """Compile Miltina Maid in Blender, render previews, and export .ydd / .yft."""
-    trevor_cfg = project_paths.get_character_paths("trevor")
+    raw_target_character = (
+        getattr(cli_args, "target_character", None) or "trevor"
+        if cli_args is not None
+        else "trevor"
+    )
+    target_protagonist = project_paths.normalize_protagonist_key(raw_target_character)
+    trevor_cfg = dict(
+        project_paths.get_character_paths(
+            target_protagonist,
+            avatar_override="miltina_maid",
+        )
+    )
+    if cli_args is not None:
+        if getattr(cli_args, "unity_scene", None):
+            trevor_cfg["unity_scene"] = cli_args.unity_scene
+        if getattr(cli_args, "unity_avatar_name", None):
+            trevor_cfg["unity_avatar_name"] = cli_args.unity_avatar_name
+        if getattr(cli_args, "face_anim", None):
+            trevor_cfg["face_anim"] = cli_args.face_anim
+        if getattr(cli_args, "skeleton_yft", None):
+            trevor_cfg["skeleton_yft"] = cli_args.skeleton_yft
+        if getattr(cli_args, "texture_dir", None):
+            override_tex_dir = Path(cli_args.texture_dir)
+            trevor_cfg["textures_dir"] = override_tex_dir
+            for tex_key in ("atlas_png", "spec_png", "normal_png"):
+                if trevor_cfg.get(tex_key):
+                    trevor_cfg[tex_key] = override_tex_dir / Path(trevor_cfg[tex_key]).name
+        if getattr(cli_args, "output_dir", None):
+            override_output_dir = Path(cli_args.output_dir)
+            trevor_cfg["exported_models_dir"] = override_output_dir
+            if not getattr(cli_args, "target_yft", None):
+                trevor_cfg["target_yft"] = override_output_dir / f"{trevor_cfg['ped_name']}.yft"
+        if getattr(cli_args, "target_yft", None):
+            trevor_cfg["target_yft"] = cli_args.target_yft
 
     addon_utils.enable("sollumz")
     from sollumz.sollumz_properties import SollumType
@@ -350,7 +251,8 @@ def build_trevor_miltina_avatar():
     for scene_mat in list(bpy.data.materials):
         bpy.data.materials.remove(scene_mat)
 
-    # 2. Import Trevor base skeleton from vrc2gtav.cfg
+    # 2. Import protagonist base skeleton from vrc2gtav.cfg
+    ped_name = str(trevor_cfg.get("ped_name", "player_two"))
     skeleton_path = Path(trevor_cfg["skeleton_yft"])
     skeleton_dir = os.path.join(str(skeleton_path.parent), "")
     skeleton_file = skeleton_path.name
@@ -361,7 +263,7 @@ def build_trevor_miltina_avatar():
     )
     bpy.ops.sollumz.import_assets(directory=skeleton_dir, files=[{"name": skeleton_file}])
 
-    ped_armature = bpy.data.objects.get("player_two")
+    ped_armature = bpy.data.objects.get(skeleton_path.stem) or bpy.data.objects.get(ped_name)
     if not ped_armature:
         ped_armature = next(
             (item for item in bpy.data.objects if item.type == "ARMATURE"), None
@@ -447,43 +349,91 @@ def build_trevor_miltina_avatar():
     print(i18n.translate("trevor.build.retained_meshes", count=len(meshes_to_keep)))
 
     # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
+    if cli_args is not None and getattr(cli_args, "unity_scene", None):
+        trevor_cfg["unity_scene"] = cli_args.unity_scene
+    if cli_args is not None and getattr(cli_args, "unity_avatar_name", None):
+        trevor_cfg["unity_avatar_name"] = cli_args.unity_avatar_name
+
     unity_config = unity_scene_helper.load_unity_avatar_from_cfg(
         trevor_cfg,
         i18n_module=i18n,
         character_hints=("milltina", "miltina"),
     )
-    hair_mode, hair_reason = unity_scene_helper.resolve_hair_mode(
-        trevor_cfg.get("fbx_hair", ""),
-        unity_config=unity_config,
+    hair_spec_input = (
+        getattr(cli_args, "hair", None) if cli_args is not None else None
     )
+    if hair_spec_input is None:
+        hair_spec_input = (
+            str(trevor_cfg.get("custom_hair", "")).strip()
+            or str(trevor_cfg.get("fbx_hair", "")).strip()
+            or "auto"
+        )
+    hair_mat_override = (
+        getattr(cli_args, "hair_mat", None) if cli_args is not None else None
+    ) or str(trevor_cfg.get("hair_mat", "") or "")
+    hair_tex_override = (
+        getattr(cli_args, "hair_tex", None) if cli_args is not None else None
+    ) or str(trevor_cfg.get("hair_tex", "") or "")
+    hair_spec = unity_hair_helper.resolve_custom_hair_spec(
+        hair_spec_input=hair_spec_input,
+        unity_scene=trevor_cfg.get("unity_scene"),
+        unity_avatar_name=trevor_cfg.get("unity_avatar_name", ""),
+        unity_assets_root=trevor_cfg.get("unity_assets_root"),
+        hair_mat_override=hair_mat_override,
+        hair_tex_override=hair_tex_override,
+    )
+    hair_mode = hair_spec.get("mode", "default")
+    hair_reason = hair_spec.get("reason") or hair_spec.get("source_input", "") or hair_mode
+    miltina_default_hair_objs = [
+        mesh_obj for mesh_obj in meshes_to_keep if mesh_obj.name in MILTINA_DEFAULT_HAIR_MESHES
+    ]
     custom_hair_meshes = set()
     custom_hair_armatures = []
+
+    # Resolve blendshapes from Unity project or portable .cfg preset
+    blendshape_fbx_paths = [fbx_path]
     if hair_mode == "custom":
-        custom_hair_fbx = str(trevor_cfg["fbx_hair"]).strip()
+        for extra_hair_fbx in hair_spec.get("all_fbxs", []):
+            if extra_hair_fbx and extra_hair_fbx not in blendshape_fbx_paths:
+                blendshape_fbx_paths.append(extra_hair_fbx)
+    blendshape_resolution = blendshape_helper.resolve_character_blendshapes(
+        trevor_cfg,
+        fbx_paths=blendshape_fbx_paths,
+        character_hints=("milltina", "miltina"),
+        default_face_mesh="Body",
+        override_source=getattr(cli_args, "blendshapes_source", None) if cli_args else None,
+        override_cfg_path=getattr(cli_args, "blendshapes_cfg", None) if cli_args else None,
+        override_unity_scene=getattr(cli_args, "unity_scene", None) if cli_args else None,
+        override_avatar_name=getattr(cli_args, "unity_avatar_name", None) if cli_args else None,
+        override_face_anim=getattr(cli_args, "face_anim", None) if cli_args else None,
+        save_cfg_path=getattr(cli_args, "save_blendshapes_cfg", None) if cli_args else None,
+    )
+    resolved_mesh_weights = blendshape_resolution["mesh_weights"]
+    total_weight_entries = sum(
+        len(weights_map) for weights_map in resolved_mesh_weights.values()
+    )
+    source_detail = (
+        blendshape_resolution.get("cfg_path")
+        or blendshape_resolution.get("unity_scene")
+        or blendshape_resolution.get("face_anim")
+        or "-"
+    )
+    print(
+        i18n.translate(
+            "blendshapes.loaded_source",
+            source=blendshape_resolution["source_used"],
+            meshes=len(resolved_mesh_weights),
+            weights=total_weight_entries,
+            detail=source_detail,
+        )
+    )
+    if blendshape_resolution.get("saved_cfg_path"):
         print(
             i18n.translate(
-                "unity_scene.hair_custom_active", reason=hair_reason, path=custom_hair_fbx
+                "blendshapes.saved_cfg",
+                path=blendshape_resolution["saved_cfg_path"],
             )
         )
-        for default_hair_obj in list(meshes_to_keep):
-            if default_hair_obj.name in MILTINA_DEFAULT_HAIR_MESHES:
-                meshes_to_keep.remove(default_hair_obj)
-                bpy.data.objects.remove(default_hair_obj)
-        pre_import_objs = set(bpy.data.objects)
-        bpy.ops.import_scene.fbx(filepath=custom_hair_fbx, use_anim=False)
-        for imported_obj in list(bpy.data.objects):
-            if imported_obj in pre_import_objs:
-                continue
-            if imported_obj.type == "ARMATURE":
-                custom_hair_armatures.append(imported_obj)
-            elif imported_obj.type == "MESH":
-                if "tail" in imported_obj.name.lower():
-                    bpy.data.objects.remove(imported_obj)
-                    continue
-                custom_hair_meshes.add(imported_obj)
-                meshes_to_keep.append(imported_obj)
-    else:
-        print(i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
 
     # 4. Bake facial expression & lip-sync jaw weights on Body
     face_obj = bpy.data.objects.get("Body")
@@ -512,18 +462,12 @@ def build_trevor_miltina_avatar():
             print(i18n.translate("trevor.build.jaw_mapped", count=mapped_count))
 
         print(i18n.translate("trevor.build.baking_face"))
-        shape_keys = face_obj.data.shape_keys
-        for anim_key, anim_val in EXACT_ANIM_FACIAL_BLENDSHAPES.items():
-            key_block = shape_keys.key_blocks.get(anim_key)
-            if key_block:
-                key_block.value = anim_val
-            else:
-                key_block_right = shape_keys.key_blocks.get(f"{anim_key}_R")
-                key_block_left = shape_keys.key_blocks.get(f"{anim_key}_L")
-                if key_block_right:
-                    key_block_right.value = anim_val
-                if key_block_left:
-                    key_block_left.value = anim_val
+        blendshape_helper.apply_blendshapes_to_blender_object(
+            face_obj,
+            resolved_mesh_weights.get("Body", {}),
+            reset_unlisted=True,
+            allow_lr_symmetry=True,
+        )
 
         bpy.context.view_layer.objects.active = face_obj
         face_obj.select_set(True)
@@ -562,16 +506,21 @@ def build_trevor_miltina_avatar():
             poly_elem.use_smooth = True
         face_obj.data.update()
 
-    # 5. Bake anti-clipping costume blendshapes
+    # 5. Bake anti-clipping costume and hair blendshapes
     print(i18n.translate("trevor.build.baking_clothing"))
-    for mesh_name, blendshape_dict in CLOTHING_BLENDSHAPES.items():
+    for mesh_name, blendshape_dict in resolved_mesh_weights.items():
+        if mesh_name == "Body":
+            continue
+        if hair_mode in ("custom", "none") and mesh_name in MILTINA_DEFAULT_HAIR_MESHES:
+            continue
         cloth_obj = bpy.data.objects.get(mesh_name)
         if cloth_obj and cloth_obj.data.shape_keys:
-            shape_keys = cloth_obj.data.shape_keys
-            for key_name, weight_val in blendshape_dict.items():
-                key_block = shape_keys.key_blocks.get(key_name)
-                if key_block:
-                    key_block.value = weight_val
+            blendshape_helper.apply_blendshapes_to_blender_object(
+                cloth_obj,
+                blendshape_dict,
+                reset_unlisted=True,
+                allow_lr_symmetry=False,
+            )
 
             bpy.context.view_layer.objects.active = cloth_obj
             cloth_obj.select_set(True)
@@ -583,7 +532,7 @@ def build_trevor_miltina_avatar():
     armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
     if vrc_armature:
         print(i18n.translate("trevor.build.rotating_arms"))
-        for rig_arm in [vrc_armature] + custom_hair_armatures:
+        for rig_arm in [vrc_armature]:
             rig_arm.scale = (
                 rig_arm.scale.x * armature_override_scale[0],
                 rig_arm.scale.y * armature_override_scale[1],
@@ -610,9 +559,70 @@ def build_trevor_miltina_avatar():
                 print(i18n.translate("unity_scene.applied_bones", count=len(applied_bones)))
         bpy.context.view_layer.update()
 
+    # Resolve cranial skull target from posed Miltina before replacing default hair
+    skull_ref = blender_hair_helper.extract_skull_reference(
+        bpy,
+        vrc_armature,
+        [bpy.data.objects.get("Body"), bpy.data.objects.get("Milltina_body")],
+        miltina_default_hair_objs,
+    )
+    if hair_mode in ("custom", "none"):
+        blender_hair_helper.remove_default_hair_meshes(
+            bpy,
+            "miltina_maid",
+            mesh_list_to_prune=meshes_to_keep,
+        )
+
+    if hair_mode == "custom":
+        print(
+            i18n.translate(
+                "unity_scene.hair_custom_active",
+                reason=hair_reason,
+                path=hair_spec.get("primary_fbx") or hair_spec.get("source_input", ""),
+            )
+        )
+        import_res = blender_hair_helper.import_and_filter_custom_hair_meshes(
+            bpy,
+            mathutils,
+            hair_spec,
+            unity_config=unity_config,
+            resolved_mesh_weights=resolved_mesh_weights,
+        )
+        custom_hair_objs = import_res["meshes"]
+        custom_hair_armatures.extend(import_res["armatures"])
+        eff_hair_scale = float(
+            cli_args.hair_scale
+            if (cli_args is not None and getattr(cli_args, "hair_scale", None) is not None)
+            else (trevor_cfg.get("hair_scale") or 1.0)
+        )
+        eff_hair_offset = blender_hair_helper.parse_offset_triple(
+            cli_args.hair_offset
+            if (cli_args is not None and getattr(cli_args, "hair_offset", None) is not None)
+            else trevor_cfg.get("hair_offset")
+        )
+        blender_hair_helper.align_custom_hair_to_avatar(
+            bpy,
+            mathutils,
+            custom_hair_objs,
+            skull_ref,
+            hair_spec,
+            import_res,
+            hair_scale_override=eff_hair_scale,
+            hair_offset_override=eff_hair_offset,
+        )
+        custom_hair_meshes.update(custom_hair_objs)
+        meshes_to_keep.extend(custom_hair_objs)
+        print(
+            i18n.translate("common.hair_aligned_summary", count=len(custom_hair_objs))
+        )
+    elif hair_mode == "none":
+        print(i18n.translate("common.hair_none_active"))
+    else:
+        print(i18n.translate("unity_scene.hair_fallback_default", reason=hair_reason))
+
     # Compute height mapping while live armatures and pose scales are active
-    target_foot_z = -0.908
-    target_head_z = 0.642
+    target_foot_z = float(trevor_cfg.get("target_z_min", -0.908))
+    target_head_z = float(trevor_cfg.get("target_z_max", 0.642))
     uniform_scale, vertical_translation = unity_scene_helper.compute_gtav_height_mapping(
         bpy,
         unity_config,
@@ -637,7 +647,10 @@ def build_trevor_miltina_avatar():
             bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
         for mod_item in list(cloth_obj.modifiers):
             if mod_item.type == "ARMATURE":
-                bpy.ops.object.modifier_apply(modifier=mod_item.name)
+                if mod_item.object is not None:
+                    bpy.ops.object.modifier_apply(modifier=mod_item.name)
+                else:
+                    cloth_obj.modifiers.remove(mod_item)
         cloth_obj.parent = None
         cloth_obj.matrix_world = mathutils.Matrix.Identity(4)
         for vert_item in cloth_obj.data.vertices:
@@ -651,7 +664,36 @@ def build_trevor_miltina_avatar():
 
     # 8. Remap UVs into the 2x2 quadrant Texture Atlas
     print(i18n.translate("trevor.build.remapping_uvs"))
+    if custom_hair_meshes:
+        loaded_manifest = unity_hair_helper.load_custom_hair_manifest(
+            trevor_cfg["textures_dir"]
+        )
+        if (
+            loaded_manifest is None
+            or loaded_manifest.get("mode") != "custom"
+            or loaded_manifest.get("source_input") != hair_spec.get("source_input")
+        ):
+            loaded_manifest = unity_hair_helper.build_inmemory_manifest_fallback(
+                hair_spec,
+                quad_size=(1024, 1024),
+                quad_uv_rect=(0.5, 0.0, 0.5, 0.5),
+            )
+        body_ref_obj = bpy.data.objects.get("Body")
+        body_uv_name = (
+            body_ref_obj.data.uv_layers[0].name
+            if body_ref_obj and body_ref_obj.data.uv_layers
+            else "UVMap"
+        )
+        blender_hair_helper.remap_custom_hair_uvs(
+            list(custom_hair_meshes),
+            loaded_manifest,
+            fallback_rect=(0.5, 0.0, 0.5, 0.5),
+            target_uv_name=body_uv_name,
+        )
+
     for cloth_obj in meshes_to_keep:
+        if cloth_obj in custom_hair_meshes:
+            continue
         mesh_data = cloth_obj.data
         uv_layer = mesh_data.uv_layers.active.data if mesh_data.uv_layers.active else None
         if not uv_layer:
@@ -666,7 +708,6 @@ def build_trevor_miltina_avatar():
             "hair" in obj_name.lower()
             or "ears" in obj_name.lower()
             or "horns" in obj_name.lower()
-            or cloth_obj in custom_hair_meshes
         ):
             offset_u_val, offset_v_val = 0.5, 0.0
         else:
@@ -681,6 +722,11 @@ def build_trevor_miltina_avatar():
     gtav_valid_bone_names = {bone_item.name for bone_item in ped_armature.data.bones}
 
     for cloth_obj in meshes_to_keep:
+        if cloth_obj in custom_hair_meshes:
+            blender_hair_helper.retarget_custom_hair_weights_to_head(
+                [cloth_obj], "SKEL_Head"
+            )
+            continue
         if cloth_obj.name == "Body":
             print(
                 i18n.translate(
@@ -734,7 +780,8 @@ def build_trevor_miltina_avatar():
 
     bpy.ops.object.join()
     unified_obj = bpy.context.active_object
-    unified_obj.name = "uppr_000_u"
+    primary_drawable = str(trevor_cfg.get("primary_drawable", "uppr_000_u"))
+    unified_obj.name = primary_drawable
     print(
         i18n.translate(
             "trevor.build.joined_mesh",
@@ -890,7 +937,18 @@ def build_trevor_miltina_avatar():
     unified_obj.data.update()
 
     # 12. Split oversized materials for uint16 RAGE limit
-    split_oversized_material_geometries(unified_obj, max_vertices_per_chunk=30000)
+    blender_hair_helper.split_oversized_material_geometries(
+        unified_obj,
+        max_vertices_per_chunk=30000,
+        log_callback=lambda mat_name, poly_count, chunk_total: print(
+            i18n.translate(
+                "trevor.build.splitting_material",
+                name=mat_name,
+                count=poly_count,
+                chunks=chunk_total,
+            )
+        ),
+    )
 
     # 13. Render preview images in Blender EEVEE
     print(i18n.translate("trevor.build.rendering_blender"))
@@ -925,7 +983,11 @@ def build_trevor_miltina_avatar():
     scene_ctx.collection.objects.link(camera_object)
     scene_ctx.camera = camera_object
 
-    renders_dir = str(project_paths.get_renders_output_dir())
+    renders_dir = (
+        str(trevor_cfg["exported_models_dir"])
+        if (cli_args is not None and getattr(cli_args, "output_dir", None))
+        else str(project_paths.get_renders_output_dir())
+    )
     os.makedirs(renders_dir, exist_ok=True)
 
     camera_data.lens = 72.0
@@ -965,14 +1027,26 @@ def build_trevor_miltina_avatar():
     os.makedirs(output_dir, exist_ok=True)
 
     export_drawables = [
-        "uppr_000_u",
-        "uppr_000_r",
-        "uppr_001_u",
-        "uppr_002_u",
-        "uppr_003_r",
-        "uppr_010_u",
-        "uppr_027_u",
+        str(slot_item) for slot_item in (trevor_cfg.get("export_drawables") or [])
     ]
+    if target_protagonist == "trevor":
+        for extra_slot in (
+            "uppr_000_u",
+            "uppr_000_r",
+            "uppr_001_u",
+            "uppr_002_u",
+            "uppr_003_r",
+            "uppr_010_u",
+            "uppr_027_u",
+        ):
+            if extra_slot not in export_drawables:
+                export_drawables.append(extra_slot)
+    if not export_drawables:
+        export_drawables = [
+            primary_drawable,
+            "uppr_000_r",
+            "uppr_001_u",
+        ]
     for drawable_name in export_drawables:
         ydd_parent_empty.name = drawable_name
         ped_armature.name = drawable_name
@@ -1042,12 +1116,78 @@ def main() -> int:
         default=None,
         help=i18n.translate("common.language_option_help"),
     )
+    parser.add_argument(
+        "--target-character",
+        default="trevor",
+        help=i18n.translate("trevor.build.arg_target_char"),
+    )
+    parser.add_argument("--skeleton-yft", default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--texture-dir", default=None)
+    parser.add_argument("--target-yft", default=None)
+    parser.add_argument(
+        "--hair",
+        default=None,
+        help="Custom Unity hair selector (.prefab, .fbx, auto, default, none)",
+    )
+    parser.add_argument(
+        "--hair-mat",
+        default=None,
+        help="Optional Unity .mat override for raw FBX hair",
+    )
+    parser.add_argument(
+        "--hair-tex",
+        default=None,
+        help="Optional texture override for custom hair",
+    )
+    parser.add_argument(
+        "--hair-scale",
+        type=float,
+        default=None,
+        help="Optional uniform scale multiplier for custom hair",
+    )
+    parser.add_argument(
+        "--hair-offset",
+        default=None,
+        help="Optional X,Y,Z Unity offset tweak for custom hair",
+    )
+    parser.add_argument(
+        "--blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_cfg"),
+    )
+    parser.add_argument(
+        "--blendshapes-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("blendshapes.cli_source"),
+    )
+    parser.add_argument(
+        "--save-blendshapes-cfg",
+        default=None,
+        help=i18n.translate("blendshapes.cli_save_cfg"),
+    )
+    parser.add_argument(
+        "--unity-scene",
+        default=None,
+        help="Optional Unity scene path override",
+    )
+    parser.add_argument(
+        "--unity-avatar-name",
+        default=None,
+        help="Optional Unity root GameObject name override",
+    )
+    parser.add_argument(
+        "--face-anim",
+        default=None,
+        help=i18n.translate("blendshapes.cli_face_anim"),
+    )
     parsed_args = parser.parse_args(custom_arguments)
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
         i18n.set_active_language(parsed_args.lang)
 
-    build_trevor_miltina_avatar()
+    build_trevor_miltina_avatar(parsed_args)
     return 0
 
 
