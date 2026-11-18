@@ -115,6 +115,12 @@ def main() -> int:
         default=None,
         help=project_i18n.translate("physbones.cli_save_cfg"),
     )
+    arg_parser.add_argument(
+        "--physbones-marshmallow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("physbones.cli_marshmallow"),
+    )
     parsed_args = arg_parser.parse_args()
     active_lang = project_i18n.set_active_language(parsed_args.lang)
     os.environ[project_i18n.LANG_ENV_VAR] = active_lang
@@ -157,6 +163,10 @@ def main() -> int:
             extra_blender_args.extend([flag_name, str(flag_val)])
     if parsed_args.hair_scale is not None:
         extra_blender_args.extend(["--hair-scale", str(parsed_args.hair_scale)])
+    if parsed_args.physbones_marshmallow is True:
+        extra_blender_args.append("--physbones-marshmallow")
+    elif parsed_args.physbones_marshmallow is False:
+        extra_blender_args.append("--no-physbones-marshmallow")
 
     blender_command, blender_env = project_paths.build_blender_command(
         blender_script,

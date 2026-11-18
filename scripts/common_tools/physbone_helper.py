@@ -104,7 +104,7 @@ def _chain_parent_map(
 
 
 # ---------------------------------------------------------------------------
-# Michael (Shinano Eternal Reunion - Full Hair + Outfit + Watch + Marshmallow PB)
+# Michael (Shinano Eternal Reunion - Full Hair + Outfit + Watch; opt-in Marshmallow PB)
 # ---------------------------------------------------------------------------
 NEKO_MIMI_HALO_WEIGHT_SPLIT: Tuple[Tuple[str, float], ...] = (
     ("PB_Ear_L_0", 0.5),
@@ -361,7 +361,7 @@ NEKO_MIMI_PARENT_MAP: Dict[str, str] = _chain_parent_map(
 
 
 # ---------------------------------------------------------------------------
-# Franklin (Shinano Casual: Full Ears, Tail, BeltA, BeltB, Ribbons, Hair, Marshmallow PB, Butt, Skirt)
+# Franklin (Shinano Casual: Full Ears, Tail, BeltA, BeltB, Ribbons, Hair, Skirt; opt-in Marshmallow PB)
 # ---------------------------------------------------------------------------
 SHINANO_CASUAL_BONE_MAP: Dict[str, str] = {
     "hair_ear_1.l": "PB_SC_Ear_L_0",
@@ -720,6 +720,9 @@ MILTINA_MAID_PARENT_MAP: Dict[str, str] = _chain_parent_map(
     MILTINA_MAID_CHAIN_SPECS, MILTINA_MAID_ROOT_PARENTS
 )
 
+# Miltina natively has no breast VRCPhysBone; breast.L/R exist only when Marshmallow PB is enabled.
+MILTINA_MARSHMALLOW_ONLY_CHAINS: Set[str] = {"breast.L", "breast.R"}
+
 CUSTOM_BONE_FLAGS: Tuple[str, ...] = (
     "RotX",
     "RotY",
@@ -741,6 +744,168 @@ DEFAULT_PHYSBONE_PRESET_RELATIVE_PATHS: Dict[str, str] = {
     "franklin": "configs/shinano_casual_physbones.cfg",
     "trevor": "configs/miltina_maid_physbones.cfg",
 }
+
+
+def parse_bool_flag(raw_value: Any, default: bool = False) -> bool:
+    """Parse boolean flag values from INI strings, integers, or Python bools."""
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, (int, float)):
+        return bool(raw_value)
+    token = str(raw_value).strip().lower()
+    if not token:
+        return default
+    if token in ("1", "true", "yes", "on", "sim"):
+        return True
+    if token in ("0", "false", "no", "off", "nao"):
+        return False
+    return default
+
+
+def _build_marshmallow_pair_presets(
+    gtav_prefix: str,
+    src_left: Tuple[str, str],
+    src_right: Tuple[str, str],
+    bone_map_extra: Dict[str, str],
+    physics_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Construct symmetric L/R Marshmallow PB breast overlay chains for offline cfg/builtin use."""
+    chains_map: Dict[str, Dict[str, Any]] = {}
+    for side_code, src_pair in (("L", src_left), ("R", src_right)):
+        chain_key = f"breast.{side_code}"
+        gtav_name = f"{gtav_prefix}_Breast_{side_code}"
+        gtav_bones = [f"{gtav_name}_0", f"{gtav_name}_1"]
+        chain_entry: Dict[str, Any] = {
+            "source_key": chain_key,
+            "gtav_chain_name": gtav_name,
+            "root_bone": gtav_bones[0],
+            "chain_bones": gtav_bones,
+            "source_bones": list(src_pair),
+            "parent_bone": "SKEL_Spine2",
+            "parent_bone_tag": SKEL_SPINE2_TAG,
+            "version": 1,
+            "integration_type": 0,
+            "multi_child_type": 0,
+            "endpoint_position": (0.0, 0.08, 0.0),
+            "gravity_falloff": 1.0,
+            "allow_collision": 1,
+            "radius": 0.06,
+            "radius_curve": [],
+            "limit_type": 1,
+            "max_angle_x": 35.0,
+            "max_angle_x_curve": [],
+            "max_angle_z": 45.0,
+            "limit_rotation": (-10.0, 0.0, 0.0),
+            "allow_grabbing": 1,
+            "allow_posing": 0,
+            "grab_movement": 0.1,
+            "max_stretch": 0.3,
+            "max_squish": 0.6,
+            "is_animated": 1,
+        }
+        chain_entry.update(physics_params)
+        chains_map[chain_key] = chain_entry
+    return {"chains": chains_map, "bone_mapping": dict(bone_map_extra)}
+
+
+MARSHMALLOW_PB_AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
+    "shinano_casual": _build_marshmallow_pair_presets(
+        "PB_SC",
+        ("Breast_1.L", "Breast_2.L"),
+        ("Breast_1.R", "Breast_2.R"),
+        {
+            "breast_1.l": "PB_SC_Breast_L_0",
+            "breast_2.l": "PB_SC_Breast_L_1",
+            "breast_1.r": "PB_SC_Breast_R_0",
+            "breast_2.r": "PB_SC_Breast_R_1",
+        },
+        {
+            "pull": 0.04,
+            "spring": 1.0,
+            "stiffness": 0.05,
+            "gravity": 0.25,
+            "immobile_type": 0,
+            "immobile": 0.6,
+            "stretch_motion": 0.75,
+        },
+    ),
+    "shinano_er": _build_marshmallow_pair_presets(
+        "PB_ER",
+        ("Breast_1.L", "Breast_2.L"),
+        ("Breast_1.R", "Breast_2.R"),
+        {
+            "breast_1.l": "PB_ER_Breast_L_0",
+            "breast_2.l": "PB_ER_Breast_L_1",
+            "breast_1.r": "PB_ER_Breast_R_0",
+            "breast_2.r": "PB_ER_Breast_R_1",
+        },
+        {
+            "pull": 0.05,
+            "spring": 1.0,
+            "stiffness": 0.05,
+            "gravity": 0.25,
+            "immobile_type": 0,
+            "immobile": 0.75,
+            "stretch_motion": 0.6,
+        },
+    ),
+    "miltina_maid": _build_marshmallow_pair_presets(
+        "PB_MT",
+        ("Breast_L", "Breast_L.001"),
+        ("Breast_R", "Breast_R.001"),
+        {
+            "breast_l": "PB_MT_Breast_L_0",
+            "breast_l.001": "PB_MT_Breast_L_1",
+            "breast_l.002": "PB_MT_Breast_L_1",
+            "breast_r": "PB_MT_Breast_R_0",
+            "breast_r.001": "PB_MT_Breast_R_1",
+            "breast_r.002": "PB_MT_Breast_R_1",
+        },
+        {
+            "pull": 0.08,
+            "spring": 0.5,
+            "stiffness": 0.25,
+            "gravity": 0.3,
+            "immobile_type": 1,
+            "immobile": 0.5,
+            "stretch_motion": 0.5,
+        },
+    ),
+}
+
+
+def apply_marshmallow_pb_presets(
+    loaded_data: Dict[str, Any],
+    avatar_id_or_char: str,
+) -> Dict[str, Any]:
+    """Overlay opt-in Marshmallow PB breast presets onto a resolved PhysBones config dict."""
+    preset_key = str(avatar_id_or_char).strip().lower()
+    if preset_key == "franklin":
+        preset_key = "shinano_casual"
+    elif preset_key == "michael":
+        preset_key = "shinano_er"
+    elif preset_key in ("trevor", "milltina", "miltina"):
+        preset_key = "miltina_maid"
+
+    overlay = MARSHMALLOW_PB_AVATAR_PRESETS.get(preset_key)
+    if not overlay:
+        return loaded_data
+
+    chains_map = dict(loaded_data.get("chains") or {})
+    bone_map = dict(loaded_data.get("bone_mapping") or {})
+    bone_map_ci = dict(loaded_data.get("bone_mapping_ci") or {})
+    for src_bone, dst_bone in overlay["bone_mapping"].items():
+        bone_map[src_bone] = dst_bone
+        bone_map_ci[src_bone.strip().lower()] = dst_bone
+    for chain_key, chain_cfg in overlay["chains"].items():
+        chains_map[chain_key] = dict(chain_cfg)
+
+    loaded_data["chains"] = chains_map
+    loaded_data["bone_mapping"] = bone_map
+    loaded_data["bone_mapping_ci"] = bone_map_ci
+    return loaded_data
 
 
 def compute_gtav_bone_tag(bone_name: str) -> int:
@@ -2064,7 +2229,7 @@ def extract_unity_scene_physbones(
     unity_assets_root: Optional[Union[str, Path]] = None,
     fbx_paths: Sequence[Union[str, Path]] = (),
     fallback_prefab_paths: Sequence[Union[str, Path]] = (),
-    include_marshmallow_pb: bool = True,
+    include_marshmallow_pb: bool = False,
     character_hints: Sequence[str] = (),
     verbose: bool = False,
 ) -> Dict[str, Any]:
@@ -2673,15 +2838,18 @@ def pack_physbone_chains_to_gtav_budget(
     template_chain_specs: Optional[Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...]] = None,
     template_root_parents: Optional[Dict[str, str]] = None,
     template_bone_map: Optional[Dict[str, str]] = None,
+    include_marshmallow_pb: bool = False,
+    marshmallow_only_chains: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Pack extracted VRChat Unity PhysBone chains safely within GTA V's `<= 63` custom-bone limit.
 
     When a curated template matches (`>= 4` matching active source bones), populates each chain's
-    exact physics parameters directly from Unity + Marshmallow PB while preserving the clean
-    grouped hierarchy. For arbitrary avatars, clusters spoke/redundant chains automatically into
-    `<= max_custom_bones` with `>= 2` bones per chain and zero ELF tag collisions.
+    exact physics parameters directly from Unity (plus optional Marshmallow PB when enabled) while
+    preserving the grouped hierarchy. For arbitrary avatars, clusters spoke chains automatically
+    within `<= max_custom_bones` with `>= 2` bones per chain and zero ELF tag collisions.
     """
+    marsh_only_set = set(marshmallow_only_chains or ())
     if template_chain_specs and template_root_parents and template_bone_map:
         extracted_bone_lows = {
             bone_str.strip().lower()
@@ -2691,8 +2859,15 @@ def pack_physbone_chains_to_gtav_budget(
         overlap_count = sum(1 for key_name in template_bone_map if key_name in extracted_bone_lows)
         if overlap_count >= 4:
             chains_out: Dict[str, Dict[str, object]] = {}
+            included_gtav_bones: List[str] = []
+            excluded_gtav_bones: Set[str] = set()
             for chain_key, gtav_name, src_bones, gtav_bones in template_chain_specs:
                 matched = _match_extracted_unity_params(chain_key, src_bones, extracted_spokes)
+                if not include_marshmallow_pb and matched is None and (
+                    chain_key in marsh_only_set or chain_key.lower().startswith("breast")
+                ):
+                    excluded_gtav_bones.update(gtav_bones)
+                    continue
                 parent_bone_name = template_root_parents.get(chain_key, "SKEL_Pelvis")
                 parent_bone_tag = PARENT_BONE_TAGS.get(parent_bone_name, SKEL_PELVIS_TAG)
                 base_params = matched or {}
@@ -2731,13 +2906,17 @@ def pack_physbone_chains_to_gtav_budget(
                     "stretch_motion": float(base_params.get("stretch_motion", 0.0)),
                     "is_animated": int(base_params.get("is_animated", 1)),
                 }
-            # Preserve exact casing for bone_mapping keys where available
-            bone_map_out = {src_k: dst_v for src_k, dst_v in template_bone_map.items()}
-            custom_bones = [bone_nm for _ck, _gn, _sb, gbs in template_chain_specs for bone_nm in gbs]
+                included_gtav_bones.extend(gtav_bones)
+            # Preserve exact casing for bone_mapping keys where available while dropping skipped chains
+            bone_map_out = {
+                src_k: dst_v
+                for src_k, dst_v in template_bone_map.items()
+                if dst_v not in excluded_gtav_bones
+            }
             return {
                 "chains": chains_out,
                 "bone_mapping": bone_map_out,
-                "custom_bones": custom_bones,
+                "custom_bones": included_gtav_bones,
                 "strategy": "unity_template_synced",
             }
 
@@ -2893,6 +3072,7 @@ def resolve_character_physbones(
     override_cfg_path: Optional[Union[str, Path]] = None,
     override_unity_scene: Optional[Union[str, Path]] = None,
     override_avatar_name: Optional[str] = None,
+    override_marshmallow: Optional[bool] = None,
     save_cfg_path: Optional[Union[str, Path]] = None,
     max_custom_bones: int = MAX_CUSTOM_PHYSBONES_PER_PED,
     header_comments: Optional[Sequence[str]] = None,
@@ -2902,8 +3082,11 @@ def resolve_character_physbones(
     Resolve active character PhysBones from `physbones_source` (`auto | unity | cfg`).
 
     - `cfg`: load directly from `physbones_cfg` (or fallback built-in template).
-    - `unity`: extract directly from `unity_scene` + Marshmallow PB + FBXs and pack <= 63 bones.
+    - `unity`: extract directly from `unity_scene` + FBXs and pack <= 63 bones.
     - `auto`: extract from `unity_scene` when configured and present on disk; else load `cfg`.
+
+    Marshmallow PB breast overrides/additions are disabled by default and enabled only when
+    `override_marshmallow=True` or `physbones_marshmallow = true` is configured.
     """
     try:
         import vrc2gtav_paths as project_paths
@@ -2918,6 +3101,12 @@ def resolve_character_physbones(
         raise ValueError(
             f"Unsupported physbones_source {requested_source!r}; expected one of {VALID_PHYSBONE_SOURCES}"
         )
+
+    use_marshmallow = (
+        bool(override_marshmallow)
+        if override_marshmallow is not None
+        else parse_bool_flag(char_cfg.get("physbones_marshmallow", False), default=False)
+    )
 
     effective_cfg = (
         str(override_cfg_path)
@@ -2969,6 +3158,7 @@ def resolve_character_physbones(
                 candidate_fbxs.append(fbx_val)
 
     use_unity = requested_source == "unity" or (requested_source == "auto" and scene_exists)
+    marsh_only_set = MILTINA_MARSHMALLOW_ONLY_CHAINS if prefix_tok == "PB_MT" else set()
     loaded_data: Dict[str, Any] = {}
     source_used = "builtin"
 
@@ -2979,7 +3169,7 @@ def resolve_character_physbones(
             unity_assets_root=unity_assets_root,
             fbx_paths=candidate_fbxs,
             fallback_prefab_paths=fallback_prefabs,
-            include_marshmallow_pb=True,
+            include_marshmallow_pb=use_marshmallow,
             character_hints=character_hints,
             verbose=verbose,
         )
@@ -2991,6 +3181,8 @@ def resolve_character_physbones(
                 template_chain_specs=tmpl_specs,
                 template_root_parents=tmpl_parents,
                 template_bone_map=tmpl_bmap,
+                include_marshmallow_pb=use_marshmallow,
+                marshmallow_only_chains=marsh_only_set,
             )
             source_used = "unity"
             default_slot_by_avatar = {
@@ -3008,6 +3200,7 @@ def resolve_character_physbones(
                     ),
                     "source": packed.get("strategy", "unity_scene"),
                     "unity_scene": Path(effective_scene).name,
+                    "marshmallow_pb": "true" if use_marshmallow else "false",
                     "custom_bones": len(packed["custom_bones"]),
                     "chain_count": len(packed["chains"]),
                 },
@@ -3019,17 +3212,13 @@ def resolve_character_physbones(
         loaded_data = load_physbone_config(effective_cfg)
         source_used = "cfg"
     elif source_used != "unity" and tmpl_specs and tmpl_parents and tmpl_bmap:
-        packed_fallback = pack_physbone_chains_to_gtav_budget(
-            [],
-            gtav_prefix=prefix_tok,
-            max_custom_bones=max_custom_bones,
-            template_chain_specs=tmpl_specs,
-            template_root_parents=tmpl_parents,
-            template_bone_map=tmpl_bmap,
-        )
         # Keep explicit fallback from builtin template when scene and cfg are both absent
         fallback_chains: Dict[str, Dict[str, object]] = {}
+        excluded_fb_bones: Set[str] = set()
         for ck_str, gn_str, sb_tup, gb_tup in tmpl_specs:
+            if not use_marshmallow and ck_str in marsh_only_set:
+                excluded_fb_bones.update(gb_tup)
+                continue
             p_name = tmpl_parents[ck_str]
             fallback_chains[ck_str] = {
                 "source_key": ck_str,
@@ -3041,13 +3230,27 @@ def resolve_character_physbones(
                 "parent_bone_tag": PARENT_BONE_TAGS.get(p_name, SKEL_PELVIS_TAG),
             }
         loaded_data = {
-            "metadata": {"avatar": effective_avatar or avatar_id, "source": "builtin"},
-            "bone_mapping": dict(tmpl_bmap),
+            "metadata": {
+                "avatar": effective_avatar or avatar_id,
+                "source": "builtin",
+                "marshmallow_pb": "true" if use_marshmallow else "false",
+            },
+            "bone_mapping": {
+                src_k: dst_v for src_k, dst_v in tmpl_bmap.items() if dst_v not in excluded_fb_bones
+            },
             "chains": fallback_chains,
         }
         source_used = "builtin"
 
+    if source_used != "unity" and use_marshmallow and loaded_data.get("chains") is not None:
+        apply_marshmallow_pb_presets(loaded_data, avatar_id)
+        loaded_data.setdefault("metadata", {})["marshmallow_pb"] = "true"
+
     chain_specs, parent_map, custom_bones, bone_mapping_ci = build_chain_specs_from_config(loaded_data)
+    if loaded_data.get("metadata") is not None:
+        loaded_data["metadata"]["marshmallow_pb"] = "true" if use_marshmallow else "false"
+        loaded_data["metadata"]["chain_count"] = len(chain_specs)
+        loaded_data["metadata"]["custom_bones"] = len(custom_bones)
     saved_path_str = ""
     if save_cfg_path and loaded_data.get("chains"):
         written = save_physbone_config(
@@ -3062,6 +3265,7 @@ def resolve_character_physbones(
     return {
         "source_used": source_used,
         "mode_requested": requested_source,
+        "marshmallow_pb": use_marshmallow,
         "chains": loaded_data.get("chains") or {},
         "metadata": loaded_data.get("metadata") or {},
         "bone_mapping": loaded_data.get("bone_mapping") or {},
@@ -3080,6 +3284,7 @@ def export_character_physbones_to_cfg(
     output_cfg_path: Optional[Union[str, Path]] = None,
     unity_scene_override: Optional[Union[str, Path]] = None,
     avatar_name_override: Optional[str] = None,
+    override_marshmallow: Optional[bool] = None,
     preserve_existing_cfg: bool = True,
 ) -> Optional[Path]:
     """
@@ -3140,6 +3345,7 @@ def export_character_physbones_to_cfg(
         override_cfg_path=target_path_obj if should_preserve else None,
         override_unity_scene=unity_scene_override,
         override_avatar_name=avatar_name_override,
+        override_marshmallow=override_marshmallow,
         save_cfg_path=target_path_obj,
     )
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None

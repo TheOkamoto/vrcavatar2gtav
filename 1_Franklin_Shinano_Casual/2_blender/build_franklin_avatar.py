@@ -69,6 +69,11 @@ def parse_franklin_cli_args():
         default=None,
     )
     arg_parser.add_argument("--save-physbones-cfg", default=None)
+    arg_parser.add_argument(
+        "--physbones-marshmallow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
     arg_parser.add_argument("--face-anim", default=None)
@@ -418,6 +423,7 @@ franklin_pb_resolution = physbone_helper.resolve_character_physbones(
     override_cfg_path=CLI_ARGS.physbones_cfg,
     override_unity_scene=CLI_ARGS.unity_scene,
     override_avatar_name=CLI_ARGS.unity_avatar_name,
+    override_marshmallow=CLI_ARGS.physbones_marshmallow,
     save_cfg_path=CLI_ARGS.save_physbones_cfg,
     verbose=True,
 )

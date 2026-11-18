@@ -996,6 +996,7 @@ def build_shinano_er_for_gtav(cli_args):
         override_cfg_path=getattr(cli_args, "physbones_cfg", None),
         override_unity_scene=getattr(cli_args, "unity_scene", None),
         override_avatar_name=getattr(cli_args, "unity_avatar_name", None),
+        override_marshmallow=getattr(cli_args, "physbones_marshmallow", None),
         save_cfg_path=getattr(cli_args, "save_physbones_cfg", None),
         verbose=True,
     )
@@ -2099,6 +2100,12 @@ def parse_blender_cli_args():
         "--save-physbones-cfg",
         default=None,
         help=i18n.translate("physbones.cli_save_cfg"),
+    )
+    argument_parser.add_argument(
+        "--physbones-marshmallow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=i18n.translate("physbones.cli_marshmallow"),
     )
     argument_parser.add_argument(
         "--texture-dir",

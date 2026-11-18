@@ -761,8 +761,9 @@ def run_physbone_cfg_export(
     target_avatars: List[str],
     output_override: Optional[str] = None,
     preserve_existing_cfg: bool = True,
+    override_marshmallow: Optional[bool] = None,
 ) -> bool:
-    """Export/sync Unity VRCPhysBones & Marshmallow PB into configs/*_physbones.cfg."""
+    """Export/sync Unity VRCPhysBones (and optional Marshmallow PB) into configs/*_physbones.cfg."""
     all_exported = True
     for char_section in target_avatars:
         single_override = (
@@ -771,6 +772,7 @@ def run_physbone_cfg_export(
         exported_path = physbone_helper.export_character_physbones_to_cfg(
             char_section,
             output_cfg_path=single_override,
+            override_marshmallow=override_marshmallow,
             preserve_existing_cfg=preserve_existing_cfg,
         )
         if exported_path is not None:
@@ -816,7 +818,15 @@ def run_interactive_physbone_sync() -> bool:
         print(project_i18n.translate("manager.invalid_option"))
         return False
 
-    return run_physbone_cfg_export(selected_avatars, preserve_existing_cfg=False)
+    marsh_answer = input(
+        project_i18n.translate("manager.physbones_prompt_marshmallow")
+    ).strip()
+    use_marshmallow = project_i18n.is_affirmative_answer(marsh_answer, default_yes=False)
+    return run_physbone_cfg_export(
+        selected_avatars,
+        preserve_existing_cfg=False,
+        override_marshmallow=use_marshmallow,
+    )
 
 
 def run_interactive_menu() -> None:
@@ -1181,6 +1191,12 @@ def main() -> None:
         default=None,
         help=project_i18n.translate("physbones.cli_cfg"),
     )
+    argument_parser.add_argument(
+        "--physbones-marshmallow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("physbones.cli_marshmallow"),
+    )
 
     parsed_arguments = argument_parser.parse_args()
     active_language = project_i18n.set_active_language(parsed_arguments.lang)
@@ -1213,6 +1229,7 @@ def main() -> None:
             target_chars,
             output_override=parsed_arguments.physbones_cfg,
             preserve_existing_cfg=not parsed_arguments.overwrite_physbones_from_unity,
+            override_marshmallow=parsed_arguments.physbones_marshmallow,
         )
         sys.exit(0 if all_exported else 1)
 
@@ -1403,6 +1420,10 @@ def main() -> None:
             extra_blender_args.extend(
                 ["--physbones-cfg", parsed_arguments.physbones_cfg]
             )
+        if parsed_arguments.physbones_marshmallow is True:
+            extra_blender_args.append("--physbones-marshmallow")
+        elif parsed_arguments.physbones_marshmallow is False:
+            extra_blender_args.append("--no-physbones-marshmallow")
         blender_status = execute_blender_build(
             selected_characters_list,
             extra_blender_args=extra_blender_args,

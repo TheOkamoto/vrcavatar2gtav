@@ -3311,9 +3311,14 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "SINCRONIZAR PHYSBONES DO UNITY PARA PRESETS .CFG",
     },
     "manager.physbones_select_avatar": {
-        "en": "Select which avatar preset to sync from Unity scene + Marshmallow PB:",
-        "ja": "Unity シーン + Marshmallow PB から PhysBone を同期するアバターを選択:",
-        "pt": "Selecione qual avatar atualizar com os PhysBones do Unity + Marshmallow PB:",
+        "en": "Select which avatar preset to sync from Unity standard VRCPhysBones:",
+        "ja": "Unity 標準 VRCPhysBone を同期するアバターを選択:",
+        "pt": "Selecione qual avatar atualizar com os VRCPhysBones padrão do Unity:",
+    },
+    "manager.physbones_prompt_marshmallow": {
+        "en": "Include optional Marshmallow PB breast overrides? [y/N]: ",
+        "ja": "任意の Marshmallow PB 胸プリセット上書きを含めますか? [y/N]: ",
+        "pt": "Incluir sobrescrita opcional Marshmallow PB nos seios? [s/N]: ",
     },
     "manager.physbones_prompt_choice": {
         "en": "Enter choice [0-4]: ",
@@ -3321,9 +3326,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "Digite a opção [0-4]: ",
     },
     "manager.cli_export_physbones": {
-        "en": "Export and sync Unity VRCPhysBones (+ Marshmallow PB) into configs/*_physbones.cfg",
-        "ja": "Unity VRCPhysBone (+ Marshmallow PB) を configs/*_physbones.cfg へ同期書き出し",
-        "pt": "Exportar e sincronizar VRCPhysBones (+ Marshmallow PB) do Unity para configs/*_physbones.cfg",
+        "en": "Export and sync Unity standard VRCPhysBones into configs/*_physbones.cfg (add --physbones-marshmallow to include Marshmallow PB)",
+        "ja": "Unity 標準 VRCPhysBone を configs/*_physbones.cfg へ同期書き出し（--physbones-marshmallow で Marshmallow PB 有効化）",
+        "pt": "Exportar VRCPhysBones padrão do Unity para configs/*_physbones.cfg (use --physbones-marshmallow para incluir Marshmallow PB)",
     },
     "manager.cli_overwrite_physbones_from_unity": {
         "en": "When exporting PhysBones, reload active Unity/Marshmallow parameters instead of preserving existing .cfg edits",
@@ -3349,6 +3354,11 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "PhysBones source priority: auto, unity, or cfg",
         "ja": "PhysBone の取得元優先順: auto, unity, または cfg",
         "pt": "Origem prioritária dos PhysBones: auto, unity ou cfg",
+    },
+    "physbones.cli_marshmallow": {
+        "en": "Enable or disable optional Marshmallow PB breast overrides (default: off / standard VRCPhysBones)",
+        "ja": "任意の Marshmallow PB 胸プリセット上書きを有効/無効化（既定: オフ / 標準 VRCPhysBone）",
+        "pt": "Ativar ou desativar o opcional Marshmallow PB nos seios (padrão: desativado / VRCPhysBones padrão)",
     },
     "physbones.cli_save_cfg": {
         "en": "Save resolved PhysBone chains and mapping to this .cfg preset file",

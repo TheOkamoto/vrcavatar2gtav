@@ -239,10 +239,10 @@ def test_compiled_drawables_and_textures() -> bool:
     physbones_runtime_ok = (
         asi_exists
         and ini_exists
-        and ini_total_chains == 81
+        and ini_total_chains == 79
         and ear_chains_count == 30
         and shinano_chains_count == 24
-        and miltina_chains_count == 27
+        and miltina_chains_count == 25
     )
     all_assets_present &= print_status_result(
         "GTAVPhysBones.asi / .ini",
@@ -650,7 +650,7 @@ def test_source_templates_and_dummies() -> bool:
     physbone_cfg_specs = (
         ("michael_neko_mimi_physbones.cfg", 30),
         ("shinano_casual_physbones.cfg", 24),
-        ("miltina_maid_physbones.cfg", 27),
+        ("miltina_maid_physbones.cfg", 25),
     )
     configs_valid = True
     loaded_configs_map = {}
@@ -662,6 +662,8 @@ def test_source_templates_and_dummies() -> bool:
         parsed_cfg = physbone_helper.load_physbone_config(cfg_file_path)
         loaded_configs_map[cfg_filename] = parsed_cfg
         if len(parsed_cfg.get("chains", {})) != expected_chains:
+            configs_valid = False
+        if parsed_cfg.get("metadata", {}).get("marshmallow_pb", "false").lower() != "false":
             configs_valid = False
 
     per_ped_bone_groups = (
@@ -1335,6 +1337,11 @@ def test_unity_scene_and_fallbacks() -> bool:
             encoding="utf-8",
         )
 
+        extracted_default_pb = physbone_helper.extract_unity_scene_physbones(
+            pb_scene,
+            avatar_name="SynthPBAvatar",
+            unity_assets_root=pb_assets_root,
+        )
         extracted_pb = physbone_helper.extract_unity_scene_physbones(
             pb_scene,
             avatar_name="SynthPBAvatar",
@@ -1344,13 +1351,19 @@ def test_unity_scene_and_fallbacks() -> bool:
         extracted_chain_roots = {
             chain_rec.get("root_bone") for chain_rec in extracted_pb.get("chains", [])
         }
+        default_chain_roots = {
+            chain_rec.get("root_bone") for chain_rec in extracted_default_pb.get("chains", [])
+        }
         marsh_breasts = extracted_pb.get("marshmallow_breasts", [])
         ear_chain = next(
             (item for item in extracted_pb.get("chains", []) if item.get("root_bone") == "Ear_L"),
             {},
         )
         pb_extract_ok = (
-            extracted_pb.get("loaded", False)
+            extracted_default_pb.get("loaded", False)
+            and "Ear_L" in default_chain_roots
+            and len(extracted_default_pb.get("marshmallow_breasts", [])) == 0
+            and extracted_pb.get("loaded", False)
             and "Ear_L" in extracted_chain_roots
             and "InactiveGimmick" not in extracted_chain_roots
             and abs(float(ear_chain.get("pull", 0.0)) - 0.12) < 1e-4
@@ -1362,7 +1375,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         suite_passed &= print_status_result(
             i18n.translate("tests.physbones_unity_extract"),
             pb_extract_ok,
-            f"chains={len(extracted_pb.get('chains', []))}, marsh={len(marsh_breasts)}",
+            f"default_marsh=0, chains={len(extracted_pb.get('chains', []))}, marsh={len(marsh_breasts)}",
         )
 
         excessive_spokes = []
@@ -1507,6 +1520,63 @@ def test_unity_scene_and_fallbacks() -> bool:
             and idle_drift_mm < 0.5
         )
 
+        miltina_cfg_file = PROJECT_ROOT_DIR / "configs" / "miltina_maid_physbones.cfg"
+        casual_cfg_file = PROJECT_ROOT_DIR / "configs" / "shinano_casual_physbones.cfg"
+        miltina_std_resolved = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "miltina_maid",
+                "physbones_source": "cfg",
+                "physbones_cfg": str(miltina_cfg_file),
+                "unity_scene": "",
+                "protagonist": "trevor",
+                "ped_name": "player_two",
+            },
+        )
+        miltina_marsh_resolved = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "miltina_maid",
+                "physbones_source": "cfg",
+                "physbones_cfg": str(miltina_cfg_file),
+                "physbones_marshmallow": "true",
+                "unity_scene": "",
+                "protagonist": "trevor",
+                "ped_name": "player_two",
+            },
+        )
+        casual_std_resolved = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "shinano_casual",
+                "physbones_source": "cfg",
+                "physbones_cfg": str(casual_cfg_file),
+                "unity_scene": "",
+                "protagonist": "franklin",
+                "ped_name": "player_one",
+            },
+        )
+        casual_marsh_resolved = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "shinano_casual",
+                "physbones_source": "cfg",
+                "physbones_cfg": str(casual_cfg_file),
+                "unity_scene": "",
+                "protagonist": "franklin",
+                "ped_name": "player_one",
+            },
+            override_marshmallow=True,
+        )
+        marshmallow_param_ok = (
+            not miltina_std_resolved.get("marshmallow_pb")
+            and len(miltina_std_resolved.get("chain_specs", [])) == 25
+            and len(miltina_std_resolved.get("custom_bones", [])) == 58
+            and miltina_marsh_resolved.get("marshmallow_pb") is True
+            and len(miltina_marsh_resolved.get("chain_specs", [])) == 27
+            and len(miltina_marsh_resolved.get("custom_bones", [])) == 62
+            and not casual_std_resolved.get("marshmallow_pb")
+            and abs(float(casual_std_resolved["chains"]["breast.L"]["max_angle_x"]) - 10.0) < 1e-4
+            and casual_marsh_resolved.get("marshmallow_pb") is True
+            and abs(float(casual_marsh_resolved["chains"]["breast.L"]["max_angle_x"]) - 35.0) < 1e-4
+        )
+
         pb_roundtrip_ok = (
             len(built_specs) == len(packed_budget["chains"])
             and len(built_bones) == len(packed_bones)
@@ -1514,6 +1584,7 @@ def test_unity_scene_and_fallbacks() -> bool:
             and resolved_pb_cfg.get("source_used") == "cfg"
             and len(resolved_pb_cfg.get("custom_bones", [])) == len(packed_bones)
             and safe_cone_ok
+            and marshmallow_param_ok
         )
         suite_passed &= print_status_result(
             i18n.translate("tests.physbones_cfg_roundtrip"),
@@ -1653,6 +1724,13 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-source"),
         (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-source"),
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-source"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--physbones-marshmallow"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--physbones-marshmallow"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--physbones-marshmallow"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--physbones-marshmallow"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-marshmallow"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-marshmallow"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-marshmallow"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")

@@ -872,6 +872,7 @@ _NON_PATH_OPTION_KEYS = frozenset(
         "unity_avatar_name",
         "blendshapes_source",
         "physbones_source",
+        "physbones_marshmallow",
         "hair_scale",
         "hair_offset",
         "target_z_min",
@@ -886,6 +887,9 @@ _NON_PATH_OPTION_KEYS = frozenset(
 _HAIR_KEYWORD_OPTION_KEYS = frozenset({"custom_hair", "fbx_hair"})
 _HAIR_OVERRIDE_OPTION_KEYS = frozenset(
     {"custom_hair", "fbx_hair", "hair_mat", "hair_tex", "hair_scale", "hair_offset"}
+)
+_PHYSBONE_OVERRIDE_OPTION_KEYS = frozenset(
+    {"physbones_source", "physbones_marshmallow"}
 )
 _HAIR_MODE_KEYWORDS = frozenset({"auto", "default", "none"})
 
@@ -1201,7 +1205,10 @@ def get_character_paths(
                 root_directory,
                 as_windows_path,
             )
-        elif option_key in _HAIR_OVERRIDE_OPTION_KEYS and option_value.strip():
+        elif (
+            option_key in _HAIR_OVERRIDE_OPTION_KEYS
+            or option_key in _PHYSBONE_OVERRIDE_OPTION_KEYS
+        ) and option_value.strip():
             resolved_character[option_key] = _resolve_option_value(
                 option_key,
                 option_value,

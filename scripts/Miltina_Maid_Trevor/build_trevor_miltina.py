@@ -450,6 +450,9 @@ def build_trevor_miltina_avatar(cli_args=None):
         override_cfg_path=getattr(cli_args, "physbones_cfg", None) if cli_args else None,
         override_unity_scene=getattr(cli_args, "unity_scene", None) if cli_args else None,
         override_avatar_name=getattr(cli_args, "unity_avatar_name", None) if cli_args else None,
+        override_marshmallow=(
+            getattr(cli_args, "physbones_marshmallow", None) if cli_args else None
+        ),
         save_cfg_path=getattr(cli_args, "save_physbones_cfg", None) if cli_args else None,
         verbose=True,
     )
@@ -1345,6 +1348,12 @@ def main() -> int:
         "--save-physbones-cfg",
         default=None,
         help=i18n.translate("physbones.cli_save_cfg"),
+    )
+    parser.add_argument(
+        "--physbones-marshmallow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=i18n.translate("physbones.cli_marshmallow"),
     )
     parser.add_argument(
         "--unity-scene",
