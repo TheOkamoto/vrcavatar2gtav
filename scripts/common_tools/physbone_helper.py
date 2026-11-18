@@ -38,6 +38,368 @@ SKEL_R_UPPERARM_TAG: int = 40269
 
 MAX_CUSTOM_PHYSBONES_PER_PED: int = 63
 
+# Ordered VRChat -> GTA V (RAGE) PhysBone prioritization tiers used when a custom
+# avatar exceeds RAGE's <= 63 custom bone limit (<= 128 total .ydd skeleton bones).
+# Preset avatars that already fit inside the limit keep 100% of their active chains.
+PHYSBONE_PRIORITY_TIERS: Tuple[Dict[str, Any], ...] = (
+    {
+        "tier": 1,
+        "key": "essential_ears_and_primary_hair",
+        "priority": 100,
+        "essential": True,
+        "label": "Tier 1 - Iconic Anatomy & Primary Hair (ears, horns, bangs, front/side/back hair, twintails)",
+        "keywords": (
+            "kemonomimi", "nekomimi", "usagimimi", "kitsunemimi", "mimi",
+            "ear", "horn", "antler", "halo",
+            "bang", "bangs", "maegami", "yokogami", "ushirogami",
+            "twintail", "ponytail", "pigtail", "braid", "osage", "sidetail",
+        ),
+        "bigrams": (
+            ("front", "hair"), ("hair", "front"),
+            ("side", "hair"), ("hair", "side"),
+            ("back", "hair"), ("hair", "back"),
+            ("hair", "base"), ("hair", "top"),
+            ("twin", "tail"), ("pony", "tail"), ("side", "tail"),
+            ("cat", "ear"), ("fox", "ear"), ("neko", "ear"),
+            ("rabbit", "ear"), ("bunny", "ear"), ("wolf", "ear"), ("dog", "ear"),
+        ),
+        "head_directional_tokens": ("front", "side", "back"),
+    },
+    {
+        "tier": 2,
+        "key": "essential_tails_wings_and_skirts",
+        "priority": 85,
+        "essential": True,
+        "label": "Tier 2 - Iconic Silhouette (tails, wings, skirts, dresses, coats, capes)",
+        "keywords": (
+            "tail", "shippo", "sipo", "wing", "hane",
+            "skirt", "dress", "onepiece", "coat", "cape", "cloak", "mantle",
+            "hakama", "furisode", "tutu", "petticoat", "capelet", "kimono",
+        ),
+        "bigrams": (
+            ("jacket", "hem"), ("apron", "skirt"), ("coat", "tail"),
+        ),
+    },
+    {
+        "tier": 3,
+        "key": "important_hair_and_major_garments",
+        "priority": 70,
+        "essential": True,
+        "label": "Tier 3 - Secondary Hair, Sleeves, Scarves & Main Chest",
+        "keywords": (
+            "hair", "kami", "ahoge", "aho",
+            "sleeve", "sode", "cuff", "scarf", "muffler", "shawl", "stole",
+            "necktie", "tie", "apron",
+            "breast", "oppai", "bust", "mune", "boob", "chest", "marshmallow",
+        ),
+        "bigrams": (
+            ("neck", "tie"), ("collar", "flap"),
+        ),
+    },
+    {
+        "tier": 4,
+        "key": "medium_ribbons_and_frills",
+        "priority": 50,
+        "essential": False,
+        "label": "Tier 4 - Ribbons, Bows, Frills, Veils & Hat Flaps",
+        "keywords": (
+            "ribbon", "hrib", "rib", "bow", "frill", "lace", "ruffle",
+            "veil", "hood", "hat", "beret", "choker", "collar", "sash", "obi", "flounce",
+        ),
+        "bigrams": (
+            ("hair", "ribbon"), ("tail", "ribbon"), ("skirt", "frill"), ("chest", "bow"),
+        ),
+    },
+    {
+        "tier": 5,
+        "key": "optional_straps_chains_and_belts",
+        "priority": 30,
+        "essential": False,
+        "label": "Tier 5 - Belts, Straps, Chains, Shoelaces & Suspenders",
+        "keywords": (
+            "belt", "strap", "suspender", "holster", "cord", "string",
+            "shoelace", "garter", "chain", "lanyard", "zipper", "tassel", "buckle",
+        ),
+        "bigrams": (
+            ("waist", "chain"), ("shoe", "lace"), ("thigh", "belt"),
+        ),
+    },
+    {
+        "tier": 6,
+        "key": "optional_micro_jiggle_and_jewelry",
+        "priority": 18,
+        "essential": False,
+        "label": "Tier 6 - Micro Soft-Body & Jewelry (cheeks, thighs, belly, earrings, necklaces)",
+        "keywords": (
+            "earring", "earpiece", "pierce", "piercing", "eyelash", "matsuge",
+            "cheek", "hoho", "hoppe", "thigh", "hip", "butt", "oshiri",
+            "belly", "stomach", "tongue", "shita", "necklace", "pendant",
+            "bell", "feather", "antenna",
+        ),
+        "bigrams": (
+            ("ear", "ring"), ("ear", "piece"), ("choker", "bell"),
+        ),
+    },
+    {
+        "tier": 7,
+        "key": "discardable_props_and_micro_decor",
+        "priority": 5,
+        "essential": False,
+        "label": "Tier 7 - Non-Essential Props & Decor (keychains, bags, pouches, pins, plushies, watches)",
+        "keywords": (
+            "pouch", "bag", "backpack", "handbag", "keychain", "keyring",
+            "hairpin", "hairclip", "plush", "plushie", "mascot", "nuigurumi",
+            "badge", "nametag", "tag", "charm", "pin", "brooch", "button",
+            "bracelet", "bangle", "pocketwatch", "wristwatch", "watch", "pocket",
+            "ring", "coin", "glasses", "goggle", "prop", "deco", "ornament",
+            "gimmick", "dummy", "heart", "star", "flower", "candy",
+        ),
+        "bigrams": (
+            ("key", "chain"), ("key", "ring"), ("hair", "pin"), ("hair", "clip"),
+            ("pocket", "watch"), ("name", "tag"), ("bag", "charm"),
+        ),
+    },
+)
+
+_PHYSBONE_TIER_BY_KEY: Dict[str, Dict[str, Any]] = {
+    tier_cfg["key"]: tier_cfg for tier_cfg in PHYSBONE_PRIORITY_TIERS
+}
+_GARMENT_MODIFIER_TOKENS: Set[str] = {
+    "skirt", "dress", "coat", "cape", "cloak", "mantle", "onepiece", "hakama", "kimono"
+}
+_KEEP_FINAL_S_TOKENS: Set[str] = {"dress", "hips", "bangs", "glasses"}
+
+
+def _tokenize_physbone_name(raw_names: Sequence[str]) -> Tuple[List[str], Set[str]]:
+    """Split camelCase/delimited PhysBone names into ordered tokens and singularized set."""
+    ordered_tokens: List[str] = []
+    for raw_item in raw_names:
+        if not raw_item:
+            continue
+        spaced = regex_module.sub(r"([a-z])([A-Z])", r"\1 \2", str(raw_item))
+        for tok in regex_module.findall(r"[a-z]+", spaced.lower()):
+            ordered_tokens.append(tok)
+    token_set: Set[str] = set(ordered_tokens)
+    for tok in ordered_tokens:
+        if tok not in _KEEP_FINAL_S_TOKENS:
+            if len(tok) > 4 and tok.endswith("es") and tok[:-2] in ("pouch", "watch", "brooch"):
+                token_set.add(tok[:-2])
+            elif len(tok) > 3 and tok.endswith("s"):
+                token_set.add(tok[:-1])
+    return ordered_tokens, token_set
+
+
+def _match_tier_tokens(
+    tier_cfg: Dict[str, Any],
+    ordered_tokens: Sequence[str],
+    token_set: Set[str],
+) -> Optional[str]:
+    """Return matched rule label if ordered tokens / singularized tokens belong to `tier_cfg`."""
+    for bg_first, bg_second in tier_cfg.get("bigrams", ()):
+        for tok_idx in range(len(ordered_tokens) - 1):
+            cur_tok = ordered_tokens[tok_idx]
+            nxt_tok = ordered_tokens[tok_idx + 1]
+            cur_sing = cur_tok[:-1] if (len(cur_tok) > 3 and cur_tok.endswith("s") and cur_tok not in _KEEP_FINAL_S_TOKENS) else cur_tok
+            nxt_sing = nxt_tok[:-1] if (len(nxt_tok) > 3 and nxt_tok.endswith("s") and nxt_tok not in _KEEP_FINAL_S_TOKENS) else nxt_tok
+            if bg_first in (cur_tok, cur_sing) and bg_second in (nxt_tok, nxt_sing):
+                return f"{bg_first}_{bg_second}"
+    for kw_tok in tier_cfg.get("keywords", ()):
+        if kw_tok in token_set:
+            return kw_tok
+    return None
+
+
+def score_physbone_chain_priority(
+    chain_name: str,
+    parent_bone_name: str = "SKEL_Pelvis",
+    spoke_bones: Sequence[str] = (),
+    object_name: str = "",
+) -> Dict[str, Any]:
+    """
+    Classify and score a PhysBone chain according to RAGE prioritization tiers.
+
+    Modifier and non-essential decor rules (Tiers 7, 6, 5, 4) are checked before
+    broad anatomical base nouns so items such as `Earring_L`, `HairPin_01`,
+    `KeyChain_0`, `PocketWatch`, and `Hair_Ribbon` are not inflated above core
+    anatomy (`Ear.L/.R`, `Tail`, `Front_Hair`, `Skirt`).
+    """
+    raw_candidates = [chain_name, object_name, *list(spoke_bones)[:3]]
+    _JEWELRY_OVERRIDES = frozenset(
+        {"earring", "earpiece", "pierce", "piercing", "eyelash", "matsuge", "necklace", "pendant"}
+    )
+    _JEWELRY_BIGRAMS = (("ear", "ring"), ("ear", "piece"))
+    ordered_tokens, token_set = _tokenize_physbone_name(raw_candidates)
+    matched_tier: Optional[Dict[str, Any]] = None
+    matched_rule = ""
+
+    # 1. Props/decor (Tier 7) and earrings/piercings (Tier 6 jewelry) override broad nouns first
+    hit_prop = _match_tier_tokens(
+        _PHYSBONE_TIER_BY_KEY["discardable_props_and_micro_decor"], ordered_tokens, token_set
+    )
+    if hit_prop:
+        matched_tier = _PHYSBONE_TIER_BY_KEY["discardable_props_and_micro_decor"]
+        matched_rule = hit_prop
+    else:
+        jewelry_hit = None
+        for bg_first, bg_second in _JEWELRY_BIGRAMS:
+            for tok_idx in range(len(ordered_tokens) - 1):
+                if ordered_tokens[tok_idx] == bg_first and ordered_tokens[tok_idx + 1] == bg_second:
+                    jewelry_hit = f"{bg_first}_{bg_second}"
+                    break
+            if jewelry_hit:
+                break
+        if not jewelry_hit:
+            for jw_tok in _JEWELRY_OVERRIDES:
+                if jw_tok in token_set:
+                    jewelry_hit = jw_tok
+                    break
+        if jewelry_hit:
+            matched_tier = _PHYSBONE_TIER_BY_KEY["optional_micro_jiggle_and_jewelry"]
+            matched_rule = jewelry_hit
+
+    if matched_tier is None:
+        check_order = (
+            "medium_ribbons_and_frills",
+            "optional_straps_chains_and_belts",
+            "optional_micro_jiggle_and_jewelry",
+            "essential_ears_and_primary_hair",
+            "essential_tails_wings_and_skirts",
+            "important_hair_and_major_garments",
+        )
+        for tier_key in check_order:
+            tier_cfg = _PHYSBONE_TIER_BY_KEY[tier_key]
+            hit_rule = _match_tier_tokens(tier_cfg, ordered_tokens, token_set)
+            if hit_rule:
+                matched_tier = tier_cfg
+                matched_rule = hit_rule
+                break
+
+    if matched_tier is None:
+        head_tier = _PHYSBONE_TIER_BY_KEY["essential_ears_and_primary_hair"]
+        if (
+            parent_bone_name in ("SKEL_Head", "SKEL_Neck_1")
+            and not (token_set & _GARMENT_MODIFIER_TOKENS)
+            and (token_set & set(head_tier.get("head_directional_tokens", ())))
+        ):
+            matched_tier = head_tier
+            matched_rule = "head_directional_hair"
+
+    if matched_tier is not None:
+        return {
+            "tier": int(matched_tier["tier"]),
+            "tier_key": str(matched_tier["key"]),
+            "priority": int(matched_tier["priority"]),
+            "essential": bool(matched_tier["essential"]),
+            "reason": f"{matched_tier['key']} ({matched_rule})",
+            "matched_rule": matched_rule,
+            "label": str(matched_tier["label"]),
+        }
+
+    spoke_depth = len(list(spoke_bones))
+    if parent_bone_name in ("SKEL_Head", "SKEL_Neck_1") and spoke_depth >= 3:
+        return {
+            "tier": 4,
+            "tier_key": "unclassified_head_strand",
+            "priority": 42,
+            "essential": False,
+            "reason": f"unclassified_head_strand ({parent_bone_name}, {spoke_depth} bones)",
+            "matched_rule": "head_strand_depth",
+            "label": "Tier 4 - Unclassified Multi-Bone Head Strand",
+        }
+    if parent_bone_name in ("SKEL_Pelvis", "SKEL_Spine0", "SKEL_Spine1", "SKEL_Spine2", "SKEL_Spine3") and spoke_depth >= 4:
+        return {
+            "tier": 4,
+            "tier_key": "unclassified_major_drape",
+            "priority": 38,
+            "essential": False,
+            "reason": f"unclassified_major_drape ({parent_bone_name}, {spoke_depth} bones)",
+            "matched_rule": "torso_drape_depth",
+            "label": "Tier 4 - Unclassified Multi-Bone Garment Drape",
+        }
+    return {
+        "tier": 7,
+        "tier_key": "unclassified_minor_bone",
+        "priority": 12,
+        "essential": False,
+        "reason": f"unclassified_minor_bone ({parent_bone_name}, {spoke_depth} bones)",
+        "matched_rule": "minor_fallback",
+        "label": "Tier 7 - Unclassified Minor Accessory Bone",
+    }
+
+
+def build_physbone_priority_report_from_chains(
+    chains_map: Dict[str, Dict[str, Any]],
+    discarded_chains: Sequence[Dict[str, Any]] = (),
+    max_custom_bones: int = MAX_CUSTOM_PHYSBONES_PER_PED,
+    strategy: str = "unity_auto_packed",
+) -> Dict[str, Any]:
+    """Summarize kept vs discarded PhysBone chains ranked by RAGE priority tier."""
+    kept_entries: List[Dict[str, Any]] = []
+    used_bones = 0
+    for chain_key, cfg_data in chains_map.items():
+        chain_bones = list(cfg_data.get("chain_bones") or ())
+        src_bones = list(cfg_data.get("source_bones") or ())
+        parent_bone = str(cfg_data.get("parent_bone") or "SKEL_Pelvis")
+        gtav_name = str(cfg_data.get("gtav_chain_name") or chain_key)
+        used_bones += len(chain_bones)
+        score_info = score_physbone_chain_priority(
+            chain_name=f"{chain_key} {gtav_name}",
+            parent_bone_name=parent_bone,
+            spoke_bones=src_bones,
+        )
+        kept_entries.append(
+            {
+                "chain_key": str(chain_key),
+                "gtav_chain_name": gtav_name,
+                "parent_bone": parent_bone,
+                "bones_allocated": len(chain_bones),
+                "source_bones_count": len(src_bones),
+                "tier": score_info["tier"],
+                "tier_key": score_info["tier_key"],
+                "priority": score_info["priority"],
+                "essential": score_info["essential"],
+                "reason": score_info["reason"],
+            }
+        )
+    kept_entries.sort(key=lambda item: (item["tier"], -item["priority"], item["chain_key"]))
+    discarded_list = [dict(item) for item in discarded_chains]
+    discarded_list.sort(key=lambda item: (item.get("tier", 7), -item.get("priority", 0), str(item.get("chain_key", ""))))
+    return {
+        "strategy": strategy,
+        "max_custom_bones": int(max_custom_bones),
+        "used_custom_bones": int(used_bones),
+        "within_budget": bool(used_bones <= int(max_custom_bones)),
+        "candidate_count": len(kept_entries) + len(discarded_list),
+        "kept_count": len(kept_entries),
+        "discarded_count": len(discarded_list),
+        "kept_chains": kept_entries,
+        "discarded_chains": discarded_list,
+    }
+
+
+def format_physbone_priority_summary(
+    priority_report: Optional[Dict[str, Any]],
+    max_items: int = 12,
+) -> str:
+    """Format a compact human-readable summary of kept/discarded PhysBone chains."""
+    if not priority_report:
+        return ""
+    used = int(priority_report.get("used_custom_bones", 0))
+    limit = int(priority_report.get("max_custom_bones", MAX_CUSTOM_PHYSBONES_PER_PED))
+    kept_cnt = int(priority_report.get("kept_count", 0))
+    drop_cnt = int(priority_report.get("discarded_count", 0))
+    summary = f"PhysBone RAGE budget: kept {kept_cnt} chains ({used}/{limit} custom bones)"
+    if drop_cnt <= 0:
+        return summary + "; discarded 0 (all within limit)"
+    discarded_items = list(priority_report.get("discarded_chains") or ())
+    preview_tokens = [
+        f"{item.get('chain_key')} [T{item.get('tier', 7)}->{item.get('fallback_bone', 'SKEL_Pelvis')}]"
+        for item in discarded_items[:max_items]
+    ]
+    if len(discarded_items) > max_items:
+        preview_tokens.append(f"+{len(discarded_items) - max_items} more")
+    return summary + f"; discarded {drop_cnt} non-essential chains bound rigidly: {', '.join(preview_tokens)}"
+
 PARENT_BONE_TAGS: Dict[str, int] = {
     "SKEL_Head": SKEL_HEAD_TAG,
     "SKEL_Neck_1": SKEL_NECK_1_TAG,
@@ -3028,58 +3390,171 @@ def pack_physbone_chains_to_gtav_budget(
                 for src_k, dst_v in template_bone_map.items()
                 if dst_v not in excluded_gtav_bones
             }
+            priority_report = build_physbone_priority_report_from_chains(
+                chains_out,
+                discarded_chains=(),
+                max_custom_bones=max_custom_bones,
+                strategy="unity_template_synced",
+            )
             return {
                 "chains": chains_out,
                 "bone_mapping": bone_map_out,
                 "custom_bones": included_gtav_bones,
                 "strategy": "unity_template_synced",
+                "kept_chains": priority_report["kept_chains"],
+                "discarded_chains": [],
+                "priority_report": priority_report,
             }
 
-    # General automatic clustering + budget packing for arbitrary Unity avatars
+    # General automatic clustering + prioritized RAGE budget packing for arbitrary Unity avatars
     grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
-    for rec in extracted_spokes:
-        spokes = rec.get("spoke_bones") or [rec["root_bone"]]
-        root_tok = spokes[0].strip()
+    for rec_item in extracted_spokes:
+        spokes = rec_item.get("spoke_bones") or [rec_item["root_bone"]]
+        root_tok = str(spokes[0]).strip()
         low_tok = root_tok.lower()
-        side_suf = "_L" if (low_tok.endswith(".l") or "_l." in low_tok or low_tok.endswith("_l")) else ("_R" if (low_tok.endswith(".r") or "_r." in low_tok or low_tok.endswith("_r")) else "")
-        stem_tok = regex_module.sub(r"[._]?([lLrR]|\d+)+(\.\d+)*$", "", root_tok).strip("._ ")
+        if (
+            low_tok.endswith(".l")
+            or "_l." in low_tok
+            or low_tok.endswith("_l")
+            or regex_module.search(r"[._](?:l|left)(?:[._]\d+)+$", low_tok)
+        ):
+            side_suf = "_L"
+        elif (
+            low_tok.endswith(".r")
+            or "_r." in low_tok
+            or low_tok.endswith("_r")
+            or regex_module.search(r"[._](?:r|right)(?:[._]\d+)+$", low_tok)
+        ):
+            side_suf = "_R"
+        else:
+            side_suf = ""
+        if side_suf:
+            stem_tok = regex_module.sub(r"(?:[._]\d+)+$", "", root_tok)
+            stem_tok = regex_module.sub(
+                r"[._](?:[lLrR]|left|right)$", "", stem_tok, flags=regex_module.IGNORECASE
+            ).strip("._ ")
+        else:
+            stem_tok = regex_module.sub(r"[._]?\d+(?:\.\d+)*$", "", root_tok).strip("._ ")
         if not stem_tok:
             stem_tok = root_tok
-        group_key = (f"{stem_tok}{side_suf}", rec["parent_bone"])
-        grouped.setdefault(group_key, []).append(rec)
+        group_key = (f"{stem_tok}{side_suf}", rec_item["parent_bone"])
+        grouped.setdefault(group_key, []).append(rec_item)
 
-    max_chains_at_2 = max(1, max_custom_bones // 2)
-    sorted_groups = sorted(
-        grouped.items(),
-        key=lambda item_kv: (
-            0 if any(tok in item_kv[0][0].lower() for tok in ("ear", "tail", "breast", "twin", "hair", "skirt")) else 1,
-            -len(item_kv[1][0].get("spoke_bones", [])),
-            item_kv[0][0],
+    raw_entries: List[Dict[str, Any]] = []
+    pair_lookup: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for (group_stem, parent_bone_name), rec_list in grouped.items():
+        rep_rec = rec_list[len(rec_list) // 2]
+        rep_spokes = list(rep_rec.get("spoke_bones") or [rep_rec["root_bone"]])
+        if group_stem.endswith("_L") or group_stem.endswith("_R"):
+            side_tag = group_stem[-1]
+            base_stem = group_stem[:-2] or group_stem
+        else:
+            side_tag = ""
+            base_stem = group_stem
+        score_info = score_physbone_chain_priority(
+            chain_name=group_stem,
+            parent_bone_name=parent_bone_name,
+            spoke_bones=rep_spokes,
+            object_name=str(rep_rec.get("object_name") or ""),
+        )
+        entry_rec: Dict[str, Any] = {
+            "group_stem": group_stem,
+            "base_stem": base_stem,
+            "side_tag": side_tag,
+            "side_order": 0 if side_tag == "L" else (1 if side_tag == "R" else 2),
+            "parent_bone": parent_bone_name,
+            "rec_list": rec_list,
+            "rep_rec": rep_rec,
+            "rep_spokes": rep_spokes,
+            "score_info": score_info,
+            "seg_slots": 2,
+        }
+        raw_entries.append(entry_rec)
+        pair_lookup.setdefault((base_stem.lower(), parent_bone_name), []).append(entry_rec)
+
+    for entry_rec in raw_entries:
+        siblings = pair_lookup.get((entry_rec["base_stem"].lower(), entry_rec["parent_bone"]), [])
+        sib_sides = {sib["side_tag"] for sib in siblings if sib["side_tag"] in ("L", "R")}
+        entry_rec["has_bilateral_pair"] = len(sib_sides) == 2 and entry_rec["side_tag"] in ("L", "R")
+        entry_rec["pair_priority"] = max(sib["score_info"]["priority"] for sib in siblings)
+        entry_rec["pair_tier"] = min(sib["score_info"]["tier"] for sib in siblings)
+        entry_rec["pair_spoke_len"] = max(len(sib["rep_spokes"]) for sib in siblings)
+        entry_rec["pair_count"] = max(len(sib["rec_list"]) for sib in siblings)
+
+    sorted_entries = sorted(
+        raw_entries,
+        key=lambda item_entry: (
+            -int(item_entry["pair_priority"]),
+            -min(8, int(item_entry["pair_spoke_len"])),
+            -int(item_entry["pair_count"]),
+            0 if item_entry["parent_bone"] in ("SKEL_Head", "SKEL_Neck_1", "SKEL_Pelvis") else 1,
+            item_entry["base_stem"].lower(),
+            int(item_entry["side_order"]),
+            item_entry["group_stem"].lower(),
         ),
     )
 
+    # Pass 1: Keep essential/highest-priority chains first (pairing .L/.R twins together)
+    kept_units: List[List[Dict[str, Any]]] = []
+    discarded_entries: List[Tuple[Dict[str, Any], str]] = []
+    allocated_bones = 0
+    cursor_idx = 0
+    total_entries = len(sorted_entries)
+    while cursor_idx < total_entries:
+        cur_entry = sorted_entries[cursor_idx]
+        nxt_entry = sorted_entries[cursor_idx + 1] if (cursor_idx + 1) < total_entries else None
+        is_pair_unit = (
+            nxt_entry is not None
+            and cur_entry["base_stem"].lower() == nxt_entry["base_stem"].lower()
+            and cur_entry["parent_bone"] == nxt_entry["parent_bone"]
+            and {cur_entry["side_tag"], nxt_entry["side_tag"]} == {"L", "R"}
+        )
+        if is_pair_unit and nxt_entry is not None:
+            pair_min_cost = 4
+            if allocated_bones + pair_min_cost <= max_custom_bones:
+                kept_units.append([cur_entry, nxt_entry])
+                allocated_bones += pair_min_cost
+            else:
+                discarded_entries.append((cur_entry, "rage_budget_pair_overflow"))
+                discarded_entries.append((nxt_entry, "rage_budget_pair_overflow"))
+            cursor_idx += 2
+        else:
+            single_min_cost = 2
+            if allocated_bones + single_min_cost <= max_custom_bones and (
+                not discarded_entries or cur_entry["score_info"]["tier"] <= 5
+            ):
+                kept_units.append([cur_entry])
+                allocated_bones += single_min_cost
+            else:
+                discarded_entries.append((cur_entry, "rage_budget_overflow"))
+            cursor_idx += 1
+
+    # Pass 2: Upgrade highest-priority kept >=3-spoke chains from 2 -> 3 bones with leftover slack
+    slack_bones = max(0, int(max_custom_bones) - allocated_bones)
+    for unit_items in kept_units:
+        if slack_bones <= 0:
+            break
+        extra_needed = len(unit_items)
+        if slack_bones >= extra_needed and all(len(item_rec["rep_spokes"]) >= 3 for item_rec in unit_items):
+            for item_rec in unit_items:
+                item_rec["seg_slots"] = 3
+            slack_bones -= extra_needed
+
+    kept_flat = [item_rec for unit_items in kept_units for item_rec in unit_items]
     used_tags: Set[int] = set(PARENT_BONE_TAGS.values())
     chains_out = {}
     bone_map_out: Dict[str, str] = {}
     custom_bones_out: List[str] = []
 
-    for grp_idx, ((group_stem, parent_bone_name), rec_list) in enumerate(sorted_groups):
-        if len(custom_bones_out) + 2 > max_custom_bones or len(chains_out) >= max_chains_at_2:
-            # Map remaining vertices to nearest existing chain sharing parent_bone
-            fallback_target = None
-            for existing_chain in chains_out.values():
-                if existing_chain["parent_bone"] == parent_bone_name:
-                    fallback_target = existing_chain["chain_bones"][0]
-                    break
-            if fallback_target:
-                for rec_item in rec_list:
-                    for b_item in rec_item.get("spoke_bones", []):
-                        bone_map_out.setdefault(b_item.lower(), str(fallback_target))
-            continue
+    for grp_idx, entry_rec in enumerate(kept_flat):
+        group_stem = entry_rec["group_stem"]
+        parent_bone_name = entry_rec["parent_bone"]
+        rec_list = entry_rec["rec_list"]
+        rep_rec = entry_rec["rep_rec"]
+        rep_spokes = entry_rec["rep_spokes"]
+        target_slots = int(entry_rec["seg_slots"])
 
-        rep_rec = rec_list[len(rec_list) // 2]
-        rep_spokes = list(rep_rec.get("spoke_bones") or [rep_rec["root_bone"]])
-        if len(rep_spokes) >= 3 and len(custom_bones_out) + 3 + (len(sorted_groups) - grp_idx - 1) * 2 <= max_custom_bones:
+        if target_slots >= 3 and len(rep_spokes) >= 3:
             sampled_src = [rep_spokes[0], rep_spokes[len(rep_spokes) // 2], rep_spokes[-1]]
         elif len(rep_spokes) >= 2:
             sampled_src = [rep_spokes[0], rep_spokes[-1]]
@@ -3092,13 +3567,13 @@ def pack_physbone_chains_to_gtav_budget(
         candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
         # Guarantee zero ELF uint16 hash collisions
         suffix_num = 1
-        while any(compute_gtav_bone_tag(b_nm) in used_tags or b_nm in custom_bones_out for b_nm in candidate_bones):
+        while any(compute_gtav_bone_tag(bone_nm) in used_tags or bone_nm in custom_bones_out for bone_nm in candidate_bones):
             gtav_chain_name = f"{gtav_prefix}_{clean_stem}_{suffix_num}"
             candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
             suffix_num += 1
-        for b_nm in candidate_bones:
-            used_tags.add(compute_gtav_bone_tag(b_nm))
-            custom_bones_out.append(b_nm)
+        for bone_nm in candidate_bones:
+            used_tags.add(compute_gtav_bone_tag(bone_nm))
+            custom_bones_out.append(bone_nm)
 
         chain_key = group_stem.lower()
         while chain_key in chains_out:
@@ -3142,20 +3617,61 @@ def pack_physbone_chains_to_gtav_budget(
 
         for rec_item in rec_list:
             sp_list = list(rec_item.get("spoke_bones") or [rec_item["root_bone"]])
-            for sp_idx, b_item in enumerate(sp_list):
+            for sp_idx, bone_item in enumerate(sp_list):
                 mapped_tier = min(
                     seg_slots - 1,
                     int((sp_idx / max(1, len(sp_list) - 1)) * (seg_slots - 1) + 0.5)
                     if len(sp_list) > 1
                     else 0,
                 )
-                bone_map_out[b_item.lower()] = candidate_bones[mapped_tier]
+                bone_map_out[bone_item.lower()] = candidate_bones[mapped_tier]
 
+    # Bind discarded non-essential PhysBone vertices statically onto their rigid parent_bone
+    discarded_report: List[Dict[str, Any]] = []
+    for disc_entry, drop_reason in discarded_entries:
+        parent_bone_name = disc_entry["parent_bone"]
+        score_info = disc_entry["score_info"]
+        rec_list = disc_entry["rec_list"]
+        rep_rec = disc_entry["rep_rec"]
+        rep_spokes = disc_entry["rep_spokes"]
+        for rec_item in rec_list:
+            bone_names_to_anchor = list(rec_item.get("spoke_bones") or [rec_item["root_bone"]]) + list(
+                rec_item.get("all_descendants") or ()
+            )
+            for bone_item in bone_names_to_anchor:
+                bone_low = str(bone_item).strip().lower()
+                if bone_low:
+                    bone_map_out.setdefault(bone_low, parent_bone_name)
+        discarded_report.append(
+            {
+                "chain_key": disc_entry["group_stem"].lower(),
+                "root_bone": str(rep_rec.get("root_bone") or rep_spokes[0]),
+                "parent_bone": parent_bone_name,
+                "fallback_bone": parent_bone_name,
+                "tier": int(score_info["tier"]),
+                "tier_key": str(score_info["tier_key"]),
+                "priority": int(score_info["priority"]),
+                "essential": bool(score_info["essential"]),
+                "reason": str(score_info["reason"]),
+                "source_bones_count": len(rep_spokes),
+                "drop_reason": drop_reason,
+            }
+        )
+
+    priority_report = build_physbone_priority_report_from_chains(
+        chains_out,
+        discarded_chains=discarded_report,
+        max_custom_bones=max_custom_bones,
+        strategy="unity_auto_packed",
+    )
     return {
         "chains": chains_out,
         "bone_mapping": bone_map_out,
         "custom_bones": custom_bones_out,
         "strategy": "unity_auto_packed",
+        "kept_chains": priority_report["kept_chains"],
+        "discarded_chains": priority_report["discarded_chains"],
+        "priority_report": priority_report,
     }
 
 
@@ -3275,6 +3791,7 @@ def resolve_character_physbones(
     use_unity = requested_source == "unity" or (requested_source == "auto" and scene_exists)
     marsh_only_set = MILTINA_MARSHMALLOW_ONLY_CHAINS if prefix_tok == "PB_MT" else set()
     loaded_data: Dict[str, Any] = {}
+    packed_priority_report: Optional[Dict[str, Any]] = None
     source_used = "builtin"
 
     if use_unity and scene_exists:
@@ -3299,6 +3816,8 @@ def resolve_character_physbones(
                 include_marshmallow_pb=use_marshmallow,
                 marshmallow_only_chains=marsh_only_set,
             )
+            packed_priority_report = packed.get("priority_report")
+            discarded_list = list(packed.get("discarded_chains") or ())
             source_used = "unity"
             default_slot_by_avatar = {
                 "shinano_er": "player_zero",
@@ -3317,11 +3836,21 @@ def resolve_character_physbones(
                     "unity_scene": Path(effective_scene).name,
                     "marshmallow_pb": "true" if use_marshmallow else "false",
                     "custom_bones": len(packed["custom_bones"]),
+                    "custom_bones_limit": max_custom_bones,
                     "chain_count": len(packed["chains"]),
+                    "discarded_non_essential_chains": len(discarded_list),
                 },
                 "bone_mapping": packed["bone_mapping"],
                 "chains": packed["chains"],
             }
+            if discarded_list:
+                print(f"[PHYSBONES] {format_physbone_priority_summary(packed_priority_report)}")
+                if verbose:
+                    for disc_item in discarded_list:
+                        print(
+                            f"  [DROP] {disc_item['chain_key']} -> {disc_item['fallback_bone']} "
+                            f"(Tier {disc_item['tier']}, score={disc_item['priority']}, {disc_item['reason']})"
+                        )
 
     if source_used != "unity" and cfg_exists:
         loaded_data = load_physbone_config(effective_cfg)
@@ -3366,6 +3895,24 @@ def resolve_character_physbones(
         loaded_data["metadata"]["marshmallow_pb"] = "true" if use_marshmallow else "false"
         loaded_data["metadata"]["chain_count"] = len(chain_specs)
         loaded_data["metadata"]["custom_bones"] = len(custom_bones)
+    effective_priority_report = packed_priority_report or build_physbone_priority_report_from_chains(
+        loaded_data.get("chains") or {},
+        discarded_chains=(),
+        max_custom_bones=max_custom_bones,
+        strategy=str((loaded_data.get("metadata") or {}).get("source") or source_used),
+    )
+    effective_headers = header_comments
+    if effective_headers is None and effective_priority_report.get("discarded_chains"):
+        auto_headers = [
+            "# VRC2GTAV PhysBone Preset - Auto-prioritized for RAGE skeleton budget",
+            f"# {format_physbone_priority_summary(effective_priority_report)}",
+        ]
+        for disc_item in effective_priority_report["discarded_chains"]:
+            auto_headers.append(
+                f"#   DISCARDED [Tier {disc_item['tier']} / {disc_item['priority']}]: "
+                f"{disc_item['chain_key']} -> rigid parent {disc_item['fallback_bone']} ({disc_item['reason']})"
+            )
+        effective_headers = tuple(auto_headers)
     saved_path_str = ""
     if save_cfg_path and loaded_data.get("chains"):
         written = save_physbone_config(
@@ -3373,7 +3920,7 @@ def resolve_character_physbones(
             loaded_data["chains"],
             metadata=loaded_data.get("metadata"),
             bone_mapping=loaded_data.get("bone_mapping"),
-            header_comments=header_comments,
+            header_comments=effective_headers,
         )
         saved_path_str = str(written)
 
@@ -3388,6 +3935,9 @@ def resolve_character_physbones(
         "chain_specs": chain_specs,
         "parent_map": parent_map,
         "custom_bones": custom_bones,
+        "priority_report": effective_priority_report,
+        "kept_chains": effective_priority_report["kept_chains"],
+        "discarded_chains": effective_priority_report["discarded_chains"],
         "cfg_path": effective_cfg,
         "unity_scene": effective_scene,
         "saved_cfg_path": saved_path_str,

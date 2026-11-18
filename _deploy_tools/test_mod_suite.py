@@ -1621,6 +1621,168 @@ def test_unity_scene_and_fallbacks() -> bool:
             ),
         )
 
+        # Verify PhysBone prioritization tiers:
+        # 1) All 3 built-in avatar configs fit within RAGE <= 63 custom bones with 0 chains dropped.
+        # 2) Any custom avatar fitting within <= 63 custom bones keeps 100% of chains.
+        # 3) Overloaded custom avatar (> 63 custom bones) preserves Tier 1-2 essential bones
+        #    symmetrically, discards lower-tier non-essential props (including Earring/HairPin),
+        #    and re-binds discarded vertices statically onto their rigid parent_bone.
+        michael_cfg_file = PROJECT_ROOT_DIR / "configs" / "michael_neko_mimi_physbones.cfg"
+        michael_std_resolved = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "shinano_er",
+                "physbones_source": "cfg",
+                "physbones_cfg": str(michael_cfg_file),
+                "unity_scene": "",
+                "protagonist": "michael",
+                "ped_name": "player_zero",
+            },
+        )
+        builtin_zero_drops_ok = (
+            len(michael_std_resolved.get("chain_specs", [])) == 30
+            and len(michael_std_resolved.get("custom_bones", [])) == 62
+            and len(michael_std_resolved.get("discarded_chains", [])) == 0
+            and len(casual_std_resolved.get("chain_specs", [])) == 24
+            and len(casual_std_resolved.get("custom_bones", [])) == 62
+            and len(casual_std_resolved.get("discarded_chains", [])) == 0
+            and len(miltina_std_resolved.get("discarded_chains", [])) == 0
+            and michael_std_resolved.get("priority_report", {}).get("within_budget") is True
+        )
+
+        def _make_spoke(stem_label: str, parent_nm: str, seg_cnt: int = 3) -> Dict[str, Any]:
+            bone_seq = [f"{stem_label}_{seg_i}" for seg_i in range(seg_cnt)]
+            return {
+                "chain_key": stem_label.lower(),
+                "root_bone": bone_seq[0],
+                "spoke_bones": bone_seq,
+                "all_descendants": list(bone_seq),
+                "parent_bone": parent_nm,
+                "parent_bone_tag": physbone_helper.PARENT_BONE_TAGS[parent_nm],
+                "pull": 0.20,
+                "spring": 0.50,
+                "stiffness": 0.25,
+                "gravity": 0.15,
+            }
+
+        light_custom_spokes = [
+            _make_spoke("CatEar.L", "SKEL_Head", 3),
+            _make_spoke("CatEar.R", "SKEL_Head", 3),
+            _make_spoke("FoxTail", "SKEL_Pelvis", 3),
+            _make_spoke("Front_Hair", "SKEL_Head", 3),
+            _make_spoke("Skirt_F", "SKEL_Pelvis", 3),
+            _make_spoke("Hair_Ribbon", "SKEL_Head", 2),
+            _make_spoke("Earring_L", "SKEL_Head", 2),
+            _make_spoke("Keychain_01", "SKEL_Pelvis", 2),
+            _make_spoke("Backpack_Bag", "SKEL_Spine2", 2),
+        ]
+        packed_light_custom = physbone_helper.pack_physbone_chains_to_gtav_budget(
+            light_custom_spokes,
+            gtav_prefix="PB_Lit",
+            max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+        )
+        light_keeps_all_ok = (
+            len(packed_light_custom.get("chains", {})) == len(light_custom_spokes)
+            and len(packed_light_custom.get("discarded_chains", [])) == 0
+            and len(packed_light_custom.get("custom_bones", [])) <= physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED
+            and len(packed_light_custom["chains"]["catear_l"]["chain_bones"]) == 3
+            and len(packed_light_custom["chains"]["catear_r"]["chain_bones"]) == 3
+        )
+
+        heavy_custom_spokes = [
+            _make_spoke("CatEar.L", "SKEL_Head", 3),
+            _make_spoke("CatEar.R", "SKEL_Head", 3),
+            _make_spoke("TwinTail.L", "SKEL_Head", 3),
+            _make_spoke("TwinTail.R", "SKEL_Head", 3),
+            _make_spoke("Bang_Center", "SKEL_Head", 3),
+            _make_spoke("Side_Hair.L", "SKEL_Head", 3),
+            _make_spoke("Side_Hair.R", "SKEL_Head", 3),
+            _make_spoke("Back_Hair.L", "SKEL_Head", 3),
+            _make_spoke("Back_Hair.R", "SKEL_Head", 3),
+            _make_spoke("FoxTail", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Front_01", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Front_02", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Side_01", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Side_02", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Back_01", "SKEL_Pelvis", 3),
+            _make_spoke("Skirt_Back_02", "SKEL_Pelvis", 3),
+            _make_spoke("Cape_Back", "SKEL_Spine3", 3),
+            _make_spoke("Scarf_Front", "SKEL_Spine3", 3),
+            _make_spoke("Sleeve.L", "SKEL_L_UpperArm", 3),
+            _make_spoke("Sleeve.R", "SKEL_R_UpperArm", 3),
+            _make_spoke("Hair_Ribbon.L", "SKEL_Head", 3),
+            _make_spoke("Hair_Ribbon.R", "SKEL_Head", 3),
+            _make_spoke("Chest_Bow", "SKEL_Spine2", 3),
+            _make_spoke("Veil_Left.L", "SKEL_Head", 3),
+            _make_spoke("Veil_Left.R", "SKEL_Head", 3),
+            _make_spoke("Hood_Flap_Back", "SKEL_Spine3", 3),
+            _make_spoke("Skirt_Frill_01", "SKEL_Pelvis", 2),
+            _make_spoke("Skirt_Frill_02", "SKEL_Pelvis", 2),
+            _make_spoke("Waist_Sash_01", "SKEL_Pelvis", 2),
+            _make_spoke("Waist_Belt_01", "SKEL_Pelvis", 2),
+            _make_spoke("Waist_Belt_02", "SKEL_Pelvis", 2),
+            _make_spoke("Thigh_Garter.L", "SKEL_L_Thigh", 2),
+            _make_spoke("Thigh_Garter.R", "SKEL_R_Thigh", 2),
+            _make_spoke("Cheek_Soft.L", "SKEL_Head", 2),
+            _make_spoke("Cheek_Soft.R", "SKEL_Head", 2),
+            _make_spoke("Earring_Gem.L", "SKEL_Head", 2),
+            _make_spoke("Earring_Gem.R", "SKEL_Head", 2),
+            _make_spoke("Necklace_Bell", "SKEL_Spine3", 2),
+            _make_spoke("Belly_Soft", "SKEL_Spine0", 2),
+            _make_spoke("HairPin_Star", "SKEL_Head", 2),
+            _make_spoke("Backpack_Bag", "SKEL_Spine2", 2),
+            _make_spoke("Keychain_Cat", "SKEL_Pelvis", 2),
+            _make_spoke("Keychain_Coin", "SKEL_Pelvis", 2),
+            _make_spoke("Plushie_Mascot", "SKEL_Spine1", 2),
+            _make_spoke("PocketWatch_Side", "SKEL_Pelvis", 2),
+            _make_spoke("NameBadge_Pin", "SKEL_Spine3", 2),
+            _make_spoke("Bracelet_Gem.L", "SKEL_L_UpperArm", 2),
+            _make_spoke("Bracelet_Gem.R", "SKEL_R_UpperArm", 2),
+        ]
+        packed_heavy_custom = physbone_helper.pack_physbone_chains_to_gtav_budget(
+            heavy_custom_spokes,
+            gtav_prefix="PB_Hvy",
+            max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+        )
+        heavy_chains = packed_heavy_custom.get("chains", {})
+        heavy_bones = list(packed_heavy_custom.get("custom_bones", []))
+        heavy_tags = [physbone_helper.compute_gtav_bone_tag(bone_item) for bone_item in heavy_bones]
+        heavy_bmap = packed_heavy_custom.get("bone_mapping", {})
+        heavy_discarded_keys = {
+            item["chain_key"] for item in packed_heavy_custom.get("discarded_chains", [])
+        }
+        priority_heavy_ok = (
+            0 < len(heavy_bones) <= physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED
+            and len(heavy_tags) == len(set(heavy_tags))
+            and not (set(heavy_tags) & set(physbone_helper.PARENT_BONE_TAGS.values()))
+            and "catear_l" in heavy_chains
+            and "catear_r" in heavy_chains
+            and "twintail_l" in heavy_chains
+            and "twintail_r" in heavy_chains
+            and "foxtail" in heavy_chains
+            and "bang_center" in heavy_chains
+            and "skirt_front_01" in heavy_chains
+            and len(heavy_chains["catear_l"]["chain_bones"])
+            == len(heavy_chains["catear_r"]["chain_bones"])
+            and "keychain_cat" in heavy_discarded_keys
+            and "backpack_bag" in heavy_discarded_keys
+            and "hairpin_star" in heavy_discarded_keys
+            and "earring_gem_l" in heavy_discarded_keys
+            and "earring_gem_r" in heavy_discarded_keys
+            and heavy_bmap.get("earring_gem.l_0") == "SKEL_Head"
+            and heavy_bmap.get("hairpin_star_0") == "SKEL_Head"
+            and heavy_bmap.get("backpack_bag_0") == "SKEL_Spine2"
+            and heavy_bmap.get("keychain_cat_0") == "SKEL_Pelvis"
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.physbones_priority_pack"),
+            bool(builtin_zero_drops_ok and light_keeps_all_ok and priority_heavy_ok),
+            (
+                f"builtin_drops=0, light_kept={len(packed_light_custom.get('chains', {}))}/{len(light_custom_spokes)}, "
+                f"heavy_kept={len(heavy_chains)}/{len(heavy_custom_spokes)} ({len(heavy_bones)}/63 bones, "
+                f"discarded={len(heavy_discarded_keys)})"
+            ),
+        )
+
     return suite_passed
 
 

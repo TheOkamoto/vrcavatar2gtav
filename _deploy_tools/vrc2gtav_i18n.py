@@ -3425,4 +3425,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "configs/*_physbones.cfg と動的 PhysBone チェーン構築の往復テスト",
         "pt": "Presets configs/*_physbones.cfg e leitura/gravação + builder dinâmico",
     },
+    "tests.physbones_priority_pack": {
+        "en": "PhysBone priority tiers keep essentials/presets & rigidly discard non-essential overflow",
+        "ja": "PhysBone 優先度ティア (プリセット維持・非必須超過分の剛体フォールバック除外)",
+        "pt": "Lista de priorização de PhysBones (mantém essenciais/presets e descarta não essenciais)",
+    },
 }

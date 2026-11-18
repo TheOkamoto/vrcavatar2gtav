@@ -302,7 +302,9 @@ def prepare_universal_avatar_job(
                 face_anim_path = anim_cand
                 break
 
+    preset_avatar_id = _infer_preset_or_custom_avatar_id(chosen_avatar_name, chosen_target_char)
     char_cfg: Dict[str, Any] = {
+        "avatar_id": preset_avatar_id,
         "ped_name": {"michael": "player_zero", "franklin": "player_one", "trevor": "player_two"}.get(
             chosen_target_char, "player_zero"
         ),
@@ -397,6 +399,9 @@ def prepare_universal_avatar_job(
         "ma_blendshape_syncs": len(ma_plan.get("blendshape_syncs", ())),
         "ma_shape_changers": len(ma_plan.get("shape_changer_weights", {})),
         "physbones_chains": len(pb_cfg.get("chains", ())),
+        "physbones_custom_bones": len(pb_cfg.get("custom_bones", ())),
+        "physbones_discarded_chains": len(pb_cfg.get("discarded_chains", ())),
+        "physbones_priority_report": pb_cfg.get("priority_report", {}),
         "physbones_marshmallow": bool(physbones_marshmallow),
         "out_dir": str(work_out_dir),
         "blender_exe": str(resolved_blender) if resolved_blender else "",
@@ -407,9 +412,13 @@ def prepare_universal_avatar_job(
     active_logger.info(
         f"Prepared universal build for {chosen_avatar_name or 'avatar'} -> {chosen_target_char} "
         f"(MA merges={manifest_data['ma_armature_merges']}, blendshape meshes={manifest_data['blendshapes_mesh_count']}, "
-        f"cfg={save_cfg_file.name})",
+        f"physbones={manifest_data['physbones_chains']}/drop={manifest_data['physbones_discarded_chains']}, cfg={save_cfg_file.name})",
         always=True,
     )
+    if manifest_data["physbones_discarded_chains"] > 0:
+        active_logger.warning(
+            physbone_helper.format_physbone_priority_summary(pb_cfg.get("priority_report"))
+        )
     if active_logger.log_path:
         active_logger.debug(f"Verbose log file: {active_logger.log_path}")
 
@@ -422,6 +431,20 @@ def prepare_universal_avatar_job(
         "discovered_avatars": discovered_avatars,
         "log_path": active_logger.log_path,
     }
+
+
+def _infer_preset_or_custom_avatar_id(avatar_name: str, target_char: str) -> str:
+    """Resolve explicit built-in preset IDs only when clearly matching; otherwise mark custom."""
+    low_name = str(avatar_name or "").strip().lower()
+    tokens = set(re.split(r"[^a-z0-9]+", low_name))
+    if "shinano" in tokens and ("reunion" in tokens or "er" in tokens or "eternal" in tokens):
+        return "shinano_er"
+    if "shinano" in tokens and "casual" in tokens:
+        return "shinano_casual"
+    if "miltina" in tokens or "milltina" in tokens:
+        return "miltina_maid"
+    safe_slug = re.sub(r"[^a-z0-9_]+", "_", low_name).strip("_") or "avatar"
+    return f"custom_{target_char}_{safe_slug}"
 
 
 def _choose_primary_fbx(
