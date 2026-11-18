@@ -887,9 +887,45 @@ def test_source_templates_and_dummies() -> bool:
         {"shader": "ped.sps", "zone_poly_counts": zone_counts},
         translate_func=i18n.translate,
     )
+    import inspect
+
+    sig_cfg = inspect.signature(ped_damage_helper.configure_ped_shader_material).parameters
+    sig_mat = inspect.signature(ped_damage_helper.create_ped_material).parameters
+    shader_defaults_ok = (
+        abs(ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL - 0.98) < 1e-6
+        and sig_cfg["bumpiness"].default == 0.0
+        and sig_cfg["specular_intensity"].default == 0.0
+        and sig_cfg["specular_falloff"].default == 1.0
+        and abs(sig_cfg["specular_fresnel"].default - 0.98) < 1e-6
+        and abs(sig_mat["specular_fresnel"].default - 0.98) < 1e-6
+    )
+    michael_src = (
+        PROJECT_ROOT_DIR / "scripts/Shinano_EternalReunion_Michael/build_michael_er.py"
+    ).read_text(encoding="utf-8")
+    franklin_src = (
+        PROJECT_ROOT_DIR / "scripts/Shinano_Casual_Franklin/build_franklin_avatar.py"
+    ).read_text(encoding="utf-8")
+    trevor_src = (
+        PROJECT_ROOT_DIR / "scripts/Miltina_Maid_Trevor/build_trevor_miltina.py"
+    ).read_text(encoding="utf-8")
+    builders_non_chrome_ok = (
+        ("specular_intensity=0.85" not in michael_src)
+        and ("specular_fresnel=0.70" not in michael_src)
+        and ("specular_fresnel=0.0" not in franklin_src)
+        and ("specular_fresnel=0.0" not in trevor_src)
+        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in michael_src)
+        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in franklin_src)
+        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in trevor_src)
+    )
     damage_decals_ok = print_status_result(
         i18n.translate("tests.ped_damage_decals"),
-        zone_checks_ok and projection_ok and seam_unwrap_ok and counts_ok and ("ped.sps" in summary_text),
+        zone_checks_ok
+        and projection_ok
+        and seam_unwrap_ok
+        and counts_ok
+        and ("ped.sps" in summary_text)
+        and shader_defaults_ok
+        and builders_non_chrome_ok,
         f"zones={zone_counts}",
     )
 

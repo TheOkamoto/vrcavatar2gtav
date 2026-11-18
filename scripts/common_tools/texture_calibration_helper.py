@@ -444,7 +444,7 @@ def calibrate_miltina_default_hair(
         hair_array[:, :, 2] += spec_lift * 155.0
 
         silky_region = matcap_weight > 0.35
-        specular_array[silky_region] = [180, 195, 215, 255]
+        specular_array[silky_region] = [180, 195, 180, 255]
 
     if rim_mask_path is not None:
         rim_mask = (

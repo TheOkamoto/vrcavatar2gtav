@@ -1068,7 +1068,7 @@ for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume", "Shinano_hai
         bumpiness=0.0,
         specular_intensity=0.0,
         specular_falloff=1.0,
-        specular_fresnel=0.0,
+        specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
         um_global_params=(0.0, 0.0, 0.0, 0.0),

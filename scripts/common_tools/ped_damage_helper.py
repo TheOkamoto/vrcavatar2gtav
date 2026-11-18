@@ -25,6 +25,9 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 PED_DAMAGE_SHADER_NAME = "ped.sps"
 PED_NO_DAMAGE_SHADER_NAME = "ped_default.sps"
+# Matches `ped_default.fxc` (`mov o2.xyzw, l(0, 0, 0.98, 1.0)`) so `ped.sps` does
+# not introduce mirror-like grazing specular or dark metallic tints on anime meshes.
+DEFAULT_ANIME_SPECULAR_FRESNEL = 0.98
 
 # GTA V RPF7 TOC stores a 24-bit entry size (`f_size` max = 16,777,215 bytes = 0xFFFFFF)
 # and a 23-bit 512-byte sector offset (`< 0x7FFFFF * 512` ~= 4.00 GiB).
@@ -203,7 +206,7 @@ def configure_ped_shader_material(
     bumpiness: float = 0.0,
     specular_intensity: float = 0.0,
     specular_falloff: float = 1.0,
-    specular_fresnel: float = 0.0,
+    specular_fresnel: float = DEFAULT_ANIME_SPECULAR_FRESNEL,
     detail_settings: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     stubble_control: Tuple[float, float] = (0.0, 0.0),
     um_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
@@ -281,7 +284,7 @@ def create_ped_material(
     bumpiness: float = 0.0,
     specular_intensity: float = 0.0,
     specular_falloff: float = 1.0,
-    specular_fresnel: float = 0.0,
+    specular_fresnel: float = DEFAULT_ANIME_SPECULAR_FRESNEL,
     detail_settings: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     stubble_control: Tuple[float, float] = (0.0, 0.0),
     um_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),

@@ -543,7 +543,7 @@ def build_liltoon_er_textures(
                 specular_array[
                     paste_sub_y : paste_sub_y + sub_dimension,
                     paste_sub_x : paste_sub_x + sub_dimension,
-                ] = [210, 215, 225, 240]
+                ] = [210, 215, 180, 240]
             elif accessory_key == "pin_back":
                 specular_array[
                     paste_sub_y : paste_sub_y + sub_dimension,
