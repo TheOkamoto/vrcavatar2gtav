@@ -894,6 +894,11 @@ def build_shinano_er_for_gtav(cli_args):
     ):
         if fbx_item and fbx_item not in blendshape_fbx_paths:
             blendshape_fbx_paths.append(fbx_item)
+    er_excluded_fbx_meshes = (
+        blendshape_helper.SHINANO_CASUAL_EXTRA_MESHES[:6]
+        if hair_mode == "default"
+        else blendshape_helper.SHINANO_CASUAL_EXTRA_MESHES
+    )
     blendshape_resolution = blendshape_helper.resolve_character_blendshapes(
         effective_cfg,
         fbx_paths=blendshape_fbx_paths,
@@ -907,6 +912,7 @@ def build_shinano_er_for_gtav(cli_args):
         save_cfg_path=getattr(cli_args, "save_blendshapes_cfg", None),
         exclude_meshes_when_no_custom_hair=(not is_calibrated_neko),
         custom_hair_mesh_names=neko_hair_mesh_names,
+        fbx_excluded_meshes=er_excluded_fbx_meshes,
     )
     resolved_mesh_weights = blendshape_resolution["mesh_weights"]
     total_weight_entries = sum(
@@ -1374,6 +1380,9 @@ def build_shinano_er_for_gtav(cli_args):
 
         proc_obj = bpy.data.objects.new(f"proc_{mesh_name}", baked_mesh)
         bpy.context.collection.objects.link(proc_obj)
+        if mesh_name != "Body" and baked_mesh.has_custom_normals:
+            bpy.context.view_layer.objects.active = proc_obj
+            bpy.ops.mesh.customdata_custom_splitnormals_clear()
 
         # Remap UVs into the target quadrant or sub-quadrant of the 4x2 Atlas
         if not mesh_cfg.get("uv_prepacked"):
@@ -1787,19 +1796,38 @@ def build_shinano_er_for_gtav(cli_args):
 
         mesh_verts = joined_mesh_obj.data.vertices
         mesh_loops = joined_mesh_obj.data.loops
+        mesh_uvs = (
+            joined_mesh_obj.data.uv_layers[0].data
+            if joined_mesh_obj.data.uv_layers
+            else None
+        )
         for poly_item in joined_mesh_obj.data.polygons:
             for loop_idx in poly_item.loop_indices:
                 vert_co = mesh_verts[mesh_loops[loop_idx].vertex_index].co
-                if vert_co.y < -0.045 and 0.61 < vert_co.z < 0.77 and abs(vert_co.x) < 0.085:
-                    norm_x = vert_co.x * 2.2
-                    norm_y = -1.0
-                    norm_z = (vert_co.z - 0.69) * 1.4
-                    vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
-                    split_normals[loop_idx] = (
-                        norm_x / vec_len,
-                        norm_y / vec_len,
-                        norm_z / vec_len,
-                    )
+                if loop_idx < face_loop_count:
+                    if vert_co.y < 0.020 and 0.60 < vert_co.z < 0.77 and abs(vert_co.x) < 0.085:
+                        norm_x = vert_co.x * 2.2
+                        norm_y = -1.0
+                        norm_z = (vert_co.z - 0.69) * 1.4
+                        vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
+                        split_normals[loop_idx] = (
+                            norm_x / vec_len,
+                            norm_y / vec_len,
+                            norm_z / vec_len,
+                        )
+                elif mesh_uvs is not None:
+                    loop_uv = mesh_uvs[loop_idx].uv
+                    if 0.25 <= loop_uv.x < 0.50 and loop_uv.y >= 0.50:
+                        if vert_co.y < 0.025 and 0.535 < vert_co.z < 0.655 and abs(vert_co.x) < 0.065:
+                            norm_x = vert_co.x * 3.5
+                            norm_y = -1.0
+                            norm_z = -0.1
+                            vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
+                            split_normals[loop_idx] = (
+                                norm_x / vec_len,
+                                norm_y / vec_len,
+                                norm_z / vec_len,
+                            )
         joined_mesh_obj.data.normals_split_custom_set(split_normals)
         ydrexport.triangulate_mesh = lambda eval_mesh: eval_mesh
 

@@ -977,6 +977,88 @@ def test_unity_scene_and_fallbacks() -> bool:
             f"{res_auto_unity['source_used']}/{res_forced_cfg['source_used']}/{res_auto_cfg['source_used']}",
         )
 
+        # Verify binary FBX channel discovery & zero-fill preservation without resetting .cfg edits
+        def pack_fbx_prop(prop_val):
+            if isinstance(prop_val, int):
+                return b"L" + struct.pack("<q", prop_val)
+            raw_bytes = prop_val.encode("utf-8")
+            return b"S" + struct.pack("<I", len(raw_bytes)) + raw_bytes
+
+        def pack_fbx_node(node_name, prop_list, children_bytes=b"", cursor_offset=0):
+            props_blob = b"".join(pack_fbx_prop(item) for item in prop_list)
+            name_bytes = node_name.encode("utf-8")
+            body_len = len(props_blob) + len(children_bytes)
+            sentinel = b"\x00" * 25 if children_bytes else b""
+            end_offset = cursor_offset + 25 + len(name_bytes) + body_len + len(sentinel)
+            header = struct.pack("<QQQB", end_offset, len(prop_list), len(props_blob), len(name_bytes))
+            return header + name_bytes + props_blob + children_bytes + sentinel
+
+        obj_children = bytearray()
+        cursor_pos = 27 + 25 + len(b"Objects")
+        for node_tag, node_props in [
+            ("Model", [10, "Body\x00\x01Model", "Mesh"]),
+            ("Geometry", [20, "Body\x00\x01Geometry", "Mesh"]),
+            ("Deformer", [30, "BlendShape\x00\x01Deformer", "BlendShape"]),
+            ("Deformer", [40, "eye_joy\x00\x01Deformer", "BlendShapeChannel"]),
+            ("Deformer", [41, "======Eye======\x00\x01Deformer", "BlendShapeChannel"]),
+            ("Deformer", [42, "body_slim\x00\x01Deformer", "BlendShapeChannel"]),
+        ]:
+            chunk = pack_fbx_node(node_tag, node_props, cursor_offset=cursor_pos)
+            obj_children.extend(chunk)
+            cursor_pos += len(chunk)
+        objects_node = pack_fbx_node("Objects", [], bytes(obj_children), cursor_offset=27)
+
+        conn_children = bytearray()
+        conn_cursor = 27 + len(objects_node) + 25 + len(b"Connections")
+        for child_id, parent_id in [(20, 10), (30, 20), (40, 30), (41, 30), (42, 30)]:
+            chunk = pack_fbx_node("C", ["OO", child_id, parent_id], cursor_offset=conn_cursor)
+            conn_children.extend(chunk)
+            conn_cursor += len(chunk)
+        connections_node = pack_fbx_node(
+            "Connections", [], bytes(conn_children), cursor_offset=27 + len(objects_node)
+        )
+        synthetic_fbx = temp_root / "SyntheticShinano.fbx"
+        synthetic_fbx.write_bytes(
+            b"Kaydara FBX Binary  \x00\x1a\x00"
+            + struct.pack("<I", 7500)
+            + objects_node
+            + connections_node
+            + (b"\x00" * 25)
+        )
+
+        partial_cfg_path = temp_root / "partial_shinano.cfg"
+        blendshape_helper.save_blendshapes_cfg(
+            partial_cfg_path,
+            {"Body": {"eye_joy": 0.35}},
+            metadata={"avatar": "SynthShinano", "source": "preset_cfg"},
+        )
+        merged_cfg_path = temp_root / "merged_shinano.cfg"
+        merged_res = blendshape_helper.resolve_character_blendshapes(
+            {"blendshapes_source": "cfg", "blendshapes_cfg": str(partial_cfg_path)},
+            fbx_paths=[synthetic_fbx],
+            save_cfg_path=merged_cfg_path,
+        )
+        reloaded_merged, _ = blendshape_helper.load_blendshapes_cfg(merged_cfg_path)
+        shinano_tracked, _ = blendshape_helper.load_blendshapes_cfg(
+            presets_dir / "shinano_blendshapes.cfg"
+        )
+        fbx_merge_ok = (
+            abs(merged_res["mesh_weights"]["Body"]["eye_joy"] - 0.35) < 1e-6
+            and abs(reloaded_merged["Body"]["eye_joy"] - 0.35) < 1e-6
+            and "======Eye======" in reloaded_merged["Body"]
+            and abs(reloaded_merged["Body"]["======Eye======"]) < 1e-6
+            and abs(reloaded_merged["Body"]["body_slim"]) < 1e-6
+            and len(shinano_tracked) >= 13
+            and len(shinano_tracked.get("Body", {})) >= 500
+            and abs(shinano_tracked["Body"].get("eye_joy", 0.0) - 0.08) < 1e-6
+            and abs(shinano_tracked["Body_base"].get("Shrink_Foot", 0.0) - 1.0) < 1e-6
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.blendshapes_fbx_merge"),
+            fbx_merge_ok,
+            f"shinano_meshes={len(shinano_tracked)}, body_keys={len(shinano_tracked.get('Body', {}))}",
+        )
+
     return suite_passed
 
 

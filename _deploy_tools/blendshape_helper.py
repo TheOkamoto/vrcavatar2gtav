@@ -58,6 +58,22 @@ DEFAULT_PRESET_RELATIVE_PATHS: Dict[str, str] = {
     **AVATAR_PRESET_RELATIVE_PATHS,
 }
 
+# Base Shinano.fbx meshes belonging solely to Shinano Casual (excluded when
+# generating Eternal Reunion presets, which supply ER_Shi + Neko Tied Bob).
+SHINANO_CASUAL_EXTRA_MESHES: Tuple[str, ...] = (
+    "Cloth_under_bra",
+    "Cloth_under_shorts",
+    "Cloth_dress",
+    "Cloth_skirt",
+    "Cloth_sweater",
+    "Cloth_tights",
+    "Hair_back",
+    "Hair_bang",
+    "Hair_base",
+    "Hair_side",
+    "Other_ear",
+)
+
 _ARRAY_ELEMENT_SIZES: Dict[str, int] = {
     "f": 4,
     "d": 8,
@@ -293,6 +309,92 @@ def build_fbx_blendshape_lookup(
             if base_model_name and base_model_name not in combined_lookup:
                 combined_lookup[base_model_name] = shape_list
     return combined_lookup
+
+
+def collect_fbx_blendshapes(
+    fbx_paths: Sequence[Union[str, Path]],
+    allowed_meshes: Optional[Sequence[str]] = None,
+    excluded_meshes: Sequence[str] = (),
+) -> Dict[str, List[str]]:
+    """Collect ordered FBX blendshape channel lists per canonical mesh name."""
+    allowed_set = set(allowed_meshes) if allowed_meshes is not None else None
+    excluded_set = set(excluded_meshes)
+    collected_shapes: Dict[str, List[str]] = {}
+    seen_paths: Set[str] = set()
+
+    for raw_fbx_path in fbx_paths:
+        if not raw_fbx_path:
+            continue
+        candidate_path = Path(raw_fbx_path)
+        norm_key = str(candidate_path)
+        if norm_key in seen_paths or not candidate_path.is_file():
+            continue
+        seen_paths.add(norm_key)
+        per_model_shapes = extract_fbx_blendshape_names(candidate_path)
+        for mesh_name, shape_list in per_model_shapes.items():
+            if allowed_set is not None and mesh_name not in allowed_set:
+                continue
+            if mesh_name in excluded_set:
+                continue
+            collected_shapes[mesh_name] = list(shape_list)
+
+    return collected_shapes
+
+
+def merge_missing_fbx_blendshapes(
+    mesh_weights: Dict[str, Dict[str, float]],
+    fbx_paths: Sequence[Union[str, Path]],
+    default_weight: float = 0.0,
+    allowed_meshes: Optional[Sequence[str]] = None,
+    excluded_meshes: Sequence[str] = (),
+) -> Dict[str, Dict[str, float]]:
+    """
+    Fill any FBX blendshape channels missing from `mesh_weights` with
+    `default_weight` (0.0) without modifying or resetting existing entries.
+    """
+    fbx_channels = collect_fbx_blendshapes(
+        fbx_paths,
+        allowed_meshes=allowed_meshes,
+        excluded_meshes=excluded_meshes,
+    )
+    if not fbx_channels:
+        return {
+            mesh_name: dict(shape_map)
+            for mesh_name, shape_map in mesh_weights.items()
+        }
+
+    merged_weights: Dict[str, Dict[str, float]] = {}
+    handled_meshes: Set[str] = set()
+
+    for mesh_name, channel_names in fbx_channels.items():
+        existing_map = mesh_weights.get(mesh_name)
+        if existing_map is None:
+            stripped_name = _strip_object_suffix(mesh_name)
+            if stripped_name in mesh_weights:
+                existing_map = mesh_weights[stripped_name]
+                handled_meshes.add(stripped_name)
+        else:
+            handled_meshes.add(mesh_name)
+        existing_map = existing_map or {}
+
+        ordered_mesh_map: Dict[str, float] = {}
+        for channel_name in channel_names:
+            if channel_name in existing_map:
+                ordered_mesh_map[channel_name] = float(existing_map[channel_name])
+            else:
+                ordered_mesh_map[channel_name] = float(default_weight)
+
+        for extra_key, extra_val in existing_map.items():
+            if extra_key not in ordered_mesh_map:
+                ordered_mesh_map[extra_key] = float(extra_val)
+
+        merged_weights[mesh_name] = ordered_mesh_map
+
+    for mesh_name, shape_map in mesh_weights.items():
+        if mesh_name not in handled_meshes and mesh_name not in merged_weights:
+            merged_weights[mesh_name] = dict(shape_map)
+
+    return merged_weights
 
 
 def load_unity_anim_blendshapes(
@@ -968,6 +1070,24 @@ def extract_unity_scene_blendshapes(
     }
 
 
+def _read_leading_cfg_comments(cfg_path: Path) -> List[str]:
+    """Preserve top `#` comment lines from an existing preset `.cfg` file."""
+    if not cfg_path.is_file():
+        return []
+    comments: List[str] = []
+    for raw_line in cfg_path.read_text(encoding="utf-8-sig").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if comments:
+                break
+            continue
+        if stripped.startswith("#"):
+            comments.append(stripped)
+        else:
+            break
+    return comments
+
+
 def resolve_character_blendshapes(
     char_cfg: Dict[str, Any],
     fbx_paths: Sequence[Union[str, Path]] = (),
@@ -982,6 +1102,10 @@ def resolve_character_blendshapes(
     save_cfg_path: Optional[Union[str, Path]] = None,
     exclude_meshes_when_no_custom_hair: bool = False,
     custom_hair_mesh_names: Sequence[str] = (),
+    fill_missing_from_fbx: bool = True,
+    fbx_allowed_meshes: Optional[Sequence[str]] = None,
+    fbx_excluded_meshes: Sequence[str] = (),
+    header_comments: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
     Resolve avatar blendshape weights according to `blendshapes_source` (`auto | unity | cfg`).
@@ -1101,6 +1225,22 @@ def resolve_character_blendshapes(
         )
         source_used = "anim"
 
+    if fill_missing_from_fbx and fbx_paths:
+        resolved_meshes = merge_missing_fbx_blendshapes(
+            resolved_meshes,
+            fbx_paths,
+            default_weight=0.0,
+            allowed_meshes=fbx_allowed_meshes,
+            excluded_meshes=fbx_excluded_meshes,
+        )
+        if source_used == "none" and resolved_meshes:
+            source_used = "fbx"
+            if not resolved_metadata:
+                resolved_metadata = {
+                    "avatar": root_name or "avatar",
+                    "source": "fbx",
+                }
+
     if exclude_meshes_when_no_custom_hair and custom_hair_mesh_names:
         hair_name_set = set(custom_hair_mesh_names)
         resolved_meshes = {
@@ -1115,6 +1255,7 @@ def resolve_character_blendshapes(
             save_cfg_path,
             resolved_meshes,
             metadata=resolved_metadata or {"avatar": root_name or "avatar", "source": source_used},
+            header_comments=header_comments,
         )
         saved_path_str = str(written_path)
 
@@ -1226,11 +1367,16 @@ def export_character_blendshapes_to_cfg(
     output_cfg_path: Optional[Union[str, Path]] = None,
     unity_scene_override: Optional[Union[str, Path]] = None,
     avatar_name_override: Optional[str] = None,
+    preserve_existing_cfg: bool = True,
+    fill_missing_from_fbx: bool = True,
 ) -> Optional[Path]:
     """
-    Export blendshape presets for an avatar preset (`shinano_casual`, `shinano_er`,
-    `miltina_maid`) or protagonist slot (`franklin`, `michael`, `trevor`) from
-    its Unity scene + configured FBXs into a `.cfg` preset file.
+    Export or synchronize blendshape presets for an avatar preset (`shinano_casual`,
+    `shinano_er`, `miltina_maid`) or protagonist slot into a `.cfg` preset file.
+
+    By default (`preserve_existing_cfg=True`), any existing `.cfg` values remain
+    untouched while missing channels from configured FBX models are appended
+    with weight `0.0`.
     """
     if project_paths is None:
         raise RuntimeError("vrc2gtav_paths is required to export character blendshapes.")
@@ -1257,7 +1403,7 @@ def export_character_blendshapes_to_cfg(
         "fbx_hair",
     ):
         fbx_val = char_cfg.get(fbx_key)
-        if fbx_val:
+        if fbx_val and fbx_val not in candidate_fbxs:
             candidate_fbxs.append(fbx_val)
 
     target_out = output_cfg_path or char_cfg.get("blendshapes_cfg")
@@ -1270,6 +1416,9 @@ def export_character_blendshapes_to_cfg(
     if not target_out:
         raise ValueError(f"No blendshapes_cfg output path configured for {character_section}")
 
+    target_path_obj = Path(project_paths.to_host_path(str(target_out)))
+    existing_comments = _read_leading_cfg_comments(target_path_obj)
+
     hints_by_avatar = {
         "shinano_casual": ["shinano"],
         "shinano_er": ["shinano", "reunion"],
@@ -1278,6 +1427,14 @@ def export_character_blendshapes_to_cfg(
         "michael": ["shinano", "reunion"],
         "trevor": ["milltina", "miltina"],
     }
+    excluded_fbx_meshes = (
+        SHINANO_CASUAL_EXTRA_MESHES if avatar_id == "shinano_er" else ()
+    )
+    should_preserve_cfg = (
+        preserve_existing_cfg
+        and target_path_obj.is_file()
+        and unity_scene_override is None
+    )
 
     resolved = resolve_character_blendshapes(
         char_cfg,
@@ -1285,23 +1442,27 @@ def export_character_blendshapes_to_cfg(
         character_hints=hints_by_avatar.get(
             avatar_id, hints_by_avatar.get(character_section, [character_section])
         ),
-        override_source="unity",
+        override_source="cfg" if should_preserve_cfg else "auto",
+        override_cfg_path=target_path_obj if should_preserve_cfg else None,
         override_unity_scene=unity_scene_override,
         override_avatar_name=avatar_name_override,
-        save_cfg_path=target_out,
+        save_cfg_path=target_path_obj,
+        fill_missing_from_fbx=fill_missing_from_fbx,
+        fbx_excluded_meshes=excluded_fbx_meshes,
+        header_comments=existing_comments or None,
     )
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
 
 
 def main() -> int:
-    """CLI entrypoint for exporting Unity project blendshapes into `.cfg` files."""
+    """CLI entrypoint for exporting Unity project & FBX blendshapes into `.cfg` files."""
     if project_i18n is not None:
         project_i18n.set_active_language()
 
     parser = argparse.ArgumentParser(
         description=_translate_msg(
             "blendshapes.cli_desc",
-            "Export Unity scene/prefab and .anim blendshapes into portable .cfg presets.",
+            "Export Unity scene/prefab, .anim, and FBX blendshapes into portable .cfg presets.",
         )
     )
     parser.add_argument(
@@ -1329,6 +1490,11 @@ def main() -> int:
         help="Optional Unity scene path override",
     )
     parser.add_argument(
+        "--overwrite-from-unity",
+        action="store_true",
+        help="Re-read active weights from Unity scene instead of keeping existing .cfg edits",
+    )
+    parser.add_argument(
         "--lang",
         choices=["auto", "en", "ja", "pt"],
         default="auto",
@@ -1349,6 +1515,7 @@ def main() -> int:
             char_name,
             output_cfg_path=out_path,
             unity_scene_override=parsed_args.unity_scene,
+            preserve_existing_cfg=not parsed_args.overwrite_from_unity,
         )
         if saved:
             print(

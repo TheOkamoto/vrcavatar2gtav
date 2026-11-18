@@ -1184,9 +1184,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "  [{opt}] {protagonist} ({ped_name}) -> {avatar}",
     },
     "manager.menu_input_choice": {
-        "en": "Enter desired option [0-7]: ",
-        "ja": "オプション番号を入力してください [0-7]: ",
-        "pt": "Digite a opção desejada [0-7]: ",
+        "en": "Enter desired option [0-9]: ",
+        "ja": "オプション番号を入力してください [0-9]: ",
+        "pt": "Digite a opção desejada [0-9]: ",
     },
     "manager.cancelled": {
         "en": "[INFO] Operation cancelled by user.",
@@ -2916,9 +2916,14 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "Sobrescrita opcional do arquivo .anim facial do Unity",
     },
     "manager.cli_export_blendshapes": {
-        "en": "Export avatar blendshapes from Unity scenes into configs/*_blendshapes.cfg",
-        "ja": "Unity シーンから configs/*_blendshapes.cfg へアバターのブレンドシェイプを書き出す",
-        "pt": "Exportar os blendshapes dos avatares das cenas Unity para configs/*_blendshapes.cfg",
+        "en": "Export and sync all FBX/Unity avatar blendshapes into configs/*_blendshapes.cfg",
+        "ja": "FBX/Unity の全ブレンドシェイプを configs/*_blendshapes.cfg へ書き出し・同期する",
+        "pt": "Exportar e sincronizar todos os blendshapes dos FBX/Unity para configs/*_blendshapes.cfg",
+    },
+    "manager.cli_overwrite_from_unity": {
+        "en": "When exporting blendshapes, reload active weights from Unity instead of preserving existing .cfg edits",
+        "ja": "ブレンドシェイプ書き出し時に既存 .cfg 編集を保持せず Unity シーンの値を再読み込みする",
+        "pt": "Ao exportar blendshapes, recarregar pesos ativos da cena Unity em vez de manter edições do .cfg",
     },
     "manager.export_blendshapes_ok": {
         "en": "[OK] Exported blendshapes for {char}: {path}",
@@ -2926,9 +2931,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "[OK] Blendshapes exportados para {char}: {path}",
     },
     "manager.export_blendshapes_skipped": {
-        "en": "[WARNING] Skipped {char}: no Unity scene configured or no blendshapes extracted.",
-        "ja": "[警告] {char} をスキップしました: Unity シーン未設定またはブレンドシェイプ未検出。",
-        "pt": "[AVISO] {char} ignorado: nenhuma cena Unity configurada ou nenhum blendshape extraído.",
+        "en": "[WARNING] Skipped {char}: no Unity scene, .cfg, or FBX blendshapes found.",
+        "ja": "[警告] {char} をスキップしました: Unity シーン・.cfg・FBX ブレンドシェイプが見つかりません。",
+        "pt": "[AVISO] {char} ignorado: nenhuma cena Unity, .cfg ou blendshape FBX encontrado.",
     },
     "tests.blendshapes_cfg_presets": {
         "en": "Tracked configs/*_blendshapes.cfg & UTF-8 round-trip serialization",
@@ -3264,5 +3269,35 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "Per-protagonist custom_hair keywords (auto/default/none) preserved in vrc2gtav_paths",
         "ja": "主人公別 custom_hair キーワード (auto/default/none) が vrc2gtav_paths で保持",
         "pt": "Palavras-chave por protagonista custom_hair (auto/default/none) preservadas",
+    },
+    "manager.menu_opt_9": {
+        "en": "  [9] Sync / Export All FBX Blendshapes -> configs/*_blendshapes.cfg",
+        "ja": "  [9] FBX 全ブレンドシェイプを configs/*_blendshapes.cfg に同期/書き出し",
+        "pt": "  [9] Sincronizar / Exportar Todos os Blendshapes do FBX -> configs/*_blendshapes.cfg",
+    },
+    "manager.blendshapes_header": {
+        "en": "SYNC FBX BLENDSHAPES TO .CFG PRESETS",
+        "ja": "FBX ブレンドシェイプを .cfg プリセットへ同期",
+        "pt": "SINCRONIZAR BLENDSHAPES DO FBX PARA PRESETS .CFG",
+    },
+    "manager.blendshapes_select_avatar": {
+        "en": "Select which avatar preset to populate from its FBX model(s):",
+        "ja": "FBX から全ブレンドシェイプを同期するアバタープリセットを選択してください:",
+        "pt": "Selecione qual preset de avatar atualizar com os blendshapes do FBX:",
+    },
+    "manager.blendshapes_opt_all": {
+        "en": "  [{opt}] All Avatars (Shinano Casual, Shinano ER, Milltina)",
+        "ja": "  [{opt}] 全アバター (Shinano Casual, Shinano ER, Milltina)",
+        "pt": "  [{opt}] Todos os Avatares (Shinano Casual, Shinano ER, Milltina)",
+    },
+    "manager.blendshapes_prompt_choice": {
+        "en": "Enter choice [0-4]: ",
+        "ja": "番号を入力してください [0-4]: ",
+        "pt": "Digite a opção [0-4]: ",
+    },
+    "tests.blendshapes_fbx_merge": {
+        "en": "FBX full channel discovery merges missing blendshapes as 0.0 without resetting existing .cfg edits",
+        "ja": "FBX 全チャンネル読込が既存 .cfg 値をリセットせず未設定項目のみ 0.0 で補完",
+        "pt": "Leitura completa de blendshapes do FBX preenche ausentes em 0.0 sem zerar edições do .cfg",
     },
 }

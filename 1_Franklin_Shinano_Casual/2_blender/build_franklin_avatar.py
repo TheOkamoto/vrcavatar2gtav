@@ -796,6 +796,9 @@ for mesh_name in include_mesh_names:
 
     new_obj = bpy.data.objects.new(f"proc_{mesh_name}", new_mesh)
     bpy.context.collection.objects.link(new_obj)
+    if mesh_name != "Body" and new_mesh.has_custom_normals:
+        bpy.context.view_layer.objects.active = new_obj
+        bpy.ops.mesh.customdata_custom_splitnormals_clear()
 
     # Copy non-alpha material slots
     for mat_slot_item in src_obj.data.materials:
@@ -1023,7 +1026,7 @@ if kept_body_normals:
         if material_key == "Shinano_face":
             for loop_idx in poly_item.loop_indices:
                 vertex_pos = mesh_vertices[mesh_loops[loop_idx].vertex_index].co
-                if vertex_pos.y < -0.045 and 0.61 < vertex_pos.z < 0.77 and abs(vertex_pos.x) < 0.085:
+                if vertex_pos.y < 0.020 and 0.60 < vertex_pos.z < 0.77 and abs(vertex_pos.x) < 0.085:
                     norm_x = vertex_pos.x * 2.2
                     norm_y = -1.0
                     norm_z = (vertex_pos.z - 0.69) * 1.4
@@ -1032,7 +1035,7 @@ if kept_body_normals:
         elif material_key == "Shinano_body":
             for loop_idx in poly_item.loop_indices:
                 vertex_pos = mesh_vertices[mesh_loops[loop_idx].vertex_index].co
-                if vertex_pos.y < -0.015 and 0.55 < vertex_pos.z < 0.65 and abs(vertex_pos.x) < 0.065:
+                if vertex_pos.y < 0.025 and 0.535 < vertex_pos.z < 0.655 and abs(vertex_pos.x) < 0.065:
                     norm_x = vertex_pos.x * 3.5
                     norm_y = -1.0
                     norm_z = -0.1
