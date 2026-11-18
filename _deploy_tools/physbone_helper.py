@@ -70,10 +70,11 @@ PHYSBONE_PRIORITY_TIERS: Tuple[Dict[str, Any], ...] = (
         "key": "essential_tails_wings_and_skirts",
         "priority": 85,
         "essential": True,
-        "label": "Tier 2 - Iconic Silhouette (tails, wings, skirts, dresses, coats, capes)",
+        "label": "Tier 2 - Iconic Silhouette (tails, wings, skirts, dresses, coats, jackets, capes)",
         "keywords": (
             "tail", "shippo", "sipo", "wing", "hane",
-            "skirt", "dress", "onepiece", "coat", "cape", "cloak", "mantle",
+            "skirt", "dress", "onepiece", "coat", "jacket", "cardigan", "hoodie",
+            "blazer", "parka", "cape", "cloak", "mantle", "hem",
             "hakama", "furisode", "tutu", "petticoat", "capelet", "kimono",
         ),
         "bigrams": (
@@ -2123,6 +2124,7 @@ def prune_orphaned_physbone_chains(
 
 
 _UNITY_GUID_CACHE: Dict[str, Dict[str, Path]] = {}
+_UNITY_GUID_SCAN_STATE: Dict[str, Dict[str, Any]] = {}
 
 
 def _index_unity_asset_guids(
@@ -2130,14 +2132,11 @@ def _index_unity_asset_guids(
     needed_guids: Set[str],
     seed_files: Sequence[Union[str, Path]] = (),
     character_hints: Sequence[str] = (),
-    deadline_sec: float = 6.0,
+    deadline_sec: float = 20.0,
 ) -> Dict[str, Path]:
     """
-    Fast breadth-first GUID indexer scanning prioritized Unity asset subfolders.
-
-    Always prioritizes `marshmallow_PB` and package directories of `seed_files`,
-    never blindly walks `unity_assets_root` or its parents, and skips heavy
-    texture, material, and animation directories so resolution stays sub-second.
+    Fast breadth-first GUID indexer scanning prioritized Unity asset subfolders (depth 1-3)
+    with a persistent resumable scan state per `unity_assets_root` so repeated queries stay instant.
     """
     import time as time_mod
 
@@ -2169,13 +2168,29 @@ def _index_unity_asset_guids(
     )
     cache_key = str(assets_dir_resolved or "")
     cached_map = _UNITY_GUID_CACHE.setdefault(cache_key, {})
+
+    try:
+        import modular_avatar_helper as ma_helper_mod
+        ma_shared_cache = getattr(ma_helper_mod, "_MA_GUID_CACHE", {})
+    except ImportError:
+        ma_shared_cache = {}
+    for guid_key in needed_low:
+        if guid_key not in cached_map:
+            shared_p = ma_shared_cache.get(guid_key)
+            if shared_p is not None and shared_p.is_file():
+                cached_map[guid_key] = shared_p
+
     guid_map: Dict[str, Path] = {
         guid_key: cached_map[guid_key]
         for guid_key in needed_low
         if guid_key in cached_map and cached_map[guid_key].is_file()
     }
     remaining = needed_low - set(guid_map)
-    if not remaining:
+    scan_state = _UNITY_GUID_SCAN_STATE.setdefault(
+        cache_key,
+        {"seen_dirs": set(), "queue": collections_module.deque(), "initialized": False, "complete": False},
+    )
+    if not remaining or (assets_dir_resolved is not None and scan_state["complete"]):
         return guid_map
 
     def _is_safe_subdir(dir_path: Path) -> bool:
@@ -2213,40 +2228,54 @@ def _index_unity_asset_guids(
 
     if assets_dir_resolved is not None:
         pkg_keywords = {
-            "shinano", "miltina", "milltina", "eternal",
-            "reunion", "dolos", "vagrant", "li-ne", "marshmallow",
+            "shinano", "miltina", "milltina", "eternal", "reunion",
+            "dolos", "vagrant", "li-ne", "marshmallow", "retargeted", "converted",
         }
         for hint_str in character_hints:
-            hint_low = str(hint_str).strip().lower()
-            if len(hint_low) >= 3:
-                pkg_keywords.add(hint_low)
-        try:
-            for dir_entry in operating_system.scandir(assets_dir_resolved):
-                if dir_entry.is_dir(follow_symlinks=False) and not dir_entry.name.startswith("."):
-                    low_name = dir_entry.name.lower()
-                    if any(word_tok in low_name for word_tok in pkg_keywords):
-                        cand_dir = Path(dir_entry.path)
-                        if _is_safe_subdir(cand_dir):
-                            candidate_roots.append(cand_dir)
-        except OSError:
-            pass
+            for tok_str in regex_module.split(r"[^A-Za-z0-9]+", str(hint_str or "").lower()):
+                if len(tok_str) >= 3:
+                    pkg_keywords.add(tok_str)
 
-    seen_dirs: Set[Path] = set()
+        def _collect_depth_hints(root_dir_item: Path, rem_depth: int) -> None:
+            if rem_depth <= 0:
+                return
+            try:
+                sub_entries = list(operating_system.scandir(root_dir_item))
+            except OSError:
+                return
+            for dir_entry in sub_entries:
+                if not dir_entry.is_dir(follow_symlinks=False) or dir_entry.name.startswith("."):
+                    continue
+                low_name = dir_entry.name.lower()
+                if low_name in skip_dirs:
+                    continue
+                cand_dir = Path(dir_entry.path)
+                if any(word_tok in low_name for word_tok in pkg_keywords):
+                    if _is_safe_subdir(cand_dir):
+                        candidate_roots.append(cand_dir)
+                else:
+                    _collect_depth_hints(cand_dir, rem_depth - 1)
+
+        _collect_depth_hints(assets_dir_resolved, 3)
+
+    seen_dirs: Set[Path] = scan_state["seen_dirs"] if assets_dir_resolved is not None else set()
     bfs_queue = collections_module.deque()
     for root_dir in candidate_roots:
         res_root = root_dir.resolve()
         if res_root not in seen_dirs and _is_safe_subdir(res_root):
-            seen_dirs.add(res_root)
             bfs_queue.append((res_root, 0))
 
     start_time = time_mod.monotonic()
 
-    def _scan_meta_dir(dir_queue: collections_module.deque, max_depth: int, max_dirs: int) -> None:
+    def _scan_meta_dir(dir_queue: collections_module.deque, max_depth: int, max_dirs: int) -> bool:
         dirs_scanned = 0
         while dir_queue and remaining and dirs_scanned < max_dirs:
             if (time_mod.monotonic() - start_time) > deadline_sec:
-                break
+                return False
             cur_dir, cur_depth = dir_queue.popleft()
+            if cur_dir in seen_dirs:
+                continue
+            seen_dirs.add(cur_dir)
             dirs_scanned += 1
             try:
                 dir_entries = list(operating_system.scandir(cur_dir))
@@ -2263,7 +2292,6 @@ def _index_unity_asset_guids(
                     ):
                         sub_res = Path(entry_item.path).resolve()
                         if sub_res not in seen_dirs:
-                            seen_dirs.add(sub_res)
                             dir_queue.append((sub_res, cur_depth + 1))
                 elif entry_name.endswith(".meta"):
                     base_name = entry_name[:-5]
@@ -2285,29 +2313,42 @@ def _index_unity_asset_guids(
                                     break
                     except OSError:
                         pass
+        return len(dir_queue) == 0
 
-    _scan_meta_dir(bfs_queue, max_depth=4, max_dirs=500)
+    _scan_meta_dir(bfs_queue, max_depth=6, max_dirs=1000)
 
-    # Shallow depth <= 2 scan across remaining asset folders only if GUIDs are still missing
+    # Resumable BFS across remaining asset folders only if GUIDs are still missing
     if remaining and assets_dir_resolved is not None and (time_mod.monotonic() - start_time) < deadline_sec:
-        extra_queue: List[Tuple[Path, int]] = []
-        try:
-            for dir_entry in operating_system.scandir(assets_dir_resolved):
-                if dir_entry.is_dir(follow_symlinks=False) and not dir_entry.name.startswith("."):
-                    if dir_entry.name.lower() not in skip_dirs:
-                        sub_res = Path(dir_entry.path).resolve()
-                        if sub_res not in seen_dirs:
-                            seen_dirs.add(sub_res)
-                            extra_queue.append((sub_res, 0))
-        except OSError:
-            pass
-        _scan_meta_dir(extra_queue, max_depth=2, max_dirs=400)
+        if not scan_state["initialized"]:
+            scan_state["initialized"] = True
+            try:
+                for dir_entry in sorted(operating_system.scandir(assets_dir_resolved), key=lambda ent: ent.name):
+                    if dir_entry.is_dir(follow_symlinks=False) and not dir_entry.name.startswith("."):
+                        if dir_entry.name.lower() not in skip_dirs:
+                            sub_res = Path(dir_entry.path).resolve()
+                            if sub_res not in seen_dirs:
+                                scan_state["queue"].append((sub_res, 0))
+            except OSError:
+                pass
+        finished_all = _scan_meta_dir(scan_state["queue"], max_depth=6, max_dirs=10000)
+        if finished_all and len(scan_state["queue"]) == 0:
+            scan_state["complete"] = True
 
     return guid_map
 
 
+_STREAM_PHYSBONE_DOC_CACHE: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+
 def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
     """O(N) streaming YAML parser extracting GO, Transform, VRCPhysBone, Marshmallow PB, and PrefabInstance."""
+    try:
+        cache_key = (str(doc_path.resolve()), doc_path.stat().st_mtime_ns)
+    except OSError:
+        cache_key = None
+    if cache_key is not None and cache_key in _STREAM_PHYSBONE_DOC_CACHE:
+        return _STREAM_PHYSBONE_DOC_CACHE[cache_key]
+
     gameobjects: Dict[str, Dict[str, Any]] = {}
     transforms: Dict[str, Dict[str, Any]] = {}
     physbones: Dict[str, Dict[str, Any]] = {}
@@ -2563,7 +2604,7 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
                             cur_obj["is_marshmallow"] = True
 
     _flush_cur()
-    return {
+    doc_result = {
         "path": doc_path,
         "gos": gameobjects,
         "tfs": transforms,
@@ -2572,6 +2613,9 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
         "smrs": skinned_meshes,
         "pis": prefab_instances,
     }
+    if cache_key is not None:
+        _STREAM_PHYSBONE_DOC_CACHE[cache_key] = doc_result
+    return doc_result
 
 
 def _parse_marshmallow_asset_file(asset_path: Path) -> Dict[str, Any]:
@@ -2978,7 +3022,7 @@ def extract_unity_scene_physbones(
         unity_assets_root,
         needed_guids,
         seed_files=[resolved_unity] + list(fbx_paths) + list(fallback_prefab_paths),
-        character_hints=character_hints,
+        character_hints=list(character_hints) + ([selected_name] if selected_name else []),
     )
 
     try:
@@ -3287,18 +3331,32 @@ def extract_unity_scene_physbones(
                     if cand_nm and not _is_fallback_hair_protected(cand_nm):
                         excluded_meshes_ci.add(cand_nm.lower())
 
-    # Active MA/explicit meshes must not stay listed in excluded_meshes unless disabled locally
-    effective_fbxs: List[Union[str, Path]] = list(fbx_paths)
+    # Resolve active avatar FBXs (explicit inputs + MA outfit FBXs + active SkinnedMeshRenderer .fbx refs)
+    effective_fbxs: List[Union[str, Path]] = []
+    seen_fbx_resolved: Set[str] = set()
+
+    def _add_effective_fbx(cand_item: Union[str, Path]) -> None:
+        if not cand_item:
+            return
+        cand_obj = Path(cand_item)
+        if not cand_obj.is_file() or cand_obj.suffix.lower() != ".fbx":
+            return
+        res_key = str(cand_obj.resolve())
+        if res_key not in seen_fbx_resolved:
+            seen_fbx_resolved.add(res_key)
+            effective_fbxs.append(cand_obj)
+
+    for raw_fbx_in in fbx_paths:
+        _add_effective_fbx(raw_fbx_in)
+    for raw_ma_fbx in ma_discovered_fbxs:
+        _add_effective_fbx(raw_ma_fbx)
+    for act_fguid in active_mesh_fbx_guids:
+        act_asset = guid_map.get(act_fguid)
+        if act_asset is not None:
+            _add_effective_fbx(act_asset)
     if not effective_fbxs:
-        seen_fbx_resolved: Set[str] = set()
-        for cand_fbx in ma_discovered_fbxs + [
-            asset_p for asset_p in guid_map.values() if asset_p.suffix.lower() == ".fbx"
-        ]:
-            if cand_fbx and cand_fbx.is_file():
-                res_key = str(cand_fbx.resolve())
-                if res_key not in seen_fbx_resolved:
-                    seen_fbx_resolved.add(res_key)
-                    effective_fbxs.append(cand_fbx)
+        for asset_p in guid_map.values():
+            _add_effective_fbx(asset_p)
 
     all_fbx_bones, _init_weighted, fbx_parent_map, mesh_weights_by_file, has_skin_clusters = (
         _inspect_fbx_weights_detailed(effective_fbxs, excluded_meshes=sorted(excluded_meshes_ci))

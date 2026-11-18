@@ -99,6 +99,33 @@ _SKIP_SCAN_DIRS: Set[str] = {
     "__pycache__",
 }
 
+_SKIP_GUID_DIRS: Set[str] = _SKIP_SCAN_DIRS | {
+    "texture",
+    "textures",
+    "tex",
+    "shader",
+    "shaders",
+    "animation",
+    "animations",
+    "anim",
+    "psd",
+    "audio",
+    "sound",
+    "sfx",
+    "vfx",
+    "particle",
+    "particles",
+    "sprites",
+    "fx",
+    "mask",
+    "masks",
+    "normal",
+    "normals",
+    "vrcsdk",
+    "samples",
+    "__backup",
+}
+
 
 def _decode_scalar(raw_val: str) -> str:
     """Decode YAML quotes and unicode escapes from a scalar string."""
@@ -235,6 +262,9 @@ def _extract_inline_ref(field_snippet: str) -> Tuple[str, str]:
     return (fid_m.group(1) if fid_m else "0", guid_m.group(1).lower() if guid_m else "")
 
 
+_MA_PARSED_YAML_CACHE: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+
 def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Stream-parse a `.unity` scene or `.prefab` extracting hierarchy, renderers,
@@ -261,6 +291,13 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
     }
     if not resolved_path.is_file():
         return empty_doc
+
+    try:
+        cache_key = (str(resolved_path.resolve()), resolved_path.stat().st_mtime_ns)
+    except OSError:
+        cache_key = None
+    if cache_key is not None and cache_key in _MA_PARSED_YAML_CACHE:
+        return _MA_PARSED_YAML_CACHE[cache_key]
 
     try:
         raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
@@ -576,7 +613,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                     }
                 )
 
-    return {
+    parsed_doc = {
         "gameobjects": gameobjects,
         "transforms": transforms,
         "go_to_tr": go_to_tr,
@@ -594,9 +631,13 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
         "activators": activators,
         "physbones": physbones,
     }
+    if cache_key is not None:
+        _MA_PARSED_YAML_CACHE[cache_key] = parsed_doc
+    return parsed_doc
 
 
 _MA_GUID_CACHE: Dict[str, Optional[Path]] = {}
+_MA_GUID_SCAN_STATE: Dict[str, Dict[str, Any]] = {}
 
 
 def _is_builtin_unity_guid(guid_str: str) -> bool:
@@ -611,9 +652,10 @@ def _collect_guid_paths_for_ma(
     assets_root: Optional[Path],
     *,
     name_hints: Sequence[str] = (),
-    budget_sec: float = 2.0,
+    budget_sec: float = 15.0,
+    include_materials: bool = False,
 ) -> Dict[str, Path]:
-    """Resolve asset GUIDs quickly via prioritized bounded search + shared in-memory cache."""
+    """Resolve asset GUIDs quickly via depth 1-3 hint matching + resumable BFS cache."""
     clean_guids = {
         guid_str.lower()
         for guid_str in needed_guids
@@ -634,105 +676,158 @@ def _collect_guid_paths_for_ma(
     if not remaining:
         return resolved
 
+    assets_resolved = assets_root.resolve() if (assets_root and assets_root.is_dir()) else None
+    full_key = f"{assets_resolved}|mats={int(include_materials)}" if assets_resolved else ""
+    scan_state = (
+        _MA_GUID_SCAN_STATE.setdefault(
+            full_key,
+            {"seen_dirs": set(), "queue": deque(), "initialized": False, "complete": False},
+        )
+        if full_key
+        else None
+    )
+    if scan_state is not None and scan_state["complete"]:
+        return resolved
+
     hint_words = {
         tok.lower()
         for raw_h in [anchor_path.stem] + list(name_hints)
         for tok in re.split(r"[^A-Za-z0-9]+", str(raw_h or ""))
         if len(tok) >= 3
     }
+    hint_words.update({"shinano", "miltina", "milltina", "retargeted", "converted"})
 
     search_roots: List[Path] = []
     if anchor_path:
         anchor_dir = anchor_path if anchor_path.is_dir() else anchor_path.parent
         cur_dir = anchor_dir
         for _step in range(3):
-            if cur_dir.is_dir() and cur_dir not in search_roots:
-                search_roots.append(cur_dir)
+            if cur_dir.is_dir() and (
+                assets_resolved is None or cur_dir.resolve() != assets_resolved
+            ):
+                if cur_dir not in search_roots:
+                    search_roots.append(cur_dir)
             parent_dir = cur_dir.parent
-            if parent_dir == cur_dir or (assets_root and cur_dir.resolve() == assets_root.resolve()):
+            if parent_dir == cur_dir or (assets_resolved is not None and cur_dir.resolve() == assets_resolved):
                 break
             cur_dir = parent_dir
 
-    if assets_root and assets_root.is_dir():
-        try:
-            top_assets_dirs = [
-                sub_entry
-                for sub_entry in sorted(assets_root.iterdir())
-                if sub_entry.is_dir()
-                and sub_entry.name.lower() not in _SKIP_SCAN_DIRS
-                and not sub_entry.name.startswith(".")
-            ]
-        except OSError:
-            top_assets_dirs = []
-        matching_top = [
-            sub_dir
-            for sub_dir in top_assets_dirs
-            if any(word in sub_dir.name.lower() for word in hint_words)
-        ]
-        for sub_dir in matching_top:
-            if sub_dir not in search_roots:
-                search_roots.append(sub_dir)
+    if assets_resolved is not None:
+        # Match depth 1-3 package directories against avatar/mesh tokens (e.g. OutfitRetargetingSystem/Outputs/Shinano Converted)
+        def _collect_hinted_dirs(root_lvl: Path, depth_rem: int) -> None:
+            if depth_rem <= 0:
+                return
+            try:
+                entries = sorted(os.scandir(root_lvl), key=lambda ent: ent.name)
+            except OSError:
+                return
+            for entry_item in entries:
+                if not entry_item.is_dir(follow_symlinks=False) or entry_item.name.startswith("."):
+                    continue
+                low_nm = entry_item.name.lower()
+                if low_nm in _SKIP_GUID_DIRS:
+                    continue
+                entry_p = Path(entry_item.path)
+                if any(word in low_nm for word in hint_words):
+                    if entry_p not in search_roots:
+                        search_roots.append(entry_p)
+                else:
+                    _collect_hinted_dirs(entry_p, depth_rem - 1)
+
+        _collect_hinted_dirs(assets_resolved, 3)
+
         if unity_scene_helper is not None and hasattr(unity_scene_helper, "_priority_search_dirs"):
             for cand_dir in unity_scene_helper._priority_search_dirs(
-                anchor_path, assets_root, [anchor_path.stem] + list(hint_words)
+                anchor_path, assets_resolved, [anchor_path.stem] + list(hint_words)
             ):
-                if cand_dir.is_dir() and cand_dir not in search_roots:
+                if cand_dir.is_dir() and cand_dir.resolve() != assets_resolved and cand_dir not in search_roots:
                     search_roots.append(cand_dir)
-        elif assets_root not in search_roots:
-            search_roots.append(assets_root)
 
     import time as time_mod
-    deadline = time_mod.monotonic() + max(0.2, budget_sec)
-    visited_dirs: Set[Path] = set()
-    for root_dir in search_roots:
-        if not remaining or time_mod.monotonic() > deadline:
-            break
-        resolved_root = root_dir.resolve()
-        if resolved_root in visited_dirs:
-            continue
-        visited_dirs.add(resolved_root)
-        for cur_root, dir_names, file_names in os.walk(resolved_root):
-            if time_mod.monotonic() > deadline:
-                dir_names[:] = []
-                break
-            dir_names[:] = [
-                sub_dir
-                for sub_dir in dir_names
-                if sub_dir.lower() not in _SKIP_SCAN_DIRS and not sub_dir.startswith(".")
-            ]
-            for file_name in file_names:
-                low_name = file_name.lower()
-                if not low_name.endswith((".prefab.meta", ".fbx.meta", ".mat.meta")):
-                    continue
-                meta_file = os.path.join(cur_root, file_name)
-                try:
-                    with open(meta_file, "r", encoding="utf-8", errors="ignore") as meta_handle:
-                        for line_idx, line_text in enumerate(meta_handle):
-                            if line_text.startswith("guid:"):
-                                found_guid = line_text.split(":", 1)[1].strip().lower()
-                                if found_guid:
-                                    asset_path = Path(meta_file[:-5])
-                                    if asset_path.is_file():
-                                        _MA_GUID_CACHE.setdefault(found_guid, asset_path)
-                                        if found_guid in remaining:
-                                            resolved[found_guid] = asset_path
-                                            remaining.discard(found_guid)
-                                break
-                            if line_idx > 6:
-                                break
-                except OSError:
-                    continue
-            if not remaining:
-                break
+    deadline = time_mod.monotonic() + max(0.5, budget_sec)
+    meta_suffixes = (
+        (".prefab.meta", ".fbx.meta", ".mat.meta") if include_materials else (".prefab.meta", ".fbx.meta")
+    )
+    local_seen: Set[Path] = scan_state["seen_dirs"] if scan_state is not None else set()
 
-    if time_mod.monotonic() <= deadline:
-        for missing_guid in remaining:
-            _MA_GUID_CACHE[missing_guid] = None
+    def _scan_dir_queue(dir_queue: deque) -> bool:
+        while dir_queue and remaining:
+            if time_mod.monotonic() > deadline:
+                return False
+            cur_dir = dir_queue.popleft()
+            cur_res = cur_dir.resolve()
+            if cur_res in local_seen:
+                continue
+            local_seen.add(cur_res)
+            try:
+                dir_entries = list(os.scandir(cur_res))
+            except OSError:
+                continue
+            for entry_item in dir_entries:
+                entry_name = entry_item.name
+                if entry_item.is_dir(follow_symlinks=False):
+                    if not entry_name.startswith(".") and entry_name.lower() not in _SKIP_GUID_DIRS:
+                        sub_res = Path(entry_item.path).resolve()
+                        if sub_res not in local_seen:
+                            dir_queue.append(sub_res)
+                else:
+                    low_name = entry_name.lower()
+                    if not low_name.endswith(meta_suffixes):
+                        continue
+                    try:
+                        with open(entry_item.path, "r", encoding="utf-8", errors="ignore") as meta_handle:
+                            for line_idx, line_text in enumerate(meta_handle):
+                                if line_text.startswith("guid:"):
+                                    found_guid = line_text.split(":", 1)[1].strip().lower()
+                                    if found_guid:
+                                        asset_path = Path(cur_res) / entry_name[:-5]
+                                        if asset_path.is_file():
+                                            _MA_GUID_CACHE.setdefault(found_guid, asset_path)
+                                            if found_guid in remaining:
+                                                resolved[found_guid] = asset_path
+                                                remaining.discard(found_guid)
+                                    break
+                                if line_idx > 6:
+                                    break
+                    except OSError:
+                        continue
+        return len(dir_queue) == 0
+
+    priority_queue: deque = deque()
+    for root_dir in search_roots:
+        res_root = root_dir.resolve()
+        if res_root not in local_seen:
+            priority_queue.append(res_root)
+    if priority_queue:
+        _scan_dir_queue(priority_queue)
+
+    if remaining and scan_state is not None and time_mod.monotonic() <= deadline:
+        if not scan_state["initialized"]:
+            scan_state["initialized"] = True
+            try:
+                for top_entry in sorted(os.scandir(assets_resolved), key=lambda ent: ent.name):
+                    if top_entry.is_dir(follow_symlinks=False) and not top_entry.name.startswith("."):
+                        if top_entry.name.lower() not in _SKIP_GUID_DIRS:
+                            sub_res = Path(top_entry.path).resolve()
+                            if sub_res not in local_seen:
+                                scan_state["queue"].append(sub_res)
+            except OSError:
+                pass
+        completed_full = _scan_dir_queue(scan_state["queue"])
+        if completed_full and len(scan_state["queue"]) == 0:
+            scan_state["complete"] = True
+            for missing_guid in remaining:
+                _MA_GUID_CACHE.setdefault(missing_guid, None)
+
     return resolved
 
 
-def _is_go_active_in_doc(doc_data: Dict[str, Any], go_fid: str) -> bool:
-    """Walk up Transforms in `doc_data` to confirm the GameObject and ancestors are active."""
+def _is_go_active_in_doc(
+    doc_data: Dict[str, Any],
+    go_fid: str,
+    stop_tr: Optional[str] = None,
+) -> bool:
+    """Walk up Transforms in `doc_data` (stopping at selected avatar root `stop_tr`) to check active state."""
     visited: Set[str] = set()
     cur_go = go_fid
     go_map = doc_data["gameobjects"]
@@ -740,9 +835,13 @@ def _is_go_active_in_doc(doc_data: Dict[str, Any], go_fid: str) -> bool:
     go_to_tr = doc_data["go_to_tr"]
     cur_tr = go_to_tr.get(cur_go, "")
 
+    if cur_tr and stop_tr and cur_tr == stop_tr:
+        return True
     if cur_go in go_map and not go_map[cur_go].get("active", True):
         return False
     while cur_tr and cur_tr not in visited:
+        if stop_tr and cur_tr == stop_tr:
+            break
         visited.add(cur_tr)
         tr_info = tr_map.get(cur_tr)
         if tr_info is None:
@@ -962,7 +1061,9 @@ def build_modular_avatar_bake_plan(
         mat_list: List[Dict[str, Any]] = []
         if not resolve_materials or unity_hair_helper is None:
             return mat_list
-        mat_map = _collect_guid_paths_for_ma(set(mat_guids), anchor_file, resolved_assets)
+        mat_map = _collect_guid_paths_for_ma(
+            set(mat_guids), anchor_file, resolved_assets, include_materials=True
+        )
         for mat_guid in mat_guids:
             mat_path = mat_map.get(mat_guid)
             if mat_path and mat_path.is_file():
@@ -988,13 +1089,16 @@ def build_modular_avatar_bake_plan(
         doc_extra_guids: Set[str] = set()
         local_fbx_paths: List[str] = []
         local_mesh_names: List[str] = []
+        doc_stop_tr = target_tr if filter_subtree else None
 
         for go_fid, rend_info in doc_renderers.items():
             if filter_subtree and not _is_go_in_avatar_subtree(go_fid):
                 continue
             go_info = doc_gos.get(go_fid, {})
             go_name = str(go_info.get("name", "") or "").strip()
-            is_act = _is_go_active_in_doc(doc_data, go_fid) and bool(rend_info.get("enabled", True))
+            is_act = _is_go_active_in_doc(doc_data, go_fid, stop_tr=doc_stop_tr) and bool(
+                rend_info.get("enabled", True)
+            )
             if not is_act:
                 if go_name:
                     disabled_meshes.add(go_name)
@@ -1007,7 +1111,14 @@ def build_modular_avatar_bake_plan(
                 doc_extra_guids.add(mguid)
             doc_extra_guids.update(rend_info.get("mat_guids", []))
 
-        resolved_doc_guids = _collect_guid_paths_for_ma(doc_extra_guids, doc_path, resolved_assets)
+        mesh_hints = list(hint_tokens) + [resolved_avatar_name] + local_mesh_names
+        resolved_doc_guids = _collect_guid_paths_for_ma(
+            doc_extra_guids,
+            doc_path,
+            resolved_assets,
+            name_hints=mesh_hints,
+            include_materials=bool(resolve_materials),
+        )
         for go_fid, rend_info in doc_renderers.items():
             if filter_subtree and not _is_go_in_avatar_subtree(go_fid):
                 continue
@@ -1027,7 +1138,7 @@ def build_modular_avatar_bake_plan(
         for toggle_comp in doc_data["object_toggles"]:
             if filter_subtree and not _is_go_in_avatar_subtree(toggle_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, toggle_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, toggle_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             for item in toggle_comp["toggles"]:
                 ref_path = item["reference_path"]
@@ -1038,7 +1149,7 @@ def build_modular_avatar_bake_plan(
         for rep_comp in doc_data["replace_objects"]:
             if filter_subtree and not _is_go_in_avatar_subtree(rep_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, rep_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, rep_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             tgt_tail = str(rep_comp["target_path"]).rsplit("/", 1)[-1].strip()
             if tgt_tail:
@@ -1047,7 +1158,7 @@ def build_modular_avatar_bake_plan(
         for shp_comp in doc_data["shape_changers"]:
             if filter_subtree and not _is_go_in_avatar_subtree(shp_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, shp_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, shp_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             for item in shp_comp["shapes"]:
                 mesh_tail = str(item.get("reference_path", "") or "").rsplit("/", 1)[-1].strip() or "Body"
@@ -1056,7 +1167,7 @@ def build_modular_avatar_bake_plan(
         for sync_comp in doc_data["blendshape_syncs"]:
             if filter_subtree and not _is_go_in_avatar_subtree(sync_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, sync_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, sync_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             local_mesh = str(doc_gos.get(sync_comp["go_fid"], {}).get("name", "") or "").strip()
             for bnd in sync_comp["bindings"]:
@@ -1073,7 +1184,7 @@ def build_modular_avatar_bake_plan(
         for scl_comp in doc_data["scale_adjusters"]:
             if filter_subtree and not _is_go_in_avatar_subtree(scl_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, scl_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, scl_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             bone_name = str(doc_gos.get(scl_comp["go_fid"], {}).get("name", "") or "").strip()
             if bone_name:
@@ -1084,7 +1195,7 @@ def build_modular_avatar_bake_plan(
                 continue
             if filter_subtree and not _is_go_in_avatar_subtree(merge_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, merge_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, merge_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             src_name = root_override_name or str(doc_gos.get(merge_comp["go_fid"], {}).get("name", "") or "").strip()
             armature_merges.append(
@@ -1106,7 +1217,7 @@ def build_modular_avatar_bake_plan(
                 continue
             if filter_subtree and not _is_go_in_avatar_subtree(proxy_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, proxy_comp["go_fid"]):
+            if not _is_go_active_in_doc(doc_data, proxy_comp["go_fid"], stop_tr=doc_stop_tr):
                 continue
             src_name = str(doc_gos.get(proxy_comp["go_fid"], {}).get("name", "") or "").strip()
             bone_ref_id = int(proxy_comp.get("bone_reference", -1))

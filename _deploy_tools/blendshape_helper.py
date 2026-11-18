@@ -417,18 +417,40 @@ def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[s
     deformers_by_id: Dict[int, Tuple[str, str]] = {}
 
     for node_name, prop_values, _ in object_nodes:
-        if node_name == "Model" and len(prop_values) >= 2:
+        if (
+            node_name == "Model"
+            and len(prop_values) >= 3
+            and isinstance(prop_values[0], int)
+            and not isinstance(prop_values[0], bool)
+        ):
             raw_model_name = str(prop_values[1]).split("\x00\x01")[0]
             models_by_id[int(prop_values[0])] = raw_model_name
-        elif node_name == "Geometry" and len(prop_values) >= 3 and prop_values[2] == "Mesh":
+        elif (
+            node_name == "Geometry"
+            and len(prop_values) >= 3
+            and prop_values[2] == "Mesh"
+            and isinstance(prop_values[0], int)
+            and not isinstance(prop_values[0], bool)
+        ):
             geometry_ids.add(int(prop_values[0]))
-        elif node_name == "Deformer" and len(prop_values) >= 3:
+        elif (
+            node_name == "Deformer"
+            and len(prop_values) >= 3
+            and isinstance(prop_values[0], int)
+            and not isinstance(prop_values[0], bool)
+        ):
             raw_deformer_name = str(prop_values[1]).split("\x00\x01")[0]
             deformers_by_id[int(prop_values[0])] = (str(prop_values[2]), raw_deformer_name)
 
     parent_to_children: Dict[int, List[int]] = {}
     for node_name, prop_values, _ in connection_nodes:
-        if node_name == "C" and len(prop_values) >= 3 and prop_values[0] == "OO":
+        if (
+            node_name == "C"
+            and len(prop_values) >= 3
+            and prop_values[0] == "OO"
+            and isinstance(prop_values[1], int)
+            and isinstance(prop_values[2], int)
+        ):
             child_id = int(prop_values[1])
             parent_id = int(prop_values[2])
             parent_to_children.setdefault(parent_id, []).append(child_id)
