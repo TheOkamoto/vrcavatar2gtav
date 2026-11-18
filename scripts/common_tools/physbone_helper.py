@@ -3145,6 +3145,62 @@ def export_character_physbones_to_cfg(
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
 
 
+def compute_safe_local_limit_axis(
+    cur_world_mat: Any,
+    next_world_mat: Optional[Any],
+    limit_rotation: Tuple[float, float, float],
+    limit_type: int,
+    node_max_angle_deg: float,
+) -> Tuple[float, float, float]:
+    """
+    Compute `limit_axis_local` aligned to the actual child bone rest direction
+    and clamped inside the node's cone limit so idle poses never flare outward.
+    """
+    import mathutils
+
+    up_vec = mathutils.Vector((0.0, 1.0, 0.0))
+    if next_world_mat is not None:
+        local_child_vec = cur_world_mat.inverted() @ next_world_mat.translation
+        local_child_dir = (
+            local_child_vec.normalized()
+            if local_child_vec.length > 1e-6
+            else up_vec.copy()
+        )
+    else:
+        local_child_dir = up_vec.copy()
+
+    align_quat = up_vec.rotation_difference(local_child_dir)
+    limit_euler = mathutils.Euler(
+        (
+            math.radians(float(limit_rotation[0])),
+            math.radians(float(limit_rotation[1])),
+            math.radians(float(limit_rotation[2])),
+        ),
+        "XYZ",
+    ).to_quaternion()
+    raw_axis = (align_quat @ (limit_euler @ up_vec)).normalized()
+
+    if limit_type > 0 and next_world_mat is not None:
+        if node_max_angle_deg <= 2.0:
+            max_tilt_deg = 0.0
+        else:
+            max_tilt_deg = min(
+                node_max_angle_deg * 0.78,
+                max(0.0, node_max_angle_deg - 5.0),
+            )
+        ang_rad = local_child_dir.angle(raw_axis, 0.0)
+        max_tilt_rad = math.radians(max_tilt_deg)
+        if ang_rad > max_tilt_rad and ang_rad > 1e-6:
+            if max_tilt_rad <= 1e-6:
+                raw_axis = local_child_dir.copy()
+            else:
+                rot_delta = local_child_dir.rotation_difference(raw_axis)
+                clamped_quat = mathutils.Quaternion(rot_delta.axis, max_tilt_rad)
+                raw_axis = (clamped_quat @ local_child_dir).normalized()
+
+    return (float(raw_axis.x), float(raw_axis.y), float(raw_axis.z))
+
+
 def build_dynamic_physbone_chains(
     ped_armature: Any,
     chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
@@ -3196,22 +3252,15 @@ def build_dynamic_physbone_chains(
             mapped_mats.append(tip_mat)
 
         lim_rot = cfg_entry.get("limit_rotation", default_limit_rotation)
-        lim_rx_rad = math.radians(float(lim_rot[0]))
-        lim_rz_rad = math.radians(float(lim_rot[2]))
-        lim_axis_vec = (
-            -math.sin(lim_rz_rad),
-            math.cos(lim_rx_rad) * math.cos(lim_rz_rad),
-            math.sin(lim_rx_rad),
-        )
-        axis_len = (
-            math.sqrt(lim_axis_vec[0] ** 2 + lim_axis_vec[1] ** 2 + lim_axis_vec[2] ** 2)
-            or 1.0
-        )
-        lim_axis_norm = (
-            lim_axis_vec[0] / axis_len,
-            lim_axis_vec[1] / axis_len,
-            lim_axis_vec[2] / axis_len,
-        )
+        limit_type = int(cfg_entry.get("limit_type", 1))
+        max_angle_curve = cfg_entry.get("max_angle_x_curve", [])
+        base_angle_x = float(cfg_entry.get("max_angle_x", 50.0))
+
+        seg_lengths = [
+            float((mapped_mats[idx + 1].translation - mapped_mats[idx].translation).length)
+            for idx in range(len(mapped_mats) - 1)
+        ]
+        total_len = sum(seg_lengths) or 1e-6
 
         root_parent_name = parent_map.get(gtav_chain_bones[0], "SKEL_Pelvis")
         if ped_world_matrices and root_parent_name in ped_world_matrices:
@@ -3226,19 +3275,34 @@ def build_dynamic_physbone_chains(
 
         parent_world_mat = root_parent_world
         chain_bone_records: List[Dict[str, object]] = []
+        cum_len = 0.0
         for node_idx, gtav_bone_name in enumerate(gtav_chain_bones):
             cur_world_mat = mapped_mats[node_idx]
+            next_world_mat = (
+                mapped_mats[node_idx + 1]
+                if node_idx + 1 < len(mapped_mats)
+                else None
+            )
             parent_name = parent_map.get(
                 gtav_bone_name,
                 root_parent_name if node_idx == 0 else gtav_chain_bones[node_idx - 1],
             )
             bone_tag = compute_gtav_bone_tag(gtav_bone_name)
-            if node_idx + 1 < len(mapped_mats):
-                seg_len = (
-                    mapped_mats[node_idx + 1].translation - cur_world_mat.translation
-                ).length
+            if node_idx < len(seg_lengths):
+                seg_len = seg_lengths[node_idx]
             else:
                 seg_len = 0.025
+
+            chain_t = min(1.0, max(0.0, cum_len / total_len))
+            angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+            node_max_angle = base_angle_x * angle_scale
+            lim_axis_vec = compute_safe_local_limit_axis(
+                cur_world_mat,
+                next_world_mat,
+                lim_rot,
+                limit_type,
+                node_max_angle,
+            )
 
             custom_bones_out.append(
                 {
@@ -3263,9 +3327,11 @@ def build_dynamic_physbone_chains(
                         float(loc_rot.z),
                         float(loc_rot.w),
                     ),
-                    "limit_axis_local": lim_axis_norm,
+                    "limit_axis_local": lim_axis_vec,
                 }
             )
+            if node_idx < len(seg_lengths):
+                cum_len += seg_lengths[node_idx]
             parent_world_mat = cur_world_mat
 
         chain_records_out.append(
@@ -3327,10 +3393,14 @@ def build_avatar_physbone_chains(
 
         cfg_entry = dict(chain_cfgs.get(chain_key, {}))
         lim_rot = cfg_entry.get("limit_rotation", default_limit_rotation)
-        lim_euler = mathutils.Euler(
-            (math.radians(float(lim_rot[0])), math.radians(float(lim_rot[1])), math.radians(float(lim_rot[2]))),
-            "XYZ",
-        ).to_matrix()
+        limit_type = int(cfg_entry.get("limit_type", 1))
+        max_angle_curve = cfg_entry.get("max_angle_x_curve", [])
+        base_angle_x = float(cfg_entry.get("max_angle_x", 50.0))
+        seg_lengths = [
+            float((mapped_world_mats[idx + 1].translation - mapped_world_mats[idx].translation).length)
+            for idx in range(len(mapped_world_mats) - 1)
+        ]
+        total_len = sum(seg_lengths) or 1e-6
 
         root_parent_name = parent_map[gtav_chain_bones[0]]
         root_parent_tag = int(
@@ -3346,21 +3416,31 @@ def build_avatar_physbone_chains(
 
         chain_bone_records: List[Dict[str, object]] = []
         cur_parent_world = parent_world_mat
+        cum_len = 0.0
         for node_idx, gtav_bone_name in enumerate(gtav_chain_bones):
             cur_world_mat = mapped_world_mats[node_idx]
+            next_world_mat = (
+                mapped_world_mats[node_idx + 1]
+                if node_idx + 1 < len(mapped_world_mats)
+                else None
+            )
             parent_name = parent_map[gtav_bone_name]
             bone_tag = compute_gtav_bone_tag(gtav_bone_name)
-            if node_idx + 1 < len(mapped_world_mats):
-                next_world_pos = mapped_world_mats[node_idx + 1].translation
-                seg_vec_world = next_world_pos - cur_world_mat.translation
-                seg_len = max(0.015, float(seg_vec_world.length))
-                local_child_dir = (cur_world_mat.inverted() @ next_world_pos).normalized()
-                if local_child_dir.length <= 1e-6:
-                    local_child_dir = mathutils.Vector((0.0, 1.0, 0.0))
-                lim_axis_vec = (lim_euler @ local_child_dir).normalized()
+            if node_idx < len(seg_lengths):
+                seg_len = max(0.015, seg_lengths[node_idx])
             else:
                 seg_len = 0.025
-                lim_axis_vec = (lim_euler @ mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+
+            chain_t = min(1.0, max(0.0, cum_len / total_len))
+            angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+            node_max_angle = base_angle_x * angle_scale
+            lim_axis_tuple = compute_safe_local_limit_axis(
+                cur_world_mat,
+                next_world_mat,
+                lim_rot,
+                limit_type,
+                node_max_angle,
+            )
 
             custom_bones.append(
                 {
@@ -3380,9 +3460,11 @@ def build_avatar_physbone_chains(
                     "tag": bone_tag,
                     "local_pos": (float(loc_pos.x), float(loc_pos.y), float(loc_pos.z)),
                     "local_rot": (float(loc_rot.x), float(loc_rot.y), float(loc_rot.z), float(loc_rot.w)),
-                    "limit_axis_local": (float(lim_axis_vec.x), float(lim_axis_vec.y), float(lim_axis_vec.z)),
+                    "limit_axis_local": lim_axis_tuple,
                 }
             )
+            if node_idx < len(seg_lengths):
+                cum_len += seg_lengths[node_idx]
             cur_parent_world = cur_world_mat
 
         chain_records.append(

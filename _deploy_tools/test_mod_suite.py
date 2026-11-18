@@ -1431,17 +1431,98 @@ def test_unity_scene_and_fallbacks() -> bool:
                 "ped_name": "player_one",
             },
         )
+        # Regression check: skewed limit_axis (> node max_angle) causes idle radial flare,
+        # whereas clamping limit_axis within compute_safe_local_limit_axis bounds keeps
+        # standing idle displacement near zero.
+        import math as std_math
+
+        rel_child_vec = (0.06, 0.14, -0.04)
+        child_len = std_math.sqrt(sum(val * val for val in rel_child_vec))
+        child_dir = tuple(val / child_len for val in rel_child_vec)
+        # Rotate child_dir in XZ/XY plane by 65 deg (exceeds 42 deg cone) vs 32 deg (safe)
+        perp_raw = (child_dir[2], 0.0, -child_dir[0])
+        perp_len = std_math.sqrt(sum(val * val for val in perp_raw))
+        perp_dir = tuple(val / perp_len for val in perp_raw)
+
+        flare_rad = std_math.radians(65.0)
+        flared_axis = tuple(
+            std_math.cos(flare_rad) * base_v + std_math.sin(flare_rad) * ort_v
+            for base_v, ort_v in zip(child_dir, perp_dir)
+        )
+        safe_rad = std_math.radians(min(42.0 * 0.78, max(0.0, 42.0 - 5.0)))
+        safe_axis = tuple(
+            std_math.cos(safe_rad) * base_v + std_math.sin(safe_rad) * ort_v
+            for base_v, ort_v in zip(child_dir, perp_dir)
+        )
+        skirt_cfg = {
+            "pull": 0.25,
+            "spring": 0.55,
+            "stiffness": 0.30,
+            "gravity": 0.10,
+            "gravity_falloff": 1.0,
+            "immobile": 0.0,
+            "limit_type": 3,
+            "max_angle_x": 60.0,
+            "max_angle_x_curve": [(0.0, 0.7), (1.0, 1.0)],
+        }
+        rest_pos_pair = [(0.0, 0.0, 0.0), rel_child_vec]
+        rest_rot_pair = [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)]
+
+        flared_sim = physbone_helper.PhysBoneChainSimulator(
+            rest_local_positions=rest_pos_pair,
+            rest_local_rotations=rest_rot_pair,
+            config=skirt_cfg,
+            limit_axes_local=[flared_axis, flared_axis],
+        )
+        flared_sim.reset((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        flared_pos = []
+        for _ in range(60):
+            flared_pos, _ = flared_sim.step((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), 1.0 / 60.0)
+        flared_drift_mm = (
+            std_math.sqrt(
+                sum((sim_v - rest_v) ** 2 for sim_v, rest_v in zip(flared_pos[1], rel_child_vec))
+            )
+            * 1000.0
+        )
+
+        safe_sim = physbone_helper.PhysBoneChainSimulator(
+            rest_local_positions=rest_pos_pair,
+            rest_local_rotations=rest_rot_pair,
+            config=skirt_cfg,
+            limit_axes_local=[safe_axis, safe_axis],
+        )
+        safe_sim.reset((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        safe_pos = []
+        for _ in range(60):
+            safe_pos, _ = safe_sim.step((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), 1.0 / 60.0)
+        idle_drift_mm = (
+            std_math.sqrt(
+                sum((sim_v - rest_v) ** 2 for sim_v, rest_v in zip(safe_pos[1], rel_child_vec))
+            )
+            * 1000.0
+        )
+        safe_cone_ok = (
+            callable(getattr(physbone_helper, "compute_safe_local_limit_axis", None))
+            and flared_drift_mm > 30.0
+            and idle_drift_mm < 0.5
+        )
+
         pb_roundtrip_ok = (
             len(built_specs) == len(packed_budget["chains"])
             and len(built_bones) == len(packed_bones)
             and bool(built_parents)
             and resolved_pb_cfg.get("source_used") == "cfg"
             and len(resolved_pb_cfg.get("custom_bones", [])) == len(packed_bones)
+            and safe_cone_ok
         )
         suite_passed &= print_status_result(
             i18n.translate("tests.physbones_cfg_roundtrip"),
             pb_roundtrip_ok,
-            f"specs={len(built_specs)}, bones={len(built_bones)}, source={resolved_pb_cfg.get('source_used')}",
+            (
+                f"specs={len(built_specs)}, bones={len(built_bones)}, "
+                f"source={resolved_pb_cfg.get('source_used')}, "
+                f"flared_mm={flared_drift_mm:.1f}, idle_mm={idle_drift_mm:.3f}"
+            ),
         )
 
     return suite_passed
