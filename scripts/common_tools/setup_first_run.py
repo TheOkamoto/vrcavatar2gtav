@@ -38,6 +38,9 @@ for tools_dir_candidate in (
         sys.path.insert(0, str(tools_dir_candidate))
 
 import blendshape_helper
+import error_handler_helper as err_helper
+import avatar_archive_helper
+import modular_avatar_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
 
@@ -320,6 +323,17 @@ def update_cfg_values_in_place(
             updated_lines.append(f"{missing_key} = {missing_val}\n")
         remaining_updates[active_section].clear()
 
+    for extra_section, extra_kv in remaining_updates.items():
+        if extra_kv:
+            if updated_lines and not updated_lines[-1].endswith("\n"):
+                updated_lines.append("\n")
+            updated_lines.append(f"\n[{extra_section}]\n")
+            for extra_key, extra_val in extra_kv.items():
+                if extra_val:
+                    updated_lines.append(f"{extra_key} = {extra_val}\n")
+                else:
+                    updated_lines.append(f"{extra_key} =\n")
+
     config_file_path.write_text("".join(updated_lines), encoding="utf-8")
     project_paths.invalidate_config_cache()
 
@@ -337,9 +351,12 @@ def prompt_path_setting(
         print(project_i18n.translate("setup.prompt_current", value=current_value))
     if detected_value and detected_value != current_value:
         print(project_i18n.translate("setup.prompt_detected", value=detected_value))
-    entered_text = input(
-        project_i18n.translate("setup.prompt_input", suggested=suggested_value)
-    ).strip()
+    try:
+        entered_text = input(
+            project_i18n.translate("setup.prompt_input", suggested=suggested_value)
+        ).strip()
+    except EOFError:
+        entered_text = ""
     chosen_raw = entered_text if entered_text else suggested_value
     return format_path_for_cfg(chosen_raw)
 
@@ -366,17 +383,22 @@ def detect_character_unity_scene(
         return None
 
     candidate_files: List[Path] = []
+    skip_dirs = {"library", "temp", "obj", "logs", ".git", "vrchat", "vrcsdk", "liltoon", "poiyomi", "textmesh pro"}
+    base_depth = len(assets_host.resolve().parts)
     try:
-        for entry in os.scandir(assets_host):
-            if entry.is_file() and entry.name.lower().endswith(".unity"):
-                candidate_files.append(Path(entry.path))
-            elif entry.is_dir():
-                try:
-                    for nested in os.scandir(entry.path):
-                        if nested.is_file() and nested.name.lower().endswith(".unity"):
-                            candidate_files.append(Path(nested.path))
-                except OSError:
-                    continue
+        for cur_root, dir_names, file_names in os.walk(assets_host):
+            cur_depth = len(Path(cur_root).resolve().parts) - base_depth
+            if cur_depth >= 4:
+                dir_names[:] = []
+            else:
+                dir_names[:] = [
+                    sub_dir
+                    for sub_dir in dir_names
+                    if sub_dir.lower() not in skip_dirs and not sub_dir.startswith(".")
+                ]
+            for file_name in file_names:
+                if file_name.lower().endswith(".unity"):
+                    candidate_files.append(Path(cur_root) / file_name)
     except OSError:
         candidate_files = []
 
@@ -424,22 +446,34 @@ def detect_character_face_anim(
         return None
 
     found_path: Optional[Path] = None
+    skip_anim_dirs = {"library", "temp", "obj", "logs", ".git", "vrchat", "vrcsdk", "liltoon", "poiyomi"}
+    target_anim_lows = {cand.lower() for cand in candidate_names}
+    base_depth = len(assets_host.resolve().parts)
     for candidate_name in candidate_names:
         direct_candidate = assets_host / candidate_name
         if direct_candidate.is_file():
             found_path = direct_candidate
             break
+    if found_path is None:
         try:
-            for entry in os.scandir(assets_host):
-                if entry.is_dir():
-                    nested_candidate = Path(entry.path) / candidate_name
-                    if nested_candidate.is_file():
-                        found_path = nested_candidate
+            for cur_root, dir_names, file_names in os.walk(assets_host):
+                cur_depth = len(Path(cur_root).resolve().parts) - base_depth
+                if cur_depth >= 5:
+                    dir_names[:] = []
+                else:
+                    dir_names[:] = [
+                        sub_dir
+                        for sub_dir in dir_names
+                        if sub_dir.lower() not in skip_anim_dirs and not sub_dir.startswith(".")
+                    ]
+                for file_name in file_names:
+                    if file_name.lower() in target_anim_lows:
+                        found_path = Path(cur_root) / file_name
                         break
+                if found_path is not None:
+                    break
         except OSError:
-            continue
-        if found_path is not None:
-            break
+            pass
 
     if found_path is None:
         return None
@@ -465,7 +499,7 @@ def ensure_character_blendshape_presets() -> bool:
             avatar_id, f"{avatar_id}_blendshapes.cfg"
         )
         avatar_cfg = project_paths.get_avatar_paths(avatar_id)
-        cfg_raw = avatar_cfg.get("blendshapes_cfg", "").strip()
+        cfg_raw = str(avatar_cfg.get("blendshapes_cfg", "") or "").strip()
         cfg_target = (
             Path(cfg_raw)
             if cfg_raw
@@ -481,7 +515,7 @@ def ensure_character_blendshape_presets() -> bool:
             )
             continue
 
-        unity_scene_str = avatar_cfg.get("unity_scene", "").strip()
+        unity_scene_str = str(avatar_cfg.get("unity_scene", "") or "").strip()
         unity_scene_path = Path(unity_scene_str) if unity_scene_str else None
         if unity_scene_path is not None and unity_scene_path.is_file():
             try:
@@ -523,11 +557,27 @@ def configure_vrc2gtav_cfg(
     blender_override: Optional[str] = None,
     rage_override: Optional[str] = None,
     python_override: Optional[str] = None,
+    avatar_zip_override: Optional[str] = None,
+    unity_project_override: Optional[str] = None,
+    download_blender: Optional[bool] = None,
+    avatar_name_override: Optional[str] = None,
+    target_character_override: Optional[str] = None,
+    import_face_blendshapes: Optional[bool] = None,
+    import_body_blendshapes: Optional[bool] = None,
+    verbose: bool = False,
+    logger: Optional[err_helper.PipelineLogger] = None,
 ) -> Path:
     """
-    Ensure `vrc2gtav.cfg` exists and update its primary executable and
-    directory paths interactively or non-interactively.
+    Ensure `vrc2gtav.cfg` exists and update its primary executable, directory,
+    `.zip`/Unity archive, Blender 4.0.2 + Sollumz, avatar selection, MA outfits,
+    and face/body blendshape `.cfg` settings interactively or via parameters.
     """
+    active_logger = logger or err_helper.PipelineLogger(
+        verbose=verbose,
+        avatar_name=avatar_name_override or "first_run",
+        stage_name="setup",
+        project_root=PROJECT_ROOT_HINT,
+    )
     cfg_was_created = not project_paths.has_project_config_file()
     config_file_path = project_paths.ensure_project_config_from_example(PROJECT_ROOT_HINT)
     if cfg_was_created:
@@ -535,6 +585,19 @@ def configure_vrc2gtav_cfg(
 
     project_paths.invalidate_config_cache()
     config_parser = project_paths.load_project_config(force_reload=True)
+
+    ingested_source: Optional[Dict[str, object]] = None
+    source_override = avatar_zip_override or unity_project_override
+    if source_override:
+        with err_helper.guarded_stage("ingest_avatar_source", logger=active_logger):
+            host_src = project_paths.to_host_path(
+                source_override, project_root_dir=PROJECT_ROOT_HINT
+            )
+            ingested_source = avatar_archive_helper.ingest_avatar_source(
+                host_src, PROJECT_ROOT_HINT, logger=active_logger
+            )
+            if not unity_assets_override and ingested_source.get("assets_root"):
+                unity_assets_override = str(ingested_source["assets_root"])
 
     current_gtav_root = config_parser.get("directories", "gtav_root", fallback="")
     current_unity_assets = config_parser.get("directories", "unity_assets", fallback="")
@@ -571,6 +634,20 @@ def configure_vrc2gtav_cfg(
             detected_assets_str,
             project_i18n.translate("setup.step_assets_desc"),
         )
+        # Allow user to paste a .zip / .unitypackage directly into Unity Assets prompt
+        raw_assets_candidate = Path(
+            project_paths.to_host_path(chosen_unity_assets, project_root_dir=PROJECT_ROOT_HINT)
+        )
+        if raw_assets_candidate.is_file() and raw_assets_candidate.suffix.lower() in (
+            ".zip",
+            ".unitypackage",
+            ".unity",
+        ):
+            ingested_source = avatar_archive_helper.ingest_avatar_source(
+                raw_assets_candidate, PROJECT_ROOT_HINT, logger=active_logger
+            )
+            if ingested_source.get("assets_root"):
+                chosen_unity_assets = format_path_for_cfg(str(ingested_source["assets_root"]))
     else:
         chosen_unity_assets = detected_assets_str or current_unity_assets
 
@@ -585,6 +662,42 @@ def configure_vrc2gtav_cfg(
         )
     else:
         chosen_blender = detected_blender or current_blender
+
+    # Verify Blender 4.0.2 + Sollumz and auto-download if missing or requested
+    resolved_blender_path = (
+        project_paths.to_host_path(chosen_blender, project_root_dir=PROJECT_ROOT_HINT)
+        if chosen_blender and chosen_blender not in PLACEHOLDER_MARKERS
+        else None
+    )
+    blender_probe = avatar_archive_helper.inspect_blender_installation(resolved_blender_path)
+    needs_blender_dl = (not blender_probe["exists"]) or (not blender_probe["is_4_0_series"])
+    needs_sollumz_dl = blender_probe["exists"] and blender_probe["is_4_0_series"] and (
+        not blender_probe["sollumz_installed"]
+    )
+    if needs_blender_dl or needs_sollumz_dl:
+        should_download = download_blender
+        if should_download is None and interactive:
+            prompt_txt = (
+                project_i18n.translate("setup.prompt_download_blender")
+                if needs_blender_dl
+                else project_i18n.translate("setup.prompt_download_sollumz")
+            )
+            try:
+                dl_ans = input(f"  {prompt_txt} [Y/n]: ").strip()
+            except EOFError:
+                dl_ans = "y"
+            should_download = project_i18n.is_affirmative_answer(dl_ans, default_yes=True)
+        if should_download:
+            with err_helper.guarded_stage("download_blender", logger=active_logger):
+                if needs_blender_dl:
+                    dl_exe = avatar_archive_helper.download_and_install_blender(
+                        PROJECT_ROOT_HINT, install_sollumz=True, logger=active_logger
+                    )
+                    chosen_blender = format_path_for_cfg(str(dl_exe))
+                elif needs_sollumz_dl and resolved_blender_path is not None:
+                    avatar_archive_helper.install_sollumz_into_blender(
+                        resolved_blender_path, logger=active_logger
+                    )
 
     if rage_override:
         chosen_rage = format_path_for_cfg(rage_override)
@@ -677,6 +790,73 @@ def configure_vrc2gtav_cfg(
                 "blendshapes_cfg"
             ] = f"${{directories:project_root}}/configs/{preset_filename}"
 
+    # Paginated avatar picker + MA / Face & Body blendshape resolution when archive or project supplied
+    if (
+        ingested_source is not None
+        or avatar_name_override is not None
+        or import_face_blendshapes is not None
+        or import_body_blendshapes is not None
+    ):
+        import build_universal_avatar
+        assets_dir_host = project_paths.to_host_path(
+            chosen_unity_assets, project_root_dir=PROJECT_ROOT_HINT
+        )
+        scene_for_picker: Optional[Path] = None
+        if ingested_source and ingested_source.get("preferred_scene"):
+            scene_for_picker = Path(str(ingested_source["preferred_scene"]))
+        elif assets_dir_host.is_dir():
+            first_scene = next(
+                (p_item for p_item in sorted(assets_dir_host.glob("*.unity"))), None
+            )
+            if first_scene is None:
+                first_scene = next(
+                    (p_item for p_item in sorted(assets_dir_host.glob("*/*.unity"))), None
+                )
+            scene_for_picker = first_scene
+
+        prep_res = build_universal_avatar.prepare_universal_avatar_job(
+            avatar_zip=avatar_zip_override,
+            unity_project=unity_project_override or (str(assets_dir_host) if assets_dir_host.is_dir() else None),
+            unity_scene=str(scene_for_picker) if scene_for_picker else None,
+            avatar_name=avatar_name_override,
+            target_character=target_character_override,
+            import_face=import_face_blendshapes,
+            import_body=import_body_blendshapes,
+            interactive=interactive,
+            verbose=verbose,
+            logger=active_logger,
+        )
+        manifest_info = prep_res["manifest"]
+        chosen_slot = str(manifest_info.get("target_character", "michael"))
+        slot_avatar_id = {
+            "michael": "shinano_er",
+            "franklin": "shinano_casual",
+            "trevor": "miltina_maid",
+        }.get(chosen_slot, "shinano_er")
+        slot_section = f"avatar_{slot_avatar_id}"
+        for cand_sec in (f"avatar_{slot_avatar_id}", f"avatar:{slot_avatar_id}", slot_avatar_id):
+            if config_parser.has_section(cand_sec):
+                slot_section = cand_sec
+                break
+        if manifest_info.get("scene_path"):
+            cfg_updates.setdefault(slot_section, {})["unity_scene"] = format_path_for_cfg(
+                str(manifest_info["scene_path"])
+            )
+        if manifest_info.get("avatar_name"):
+            cfg_updates.setdefault(slot_section, {})["unity_avatar_name"] = str(
+                manifest_info["avatar_name"]
+            )
+        cfg_updates.setdefault(slot_section, {})["import_face_blendshapes"] = (
+            "1" if manifest_info.get("import_face_blendshapes", True) else "0"
+        )
+        cfg_updates.setdefault(slot_section, {})["import_body_blendshapes"] = (
+            "1" if manifest_info.get("import_body_blendshapes", True) else "0"
+        )
+        if manifest_info.get("blendshapes_cfg_path"):
+            cfg_updates.setdefault(slot_section, {})["blendshapes_cfg"] = format_path_for_cfg(
+                str(manifest_info["blendshapes_cfg_path"])
+            )
+
     update_cfg_values_in_place(config_file_path, cfg_updates)
     print(project_i18n.translate("setup.saved_cfg", path=config_file_path))
     return config_file_path
@@ -708,7 +888,19 @@ def run_rage_extract(
         else project_i18n.translate("setup.extracting_default", filename=archive_path.name)
     )
     print(f"[INFO] {label_text} -> {output_dir}...")
-    subprocess.run(full_command, check=True)
+    try:
+        subprocess.run(
+            full_command,
+            stdin=subprocess.DEVNULL,
+            timeout=300.0,
+            check=True,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise err_helper.SubprocessExecutionError(
+            f"RAGE extraction failed ({archive_path.name}): {exc}",
+            stage="rage_extract",
+            cause=exc,
+        )
 
 
 def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
@@ -764,7 +956,19 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
             "-o",
             str(keys_output_dir),
         )
-        subprocess.run(extract_keys_cmd, check=True)
+        try:
+            subprocess.run(
+                extract_keys_cmd,
+                stdin=subprocess.DEVNULL,
+                timeout=180.0,
+                check=True,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            raise err_helper.SubprocessExecutionError(
+                f"Failed extracting RAGE decryption keys: {exc}",
+                stage="rage_extract_keys",
+                cause=exc,
+            )
     else:
         print(project_i18n.translate("setup.keys_ready", path=keys_output_dir))
 
@@ -998,7 +1202,7 @@ def diagnose_setup_state() -> Dict[str, bool]:
     blendshapes_ok = all(
         Path(project_paths.get_avatar_paths(avatar_id).get("blendshapes_cfg", "")).is_file()
         or (
-            bool(project_paths.get_avatar_paths(avatar_id).get("unity_scene", "").strip())
+            bool(str(project_paths.get_avatar_paths(avatar_id).get("unity_scene", "") or "").strip())
             and Path(project_paths.get_avatar_paths(avatar_id)["unity_scene"]).is_file()
         )
         for avatar_id in project_paths.list_available_avatars()
@@ -1050,30 +1254,57 @@ def run_first_run_setup(
     blender_override: Optional[str] = None,
     rage_override: Optional[str] = None,
     python_override: Optional[str] = None,
+    avatar_zip_override: Optional[str] = None,
+    unity_project_override: Optional[str] = None,
+    download_blender: Optional[bool] = None,
+    avatar_name_override: Optional[str] = None,
+    target_character_override: Optional[str] = None,
+    import_face_blendshapes: Optional[bool] = None,
+    import_body_blendshapes: Optional[bool] = None,
+    verbose: bool = False,
 ) -> bool:
-    """Run the full First-Run configuration and vanilla GTA V extraction flow."""
+    """Run the full First-Run configuration, archive/Unity ingestion, MA bake, and GTA V extraction flow."""
+    active_logger = err_helper.PipelineLogger(
+        verbose=verbose,
+        avatar_name=avatar_name_override or "first_run",
+        stage_name="setup",
+        project_root=PROJECT_ROOT_HINT,
+    )
     print("\n" + "=" * 70)
     print(project_i18n.translate("setup.banner_title"))
     print("=" * 70)
     print(project_i18n.translate("setup.banner_notice"))
 
-    configure_vrc2gtav_cfg(
-        interactive=interactive,
-        gtav_root_override=gtav_root_override,
-        unity_assets_override=unity_assets_override,
-        blender_override=blender_override,
-        rage_override=rage_override,
-        python_override=python_override,
-    )
+    try:
+        configure_vrc2gtav_cfg(
+            interactive=interactive,
+            gtav_root_override=gtav_root_override,
+            unity_assets_override=unity_assets_override,
+            blender_override=blender_override,
+            rage_override=rage_override,
+            python_override=python_override,
+            avatar_zip_override=avatar_zip_override,
+            unity_project_override=unity_project_override,
+            download_blender=download_blender,
+            avatar_name_override=avatar_name_override,
+            target_character_override=target_character_override,
+            import_face_blendshapes=import_face_blendshapes,
+            import_body_blendshapes=import_body_blendshapes,
+            verbose=verbose,
+            logger=active_logger,
+        )
 
-    unity_assets_dir = project_paths.get_vrc_assets_dir()
-    if not unity_assets_dir.is_dir():
-        print(project_i18n.translate("setup.unity_assets_warning", path=unity_assets_dir))
+        unity_assets_dir = project_paths.get_vrc_assets_dir()
+        if not unity_assets_dir.is_dir():
+            print(project_i18n.translate("setup.unity_assets_warning", path=unity_assets_dir))
 
-    ensure_character_blendshape_presets()
-    extraction_ok = extract_vanilla_gtav_assets(force_reextract=force_reextract)
-    print_setup_diagnostics()
-    return extraction_ok
+        ensure_character_blendshape_presets()
+        extraction_ok = extract_vanilla_gtav_assets(force_reextract=force_reextract)
+        print_setup_diagnostics()
+        return extraction_ok
+    except Exception as exc:
+        active_logger.error(f"First-Run setup failed: {exc}")
+        return False
 
 
 def main() -> int:
@@ -1128,6 +1359,50 @@ def main() -> int:
         default=None,
         help=project_i18n.translate("setup.cli_python"),
     )
+    arg_parser.add_argument(
+        "--avatar-zip",
+        default=None,
+        help="Path to avatar .zip or .unitypackage archive for First-Run extraction",
+    )
+    arg_parser.add_argument(
+        "--unity-project",
+        default=None,
+        help="Path to an existing Unity project directory (containing Assets/) or .unity scene",
+    )
+    arg_parser.add_argument(
+        "--avatar-name",
+        default=None,
+        help="Avatar name to select automatically from the Unity scene",
+    )
+    arg_parser.add_argument(
+        "--target-character",
+        choices=["michael", "franklin", "trevor"],
+        default=None,
+        help="GTA V protagonist target slot",
+    )
+    arg_parser.add_argument(
+        "--download-blender",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Automatically download portable Blender 4.0.2 + Sollumz when missing",
+    )
+    arg_parser.add_argument(
+        "--import-face-blendshapes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Import facial blendshapes from Unity into .cfg (No zeroes face keys)",
+    )
+    arg_parser.add_argument(
+        "--import-body-blendshapes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Import body/outfit blendshapes from Unity into .cfg (No zeroes body keys)",
+    )
+    arg_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Detailed console output + timestamped log file in logs/",
+    )
 
     parsed_args = arg_parser.parse_args()
     project_i18n.set_active_language(parsed_args.lang)
@@ -1144,6 +1419,14 @@ def main() -> int:
         blender_override=parsed_args.blender,
         rage_override=parsed_args.rage,
         python_override=parsed_args.python,
+        avatar_zip_override=parsed_args.avatar_zip,
+        unity_project_override=parsed_args.unity_project,
+        download_blender=parsed_args.download_blender,
+        avatar_name_override=parsed_args.avatar_name,
+        target_character_override=parsed_args.target_character,
+        import_face_blendshapes=parsed_args.import_face_blendshapes,
+        import_body_blendshapes=parsed_args.import_body_blendshapes,
+        verbose=parsed_args.verbose,
     )
     return 0 if setup_ok else 1
 

@@ -199,15 +199,36 @@ def execute_subcommand(
     command_arguments: List[str],
     task_description: str,
     custom_environment: Optional[Dict[str, str]] = None,
+    timeout_sec: Optional[float] = 1800.0,
 ) -> bool:
     """
     Execute a subprocess safely while streaming salient progress lines and
     reporting detailed failure diagnostics if the command returns non-zero.
+    Kills child process cleanly on timeout or error so no orphan processes remain.
     """
     print(project_i18n.translate("manager.subcmd_starting", task=task_description))
     start_timestamp = time.time()
     captured_output_lines: List[str] = []
     effective_env = _build_subprocess_env(custom_environment)
+    verbose_mode = os.environ.get("VRC2GTAV_VERBOSE", "0") == "1"
+    process_execution: Optional[subprocess.Popen] = None
+
+    def _terminate_child(proc_obj: Optional[subprocess.Popen]) -> None:
+        if proc_obj is None or proc_obj.poll() is not None:
+            return
+        try:
+            proc_obj.terminate()
+            proc_obj.wait(timeout=3.0)
+        except Exception:
+            try:
+                proc_obj.kill()
+                proc_obj.wait(timeout=3.0)
+            except Exception:
+                pass
+
+    import threading
+    timed_out_flag = False
+    watchdog_timer: Optional[threading.Timer] = None
 
     try:
         process_execution = subprocess.Popen(
@@ -222,6 +243,16 @@ def execute_subcommand(
             env=effective_env,
         )
 
+        if timeout_sec is not None and timeout_sec > 0:
+            def _on_timeout() -> None:
+                nonlocal timed_out_flag
+                timed_out_flag = True
+                _terminate_child(process_execution)
+
+            watchdog_timer = threading.Timer(float(timeout_sec), _on_timeout)
+            watchdog_timer.daemon = True
+            watchdog_timer.start()
+
         if process_execution.stdout is not None:
             for raw_output_line in process_execution.stdout:
                 stripped_line = raw_output_line.rstrip()
@@ -229,14 +260,21 @@ def execute_subcommand(
                     continue
                 captured_output_lines.append(stripped_line)
 
-                if any(
+                if verbose_mode or any(
                     status_marker in stripped_line
                     for status_marker in SUBCOMMAND_STATUS_MARKERS
                 ):
                     print(f"    {stripped_line}")
 
-        process_execution.wait()
+        process_execution.wait(timeout=timeout_sec if (timeout_sec and timeout_sec > 0) else None)
+        if watchdog_timer is not None:
+            watchdog_timer.cancel()
         elapsed_seconds = time.time() - start_timestamp
+
+        if timed_out_flag:
+            raise TimeoutError(
+                f"{task_description} exceeded timeout of {timeout_sec:.0f}s"
+            )
 
         if process_execution.returncode != 0:
             print(
@@ -262,6 +300,9 @@ def execute_subcommand(
         return True
 
     except Exception as unexpected_error:
+        if watchdog_timer is not None:
+            watchdog_timer.cancel()
+        _terminate_child(process_execution)
         print(
             project_i18n.translate(
                 "manager.subcmd_unexpected_error",
@@ -284,6 +325,7 @@ def verify_system_prerequisites() -> bool:
     try:
         dep_check = subprocess.run(
             [PYTHON_EXECUTABLE, "-c", "import PIL, numpy"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=15,
@@ -634,7 +676,11 @@ def run_interactive_hair_config() -> bool:
     if candidates:
         for idx_offset, item_entry in enumerate(candidates, start=4):
             kind_tag = item_entry.get("kind", "prefab")
-            rel_label = item_entry.get("relative_path") or item_entry.get("path", "")
+            rel_label = (
+                item_entry.get("relative_path")
+                or item_entry.get("relative")
+                or item_entry.get("path", "")
+            )
             print(f"  [{idx_offset}] [{kind_tag}] {rel_label}")
     else:
         print(project_i18n.translate("manager.hair_no_candidates"))
@@ -844,6 +890,7 @@ def run_interactive_menu() -> None:
                 sys.exit(1)
             load_runtime_context(force_reload=True)
 
+    context_dirty = True
     while True:
         separator_banner = "=" * 70
         print(f"\n{separator_banner}")
@@ -851,7 +898,9 @@ def run_interactive_menu() -> None:
         print(f"{separator_banner}")
         print(project_i18n.translate("manager.menu_prompt_select"))
         if project_paths.has_project_config_file():
-            load_runtime_context(force_reload=True)
+            if context_dirty:
+                load_runtime_context(force_reload=True)
+                context_dirty = False
             for opt_index, protagonist_key in enumerate(
                 project_paths.list_available_protagonists(), start=1
             ):
@@ -892,6 +941,7 @@ def run_interactive_menu() -> None:
                 print(project_i18n.translate("manager.missing_cfg_option6"))
                 sys.exit(1)
             load_runtime_context(force_reload=True)
+            context_dirty = False
             run_interactive_physbone_sync()
             continue
 
@@ -900,6 +950,7 @@ def run_interactive_menu() -> None:
                 print(project_i18n.translate("manager.missing_cfg_option6"))
                 sys.exit(1)
             load_runtime_context(force_reload=True)
+            context_dirty = False
             run_interactive_blendshape_sync()
             continue
 
@@ -908,6 +959,7 @@ def run_interactive_menu() -> None:
                 print(project_i18n.translate("manager.missing_cfg_option6"))
                 sys.exit(1)
             run_interactive_hair_config()
+            context_dirty = True
             continue
 
         if user_menu_choice == "7":
@@ -915,6 +967,7 @@ def run_interactive_menu() -> None:
                 print(project_i18n.translate("manager.missing_cfg_option6"))
                 sys.exit(1)
             run_interactive_avatar_swap()
+            context_dirty = True
             continue
 
         if user_menu_choice == "6":
@@ -923,8 +976,8 @@ def run_interactive_menu() -> None:
 
         if user_menu_choice == "5":
             load_runtime_context(force_reload=True)
-            execute_rpf_repack_and_deploy()
-            sys.exit(0)
+            deploy_ok = execute_rpf_repack_and_deploy()
+            sys.exit(0 if deploy_ok else 1)
 
         break
 
@@ -1197,10 +1250,52 @@ def main() -> None:
         default=None,
         help=project_i18n.translate("physbones.cli_marshmallow"),
     )
+    argument_parser.add_argument(
+        "--avatar-zip",
+        default=None,
+        help="Path to avatar .zip or .unitypackage archive",
+    )
+    argument_parser.add_argument(
+        "--unity-project",
+        default=None,
+        help="Path to Unity project directory (containing Assets/) or .unity scene",
+    )
+    argument_parser.add_argument(
+        "--download-blender",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Auto-download portable Blender 4.0.2 + Sollumz if missing",
+    )
+    argument_parser.add_argument(
+        "--import-face-blendshapes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Import facial blendshapes from Unity into .cfg (No zeroes face keys)",
+    )
+    argument_parser.add_argument(
+        "--import-body-blendshapes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Import body/outfit blendshapes from Unity into .cfg (No zeroes body keys)",
+    )
+    argument_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Detailed console output + timestamped log file in logs/",
+    )
 
     parsed_arguments = argument_parser.parse_args()
     active_language = project_i18n.set_active_language(parsed_arguments.lang)
     os.environ[project_i18n.LANG_ENV_VAR] = active_language
+    if parsed_arguments.verbose:
+        os.environ["VRC2GTAV_VERBOSE"] = "1"
+    import error_handler_helper as err_helper
+    manager_logger = err_helper.PipelineLogger(
+        verbose=bool(parsed_arguments.verbose),
+        avatar_name=parsed_arguments.unity_avatar_name or parsed_arguments.character or "manager",
+        stage_name="run_mod_manager",
+        project_root=project_paths.get_project_root(),
+    )
 
     # Export FBX & Unity blendshape presets to configs/*_blendshapes.cfg
     if parsed_arguments.export_blendshapes:
@@ -1254,6 +1349,11 @@ def main() -> None:
 
     # Explicit First-Run setup flow
     if parsed_arguments.setup:
+        setup_target_char = (
+            parsed_arguments.character
+            if parsed_arguments.character in ("michael", "franklin", "trevor")
+            else None
+        )
         setup_ok = setup_first_run.run_first_run_setup(
             interactive=not parsed_arguments.non_interactive,
             force_reextract=parsed_arguments.force_setup,
@@ -1261,6 +1361,14 @@ def main() -> None:
             unity_assets_override=parsed_arguments.unity_assets,
             blender_override=parsed_arguments.blender,
             rage_override=parsed_arguments.rage,
+            avatar_zip_override=parsed_arguments.avatar_zip,
+            unity_project_override=parsed_arguments.unity_project,
+            download_blender=parsed_arguments.download_blender,
+            avatar_name_override=parsed_arguments.unity_avatar_name,
+            target_character_override=setup_target_char,
+            import_face_blendshapes=parsed_arguments.import_face_blendshapes,
+            import_body_blendshapes=parsed_arguments.import_body_blendshapes,
+            verbose=parsed_arguments.verbose,
         )
         if not setup_ok:
             sys.exit(1)
@@ -1327,17 +1435,67 @@ def main() -> None:
         ):
             sys.exit(0)
 
+    if parsed_arguments.avatar_zip or parsed_arguments.unity_project:
+        import build_universal_avatar
+        target_slot = (
+            parsed_arguments.character
+            if parsed_arguments.character in ("michael", "franklin", "trevor")
+            else None
+        )
+        universal_argv: List[str] = []
+        if parsed_arguments.avatar_zip:
+            universal_argv.extend(["--avatar-zip", parsed_arguments.avatar_zip])
+        if parsed_arguments.unity_project:
+            universal_argv.extend(["--unity-project", parsed_arguments.unity_project])
+        if parsed_arguments.unity_scene:
+            universal_argv.extend(["--unity-scene", parsed_arguments.unity_scene])
+        if parsed_arguments.unity_avatar_name:
+            universal_argv.extend(["--avatar-name", parsed_arguments.unity_avatar_name])
+        if target_slot:
+            universal_argv.extend(["--target-character", target_slot])
+        if parsed_arguments.import_face_blendshapes is True:
+            universal_argv.append("--import-face-blendshapes")
+        elif parsed_arguments.import_face_blendshapes is False:
+            universal_argv.append("--no-import-face-blendshapes")
+        if parsed_arguments.import_body_blendshapes is True:
+            universal_argv.append("--import-body-blendshapes")
+        elif parsed_arguments.import_body_blendshapes is False:
+            universal_argv.append("--no-import-body-blendshapes")
+        if parsed_arguments.download_blender:
+            universal_argv.append("--auto-download-blender")
+        if parsed_arguments.physbones_marshmallow:
+            universal_argv.append("--physbones-marshmallow")
+        if not parsed_arguments.non_interactive:
+            universal_argv.append("--interactive")
+        if parsed_arguments.skip_blender:
+            universal_argv.append("--prepare-only")
+        if parsed_arguments.verbose:
+            universal_argv.append("--verbose")
+        univ_exit = build_universal_avatar.main(universal_argv)
+        if univ_exit != 0:
+            manager_logger.error("Universal Modular Avatar build failed.")
+            sys.exit(univ_exit)
+        if parsed_arguments.skip_deploy or parsed_arguments.skip_blender:
+            sys.exit(0)
+
     # Interactive mode when no character/action flags were specified
     if (
         parsed_arguments.character is None
         and not parsed_arguments.deploy_only
         and not parsed_arguments.check_env
     ):
+        if parsed_arguments.non_interactive:
+            sys.exit(0)
         run_interactive_menu()
         sys.exit(0)
 
     if not project_paths.has_project_config_file() or setup_first_run.is_first_run_needed():
         print(project_i18n.translate("manager.auto_setup_info"))
+        auto_target_char = (
+            parsed_arguments.character
+            if parsed_arguments.character in ("michael", "franklin", "trevor")
+            else None
+        )
         setup_ok = setup_first_run.run_first_run_setup(
             interactive=False,
             force_reextract=False,
@@ -1345,6 +1503,14 @@ def main() -> None:
             unity_assets_override=parsed_arguments.unity_assets,
             blender_override=parsed_arguments.blender,
             rage_override=parsed_arguments.rage,
+            avatar_zip_override=parsed_arguments.avatar_zip,
+            unity_project_override=parsed_arguments.unity_project,
+            download_blender=parsed_arguments.download_blender,
+            avatar_name_override=parsed_arguments.unity_avatar_name,
+            target_character_override=auto_target_char,
+            import_face_blendshapes=parsed_arguments.import_face_blendshapes,
+            import_body_blendshapes=parsed_arguments.import_body_blendshapes,
+            verbose=parsed_arguments.verbose,
         )
         if not setup_ok:
             print(project_i18n.translate("manager.auto_setup_failed"))
@@ -1369,8 +1535,8 @@ def main() -> None:
         sys.exit(0 if prerequisites_valid else 1)
 
     if parsed_arguments.deploy_only:
-        execute_rpf_repack_and_deploy()
-        sys.exit(0)
+        deploy_ok = execute_rpf_repack_and_deploy()
+        sys.exit(0 if deploy_ok else 1)
 
     if parsed_arguments.character == "all":
         selected_characters_list = ["michael", "franklin", "trevor"]

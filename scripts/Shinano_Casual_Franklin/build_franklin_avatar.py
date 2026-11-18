@@ -280,7 +280,16 @@ for cleanup_name in (f"{skeleton_arm_name}.mesh", f"{ped_name}.mesh", "SKEL_ROOT
 source_fbx_path = str(FRANKLIN_CFG["source_fbx"])
 print(project_i18n.translate("franklin.importing_fbx", filename=Path(source_fbx_path).name))
 bpy.ops.import_scene.fbx(filepath=source_fbx_path)
-shinano_armature = bpy.data.objects["Armature"]
+shinano_armature = bpy.data.objects.get("Armature") or next(
+    (
+        arm_cand
+        for arm_cand in bpy.data.objects
+        if arm_cand.type == "ARMATURE" and arm_cand != franklin_armature
+    ),
+    None,
+)
+if shinano_armature is None:
+    raise RuntimeError(f"Imported Shinano armature not found from {source_fbx_path}")
 
 # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
 unity_config = unity_scene_helper.load_unity_avatar_from_cfg(
@@ -801,7 +810,7 @@ for mesh_name in include_mesh_names:
         alpha_indices = [
             mat_idx
             for mat_idx, mat_item in enumerate(src_obj.data.materials)
-            if "alpha" in mat_item.name.lower()
+            if mat_item is not None and "alpha" in mat_item.name.lower()
         ]
         orig_loop_layer = bm_data.loops.layers.int.new("orig_loop_idx")
         loop_counter = 0
@@ -865,7 +874,7 @@ for mesh_name in include_mesh_names:
 
     # Copy non-alpha material slots
     for mat_slot_item in src_obj.data.materials:
-        if mesh_name == "Body" and "alpha" in mat_slot_item.name.lower():
+        if mesh_name == "Body" and mat_slot_item is not None and "alpha" in mat_slot_item.name.lower():
             continue
         new_obj.data.materials.append(mat_slot_item)
 
@@ -1058,8 +1067,11 @@ for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume", "Shinano_hai
             shader_node.set_float(0.0)
         elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
             shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings" and hasattr(shader_node, "set_vec4"):
-            shader_node.set_vec3((0.0, 0.0, 0.0))
+        elif shader_node.name == "detailSettings":
+            if hasattr(shader_node, "set_vec3"):
+                shader_node.set_vec3((0.0, 0.0, 0.0))
+            elif hasattr(shader_node, "set_vec4"):
+                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
         elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
             shader_node.set_float(0.0)
         elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):

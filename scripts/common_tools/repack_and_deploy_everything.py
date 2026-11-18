@@ -282,67 +282,80 @@ def copy_file_with_progress(
         flush=True,
     )
 
-    if total_file_bytes == 0:
-        shutil.copy2(str(source_file_path), str(destination_file_path))
-        write_progress_line(
-            project_i18n.translate(
-                "repack.copy_zero_done", bar=format_progress_bar(1.0)
-            ),
-            is_final=True,
-        )
-        return
+    temp_dest_path = destination_file_path.with_name(
+        f".{destination_file_path.name}.tmp.{os.getpid()}"
+    )
+    try:
+        if total_file_bytes == 0:
+            shutil.copy2(str(source_file_path), str(temp_dest_path))
+            os.replace(temp_dest_path, destination_file_path)
+            write_progress_line(
+                project_i18n.translate(
+                    "repack.copy_zero_done", bar=format_progress_bar(1.0)
+                ),
+                is_final=True,
+            )
+            return
 
-    chunk_size_bytes = 4 * 1024 * 1024
-    copied_bytes = 0
-    copy_start_time = time.time()
-    last_tty_refresh = 0.0
-    next_non_tty_milestone = 25.0
-    is_interactive_tty = sys.stdout.isatty()
+        chunk_size_bytes = 4 * 1024 * 1024
+        copied_bytes = 0
+        copy_start_time = time.time()
+        last_tty_refresh = 0.0
+        next_non_tty_milestone = 25.0
+        is_interactive_tty = sys.stdout.isatty()
 
-    with open(source_file_path, "rb") as source_handle:
-        with open(destination_file_path, "wb") as dest_handle:
-            while True:
-                data_chunk = source_handle.read(chunk_size_bytes)
-                if not data_chunk:
-                    break
-                dest_handle.write(data_chunk)
-                copied_bytes += len(data_chunk)
+        with open(source_file_path, "rb") as source_handle:
+            with open(temp_dest_path, "wb") as dest_handle:
+                while True:
+                    data_chunk = source_handle.read(chunk_size_bytes)
+                    if not data_chunk:
+                        break
+                    dest_handle.write(data_chunk)
+                    copied_bytes += len(data_chunk)
 
-                fraction_done = min(1.0, copied_bytes / total_file_bytes)
-                percent_done = fraction_done * 100.0
-                current_time = time.time()
-                elapsed_seconds = max(0.001, current_time - copy_start_time)
-                transfer_rate_mbs = (copied_bytes / (1024.0 * 1024.0)) / elapsed_seconds
-                copied_megabytes = copied_bytes / (1024.0 * 1024.0)
-                remaining_bytes = max(0, total_file_bytes - copied_bytes)
-                eta_seconds = (
-                    (remaining_bytes / (1024.0 * 1024.0)) / transfer_rate_mbs
-                    if transfer_rate_mbs > 0.0
-                    else 0.0
-                )
-
-                should_render_tty = is_interactive_tty and (
-                    current_time - last_tty_refresh >= 0.15
-                )
-                should_render_log = (not is_interactive_tty) and (
-                    percent_done >= next_non_tty_milestone and percent_done < 100.0
-                )
-                if should_render_tty or should_render_log:
-                    progress_text = project_i18n.translate(
-                        "repack.copy_progress",
-                        bar=format_progress_bar(fraction_done),
-                        percent=percent_done,
-                        copied_mb=copied_megabytes,
-                        total_mb=total_megabytes,
-                        rate_mbs=transfer_rate_mbs,
-                        eta_sec=eta_seconds,
+                    fraction_done = min(1.0, copied_bytes / total_file_bytes)
+                    percent_done = fraction_done * 100.0
+                    current_time = time.time()
+                    elapsed_seconds = max(0.001, current_time - copy_start_time)
+                    transfer_rate_mbs = (copied_bytes / (1024.0 * 1024.0)) / elapsed_seconds
+                    copied_megabytes = copied_bytes / (1024.0 * 1024.0)
+                    remaining_bytes = max(0, total_file_bytes - copied_bytes)
+                    eta_seconds = (
+                        (remaining_bytes / (1024.0 * 1024.0)) / transfer_rate_mbs
+                        if transfer_rate_mbs > 0.0
+                        else 0.0
                     )
-                    write_progress_line(progress_text, is_final=False)
-                    last_tty_refresh = current_time
-                    while next_non_tty_milestone <= percent_done:
-                        next_non_tty_milestone += 25.0
 
-    shutil.copystat(str(source_file_path), str(destination_file_path))
+                    should_render_tty = is_interactive_tty and (
+                        current_time - last_tty_refresh >= 0.15
+                    )
+                    should_render_log = (not is_interactive_tty) and (
+                        percent_done >= next_non_tty_milestone and percent_done < 100.0
+                    )
+                    if should_render_tty or should_render_log:
+                        progress_text = project_i18n.translate(
+                            "repack.copy_progress",
+                            bar=format_progress_bar(fraction_done),
+                            percent=percent_done,
+                            copied_mb=copied_megabytes,
+                            total_mb=total_megabytes,
+                            rate_mbs=transfer_rate_mbs,
+                            eta_sec=eta_seconds,
+                        )
+                        write_progress_line(progress_text, is_final=False)
+                        last_tty_refresh = current_time
+                        while next_non_tty_milestone <= percent_done:
+                            next_non_tty_milestone += 25.0
+
+        shutil.copystat(str(source_file_path), str(temp_dest_path))
+        os.replace(temp_dest_path, destination_file_path)
+    except Exception:
+        if temp_dest_path.exists():
+            try:
+                temp_dest_path.unlink()
+            except OSError:
+                pass
+        raise
     total_elapsed = max(0.001, time.time() - copy_start_time)
     final_rate_mbs = total_megabytes / total_elapsed
     write_progress_line(
@@ -380,6 +393,7 @@ def execute_rage_create_with_progress(
     )
 
     start_timestamp = time.time()
+    process_timeout_sec = 600.0
     process_handle = subprocess.Popen(
         command_arguments_list,
         stdin=subprocess.DEVNULL,
@@ -407,50 +421,65 @@ def execute_rage_create_with_progress(
     next_write_milestone = 25.0
     tty_line_active = False
 
-    while process_handle.poll() is None:
-        current_time = time.time()
-        elapsed_seconds = current_time - start_timestamp
-        written_bytes = output_rpf_path.stat().st_size if output_rpf_path.exists() else 0
+    try:
+        while process_handle.poll() is None:
+            current_time = time.time()
+            elapsed_seconds = current_time - start_timestamp
+            if elapsed_seconds > process_timeout_sec:
+                raise TimeoutError(
+                    f"{task_description} exceeded timeout of {process_timeout_sec:.0f}s"
+                )
+            written_bytes = output_rpf_path.stat().st_size if output_rpf_path.exists() else 0
 
-        if written_bytes <= 0:
-            activity_bar = format_indeterminate_bar(tick_counter)
-            line_msg = project_i18n.translate(
-                "repack.reading_files",
-                bar=activity_bar,
-                elapsed=elapsed_seconds,
-                expected_mb=expected_megabytes,
-            )
-            if is_interactive_tty:
-                write_progress_line(line_msg, is_final=False)
-                tty_line_active = True
-            elif current_time - last_log_heartbeat >= 5.0:
-                write_progress_line(line_msg, is_final=True)
-                last_log_heartbeat = current_time
-        else:
-            write_fraction = min(0.99, written_bytes / expected_bytes)
-            write_percent = write_fraction * 100.0
-            written_megabytes = written_bytes / (1024.0 * 1024.0)
-            line_msg = project_i18n.translate(
-                "repack.writing_rpf",
-                bar=format_progress_bar(write_fraction),
-                percent=write_percent,
-                written_mb=written_megabytes,
-                expected_mb=expected_megabytes,
-                elapsed=elapsed_seconds,
-            )
-            if is_interactive_tty:
-                write_progress_line(line_msg, is_final=False)
-                tty_line_active = True
-            elif write_percent >= next_write_milestone or (current_time - last_log_heartbeat >= 5.0):
-                write_progress_line(line_msg, is_final=True)
-                last_log_heartbeat = current_time
-                while next_write_milestone <= write_percent:
-                    next_write_milestone += 25.0
+            if written_bytes <= 0:
+                activity_bar = format_indeterminate_bar(tick_counter)
+                line_msg = project_i18n.translate(
+                    "repack.reading_files",
+                    bar=activity_bar,
+                    elapsed=elapsed_seconds,
+                    expected_mb=expected_megabytes,
+                )
+                if is_interactive_tty:
+                    write_progress_line(line_msg, is_final=False)
+                    tty_line_active = True
+                elif current_time - last_log_heartbeat >= 5.0:
+                    write_progress_line(line_msg, is_final=True)
+                    last_log_heartbeat = current_time
+            else:
+                write_fraction = min(0.99, written_bytes / expected_bytes)
+                write_percent = write_fraction * 100.0
+                written_megabytes = written_bytes / (1024.0 * 1024.0)
+                line_msg = project_i18n.translate(
+                    "repack.writing_rpf",
+                    bar=format_progress_bar(write_fraction),
+                    percent=write_percent,
+                    written_mb=written_megabytes,
+                    expected_mb=expected_megabytes,
+                    elapsed=elapsed_seconds,
+                )
+                if is_interactive_tty:
+                    write_progress_line(line_msg, is_final=False)
+                    tty_line_active = True
+                elif write_percent >= next_write_milestone or (current_time - last_log_heartbeat >= 5.0):
+                    write_progress_line(line_msg, is_final=True)
+                    last_log_heartbeat = current_time
+                    while next_write_milestone <= write_percent:
+                        next_write_milestone += 25.0
 
-        tick_counter += 1
-        time.sleep(0.2)
-
-    reader_thread.join(timeout=5.0)
+            tick_counter += 1
+            time.sleep(0.2)
+    finally:
+        if process_handle.poll() is None:
+            try:
+                process_handle.terminate()
+                process_handle.wait(timeout=3.0)
+            except Exception:
+                try:
+                    process_handle.kill()
+                    process_handle.wait(timeout=3.0)
+                except Exception:
+                    pass
+        reader_thread.join(timeout=5.0)
     combined_stdout = "".join(captured_output_lines)
 
     if process_handle.returncode != 0:
@@ -687,8 +716,10 @@ def run_repack_and_deploy() -> None:
 
         dlc_verification_output = subprocess.run(
             [rage_cli_tool, "list", "-d", str(target_dlc_rpf_path)],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            timeout=120.0,
             check=True,
         ).stdout
         dlc_compressed_entries = [
@@ -705,8 +736,10 @@ def run_repack_and_deploy() -> None:
 
         x64v_verification_output = subprocess.run(
             [rage_cli_tool, "list", "-d", str(target_x64v_rpf_path)],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            timeout=120.0,
             check=True,
         ).stdout
         x64v_compressed_entries = [
@@ -721,6 +754,26 @@ def run_repack_and_deploy() -> None:
             )
         )
 
+        is_patchday4_valid = True
+        if has_patchday4ng_staging and target_patchday4ng_dlc_path.is_file():
+            with open(target_patchday4ng_dlc_path, "rb") as pd4_file:
+                pd4_file.seek(12)
+                pd4_flag = pd4_file.read(4)
+            pd4_output = subprocess.run(
+                [rage_cli_tool, "list", "-d", str(target_patchday4ng_dlc_path)],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=120.0,
+                check=True,
+            ).stdout
+            pd4_compressed = [
+                line_item
+                for line_item in pd4_output.splitlines()
+                if "Compressed:" in line_item and "Compressed: 0" not in line_item
+            ]
+            is_patchday4_valid = (len(pd4_compressed) == 0 and pd4_flag == b"OPEN")
+
         is_dlc_valid = (
             len(dlc_compressed_entries) == 0 and dlc_encryption_flag == b"OPEN"
         )
@@ -728,7 +781,7 @@ def run_repack_and_deploy() -> None:
             len(x64v_compressed_entries) == 0 and x64v_encryption_flag == b"OPEN"
         )
 
-        if is_dlc_valid and is_x64v_valid:
+        if is_dlc_valid and is_x64v_valid and is_patchday4_valid:
             stage_tracker.finish_pipeline()
             print(project_i18n.translate("repack.verify_passed"))
         else:

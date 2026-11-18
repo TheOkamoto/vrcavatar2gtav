@@ -161,21 +161,30 @@ GTA V protagonist outfits span multiple component slots (`uppr`, `lowr`, `feet`,
 
 ## 8. Running the Pipeline (First-Run, Manager & Tests)
 
-### 8.1 First-Run Setup (Required on a Fresh Clone)
-Before building textures or repacking RPFs:
+### 8.1 First-Run Setup, `.zip`/Unity Ingestion & Blender 4.0.2 Auto-Download
+Starting from a clean GitHub clone or a brand-new Unity project containing only VRChat SDK + your avatar (e.g. `Shinano.zip`):
 
 ```bash
-python scripts/common_tools/setup_first_run.py
-# Or through the master orchestrator:
-python run_mod_manager.py --setup
+python scripts/common_tools/setup_first_run.py --avatar-zip "/path/to/Shinano_ver1.02.zip" --download-blender --verbose
+# Or via an existing Unity project / master orchestrator:
+python run_mod_manager.py --setup --unity-project "/path/to/MyUnityProject" --download-blender
 ```
 
-This wizard initializes `vrc2gtav.cfg` from [`vrc2gtav.cfg.example`](../vrc2gtav.cfg.example), validates `GTA5.exe`, Unity `Assets`, `blender`, and `rage`, and extracts the user's vanilla GTA V RPFs into local `staging/`. Add `--check-only` to inspect prerequisites without writing files, or `--lang en|ja|pt` to override language.
+Key behaviors built into [`setup_first_run.py`](../scripts/common_tools/setup_first_run.py), [`avatar_archive_helper.py`](../scripts/common_tools/avatar_archive_helper.py), [`modular_avatar_helper.py`](../scripts/common_tools/modular_avatar_helper.py), and [`build_universal_avatar.py`](../scripts/common_tools/build_universal_avatar.py):
+1. **Portable Blender `4.0.2` + `Sollumz` Auto-Install**: Checks the configured Blender binary version (`4.0.x`) and verifies `4.0/scripts/addons/sollumz/__init__.py`. If absent, `--download-blender` (or confirming the prompt) fetches portable Blender `4.0.2` + `Sollumz` atomically into `tools/`.
+2. **Safe `.zip` / `.unitypackage` Extraction**: Extracts Archives with Zip-Slip protection into gitignored `imported_unity_projects/`, preserving `.meta` GUIDs so Unity scenes, outfits, and materials resolve accurately.
+3. **Paginated Scene Avatar Selector (`10` / page + `Next`)**: Scans `SceneRoots` + `PrefabInstance` hierarchies cleanly and presents pages of 10 avatars with `[N] Next page >>` / `[P] << Prev` navigation.
+4. **Native Modular Avatar (NDMF) Bake Engine**: Supports arbitrary dresses/accessories carrying `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, embedded `VRCPhysBone`s, and lilToon textures onto `michael`, `franklin`, or `trevor`.
+5. **Separate Face & Body Blendshape Import Prompts**: Prompts independently for face (`--import-face-blendshapes`) and body (`--import-body-blendshapes`). Selecting **No** writes a `.cfg` containing all avatar + custom dress FBX blendshapes zeroed (`0.0`).
+6. **Error Handling & `--verbose` Logs**: [`error_handler_helper.py`](../scripts/common_tools/error_handler_helper.py) wraps downloads, extractions, parsers, and subprocesses in structured `try/except` stages, keeping default stdout concise while `--verbose` writes timestamped `logs/<YYYYMMDD_HHMMSS>_<avatar>_<stage>.log` files.
 
 ### 8.2 Interactive Manager & CLI Modes
 On Windows, double-click [`RUN_MANAGER.bat`](../RUN_MANAGER.bat) (or [`EXECUTAR_GERENCIADOR.bat`](../EXECUTAR_GERENCIADOR.bat)), or run via terminal:
 
 ```bash
+# Universal Modular Avatar workflow (CLI or interactive wizard):
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Shinano_ver1.02.zip" --interactive --verbose
+
 # Launch interactive menu:
 python run_mod_manager.py
 
@@ -203,10 +212,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) validates both source invariants and compiled game outputs:
 
 ```bash
-# Full suite (10 checks; requires First-Run, build, and deploy):
+# Full suite (11 checks; requires First-Run, build, and deploy):
 python scripts/common_tools/test_mod_suite.py --lang en
 
-# Source-only suite (7 checks; runs on a fresh clone prior to First-Run):
+# Source-only suite (8 checks; runs on a fresh clone prior to First-Run):
 python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ```
 

@@ -963,7 +963,7 @@ def build_shinano_er_for_gtav(cli_args):
     applied_scene_summary = blendshape_helper.apply_blendshapes_to_blender_scene(
         bpy,
         resolved_mesh_weights,
-        exclude_meshes=() if hair_mode == "custom" else custom_hair_mesh_names,
+        exclude_meshes=() if hair_mode == "custom" else neko_hair_mesh_names,
         lr_symmetry_meshes=(),
         reset_unlisted=True,
     )
@@ -1789,8 +1789,11 @@ def build_shinano_er_for_gtav(cli_args):
             shader_node.set_float(0.35)
         elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
             shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings" and hasattr(shader_node, "set_vec4"):
-            shader_node.set_vec3((0.0, 0.0, 0.0))
+        elif shader_node.name == "detailSettings":
+            if hasattr(shader_node, "set_vec3"):
+                shader_node.set_vec3((0.0, 0.0, 0.0))
+            elif hasattr(shader_node, "set_vec4"):
+                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
         elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
             shader_node.set_float(0.85)
         elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):

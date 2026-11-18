@@ -51,8 +51,13 @@ renders/
 # Machine-local path configuration (generated from vrc2gtav.cfg.example)
 vrc2gtav.cfg
 
-# Local backups and runtime-generated outputs
+# Local backups, downloads, logs, tools, and runtime-generated outputs
 backups/
+logs/
+tools/
+imported_unity_projects/
+*.zip
+*.unitypackage
 1_Franklin_Shinano_Casual/3_textures_gtav/textures/
 1_Franklin_Shinano_Casual/4_exported_models/
 2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas/

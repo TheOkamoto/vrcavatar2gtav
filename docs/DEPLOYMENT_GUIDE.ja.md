@@ -161,19 +161,30 @@ GTA V の主人公服装は複数スロット (`uppr`, `lowr`, `feet`, `head`, `
 
 ## 8. パイプライン実行 (First-Run・マネージャー・検証)
 
-### 8.1 First-Run セットアップ (新規クローン時の必須手順)
+### 8.1 First-Run・`.zip`/Unity 読込 & Blender 4.0.2 自動取得
+VRChat SDK とアバターだけが入った新規 Unity プロジェクトや配布 `.zip`（例: `Shinano.zip`）から直接環境構築できます:
+
 ```bash
-python scripts/common_tools/setup_first_run.py
-# またはマネージャーから実行:
-python run_mod_manager.py --setup
+python scripts/common_tools/setup_first_run.py --avatar-zip "/path/to/Shinano_ver1.02.zip" --download-blender --verbose
+# または既存 Unity プロジェクトを指定して実行:
+python run_mod_manager.py --setup --unity-project "/path/to/UnityProject" --download-blender
 ```
 
-このウィザードは [`vrc2gtav.cfg.example`](../vrc2gtav.cfg.example) から `vrc2gtav.cfg` を初期化し、`GTA5.exe`・Unity `Assets`・`blender`・`rage` を検証してユーザー環境の純正 RPF をローカルの `staging/` へ展開します。変更なしで状態確認のみ行う場合は `--check-only`、言語指定は `--lang en|ja|pt` を付与します。
+主な機能 ([`setup_first_run.py`](../scripts/common_tools/setup_first_run.py)・[`avatar_archive_helper.py`](../scripts/common_tools/avatar_archive_helper.py)・[`modular_avatar_helper.py`](../scripts/common_tools/modular_avatar_helper.py)・[`build_universal_avatar.py`](../scripts/common_tools/build_universal_avatar.py)):
+1. **Blender `4.0.2` + `Sollumz` 自動導入**: バージョンとアドオンを検査し、不足時はポータブル版を `tools/` へ安全に取得・展開します。
+2. **`.zip` / `.unitypackage` 安全展開**: Zip-Slip 対策済みで `imported_unity_projects/` へ展開し、`.meta` GUID を保持します。
+3. **10 件ページング＋`Next` アバター選択メニュー**: シーンの `SceneRoots`・`PrefabInstance` を解析し、1ページ10件ずつ `[N] Next` / `[P] Prev` で選択できます。
+4. **ネイティブ Modular Avatar (NDMF) ベイク**: `MergeArmature`・`BoneProxy`・`ScaleAdjuster`・`MeshSettings`・`ObjectToggle`/`Activator`・`ReplaceObject`・`ShapeChanger`・`BlendshapeSync`・内蔵 `VRCPhysBone`・lilToon をそのまま統合ベイクします。
+5. **顔/体ブレンドシェイプ個別確認＋カスタム衣装含む全ゼロ `.cfg`**: `--import-face-blendshapes` / `--import-body-blendshapes` の指定や対話回答に応じ、不要時はアバター＋カスタム衣装 FBX 由来の全キーを `0.0` で保存します。
+6. **専用エラーハンドラ＆ `--verbose` 日時ログ**: [`error_handler_helper.py`](../scripts/common_tools/error_handler_helper.py) により通常表示を簡潔に保ち、`--verbose` 時は `logs/` へ日時・アバター名付きログを保存します。
 
 ### 8.2 対話式マネージャーと CLI モード
 Windows では [`RUN_MANAGER.bat`](../RUN_MANAGER.bat)（または [`EXECUTAR_GERENCIADOR.bat`](../EXECUTAR_GERENCIADOR.bat)）をダブルクリックするか、ターミナルで以下を実行します:
 
 ```bash
+# 汎用 Modular Avatar ビルダーを起動:
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Shinano_ver1.02.zip" --interactive --verbose
+
 # 対話式メニューを起動:
 python run_mod_manager.py
 
@@ -201,10 +212,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) はソース規約とビルド済み出力の双方を検証します:
 
 ```bash
-# フルスイート (10項目: First-Run・ビルド・導入済み環境向け):
+# フルスイート (11項目: First-Run・ビルド・導入済み環境向け):
 python scripts/common_tools/test_mod_suite.py --lang ja
 
-# ソースのみ検証 (7項目: クローン直後・First-Run 前の環境でも実行可能):
+# ソースのみ検証 (8項目: クローン直後・First-Run 前の環境でも実行可能):
 python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ```
 

@@ -933,6 +933,16 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "Python 3 実行ファイル",
         "pt": "Executável Python 3",
     },
+    "setup.prompt_download_blender": {
+        "en": "Blender 4.0.2 not found or wrong version. Download portable Blender 4.0.2 + Sollumz now?",
+        "ja": "Blender 4.0.2 が見つからないかバージョンが異なります。ポータブル版 Blender 4.0.2 + Sollumz をダウンロードしますか？",
+        "pt": "Blender 4.0.2 não encontrado ou versão incompatível. Baixar Blender 4.0.2 portátil + Sollumz agora?",
+    },
+    "setup.prompt_download_sollumz": {
+        "en": "Sollumz add-on is missing in Blender 4.0.2. Download and install Sollumz now?",
+        "ja": "Blender 4.0.2 に Sollumz アドオンが見つかりません。ダウンロードしてインストールしますか？",
+        "pt": "O add-on Sollumz não foi encontrado no Blender 4.0.2. Baixar e instalar o Sollumz agora?",
+    },
     "manager.subcmd_starting": {
         "en": "[STARTING] {task}...",
         "ja": "[開始] {task}...",
@@ -2600,6 +2610,11 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "\n[テスト 6] コード品質・AST 識別子・ミラー同期チェック",
         "pt": "\n[TESTE 6] Qualidade de Código, Identificadores AST e Sincronização de Espelhos",
     },
+    "tests.sec_first_run_ma_title": {
+        "en": "\n[TEST 8] First-Run Archive/Unity, Modular Avatar Bake, Face/Body Blendshapes & Error Handling",
+        "ja": "\n[テスト 8] First-Run 書庫/Unity・Modular Avatar ベイク・顔/体シェイプキー・エラー処理",
+        "pt": "\n[TESTE 8] First-Run Arquivo/Unity, Bake Modular Avatar, Blendshapes Rosto/Corpo e Erros",
+    },
     "tests.no_emojis": {
         "en": "No emojis: {name}",
         "ja": "絵文字なし: {name}",
@@ -2744,6 +2759,11 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "Code Quality and Mirrors",
         "ja": "コード品質とミラー同期",
         "pt": "Qualidade e Espelhos",
+    },
+    "tests.suite_first_run_ma": {
+        "en": "First-Run, Modular Avatar & Error Handling",
+        "ja": "First-Run・Modular Avatar・エラー処理",
+        "pt": "First-Run, Modular Avatar e Tratamento de Erros",
     },
     "tests.suite_paths": {
         "en": "Path Resolution",

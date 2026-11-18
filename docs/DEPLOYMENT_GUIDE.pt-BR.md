@@ -161,21 +161,30 @@ O script [`scripts/common_tools/repack_and_deploy_everything.py`](../scripts/com
 
 ## 8. Como Executar (First-Run, Orquestrador e Testes)
 
-### 8.1 First-Run (Primeira Execução Obrigatória em Instalação Limpa)
-Antes de compilar ou empacotar qualquer personagem:
+### 8.1 First-Run, Ingestão de `.zip`/Unity e Download do Blender 4.0.2
+Partindo de um clone limpo do GitHub ou de um projeto Unity criado do zero contendo apenas o VRChat SDK + seu avatar (ex.: `Shinano.zip`):
 
 ```bash
-python scripts/common_tools/setup_first_run.py
-# Ou diretamente pelo orquestrador:
-python run_mod_manager.py --setup
+python scripts/common_tools/setup_first_run.py --avatar-zip "/caminho/Shinano_ver1.02.zip" --download-blender --verbose
+# Ou apontando diretamente para um projeto Unity existente:
+python run_mod_manager.py --setup --unity-project "/caminho/ProjetoUnity" --download-blender
 ```
 
-O assistente cria `vrc2gtav.cfg`, valida `GTA5.exe`, Unity `Assets`, `blender` (Sollumz) e `rage`, e extrai automaticamente os RPFs originais do jogo do usuário para `staging/`. Para diagnosticar sem alterar arquivos, use `--check-only`; para forçar idioma específico, adicione `--lang pt`, `--lang en` ou `--lang ja`.
+Recursos integrados em [`setup_first_run.py`](../scripts/common_tools/setup_first_run.py), [`avatar_archive_helper.py`](../scripts/common_tools/avatar_archive_helper.py), [`modular_avatar_helper.py`](../scripts/common_tools/modular_avatar_helper.py) e [`build_universal_avatar.py`](../scripts/common_tools/build_universal_avatar.py):
+1. **Download Automático do Blender `4.0.2` + `Sollumz`**: Verifica a versão do Blender (`4.0.x`) e a presença do add-on `Sollumz`. Se ausente, baixa e extrai de forma atômica para `tools/`.
+2. **Extração Segura de `.zip` e `.unitypackage`**: Extrai para `imported_unity_projects/` (ignorado pelo Git) com proteção *Zip-Slip*, preservando exatamente os GUIDs `.meta` das cenas e materiais.
+3. **Menu Paginado de Seleção de Avatar (`10` opções/página + `Next`)**: Lê `SceneRoots` e `PrefabInstance`s da cena `.unity` e exibe 10 avatares por página com botões `[N] Next` e `[P] Prev`.
+4. **Motor Nativo Modular Avatar (NDMF)**: Suporta vestidos/acessórios com `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, `VRCPhysBone`s e materiais lilToon para `michael`, `franklin` ou `trevor`.
+5. **Importação Separada de Blendshapes (Rosto / Corpo) e `.cfg` Zerado**: Pergunta separadamente pelo rosto (`--import-face-blendshapes`) e pelo corpo (`--import-body-blendshapes`). Ao escolher **Não**, gera um `.cfg` completo com todos os *blendshapes* em `0.0`, incluindo os do vestido customizado extraídos via FBX.
+6. **Tratamento de Erros e Logs `--verbose`**: [`error_handler_helper.py`](../scripts/common_tools/error_handler_helper.py) encapsula as etapas em `try/except`, mantendo a tela enxuta por padrão e gravando logs detalhados com data, hora e avatar em `logs/` ao usar `--verbose`.
 
 ### 8.2 Orquestrador Interativo e CLI
 No Windows, dê um duplo clique em [`RUN_MANAGER.bat`](../RUN_MANAGER.bat) (ou [`EXECUTAR_GERENCIADOR.bat`](../EXECUTAR_GERENCIADOR.bat)), ou execute no terminal:
 
 ```bash
+# Fluxo universal Modular Avatar (com seleção paginada 10/página + Next):
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/caminho/Shinano_ver1.02.zip" --interactive --verbose
+
 # Menu interativo completo:
 python run_mod_manager.py
 
@@ -203,10 +212,10 @@ python run_mod_manager.py --check-env
 O arquivo [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) verifica todo o projeto:
 
 ```bash
-# Modo completo (após First-Run, build e deploy): valida 10 suítes
+# Modo completo (após First-Run, build e deploy): valida 11 suítes
 python scripts/common_tools/test_mod_suite.py --lang pt
 
-# Modo apenas código-fonte (em clone limpo antes do First-Run): valida 7 suítes
+# Modo apenas código-fonte (em clone limpo antes do First-Run): valida 8 suítes
 python scripts/common_tools/test_mod_suite.py --source-only --lang pt
 ```
 

@@ -35,12 +35,14 @@ Instead of manual bone tweaking and brittle one-off edits, the pipeline coordina
 
 ### Key Features
 
-- **First-Run Setup & Cross-Platform Config**: Guided setup wizard and external [`vrc2gtav.cfg`](vrc2gtav.cfg.example) override keep local paths out of version control.
+- **First-Run Wizard, `.zip`/Unity Ingestion & Blender 4.0.2 Auto-Download**: Start from a blank GitHub clone or fresh VRChat-only Unity project via `--avatar-zip` (`.zip` / `.unitypackage`) or `--unity-project`. [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) safely extracts archives, auto-downloads portable Blender `4.0.2` + `Sollumz` (`--download-blender`) when missing, and presents a **10-options-per-page paginated avatar picker (`Next` / `Prev`)** for multi-avatar `.unity` scenes.
+- **Native Modular Avatar (NDMF) Bake Engine**: [`scripts/common_tools/modular_avatar_helper.py`](scripts/common_tools/modular_avatar_helper.py) and [`scripts/common_tools/build_universal_avatar.py`](scripts/common_tools/build_universal_avatar.py) natively bake outfits/dresses with `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, embedded `VRCPhysBone`s, and lilToon textures onto any GTA V protagonist (`michael`, `franklin`, `trevor`).
+- **Separate Face & Body Blendshapes + Zeroed Custom Dress `.cfg`**: Prompts separately to import **face** (`--import-face-blendshapes`) and **body** (`--import-body-blendshapes`) weights from Unity without wiping base body keys, or creates an all-`0.0` `.cfg` including custom dress FBXs (`--no-import-face-blendshapes --no-import-body-blendshapes`).
+- **Dedicated Error Handling & `--verbose` Timestamped Logs**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) provides typed stage exceptions, atomic file writes, child-process timeout guards, concise default output, and `--verbose` timestamped log files under `logs/`.
 - **Trilingual Support (`en` / `ja` / `pt`)**: Automatic OS locale detection with explicit `--lang` CLI override across managers, setup tools, and automated test suites.
 - **Unit `1.0` Defaults + `.unity` Scale Extraction**: Defaults body scales cleanly to `1.0` out of the box, while automatically reading and extracting custom hierarchy scales when a `.unity` scene file is provided.
-- **Universal Custom Unity Hair Porting (`.prefab` / `PrefabVariant` / `.fbx`)**: Automatically parses any VRChat Unity hair prefab, Modular Avatar attachment, or `.fbx` + `.mat`, bakes lilToon color/HSV tints into the 2K atlas, aligns the hair onto the target avatar's skull, and falls back gracefully to default avatar hair (`default` / `none` / missing custom hair).
-- **Full Avatar <-> Protagonist Interchangeability**: Any VRChat preset (`shinano_casual`, `shinano_er`, `miltina_maid`) can be assigned to any GTA V protagonist (`michael`, `franklin`, `trevor`) via `[7]` in the interactive menu, CLI `--avatar` / `--*-avatar` flags, or `vrc2gtav.cfg`.
-- **Automated Verification**: Includes both a fast source-only check (`7` suites, works on a fresh GitHub clone) and a full post-build/deploy validation suite (`10` suites).
+- **Universal Custom Unity Hair & PhysBones Porting**: Resolves arbitrary `.prefab` / `PrefabVariant` / `.fbx` hairs, `VRCPhysBone` chains (`79` standard chains, optional `--physbones-marshmallow`), and full protagonist interchangeability (`[7]`, `--avatar`).
+- **Automated Verification**: Includes both a fast source-only check (`8` suites, works on a fresh GitHub clone) and a full post-build/deploy validation suite (`11` suites).
 
 ---
 
@@ -117,6 +119,8 @@ By default each protagonist starts with the preset below, and every VRChat avata
 | :--- | :--- |
 | `RUN_MANAGER.bat` / `EXECUTAR_GERENCIADOR.bat` | Interactive Windows launcher for First-Run, build, and deploy |
 | `python run_mod_manager.py --setup` | Interactive First-Run wizard & `vrc2gtav.cfg` configuration |
+| `python run_mod_manager.py --setup --avatar-zip "/path/Shinano.zip" --download-blender --verbose` | Extract `.zip`/`.unitypackage`, download Blender `4.0.2` + Sollumz if needed, pick avatar (`10`/page + `Next`), configure MA + Face/Body `.cfg` & log in `logs/` |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Shinano.zip" --interactive --verbose` | Standalone universal avatar/MA outfit builder with 10-per-page `Next` picker, Face/Body blendshape prompts & timestamped logs |
 | `python run_mod_manager.py --check-env` | Validate GTA V, Blender, `rage-cli`, and configured asset paths |
 | `python scripts/common_tools/setup_first_run.py --check-only` | Non-destructive environment & source asset audit |
 | `python run_mod_manager.py --character all` | Full 3D Blender rebuild, XML/YDD/YTD export, and RPF7 deployment |
@@ -128,8 +132,8 @@ By default each protagonist starts with the preset below, and every VRChat avata
 | `python run_mod_manager.py --export-physbones` | Auto-import standard VRChat PhysBones presets from `.unity` scenes into `configs/*_physbones.cfg` (`--physbones-marshmallow` includes Marshmallow PB; `--overwrite-physbones-from-unity` overwrites edits) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Build using portable `.cfg` PhysBone presets instead of live `.unity` scenes (add `--physbones-marshmallow` to enable Marshmallow PB breasts) |
 | `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character folders to `mods/x64v.rpf` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `7` source/config/i18n/interchangeability/custom-hair suites (clean clone safe) |
-| `python scripts/common_tools/test_mod_suite.py` | Run all `10` end-to-end validation suites (requires built & deployed assets) |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `8` source/config/i18n/First-Run/Modular-Avatar suites (clean clone safe) |
+| `python scripts/common_tools/test_mod_suite.py` | Run all `11` end-to-end validation suites (requires built & deployed assets) |
 
 ---
 

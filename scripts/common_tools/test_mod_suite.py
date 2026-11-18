@@ -10,13 +10,18 @@ meshes, deployed RPF headers, code quality rules, and mirror synchronization.
 import argparse
 import ast
 import filecmp
+import io as io_stream
 import os
 import py_compile
 import re as regex_module
 import string
 import struct
 import sys
+import tarfile
+import tempfile
+import zipfile
 from pathlib import Path
+from typing import Any, List, Sequence, Tuple
 
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_DIR = CURRENT_SCRIPT_DIR.parent.parent
@@ -53,18 +58,41 @@ def print_status_result(
     return success_condition
 
 
+_PRUNED_WALK_DIRS = frozenset(
+    {
+        "staging",
+        ".git",
+        "__pycache__",
+        ".venv",
+        "tools",
+        "imported_unity_projects",
+        "logs",
+        "extracted_rpfs",
+        "backups",
+    }
+)
+
+
+def _iter_project_python_files(scan_root: Path) -> List[Path]:
+    """Walk `scan_root` pruning large binary/cache/tool subtrees up front."""
+    found_files: List[Path] = []
+    for cur_root, dir_names, file_names in os.walk(scan_root):
+        dir_names[:] = sorted(
+            sub_dir for sub_dir in dir_names if sub_dir not in _PRUNED_WALK_DIRS
+        )
+        for file_name in sorted(file_names):
+            if file_name.endswith(".py"):
+                found_files.append(Path(cur_root) / file_name)
+    return found_files
+
+
 def test_python_syntax_compilation() -> bool:
     """Compile every tracked Python file to verify valid syntax."""
     print(i18n.translate("tests.sec1_title"))
     all_compiled_cleanly = True
-    python_files_found = sorted(PROJECT_ROOT_DIR.glob("**/*.py"))
+    python_files_found = _iter_project_python_files(PROJECT_ROOT_DIR)
 
     for python_file_path in python_files_found:
-        if any(
-            ignored in python_file_path.parts
-            for ignored in ("staging", ".git", "__pycache__", ".venv")
-        ):
-            continue
         try:
             py_compile.compile(str(python_file_path), doraise=True)
             print_status_result(
@@ -404,12 +432,7 @@ def test_i18n_catalog_integrity() -> bool:
         catalog_issues.append("Language normalization or affirmative parser check failed")
 
     translation_func_names = {"translate", "translate_message", "get_text"}
-    for python_file in sorted(PROJECT_ROOT_DIR.rglob("*.py")):
-        if any(
-            ignored_part in python_file.parts
-            for ignored_part in ("__pycache__", "staging", "backups")
-        ):
-            continue
+    for python_file in _iter_project_python_files(PROJECT_ROOT_DIR):
         parsed_tree = ast.parse(
             python_file.read_text(encoding="utf-8"), filename=str(python_file)
         )
@@ -461,12 +484,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         else PROJECT_ROOT_DIR
     )
     total_python_files = 0
-    for python_file in sorted(root_dir.rglob("*.py")):
-        if any(
-            ignored in python_file.parts
-            for ignored in (".git", "__pycache__", "extracted_rpfs", "backups", "staging", ".venv")
-        ):
-            continue
+    for python_file in _iter_project_python_files(root_dir):
         total_python_files += 1
         file_content = python_file.read_text(encoding="utf-8", errors="ignore")
         if emoji_pattern.search(file_content):
@@ -524,7 +542,12 @@ def test_code_quality_and_mirror_sync() -> bool:
     mirror_pairs = [
         (common_dir / "vrc2gtav_i18n.py", deploy_dir / "vrc2gtav_i18n.py"),
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
+        (common_dir / "error_handler_helper.py", deploy_dir / "error_handler_helper.py"),
+        (common_dir / "avatar_archive_helper.py", deploy_dir / "avatar_archive_helper.py"),
+        (common_dir / "modular_avatar_helper.py", deploy_dir / "modular_avatar_helper.py"),
+        (common_dir / "build_universal_avatar.py", deploy_dir / "build_universal_avatar.py"),
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
+        (common_dir / "setup_first_run.py", root_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
         (common_dir / "physbone_helper.py", deploy_dir / "physbone_helper.py"),
         (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
@@ -878,9 +901,11 @@ def test_unity_scene_and_fallbacks() -> bool:
         mil_diff, mil_spec, mil_norm = calibration_helper.calibrate_miltina_default_hair(
             miltina_hair_file, temp_root, 64
         )
+        with pil_image.open(miltina_face_file) as miltina_face_opened:
+            mil_face_rgba = miltina_face_opened.convert("RGBA")
         mil_face_out, mil_eye_spec, used_custom_eyes = (
             calibration_helper.composite_miltina_eyes_with_fallback(
-                pil_image.open(miltina_face_file),
+                mil_face_rgba,
                 str(temp_root / "missing_aw_eyes.png"),
                 str(temp_root / "missing_aw_hl.png"),
             )
@@ -2108,8 +2133,456 @@ def test_custom_unity_hair_support() -> bool:
     return suite_passed
 
 
+def test_first_run_modular_avatar_and_error_handling() -> bool:
+    """
+    Validate First-Run archive/Unity ingestion, paginated 10+Next avatar selection,
+    Modular Avatar native bake planning, Face/Body/Zeroed custom-dress blendshape
+    export, PhysBone curve/prefix guards, INI append updates, and `--verbose` logging.
+    """
+    print(i18n.translate("tests.sec_first_run_ma_title"))
+    import error_handler_helper as err_helper
+    import avatar_archive_helper
+    import modular_avatar_helper
+    import blendshape_helper
+    import physbone_helper
+    import setup_first_run
+    import build_universal_avatar
+
+    suite_passed = True
+
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp_dir = Path(tmp_str)
+
+        # 1. Error handler & --verbose timestamped logging + timeout zombie prevention
+        log_obj = err_helper.PipelineLogger(
+            verbose=True,
+            avatar_name="Shinano Test",
+            stage_name="unit",
+            project_root=tmp_dir,
+        )
+        log_obj.info("Pipeline concise summary", always=True)
+        log_obj.debug("Detailed verbose line")
+        log_exists = bool(
+            log_obj.log_path
+            and log_obj.log_path.is_file()
+            and "Detailed verbose line" in log_obj.log_path.read_text(encoding="utf-8")
+        )
+        suite_passed &= print_status_result(
+            "Verbose timestamped log file created in logs/",
+            log_exists,
+            str(log_obj.log_path),
+        )
+
+        timed_out_cleanly = False
+        try:
+            err_helper.run_subprocess_safe(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                logger=log_obj,
+                stage_name="timeout_test",
+                timeout_sec=0.4,
+            )
+        except err_helper.SubprocessExecutionError:
+            timed_out_cleanly = True
+        suite_passed &= print_status_result(
+            "Subprocess timeout cleanly killed without zombie",
+            timed_out_cleanly,
+        )
+
+        # 2. Zip-Slip rejection + synthetic .unitypackage + .zip ingestion
+        evil_zip = tmp_dir / "evil.zip"
+        with zipfile.ZipFile(evil_zip, "w") as zip_handle:
+            zip_handle.writestr("../escape.txt", "blocked")
+        zip_slip_blocked = False
+        try:
+            avatar_archive_helper.safe_extract_zip(evil_zip, tmp_dir / "unzip_out")
+        except err_helper.ArchiveExtractionError:
+            zip_slip_blocked = True
+        suite_passed &= print_status_result("Zip-Slip traversal blocked", zip_slip_blocked)
+
+        # Build synthetic 15-avatar Unity scene + custom dress MA prefab inside .unitypackage inside .zip
+        pkg_staging = tmp_dir / "pkg_staging"
+        pkg_staging.mkdir()
+        dress_guid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        dress_prefab_guid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        avatar_prefab_guid = "cccccccccccccccccccccccccccccccc"
+
+        # Minimal valid binary FBX with ShapeKeys for Avatar (Body) and Custom Dress (CustomDressMesh)
+        def _write_min_shape_fbx(fbx_out: Path, model_name: str, shape_names: Sequence[str]) -> None:
+            def _pack_node(name: str, props: Sequence[Tuple[str, Any]], children: Sequence[bytes] = ()) -> bytes:
+                prop_bytes = bytearray()
+                for ptype, pval in props:
+                    prop_bytes.append(ord(ptype))
+                    if ptype == "L":
+                        prop_bytes.extend(struct.pack("<q", int(pval)))
+                    elif ptype == "S":
+                        raw_str = str(pval).encode("utf-8")
+                        prop_bytes.extend(struct.pack("<I", len(raw_str)) + raw_str)
+                child_blob = b"".join(children) + (b"\x00" * 13 if children else b"")
+                total_rec = 13 + len(name.encode("utf-8")) + len(prop_bytes) + len(child_blob)
+                return b"".join([
+                    struct.pack("<IIIB", total_rec, len(props), len(prop_bytes), len(name.encode("utf-8"))),
+                    name.encode("utf-8"),
+                    bytes(prop_bytes),
+                    child_blob,
+                ])
+
+            model_id = 100
+            geom_id = 200
+            bs_id = 300
+            obj_children = [
+                _pack_node("Model", [("L", model_id), ("S", f"{model_name}\x00\x01Model"), ("S", "Mesh")]),
+                _pack_node("Geometry", [("L", geom_id), ("S", "Geo\x00\x01Geometry"), ("S", "Mesh")]),
+                _pack_node("Deformer", [("L", bs_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")]),
+            ]
+            conn_children = [
+                _pack_node("C", [("S", "OO"), ("L", geom_id), ("L", model_id)]),
+                _pack_node("C", [("S", "OO"), ("L", bs_id), ("L", geom_id)]),
+            ]
+            for s_idx, s_name in enumerate(shape_names):
+                ch_id = 400 + s_idx
+                obj_children.append(
+                    _pack_node("Deformer", [("L", ch_id), ("S", f"{s_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")])
+                )
+                conn_children.append(_pack_node("C", [("S", "OO"), ("L", ch_id), ("L", bs_id)]))
+            header = b"Kaydara FBX Binary  \x00\x1a\x00" + struct.pack("<I", 7400)
+            body = (
+                _pack_node("Objects", [], obj_children)
+                + _pack_node("Connections", [], conn_children)
+                + (b"\x00" * 13)
+            )
+            # Recompute absolute end offsets from 27-byte header cleanly using second pass:
+            # Instead build section offsets sequentially so end_offset is exact file offset!
+            def _write_node_at(offset: int, name: str, props: Sequence[Tuple[str, Any]], child_specs: Sequence[Any]) -> Tuple[bytes, int]:
+                prop_bytes = bytearray()
+                for ptype, pval in props:
+                    prop_bytes.append(ord(ptype))
+                    if ptype == "L":
+                        prop_bytes.extend(struct.pack("<q", int(pval)))
+                    elif ptype == "S":
+                        raw_str = str(pval).encode("utf-8")
+                        prop_bytes.extend(struct.pack("<I", len(raw_str)) + raw_str)
+                cur = offset + 13 + len(name.encode("utf-8")) + len(prop_bytes)
+                child_chunks: List[bytes] = []
+                if child_specs:
+                    for c_name, c_props, c_sub in child_specs:
+                        c_bytes, cur = _write_node_at(cur, c_name, c_props, c_sub)
+                        child_chunks.append(c_bytes)
+                    cur += 13
+                    child_chunks.append(b"\x00" * 13)
+                end_off = cur
+                hdr = struct.pack("<IIIB", end_off, len(props), len(prop_bytes), len(name.encode("utf-8")))
+                return hdr + name.encode("utf-8") + bytes(prop_bytes) + b"".join(child_chunks), end_off
+
+            o_specs = [
+                ("Model", [("L", model_id), ("S", f"{model_name}\x00\x01Model"), ("S", "Mesh")], ()),
+                ("Geometry", [("L", geom_id), ("S", "Geo\x00\x01Geometry"), ("S", "Mesh")], ()),
+                ("Deformer", [("L", bs_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")], ()),
+            ]
+            c_specs = [
+                ("C", [("S", "OO"), ("L", geom_id), ("L", model_id)], ()),
+                ("C", [("S", "OO"), ("L", bs_id), ("L", geom_id)], ()),
+            ]
+            for s_idx, s_name in enumerate(shape_names):
+                ch_id = 400 + s_idx
+                o_specs.append(("Deformer", [("L", ch_id), ("S", f"{s_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")], ()))
+                c_specs.append(("C", [("S", "OO"), ("L", ch_id), ("L", bs_id)], ()))
+
+            obj_blob, next_off = _write_node_at(27, "Objects", (), o_specs)
+            conn_blob, _ = _write_node_at(next_off, "Connections", (), c_specs)
+            fbx_out.parent.mkdir(parents=True, exist_ok=True)
+            fbx_out.write_bytes(header + obj_blob + conn_blob + (b"\x00" * 13))
+
+        # Write Unity project with scene containing 15 avatars + MA custom dress
+        uproj = tmp_dir / "FakeUnityProj"
+        uassets = uproj / "Assets" / "ShinanoTest"
+        uassets.mkdir(parents=True)
+        avatar_fbx = uassets / "ShinanoBase.fbx"
+        dress_fbx = uassets / "CustomDress.fbx"
+        _write_min_shape_fbx(avatar_fbx, "Body", ["vrc.v_aa", "Smile_1", "shrink_breast", "shrink_hip"])
+        _write_min_shape_fbx(dress_fbx, "CustomDressMesh", ["Corset", "Skirt_Wide"])
+        (uassets / "ShinanoBase.fbx.meta").write_text(f"fileFormatVersion: 2\nguid: {avatar_prefab_guid}\n", encoding="utf-8")
+        (uassets / "CustomDress.fbx.meta").write_text(f"fileFormatVersion: 2\nguid: {dress_guid}\n", encoding="utf-8")
+
+        dress_prefab = uassets / "CustomDress.prefab"
+        dress_prefab.write_text(
+            f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &10
+GameObject:
+  m_Name: CustomDress
+  m_IsActive: 1
+--- !u!4 &11
+Transform:
+  m_GameObject: {{fileID: 10}}
+  m_Father: {{fileID: 0}}
+  m_Children:
+  - {{fileID: 21}}
+  - {{fileID: 31}}
+--- !u!1 &20
+GameObject:
+  m_Name: Dress_Armature
+  m_IsActive: 1
+--- !u!4 &21
+Transform:
+  m_GameObject: {{fileID: 20}}
+  m_Father: {{fileID: 11}}
+  m_Children: []
+--- !u!114 &22
+MonoBehaviour:
+  m_GameObject: {{fileID: 20}}
+  m_Enabled: 1
+  m_Script: {{fileID: 11500000, guid: {modular_avatar_helper.MA_MERGE_ARMATURE_GUID}, type: 3}}
+  mergeTarget:
+    referencePath: Armature
+  prefix: Dress_
+  suffix: _cloth
+  mangleNames: 1
+--- !u!1 &30
+GameObject:
+  m_Name: CustomDressMesh
+  m_IsActive: 1
+--- !u!4 &31
+Transform:
+  m_GameObject: {{fileID: 30}}
+  m_Father: {{fileID: 11}}
+  m_Children: []
+--- !u!137 &32
+SkinnedMeshRenderer:
+  m_GameObject: {{fileID: 30}}
+  m_Enabled: 1
+  m_Mesh: {{fileID: 4300000, guid: {dress_guid}, type: 3}}
+--- !u!114 &33
+MonoBehaviour:
+  m_GameObject: {{fileID: 30}}
+  m_Enabled: 1
+  m_Script: {{fileID: 11500000, guid: {modular_avatar_helper.MA_BLENDSHAPE_SYNC_GUID}, type: 3}}
+  Bindings:
+  - ReferenceMesh:
+      referencePath: Body
+    Blendshape: shrink_breast
+    LocalBlendshape: Corset
+--- !u!114 &34
+MonoBehaviour:
+  m_GameObject: {{fileID: 30}}
+  m_Enabled: 1
+  m_Script: {{fileID: 11500000, guid: {modular_avatar_helper.MA_SHAPE_CHANGER_GUID}, type: 3}}
+  m_inverted: 0
+  m_shapes:
+  - Object:
+      referencePath: Body
+      targetObject: {{fileID: 999}}
+    ShapeName: shrink_breast
+    ChangeType: 1
+    Value: 100
+""",
+            encoding="utf-8",
+        )
+        (uassets / "CustomDress.prefab.meta").write_text(f"fileFormatVersion: 2\nguid: {dress_prefab_guid}\n", encoding="utf-8")
+
+        # Build a 15-avatar Unity scene using SceneRoots
+        scene_lines = ["%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"]
+        root_ids: List[str] = []
+        for idx_av in range(1, 16):
+            go_id = 1000 + idx_av * 10
+            tr_id = 2000 + idx_av * 10
+            root_ids.append(str(tr_id))
+            act_flag = 1 if idx_av == 13 else 0
+            scene_lines.append(
+                f"--- !u!1 &{go_id}\nGameObject:\n  m_Name: Avatar_{idx_av:02d}\n  m_IsActive: {act_flag}\n"
+                f"--- !u!4 &{tr_id}\nTransform:\n  m_GameObject: {{fileID: {go_id}}}\n  m_Father: {{fileID: 0}}\n  m_Children:\n"
+            )
+            if idx_av == 13:
+                scene_lines[-1] += f"  - {{fileID: {tr_id + 1}}}\n"
+                scene_lines.append(
+                    f"--- !u!1 &{go_id + 1}\nGameObject:\n  m_Name: Body\n  m_IsActive: 1\n"
+                    f"--- !u!4 &{tr_id + 1}\nTransform:\n  m_GameObject: {{fileID: {go_id + 1}}}\n  m_Father: {{fileID: {tr_id}}}\n  m_Children: []\n"
+                    f"--- !u!95 &{go_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {go_id}}}\n"
+                    f"--- !u!137 &{go_id + 3}\nSkinnedMeshRenderer:\n  m_GameObject: {{fileID: {go_id + 1}}}\n  m_Mesh: {{fileID: 4300000, guid: {avatar_prefab_guid}, type: 3}}\n"
+                    f"  m_BlendShapeWeights:\n  - 0\n  - 85\n  - 100\n  - 25\n"
+                    f"--- !u!1001 &{go_id + 4}\nPrefabInstance:\n  m_TransformParent: {{fileID: {tr_id}}}\n"
+                    f"  m_SourcePrefab: {{fileID: 100100000, guid: {dress_prefab_guid}, type: 3}}\n"
+                    f"  m_Modification:\n    m_Modifications:\n"
+                    f"    - target: {{fileID: 10, guid: {dress_prefab_guid}, type: 3}}\n"
+                    f"      propertyPath: m_Name\n      value: CustomDress\n      objectReference: {{fileID: 0}}\n"
+                )
+            else:
+                scene_lines[-1] += "  []\n"
+                scene_lines.append(f"--- !u!95 &{go_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {go_id}}}\n")
+
+        scene_lines.append("--- !u!1660057539 &9223372036854775807\nSceneRoots:\n  m_Roots:\n")
+        for rid in root_ids:
+            scene_lines.append(f"  - {{fileID: {rid}}}\n")
+        test_scene = uassets / "TestMultiAvatar.unity"
+        test_scene.write_text("".join(scene_lines), encoding="utf-8")
+
+        # Pack into .unitypackage inside .zip to exercise full archive ingestion
+        test_pkg = tmp_dir / "ShinanoTest.unitypackage"
+        with tarfile.open(test_pkg, "w:gz") as tar_out:
+            for item_idx, rel_p in enumerate(
+                [
+                    ("Assets/ShinanoTest/ShinanoBase.fbx", avatar_fbx, uassets / "ShinanoBase.fbx.meta", avatar_prefab_guid),
+                    ("Assets/ShinanoTest/CustomDress.fbx", dress_fbx, uassets / "CustomDress.fbx.meta", dress_guid),
+                    ("Assets/ShinanoTest/CustomDress.prefab", dress_prefab, uassets / "CustomDress.prefab.meta", dress_prefab_guid),
+                    ("Assets/ShinanoTest/TestMultiAvatar.unity", test_scene, None, "dddddddddddddddddddddddddddddddd"),
+                ]
+            ):
+                unity_rel, asset_src, meta_src, g_str = rel_p
+                for sub_name, raw_bytes in [
+                    (f"{g_str}/pathname", unity_rel.encode("utf-8")),
+                    (f"{g_str}/asset", asset_src.read_bytes()),
+                    (
+                        f"{g_str}/asset.meta",
+                        meta_src.read_bytes() if meta_src else f"fileFormatVersion: 2\nguid: {g_str}\n".encode("utf-8"),
+                    ),
+                ]:
+                    t_info = tarfile.TarInfo(sub_name)
+                    t_info.size = len(raw_bytes)
+                    tar_out.addfile(t_info, io_stream.BytesIO(raw_bytes))
+
+        bundle_zip = tmp_dir / "AvatarPack.zip"
+        with zipfile.ZipFile(bundle_zip, "w") as zip_out:
+            zip_out.write(test_pkg, arcname="AvatarPack/ShinanoTest.unitypackage")
+
+        ingested = avatar_archive_helper.ingest_avatar_source(bundle_zip, tmp_dir, logger=log_obj)
+        discovered = avatar_archive_helper.discover_scene_avatars(
+            ingested["preferred_scene"], ingested["assets_root"]
+        )
+        suite_passed &= print_status_result(
+            "Archive .zip -> .unitypackage -> 15 scene avatars discovered cleanly",
+            len(discovered) == 15 and all(entry["name"] != "?" for entry in discovered),
+            f"count={len(discovered)}, first={discovered[0]['name'] if discovered else ''}",
+        )
+
+        # Test paginated menu: 10 per page + Next button ('n' -> page 2 -> select item '3' = Avatar_03 or check)
+        prompts_iter = iter(["n", "3"])
+        menu_output: List[str] = []
+        picked = avatar_archive_helper.prompt_select_scene_avatar(
+            discovered,
+            input_func=lambda _prompt: next(prompts_iter),
+            output_func=menu_output.append,
+            page_size=10,
+        )
+        has_next_btn = any("Next page >>" in line_txt for line_txt in menu_output)
+        has_prev_btn = any("Previous page" in line_txt for line_txt in menu_output)
+        suite_passed &= print_status_result(
+            "Paginated avatar menu (10/page + Next + Prev)",
+            bool(picked and picked == discovered[12] and has_next_btn and has_prev_btn),
+            f"selected={picked['name'] if picked else None}",
+        )
+
+        # 3. Modular Avatar NDMF plan resolution (MergeArmature, Sync, ShapeChanger, Dress FBX)
+        ma_plan = modular_avatar_helper.build_modular_avatar_bake_plan(
+            ingested["preferred_scene"],
+            avatar_name="Avatar_13",
+            assets_root=ingested["assets_root"],
+            logger=log_obj,
+        )
+        bone_map = modular_avatar_helper.resolve_ma_bone_mapping(
+            ["Dress_Hips_cloth", "Dress_LeftUpperArm_cloth", "Skirt_Back_01"],
+            ["Hips", "UpperArm.L", "Head"],
+            prefix="Dress_",
+            suffix="_cloth",
+        )
+        suite_passed &= print_status_result(
+            "Modular Avatar NDMF bake plan (MergeArmature, Sync, ShapeChanger, CustomDress FBX)",
+            bool(
+                ma_plan["loaded"]
+                and len(ma_plan["armature_merges"]) == 1
+                and len(ma_plan["blendshape_syncs"]) == 1
+                and abs(ma_plan["shape_changer_weights"].get("Body", {}).get("shrink_breast", 0.0) - 1.0) < 1e-4
+                and bone_map.get("Dress_LeftUpperArm_cloth") == "UpperArm.L"
+                and "Skirt_Back_01" not in bone_map
+            ),
+            f"merges={len(ma_plan['armature_merges'])}, bone_map={bone_map}",
+        )
+
+        # 4. Separate Face & Body blendshape extraction & custom dress zeroed .cfg generation
+        zero_cfg = tmp_dir / "zeroed.cfg"
+        zero_res = blendshape_helper.resolve_character_blendshapes(
+            {"unity_scene": str(ingested["preferred_scene"]), "unity_avatar_name": "Avatar_13"},
+            fbx_paths=[avatar_fbx],
+            extra_fbx_paths=[dress_fbx],
+            unity_assets_root=ingested["assets_root"],
+            save_cfg_path=zero_cfg,
+            import_face=False,
+            import_body=False,
+        )
+        all_zero_ok = (
+            zero_res["source_used"] == "fbx_zeroed"
+            and "Body" in zero_res["mesh_weights"]
+            and "CustomDressMesh" in zero_res["mesh_weights"]
+            and all(
+                abs(w_val) < 1e-6
+                for mesh_map in zero_res["mesh_weights"].values()
+                for w_val in mesh_map.values()
+            )
+        )
+        suite_passed &= print_status_result(
+            "Blendshapes No/No generates zeroed .cfg including custom dress FBX",
+            all_zero_ok,
+            f"meshes={list(zero_res['mesh_weights'].keys())}",
+        )
+
+        face_only_res = blendshape_helper.resolve_character_blendshapes(
+            {"unity_scene": str(ingested["preferred_scene"]), "unity_avatar_name": "Avatar_13"},
+            fbx_paths=[avatar_fbx],
+            extra_fbx_paths=[dress_fbx],
+            unity_assets_root=ingested["assets_root"],
+            import_face=True,
+            import_body=False,
+        )
+        face_only_ok = (
+            abs(face_only_res["mesh_weights"]["Body"].get("Smile_1", 0.0) - 0.85) < 1e-4
+            and abs(face_only_res["mesh_weights"]["Body"].get("shrink_breast", 1.0)) < 1e-6
+        )
+        suite_passed &= print_status_result(
+            "Blendshapes Face=Yes/Body=No preserves face weights & zeroes body",
+            face_only_ok,
+        )
+
+        # 5. PhysBone YAML curve parser & update_cfg_values_in_place new section append
+        curve_block = (
+            "  curve:\n"
+            "    serializedVersion: 2\n"
+            "    m_Curve:\n"
+            "    - serializedVersion: 3\n"
+            "      time: 0\n"
+            "      value: 1\n"
+            "    - serializedVersion: 3\n"
+            "      time: 1\n"
+            "      value: 0.25\n"
+            "    m_PreInfinity: 2\n"
+        )
+        parsed_curve = physbone_helper._parse_yaml_curve(curve_block, "curve")
+        cfg_sample = tmp_dir / "sample.cfg"
+        cfg_sample.write_text("[directories]\ngtav_root = C:/GTA\n", encoding="utf-8")
+        setup_first_run.update_cfg_values_in_place(
+            cfg_sample,
+            {"new_section": {"unity_avatar_name": "Avatar_13"}},
+        )
+        appended_ok = "unity_avatar_name = Avatar_13" in cfg_sample.read_text(encoding="utf-8")
+        suite_passed &= print_status_result(
+            "PhysBone curve parser & INI missing-section append fixes",
+            len(parsed_curve) == 2 and abs(parsed_curve[1][1] - 0.25) < 1e-4 and appended_ok,
+            f"curve={parsed_curve}",
+        )
+
+        # 6. Portable Blender detection check on local workstation when available
+        local_blender_raw = project_paths.get_blender_exe() if project_paths.has_project_config_file() else ""
+        local_blender = Path(project_paths.to_host_path(local_blender_raw)) if local_blender_raw else None
+        if local_blender and local_blender.is_file():
+            probe_res = avatar_archive_helper.inspect_blender_installation(local_blender)
+            suite_passed &= print_status_result(
+                "Blender 4.0.x & Sollumz inspection check",
+                bool(probe_res["exists"] and probe_res["sollumz_installed"]),
+                f"ver={probe_res['version']} sollumz={probe_res['sollumz_installed']}",
+            )
+
+    return suite_passed
+
+
 def run_source_only_validation_suite() -> bool:
-    """Run source-only checks (syntax, templates, i18n, quality, and mirrors)."""
+    """Run source-only checks (syntax, templates, i18n, quality, mirrors, First-Run/MA)."""
     separator_banner = "=" * 70
     print(f"\n{separator_banner}")
     print(f"      {i18n.translate('tests.source_banner')}")
@@ -2121,6 +2594,7 @@ def run_source_only_validation_suite() -> bool:
         (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
         (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
+        (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -2145,6 +2619,7 @@ def run_full_validation_suite() -> bool:
         (i18n.translate("tests.suite_unity"), test_unity_scene_and_fallbacks()),
         (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
+        (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

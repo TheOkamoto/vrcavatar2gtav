@@ -9,6 +9,7 @@ Starts with Michael (player_zero) neko mimi articulated ear chains
 (ear.L -> PB_Ear_L_0..2, ear.R -> PB_Ear_R_0..2) parented to SKEL_Head.
 """
 
+import collections as collections_module
 from configparser import ConfigParser
 import math
 import os as operating_system
@@ -17,6 +18,8 @@ import re as regex_module
 import struct
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 import zlib
+
+_FBX_WEIGHTED_BONES_CACHE: Dict[Tuple[str, int], Tuple[Set[str], Set[str], Dict[str, str]]] = {}
 
 
 SKEL_HEAD_TAG: int = 31086
@@ -1248,16 +1251,49 @@ def _parse_yaml_scalar_vec3(block_text: str, field_name: str, default_val: Tuple
 
 def _parse_yaml_curve(block_text: str, curve_field: str) -> List[Tuple[float, float]]:
     """Extract keyframe (time, value) pairs from a Unity AnimationCurve YAML block."""
-    match = regex_module.search(
-        rf"^\s*{regex_module.escape(curve_field)}:\s*\n\s*serializedVersion:\s*\d+\s*\n\s*m_Curve:\s*(.*?)(?=^\s*[A-Za-z_]\w*:|\Z)",
-        block_text,
-        regex_module.MULTILINE | regex_module.DOTALL,
-    )
-    if not match:
-        return []
-    curve_body = match.group(1)
-    pairs = regex_module.findall(r"time:\s*([^\n\r]+)\s*\n\s*value:\s*([^\n\r]+)", curve_body)
-    return [(float(time_str), float(val_str)) for time_str, val_str in pairs]
+    lines = block_text.splitlines()
+    field_prefix = f"{curve_field}:"
+    in_field = False
+    in_curve = False
+    field_indent = -1
+    curve_indent = -1
+    pairs: List[Tuple[float, float]] = []
+    cur_time: Optional[float] = None
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent_len = len(raw_line) - len(raw_line.lstrip(" "))
+        if not in_field:
+            if stripped == field_prefix or stripped.startswith(field_prefix + " "):
+                in_field = True
+                field_indent = indent_len
+            continue
+        if indent_len <= field_indent and not stripped.startswith("-"):
+            break
+        if not in_curve:
+            if stripped.startswith("m_Curve:"):
+                if stripped.endswith("[]"):
+                    return []
+                in_curve = True
+                curve_indent = indent_len
+            continue
+        if indent_len <= curve_indent and not stripped.startswith("-"):
+            break
+        if stripped.startswith("time:"):
+            try:
+                cur_time = float(stripped.split(":", 1)[1].strip())
+            except ValueError:
+                cur_time = None
+        elif stripped.startswith("value:") and cur_time is not None:
+            try:
+                pairs.append((cur_time, float(stripped.split(":", 1)[1].strip())))
+            except ValueError:
+                pass
+            cur_time = None
+
+    return pairs
 
 
 def extract_unity_physbones_from_prefab(
@@ -1379,7 +1415,11 @@ def collect_fbx_weighted_bones(
     parent_map_ci: Dict[str, str] = {}
     excluded_low = {str(name_item).strip().lower() for name_item in excluded_meshes if str(name_item).strip()}
 
-    def _read_prop(raw_bytes: bytes, byte_pos: int) -> Tuple[Any, int]:
+    def _read_prop(
+        raw_bytes: bytes, byte_pos: int, total_len: int, parse_weights_array: bool = False
+    ) -> Tuple[Any, int]:
+        if byte_pos >= total_len:
+            raise ValueError("Truncated FBX property")
         type_code = chr(raw_bytes[byte_pos])
         byte_pos += 1
         if type_code == "Y":
@@ -1403,49 +1443,75 @@ def collect_fbx_weighted_bones(
         if type_code in ("f", "d", "l", "i", "b"):
             arr_len, enc_flag, comp_len = struct.unpack_from("<III", raw_bytes, byte_pos)
             byte_pos += 12
-            if type_code == "d" and arr_len > 0:
+            if parse_weights_array and type_code == "d" and arr_len > 0:
+                if byte_pos + comp_len > total_len:
+                    return 0.0, total_len
                 buf_bytes = raw_bytes[byte_pos : byte_pos + comp_len]
                 if enc_flag == 1:
                     buf_bytes = zlib.decompress(buf_bytes)
-                vals = struct.unpack_from(f"<{arr_len}d", buf_bytes)
+                unpack_cnt = min(arr_len, len(buf_bytes) // 8)
+                if unpack_cnt <= 0:
+                    return 0.0, byte_pos + comp_len
+                vals = struct.unpack_from(f"<{unpack_cnt}d", buf_bytes)
                 return max(vals) if vals else 0.0, byte_pos + comp_len
-            return arr_len, byte_pos + comp_len
+            elem_size = {"f": 4, "d": 8, "l": 8, "i": 4, "b": 1}[type_code]
+            byte_span = comp_len if enc_flag == 1 else (arr_len * elem_size)
+            return arr_len, byte_pos + byte_span
         raise ValueError(f"Unsupported FBX property code: {type_code}")
 
     def _read_node(
         raw_bytes: bytes,
         byte_pos: int,
+        total_len: int,
         hdr_fmt: str,
         hdr_size: int,
         parse_props: bool = False,
         parse_children: bool = False,
+        parse_weights: bool = False,
     ) -> Tuple[Optional[Tuple[str, List[Any], List[Any]]], int]:
+        if byte_pos + hdr_size > total_len:
+            return None, total_len
         end_offset, prop_cnt, prop_len, name_len = struct.unpack_from(hdr_fmt, raw_bytes, byte_pos)
         if end_offset == 0:
             return None, byte_pos + hdr_size
+        if end_offset <= byte_pos or end_offset > total_len:
+            return None, total_len
         byte_pos += hdr_size
         node_name = raw_bytes[byte_pos : byte_pos + name_len].decode("utf-8", errors="replace")
         byte_pos += name_len
         prop_list: List[Any] = []
-        prop_end = byte_pos + prop_len
+        prop_end = min(end_offset, byte_pos + prop_len)
+        want_weights_here = parse_weights or node_name == "Weights"
         if parse_props:
             for _prop_idx in range(prop_cnt):
-                prop_val, byte_pos = _read_prop(raw_bytes, byte_pos)
+                if byte_pos >= prop_end:
+                    break
+                prop_val, byte_pos = _read_prop(
+                    raw_bytes, byte_pos, total_len, parse_weights_array=want_weights_here
+                )
                 prop_list.append(prop_val)
         byte_pos = prop_end
         child_list: List[Any] = []
+        want_child_weights = (
+            node_name == "Deformer"
+            and len(prop_list) >= 3
+            and prop_list[2] == "Cluster"
+        )
         if parse_children:
-            while byte_pos < end_offset:
-                child_node, byte_pos = _read_node(
+            while byte_pos + hdr_size <= end_offset:
+                child_node, next_pos = _read_node(
                     raw_bytes,
                     byte_pos,
+                    total_len,
                     hdr_fmt,
                     hdr_size,
                     parse_props=True,
-                    parse_children=(node_name == "Objects"),
+                    parse_children=(node_name == "Objects" or want_child_weights),
+                    parse_weights=want_child_weights,
                 )
-                if child_node is None:
+                if child_node is None or next_pos <= byte_pos:
                     break
+                byte_pos = next_pos
                 child_list.append(child_node)
         return (node_name, prop_list, child_list), end_offset
 
@@ -1455,87 +1521,132 @@ def collect_fbx_weighted_bones(
         fbx_file = Path(raw_path)
         if not fbx_file.is_file():
             continue
-        raw_bytes = fbx_file.read_bytes()
-        if len(raw_bytes) < 27:
+        try:
+            mtime_ns = fbx_file.stat().st_mtime_ns
+        except OSError:
             continue
-        fbx_ver = struct.unpack_from("<I", raw_bytes, 23)[0]
-        is_64bit = fbx_ver >= 7500
-        hdr_fmt = "<QQQB" if is_64bit else "<IIIB"
-        hdr_size = 25 if is_64bit else 13
 
-        cursor = 27
-        models_map: Dict[int, Tuple[str, str]] = {}
-        geom_ids: Set[int] = set()
-        skin_ids: Set[int] = set()
-        cluster_maxw: Dict[int, float] = {}
-        conns_list: List[Tuple[int, int]] = []
+        cache_key = (str(fbx_file.resolve()), mtime_ns)
+        cached_fbx = _FBX_WEIGHTED_BONES_CACHE.get(cache_key)
+        if cached_fbx is not None:
+            file_bones, file_mesh_weights, file_parents = cached_fbx
+            all_bones_ci.update(file_bones)
+            for child_k, parent_val in file_parents.items():
+                parent_map_ci.setdefault(child_k, parent_val)
+            for mesh_low, w_set in file_mesh_weights.items():
+                if mesh_low not in excluded_low:
+                    weighted_bones_ci.update(w_set)
+            continue
 
-        while cursor < len(raw_bytes) - hdr_size:
-            end_offset, _pc, _pl, name_len = struct.unpack_from(hdr_fmt, raw_bytes, cursor)
-            if end_offset == 0:
-                break
-            top_name = raw_bytes[cursor + hdr_size : cursor + hdr_size + name_len].decode(
-                "utf-8", errors="replace"
-            )
-            if top_name in ("Objects", "Connections"):
-                parsed_top, cursor = _read_node(
-                    raw_bytes, cursor, hdr_fmt, hdr_size, parse_props=True, parse_children=True
-                )
-                if parsed_top is None:
+        try:
+            raw_bytes = fbx_file.read_bytes()
+        except OSError:
+            continue
+        total_len = len(raw_bytes)
+        if total_len < 27 or not raw_bytes.startswith(b"Kaydara FBX Binary"):
+            continue
+
+        file_bones_ci: Set[str] = set()
+        file_parents_ci: Dict[str, str] = {}
+        file_mesh_weights: Dict[str, Set[str]] = {}
+        try:
+            fbx_ver = struct.unpack_from("<I", raw_bytes, 23)[0]
+            is_64bit = fbx_ver >= 7500
+            hdr_fmt = "<QQQB" if is_64bit else "<IIIB"
+            hdr_size = 25 if is_64bit else 13
+
+            cursor = 27
+            models_map: Dict[int, Tuple[str, str]] = {}
+            geom_ids: Set[int] = set()
+            skin_ids: Set[int] = set()
+            cluster_maxw: Dict[int, float] = {}
+            conns_list: List[Tuple[int, int]] = []
+
+            while cursor <= total_len - hdr_size:
+                end_offset, _pc, _pl, name_len = struct.unpack_from(hdr_fmt, raw_bytes, cursor)
+                if end_offset == 0 or end_offset <= cursor or end_offset > total_len:
                     break
-                if top_name == "Objects":
-                    for sub_node in parsed_top[2]:
-                        sub_type = sub_node[0]
-                        sub_props = sub_node[1]
-                        if sub_type == "Model" and len(sub_props) >= 3:
-                            models_map[sub_props[0]] = (
-                                str(sub_props[1]).split("\x00")[0],
-                                str(sub_props[2]),
-                            )
-                        elif sub_type == "Geometry" and len(sub_props) >= 1:
-                            geom_ids.add(sub_props[0])
-                        elif sub_type == "Deformer" and len(sub_props) >= 3:
-                            if sub_props[2] == "Skin":
-                                skin_ids.add(sub_props[0])
-                            elif sub_props[2] == "Cluster":
-                                max_weight = 0.0
-                                for csub in sub_node[2]:
-                                    if csub[0] == "Weights" and csub[1] and isinstance(csub[1][0], (int, float)):
-                                        max_weight = float(csub[1][0])
-                                cluster_maxw[sub_props[0]] = max_weight
+                top_name = raw_bytes[cursor + hdr_size : cursor + hdr_size + name_len].decode(
+                    "utf-8", errors="replace"
+                )
+                if top_name in ("Objects", "Connections"):
+                    parsed_top, next_cursor = _read_node(
+                        raw_bytes,
+                        cursor,
+                        total_len,
+                        hdr_fmt,
+                        hdr_size,
+                        parse_props=True,
+                        parse_children=True,
+                    )
+                    if parsed_top is None or next_cursor <= cursor:
+                        break
+                    cursor = next_cursor
+                    if top_name == "Objects":
+                        for sub_node in parsed_top[2]:
+                            sub_type = sub_node[0]
+                            sub_props = sub_node[1]
+                            if sub_type == "Model" and len(sub_props) >= 3:
+                                models_map[sub_props[0]] = (
+                                    str(sub_props[1]).split("\x00")[0],
+                                    str(sub_props[2]),
+                                )
+                            elif sub_type == "Geometry" and len(sub_props) >= 1:
+                                geom_ids.add(sub_props[0])
+                            elif sub_type == "Deformer" and len(sub_props) >= 3:
+                                if sub_props[2] == "Skin":
+                                    skin_ids.add(sub_props[0])
+                                elif sub_props[2] == "Cluster":
+                                    max_weight = 0.0
+                                    for csub in sub_node[2]:
+                                        if csub[0] == "Weights" and csub[1] and isinstance(csub[1][0], (int, float)):
+                                            max_weight = float(csub[1][0])
+                                    cluster_maxw[sub_props[0]] = max_weight
+                    else:
+                        for sub_node in parsed_top[2]:
+                            if sub_node[0] == "C" and len(sub_node[1]) >= 3:
+                                conns_list.append((sub_node[1][1], sub_node[1][2]))
                 else:
-                    for sub_node in parsed_top[2]:
-                        if sub_node[0] == "C" and len(sub_node[1]) >= 3:
-                            conns_list.append((sub_node[1][1], sub_node[1][2]))
-            else:
-                cursor = end_offset
+                    cursor = end_offset
 
-        children_of: Dict[int, List[int]] = {}
-        for src_id, dst_id in conns_list:
-            children_of.setdefault(dst_id, []).append(src_id)
-            if src_id in models_map and dst_id in models_map:
-                src_name, src_subtype = models_map[src_id]
-                dst_name, dst_subtype = models_map[dst_id]
-                if src_subtype in ("LimbNode", "Null", "Root") and dst_subtype in ("LimbNode", "Null", "Root"):
-                    parent_map_ci.setdefault(src_name.lower(), dst_name.lower())
+            children_of: Dict[int, List[int]] = {}
+            for src_id, dst_id in conns_list:
+                children_of.setdefault(dst_id, []).append(src_id)
+                if src_id in models_map and dst_id in models_map:
+                    src_name, src_subtype = models_map[src_id]
+                    dst_name, dst_subtype = models_map[dst_id]
+                    if src_subtype in ("LimbNode", "Null", "Root") and dst_subtype in ("LimbNode", "Null", "Root"):
+                        file_parents_ci.setdefault(src_name.lower(), dst_name.lower())
 
-        for model_id, (model_name, model_subtype) in models_map.items():
-            if model_subtype in ("LimbNode", "Null", "Root"):
-                all_bones_ci.add(model_name.lower())
-            if model_subtype != "Mesh" or model_name.strip().lower() in excluded_low:
-                continue
-            for geom_id in children_of.get(model_id, []):
-                if geom_id not in geom_ids:
+            for model_id, (model_name, model_subtype) in models_map.items():
+                if model_subtype in ("LimbNode", "Null", "Root"):
+                    file_bones_ci.add(model_name.lower())
+                if model_subtype != "Mesh":
                     continue
-                for skin_id in children_of.get(geom_id, []):
-                    if skin_id not in skin_ids:
+                mesh_low = model_name.strip().lower()
+                mesh_w_set = file_mesh_weights.setdefault(mesh_low, set())
+                for geom_id in children_of.get(model_id, []):
+                    if geom_id not in geom_ids:
                         continue
-                    for cluster_id in children_of.get(skin_id, []):
-                        if cluster_maxw.get(cluster_id, 0.0) <= 1e-4:
+                    for skin_id in children_of.get(geom_id, []):
+                        if skin_id not in skin_ids:
                             continue
-                        for bone_id in children_of.get(cluster_id, []):
-                            if bone_id in models_map:
-                                weighted_bones_ci.add(models_map[bone_id][0].lower())
+                        for cluster_id in children_of.get(skin_id, []):
+                            if cluster_maxw.get(cluster_id, 0.0) <= 1e-4:
+                                continue
+                            for bone_id in children_of.get(cluster_id, []):
+                                if bone_id in models_map:
+                                    mesh_w_set.add(models_map[bone_id][0].lower())
+        except (struct.error, ValueError, zlib.error, IndexError):
+            continue
+
+        _FBX_WEIGHTED_BONES_CACHE[cache_key] = (file_bones_ci, file_mesh_weights, file_parents_ci)
+        all_bones_ci.update(file_bones_ci)
+        for child_k, parent_val in file_parents_ci.items():
+            parent_map_ci.setdefault(child_k, parent_val)
+        for mesh_low, w_set in file_mesh_weights.items():
+            if mesh_low not in excluded_low:
+                weighted_bones_ci.update(w_set)
 
     return all_bones_ci, weighted_bones_ci, parent_map_ci
 
@@ -1650,7 +1761,7 @@ def _index_unity_asset_guids(
             pass
 
     seen_dirs: Set[Path] = set()
-    bfs_queue: List[Tuple[Path, int]] = []
+    bfs_queue = collections_module.deque()
     for root_dir in candidate_roots:
         res_root = root_dir.resolve()
         if res_root not in seen_dirs and _is_safe_subdir(res_root):
@@ -1659,12 +1770,12 @@ def _index_unity_asset_guids(
 
     start_time = time_mod.monotonic()
 
-    def _scan_meta_dir(dir_queue: List[Tuple[Path, int]], max_depth: int, max_dirs: int) -> None:
+    def _scan_meta_dir(dir_queue: collections_module.deque, max_depth: int, max_dirs: int) -> None:
         dirs_scanned = 0
         while dir_queue and remaining and dirs_scanned < max_dirs:
             if (time_mod.monotonic() - start_time) > deadline_sec:
                 break
-            cur_dir, cur_depth = dir_queue.pop(0)
+            cur_dir, cur_depth = dir_queue.popleft()
             dirs_scanned += 1
             try:
                 dir_entries = list(operating_system.scandir(cur_dir))
@@ -2293,10 +2404,14 @@ def extract_unity_scene_physbones(
 
     children_tfs: Dict[str, List[str]] = {}
     children_pis: Dict[str, List[str]] = {}
+    tfs_by_pi: Dict[str, List[str]] = {}
     for tf_id, tf_data in scene_doc["tfs"].items():
         father_ref = tf_data.get("father")
         if father_ref and father_ref[0] != "0":
             children_tfs.setdefault(father_ref[0], []).append(tf_id)
+        pi_ref = tf_data.get("pi")
+        if pi_ref and pi_ref[0] != "0":
+            tfs_by_pi.setdefault(pi_ref[0], []).append(tf_id)
     for pi_id, pi_data in scene_doc["pis"].items():
         ptf_ref = pi_data.get("parent_tf")
         if ptf_ref and ptf_ref[0] != "0":
@@ -2304,9 +2419,9 @@ def extract_unity_scene_physbones(
 
     visited_tfs: Set[str] = set()
     visited_pis: Set[str] = set()
-    bfs_queue: List[str] = [root_tf_id]
+    bfs_queue = collections_module.deque([root_tf_id])
     while bfs_queue:
-        cur_tf = bfs_queue.pop(0)
+        cur_tf = bfs_queue.popleft()
         if cur_tf in visited_tfs:
             continue
         visited_tfs.add(cur_tf)
@@ -2315,9 +2430,8 @@ def extract_unity_scene_physbones(
         for child_pi in children_pis.get(cur_tf, []):
             if child_pi not in visited_pis:
                 visited_pis.add(child_pi)
-                for tf_id, tf_data in scene_doc["tfs"].items():
-                    pi_ref = tf_data.get("pi")
-                    if pi_ref and pi_ref[0] == child_pi and tf_id not in visited_tfs:
+                for tf_id in tfs_by_pi.get(child_pi, []):
+                    if tf_id not in visited_tfs:
                         bfs_queue.append(tf_id)
 
     # Collect GUIDs needed from PIs and FBX/prefab refs
@@ -2825,9 +2939,10 @@ def _match_extracted_unity_params(
             return rec
     # Prefix match fallback (e.g. Skirt_FrontB -> Skirt)
     prefix_tok = root_low.split(".", 1)[0].rstrip("0123456789")
-    for rec in extracted_spokes:
-        if rec["root_bone"].strip().lower().startswith(prefix_tok):
-            return rec
+    if prefix_tok and len(prefix_tok) >= 2:
+        for rec in extracted_spokes:
+            if rec["root_bone"].strip().lower().startswith(prefix_tok):
+                return rec
     return None
 
 

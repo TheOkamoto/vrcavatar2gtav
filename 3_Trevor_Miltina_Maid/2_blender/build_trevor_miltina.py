@@ -217,26 +217,26 @@ def build_trevor_miltina_avatar(cli_args=None):
     )
     if cli_args is not None:
         if getattr(cli_args, "unity_scene", None):
-            trevor_cfg["unity_scene"] = cli_args.unity_scene
+            trevor_cfg["unity_scene"] = project_paths.to_host_path(cli_args.unity_scene)
         if getattr(cli_args, "unity_avatar_name", None):
             trevor_cfg["unity_avatar_name"] = cli_args.unity_avatar_name
         if getattr(cli_args, "face_anim", None):
-            trevor_cfg["face_anim"] = cli_args.face_anim
+            trevor_cfg["face_anim"] = project_paths.to_host_path(cli_args.face_anim)
         if getattr(cli_args, "skeleton_yft", None):
-            trevor_cfg["skeleton_yft"] = cli_args.skeleton_yft
+            trevor_cfg["skeleton_yft"] = project_paths.to_host_path(cli_args.skeleton_yft)
         if getattr(cli_args, "texture_dir", None):
-            override_tex_dir = Path(cli_args.texture_dir)
+            override_tex_dir = project_paths.to_host_path(cli_args.texture_dir)
             trevor_cfg["textures_dir"] = override_tex_dir
             for tex_key in ("atlas_png", "spec_png", "normal_png"):
                 if trevor_cfg.get(tex_key):
                     trevor_cfg[tex_key] = override_tex_dir / Path(trevor_cfg[tex_key]).name
         if getattr(cli_args, "output_dir", None):
-            override_output_dir = Path(cli_args.output_dir)
+            override_output_dir = project_paths.to_host_path(cli_args.output_dir)
             trevor_cfg["exported_models_dir"] = override_output_dir
             if not getattr(cli_args, "target_yft", None):
                 trevor_cfg["target_yft"] = override_output_dir / f"{trevor_cfg['ped_name']}.yft"
         if getattr(cli_args, "target_yft", None):
-            trevor_cfg["target_yft"] = cli_args.target_yft
+            trevor_cfg["target_yft"] = project_paths.to_host_path(cli_args.target_yft)
 
     addon_utils.enable("sollumz")
     from sollumz.sollumz_properties import SollumType
@@ -1007,8 +1007,11 @@ def build_trevor_miltina_avatar(cli_args=None):
             shader_node.set_float(0.0)
         elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
             shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings" and hasattr(shader_node, "set_vec4"):
-            shader_node.set_vec3((0.0, 0.0, 0.0))
+        elif shader_node.name == "detailSettings":
+            if hasattr(shader_node, "set_vec3"):
+                shader_node.set_vec3((0.0, 0.0, 0.0))
+            elif hasattr(shader_node, "set_vec4"):
+                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
         elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
             shader_node.set_float(0.0)
         elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):

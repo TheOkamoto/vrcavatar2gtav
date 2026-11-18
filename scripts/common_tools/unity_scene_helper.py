@@ -10,8 +10,14 @@ setup), every anatomical bone scale defaults cleanly to (1.0, 1.0, 1.0).
 import math
 import os
 import time
+from collections import deque
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+try:
+    import error_handler_helper as err_helper
+except Exception:
+    err_helper = None
 
 DEFAULT_SCALE: Tuple[float, float, float] = (1.0, 1.0, 1.0)
 DEFAULT_SCALE_TOLERANCE: float = 1e-3
@@ -63,6 +69,7 @@ _SKIP_SEARCH_DIRS: Set[str] = {
 
 _PREFAB_NODE_CACHE: Dict[str, Dict[str, str]] = {}
 _GUID_ASSET_CACHE: Dict[str, Optional[Path]] = {}
+_YAML_PARSE_CACHE: Dict[Tuple[str, int], Dict[str, object]] = {}
 
 
 def empty_unity_avatar_config(scene_path_str: str = "") -> Dict[str, object]:
@@ -144,7 +151,30 @@ def _is_ignored_scale_node(node_name: str) -> bool:
 
 
 def _stream_parse_unity_yaml(yaml_path: Path) -> Dict[str, object]:
-    """Stream-parse GameObject (!u!1), Transform (!u!4), and PrefabInstance (!u!1001)."""
+    """Stream-parse GameObject (!u!1), Transform (!u!4), and PrefabInstance (!u!1001) with mtime cache."""
+    resolved_path = Path(yaml_path)
+    try:
+        mtime_ns = resolved_path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = -1
+    cache_key = (str(resolved_path), mtime_ns)
+    cached_doc = _YAML_PARSE_CACHE.get(cache_key)
+    if cached_doc is not None:
+        return cached_doc
+    try:
+        parsed_doc = _stream_parse_unity_yaml_uncached(resolved_path)
+    except OSError as exc:
+        if err_helper is not None:
+            logger_obj = err_helper.get_active_logger_from_env(stage_name="unity_scene")
+            logger_obj.warning(f"Failed to read Unity YAML {resolved_path}: {exc}")
+        return {"game_objects": {}, "transforms": {}, "prefab_instances": {}}
+    if mtime_ns >= 0:
+        _YAML_PARSE_CACHE[cache_key] = parsed_doc
+    return parsed_doc
+
+
+def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
+    """Uncached streaming parser for GameObject (!u!1), Transform (!u!4), and PrefabInstance (!u!1001)."""
     game_objects: Dict[str, Dict[str, object]] = {}
     transforms: Dict[str, Dict[str, object]] = {}
     prefab_instances: Dict[str, Dict[str, object]] = {}
@@ -269,6 +299,7 @@ def _collect_guid_paths_bounded(
 
     visited_dirs: Set[str] = set()
     total_roots = len(search_roots)
+    scan_deadline: Optional[float] = None
     for root_idx, root_candidate in enumerate(search_roots):
         if not remaining:
             break
@@ -301,12 +332,13 @@ def _collect_guid_paths_bounded(
                         for idx_line, meta_line in enumerate(meta_handle):
                             if meta_line.startswith("guid:"):
                                 found_guid = meta_line.split(":", 1)[1].strip().lower()
-                                if found_guid in remaining:
+                                if found_guid:
                                     asset_path = Path(meta_path[:-5])
                                     if asset_path.is_file():
-                                        _GUID_ASSET_CACHE[found_guid] = asset_path
-                                        resolved[found_guid] = asset_path
-                                        remaining.discard(found_guid)
+                                        _GUID_ASSET_CACHE.setdefault(found_guid, asset_path)
+                                        if found_guid in remaining:
+                                            resolved[found_guid] = asset_path
+                                            remaining.discard(found_guid)
                                 break
                             if idx_line > 8:
                                 break
@@ -315,8 +347,9 @@ def _collect_guid_paths_bounded(
             if not remaining:
                 break
 
-    for missing_guid in remaining:
-        _GUID_ASSET_CACHE[missing_guid] = None
+    if scan_deadline is None or time.monotonic() <= scan_deadline:
+        for missing_guid in remaining:
+            _GUID_ASSET_CACHE[missing_guid] = None
     return resolved
 
 
@@ -362,22 +395,40 @@ def _load_prefab_file_id_names(asset_path: Path) -> Dict[str, str]:
     return id_to_name
 
 
-def _extract_pi_identity(pi_info: Dict[str, object]) -> Tuple[str, Optional[int]]:
-    """Derive a PrefabInstance display name and active state from its m_Modifications."""
+def _extract_pi_identity(
+    pi_info: Dict[str, object],
+    root_go_fid: str = "",
+) -> Tuple[str, Optional[int]]:
+    """Derive a PrefabInstance display name and root active state from its m_Modifications."""
     found_name = ""
     found_active: Optional[int] = None
     root_name_target = ""
+    src_guid = str(pi_info.get("source_guid", "")).lower()
+    active_by_target: Dict[str, int] = {}
 
     for mod_item in pi_info.get("mods", []):  # type: ignore[union-attr]
         prop_name = str(mod_item.get("prop", ""))
         val_str = str(mod_item.get("val", ""))
-        if prop_name == "m_Name" and not found_name and val_str:
-            found_name = val_str
-            root_name_target = str(mod_item.get("target_id", ""))
-        elif prop_name == "m_IsActive" and (
-            found_active is None or str(mod_item.get("target_id", "")) == root_name_target
-        ):
-            found_active = 0 if val_str == "0" else 1
+        target_id = str(mod_item.get("target_id", ""))
+        target_guid = str(mod_item.get("target_guid", "")).lower()
+        if prop_name == "m_Name" and val_str:
+            is_src_match = bool(src_guid and target_guid == src_guid)
+            if not found_name or (is_src_match and root_name_target == ""):
+                found_name = val_str
+                root_name_target = target_id
+        elif prop_name == "m_IsActive" and target_id:
+            active_val = 0 if val_str == "0" else 1
+            if not src_guid or not target_guid or target_guid == src_guid:
+                active_by_target[target_id] = active_val
+
+    if root_go_fid and root_go_fid in active_by_target:
+        found_active = active_by_target[root_go_fid]
+    elif root_name_target and root_name_target in active_by_target:
+        found_active = active_by_target[root_name_target]
+    elif not root_name_target and "100000" in active_by_target:
+        # Standard Unity ModelImporter FBX root GameObject fileID when root isn't renamed.
+        found_active = active_by_target["100000"]
+
     return found_name, found_active
 
 
@@ -583,9 +634,9 @@ def extract_unity_avatar_config(
     if root_kind == "xf":
         # BFS from avatar root so primary Armature bones precede nested clothing Armatures.
         node_chain_scales: Dict[Tuple[str, str], List[Tuple[float, float, float]]] = {}
-        queue: List[Tuple[str, Tuple[str, ...]]] = [(root_id, (resolved_name,))]
+        queue: deque = deque([(root_id, (resolved_name,))])
         while queue:
-            cur_xf_id, cur_path = queue.pop(0)
+            cur_xf_id, cur_path = queue.popleft()
             subtree_xforms.add(cur_xf_id)
             xf_info = transforms.get(cur_xf_id, {})
             go_info = game_objects.get(str(xf_info.get("go", "")), {})

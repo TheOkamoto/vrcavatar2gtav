@@ -35,12 +35,13 @@
 
 ### 主な機能
 
-- **First-Run セットアップ & 外部設定ファイル**: 対話型ウィザードと [`vrc2gtav.cfg`](vrc2gtav.cfg.example) により、ローカルパス設定を Git 管理外へ分離。
-- **3言語対応 (`en` / `ja` / `pt`)**: OS のロケールを自動判定し、`--lang` オプションでマネージャー・セットアップ・テスト出力を切り替え可能。
-- **スケール `1.0` 標準 + `.unity` シーン抽出**: GitHub 版の既定値として全身スケール `1.0` を採用しつつ、`.unity` シーンファイルが指定された場合は階層内のカスタムスケールを自動読み取り・反映。
-- **汎用 Unity カスタムヘア自動移植 (`.prefab` / `PrefabVariant` / `.fbx`)**: あらゆる VRChat Unity ヘア `.prefab`・Modular Avatar 構造・`.fbx` + `.mat` を解析し、lilToon 色調・HSV を 2K アトラスへ焼き込み、対象アバター頭部へ位置合わせします（未設定や `default` / `none` 指定時は標準ヘアへ安全にフォールバック）。
-- **アバター <-> 主人公の完全な相互切替**: 任意の VRChat アバター（`shinano_casual` / `shinano_er` / `miltina_maid`）をどの主人公（`michael` / `franklin` / `trevor`）にも自由に割り当て可能（対話メニュー `[7]`、`--avatar` / `--*-avatar`、または `vrc2gtav.cfg` で切り替え）。
-- **自動検証テストスイート**: クリーンなクローン環境で実行できるソース検証 (`7` スイート) と、ビルド・配置後に行うフル検証 (`10` スイート) を搭載。
+- **First-Run・`.zip`/Unity 読込 & Blender 4.0.2 自動取得**: `--avatar-zip` (`.zip` / `.unitypackage`) または `--unity-project` を渡すだけで、VRChat だけの新しい Unity プロジェクトからも開始可能。[`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) が安全に展開し、Blender `4.0.2` + `Sollumz` が未導入なら自動ダウンロードし、**1ページ10件＋`Next`/`Prev` ページング選択メニュー**でアバターを選べます。
+- **ネイティブ Modular Avatar (NDMF) ベイクエンジン**: [`scripts/common_tools/modular_avatar_helper.py`](scripts/common_tools/modular_avatar_helper.py) と [`scripts/common_tools/build_universal_avatar.py`](scripts/common_tools/build_universal_avatar.py) が、`ModularAvatarMergeArmature`・`BoneProxy`・`ScaleAdjuster`・`MeshSettings`・`ObjectToggle`/`Activator`・`ReplaceObject`・`ShapeChanger`・`BlendshapeSync`・内蔵 `VRCPhysBone`・lilToon マテリアルを含む衣装やドレスを任意の主人公 (`michael`/`franklin`/`trevor`) へそのままベイクします。
+- **顔／体ブレンドシェイプ個別確認＋カスタム衣装含む全ゼロ `.cfg` 生成**: 顔 (`--import-face-blendshapes`) と体 (`--import-body-blendshapes`) を個別に確認し、「Yes」なら Unity から抽出、「No」ならアバター FBX およびカスタム衣装 FBX を含むすべてのシェイプキーを `0.0` で初期化した `.cfg` を出力します。
+- **専用エラーハンドラ＆ `--verbose` 日時ログ**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) により、通常時は簡潔に出力し、`--verbose` 指定時は詳細出力と同時に `logs/` へ日時・アバター名付きログを保存します。
+- **3言語対応 (`en` / `ja` / `pt`)**: OS のロケール自動判定と `--lang` 指定。
+- **スケール `1.0` 標準 + `.unity` シーン抽出**・**汎用カスタムヘア移植**・**標準 VRCPhysBone 自動抽出**・**アバター <-> 主人公の完全な相互切替**。
+- **自動検証テストスイート**: ソース検証 (`8` スイート) およびフル検証 (`11` スイート)。
 
 ---
 
@@ -117,6 +118,8 @@
 | :--- | :--- |
 | `RUN_MANAGER.bat` / `EXECUTAR_GERENCIADOR.bat` | First-Run・ビルド・配置を行う Windows 対話メニュー |
 | `python run_mod_manager.py --setup` | 対話型 First-Run ウィザードと `vrc2gtav.cfg` の設定 |
+| `python run_mod_manager.py --setup --avatar-zip "/path/Shinano.zip" --download-blender --verbose` | `.zip`/`.unitypackage` 展開・Blender `4.0.2` + Sollumz 自動導入・10件+`Next` 選択・MA/顔体 `.cfg` 生成・`logs/` ログ記録 |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Shinano.zip" --interactive --verbose` | Modular Avatar 対応汎用アバター・衣装ビルダー（10件ページ選択・顔/体個別質問・詳細ログ対応） |
 | `python run_mod_manager.py --check-env` | GTA V・Blender・`rage-cli`・アセットパスの検証 |
 | `python scripts/common_tools/setup_first_run.py --check-only` | 環境と元アセットの有無を非破壊チェック |
 | `python run_mod_manager.py --character all` | 3人分の Blender 再構築・YDD/YTD 出力・RPF7 配置を一括実行 |
@@ -128,8 +131,8 @@
 | `python run_mod_manager.py --export-physbones` | `.unity` シーンから標準 VRCPhysBone を `configs/*_physbones.cfg` へ自動同期（`--physbones-marshmallow` で Marshmallow PB 含める、`--overwrite-physbones-from-unity` で上書き） |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Unity シーンではなく `.cfg` プリセットの PhysBone 設定を使ってビルド（`--physbones-marshmallow` で Marshmallow PB 有効化可能） |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド済みフォルダから `mods/x64v.rpf` へ再梱包・配置 |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・相互切替・カスタムヘアの `7` スイートを実行（クローン直後対応） |
-| `python scripts/common_tools/test_mod_suite.py` | 全 `10` スイートの統合検証を実行（ビルド・配置済み環境が必要） |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・First-Run・Modular Avatar の `8` スイートを実行（クローン直後対応） |
+| `python scripts/common_tools/test_mod_suite.py` | 全 `11` スイートの統合検証を実行（ビルド・配置済み環境が必要） |
 
 ---
 

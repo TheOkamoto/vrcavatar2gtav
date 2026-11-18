@@ -149,10 +149,27 @@ def find_unity_assets_root(
     return None
 
 
-def _load_disk_guid_cache(root_dir: Path) -> Optional[Dict[str, Path]]:
-    """Load persisted Assets GUID index from temp cache when available."""
+def clear_guid_cache() -> None:
+    """Clear in-memory and temporary disk GUID resolution caches cleanly."""
+    import tempfile
+
+    _GUID_CACHE_BY_ROOT.clear()
+    try:
+        temp_dir = Path(tempfile.gettempdir())
+        for cache_file in temp_dir.glob("vrc2gtav_guid_cache_*.json"):
+            try:
+                cache_file.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _load_disk_guid_cache(root_dir: Path, max_age_sec: float = 300.0) -> Optional[Dict[str, Path]]:
+    """Load persisted Assets GUID index from temp cache when fresh, complete, and matching mtime."""
     import hashlib
     import tempfile
+    import time
 
     root_key = str(root_dir.resolve())
     cache_hash = hashlib.sha1(root_key.encode("utf-8", errors="ignore")).hexdigest()[:16]
@@ -160,25 +177,44 @@ def _load_disk_guid_cache(root_dir: Path) -> Optional[Dict[str, Path]]:
     if not cache_file.is_file():
         return None
     try:
+        cur_mtime_ns = root_dir.stat().st_mtime_ns
         payload = json.loads(cache_file.read_text(encoding="utf-8"))
         if payload.get("root") != root_key:
+            return None
+        if payload.get("truncated", False):
+            return None
+        if int(payload.get("root_mtime_ns", -1)) != int(cur_mtime_ns):
+            return None
+        saved_ts = float(payload.get("saved_at", 0.0))
+        if saved_ts <= 0.0 or (time.time() - saved_ts) > max_age_sec:
             return None
         return {guid_k: Path(asset_str) for guid_k, asset_str in payload.get("entries", {}).items()}
     except Exception:
         return None
 
 
-def _save_disk_guid_cache(root_dir: Path, guid_map: Dict[str, Path]) -> None:
-    """Persist scanned Assets GUID index in temp storage to avoid repeated slow walks."""
+def _save_disk_guid_cache(
+    root_dir: Path,
+    guid_map: Dict[str, Path],
+    truncated: bool = False,
+) -> None:
+    """Persist complete scanned Assets GUID index in temp storage with mtime validation."""
     import hashlib
     import tempfile
+    import time
 
+    if truncated:
+        return
     root_key = str(root_dir.resolve())
     cache_hash = hashlib.sha1(root_key.encode("utf-8", errors="ignore")).hexdigest()[:16]
     cache_file = Path(tempfile.gettempdir()) / f"vrc2gtav_guid_cache_{cache_hash}.json"
     try:
+        root_mtime_ns = root_dir.stat().st_mtime_ns
         payload = {
             "root": root_key,
+            "root_mtime_ns": int(root_mtime_ns),
+            "saved_at": time.time(),
+            "truncated": bool(truncated),
             "entries": {guid_k: str(asset_p) for guid_k, asset_p in guid_map.items()},
         }
         cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -247,6 +283,7 @@ def _index_meta_tree(root_dir: Path, max_files: int = 80000, use_disk_cache: boo
         if entry.is_file() and entry.name.endswith(".meta"):
             meta_paths.append(str(entry))
 
+    was_truncated = False
     if len(top_subdirs) > 2:
         per_branch_cap = max(2000, max_files // max(1, len(top_subdirs) // 2))
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as walk_executor:
@@ -254,12 +291,17 @@ def _index_meta_tree(root_dir: Path, max_files: int = 80000, use_disk_cache: boo
                 lambda sub_path: _collect_meta_files_under_dir(sub_path, per_branch_cap),
                 top_subdirs,
             ):
+                if len(branch_metas) >= per_branch_cap:
+                    was_truncated = True
                 meta_paths.extend(branch_metas)
                 if len(meta_paths) >= max_files:
                     meta_paths = meta_paths[:max_files]
+                    was_truncated = True
                     break
     else:
         meta_paths.extend(_collect_meta_files_under_dir(str(root_dir), max_files))
+        if len(meta_paths) >= max_files:
+            was_truncated = True
         meta_paths = meta_paths[:max_files]
 
     guid_map: Dict[str, Path] = {}
@@ -272,13 +314,13 @@ def _index_meta_tree(root_dir: Path, max_files: int = 80000, use_disk_cache: boo
                     guid_map[guid_str] = Path(asset_str)
 
     _GUID_CACHE_BY_ROOT[cache_key] = guid_map
-    if use_disk_cache and guid_map:
-        _save_disk_guid_cache(root_dir, guid_map)
+    if use_disk_cache and guid_map and not was_truncated:
+        _save_disk_guid_cache(root_dir, guid_map, truncated=was_truncated)
     return guid_map
 
 
 def _scan_nearby_meta_files(anchor_path: Path, target_guid: str) -> Optional[Path]:
-    """Search nearby parent folders up to the package root just under Assets/ in milliseconds."""
+    """Search nearby parent folders upward without re-walking already indexed child trees."""
     start_dir = anchor_path if anchor_path.is_dir() else anchor_path.parent
     candidate_dirs: List[Path] = []
     cur_dir = start_dir
@@ -293,12 +335,44 @@ def _scan_nearby_meta_files(anchor_path: Path, target_guid: str) -> Optional[Pat
             break
         cur_dir = parent_dir
 
-    # Search deepest local folder first, widening outward toward package root on miss
+    prev_scanned_child: Optional[Path] = None
     for scan_dir in candidate_dirs:
-        local_cache = _index_meta_tree(scan_dir, max_files=12000, use_disk_cache=False)
+        scan_key = str(scan_dir.resolve())
+        if scan_key in _GUID_CACHE_BY_ROOT:
+            found_path = _GUID_CACHE_BY_ROOT[scan_key].get(target_guid)
+            if found_path is not None:
+                return found_path
+            prev_scanned_child = scan_dir
+            continue
+
+        if prev_scanned_child is None:
+            local_cache = _index_meta_tree(scan_dir, max_files=12000, use_disk_cache=False)
+        else:
+            local_cache = dict(_GUID_CACHE_BY_ROOT.get(str(prev_scanned_child.resolve()), {}))
+            try:
+                sibling_dirs = [
+                    sub_item
+                    for sub_item in scan_dir.iterdir()
+                    if sub_item.is_dir()
+                    and sub_item.resolve() != prev_scanned_child.resolve()
+                    and sub_item.name.lower() not in SKIP_WALK_DIRS
+                    and not sub_item.name.startswith(".")
+                ]
+                for direct_entry in scan_dir.iterdir():
+                    if direct_entry.is_file() and direct_entry.name.endswith(".meta"):
+                        pair_res = _read_meta_guid_pair(str(direct_entry))
+                        if pair_res is not None:
+                            local_cache[pair_res[0]] = Path(pair_res[1])
+                for sibling_dir in sibling_dirs:
+                    local_cache.update(_index_meta_tree(sibling_dir, max_files=8000, use_disk_cache=False))
+            except OSError:
+                pass
+            _GUID_CACHE_BY_ROOT[scan_key] = local_cache
+
         found_path = local_cache.get(target_guid)
         if found_path is not None:
             return found_path
+        prev_scanned_child = scan_dir
     return None
 
 
@@ -691,7 +765,7 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
             mesh_m = re.search(r"m_Mesh:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
             root_bone_m = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", body)
             mat_section = re.search(
-                r"m_Materials:(.*?)(?:^\s*m_StaticBatchInfo:|^\s*m_ProbeAnchor:|\Z)",
+                r"m_Materials:(.*?)(?=^\s{2}[a-zA-Z_][a-zA-Z0-9_]*:|\Z)",
                 body,
                 re.DOTALL | re.MULTILINE,
             )
@@ -730,10 +804,10 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
             parent_m = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", body)
             mods: List[Dict[str, str]] = []
             for mod_match in re.finditer(
-                r"-\s*target:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?[^\}]*\}\s*\n"
-                r"\s*propertyPath:\s*([^\n]+)\n"
-                r"\s*value:\s*([^\n]*)\n"
-                r"\s*objectReference:\s*\{([^\}]*)\}",
+                r"-\s*target:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?[^\}]*\}[ \t]*\r?\n"
+                r"[ \t]*propertyPath:[ \t]*([^\r\n]+)\r?\n"
+                r"[ \t]*value:[ \t]*([^\r\n]*)\r?\n"
+                r"[ \t]*objectReference:[ \t]*\{([^\}]*)\}",
                 body,
             ):
                 mods.append(
@@ -812,9 +886,16 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
                 block_lines.append(raw_line.rstrip("\r\n"))
     _flush_block()
 
+    go_to_tr = {
+        tr_info["go_fid"]: tr_fid
+        for tr_fid, tr_info in transforms.items()
+        if tr_info.get("go_fid")
+    }
+
     return {
         "game_objects": game_objects,
         "transforms": transforms,
+        "go_to_tr": go_to_tr,
         "renderers": renderers,
         "mesh_filters": mesh_filters,
         "prefab_instances": prefab_instances,
@@ -826,6 +907,9 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
 
 def _find_transform_for_go(parsed_yaml: Dict[str, Any], go_fid: str) -> Optional[str]:
     """Return Transform fileID owning GameObject fileID."""
+    go_to_tr = parsed_yaml.get("go_to_tr")
+    if isinstance(go_to_tr, dict):
+        return go_to_tr.get(go_fid)
     for tr_fid, tr_info in parsed_yaml["transforms"].items():
         if tr_info["go_fid"] == go_fid:
             return tr_fid
@@ -1276,6 +1360,11 @@ def _discover_scene_custom_hair(
     ma_go_fids = {item["go_fid"] for item in parsed["ma_merge_armatures"] if item.get("enabled", True)}
     ma_go_fids.update(item["go_fid"] for item in parsed["ma_bone_proxies"])
     ma_go_fids.update(item["go_fid"] for item in parsed["vrcfury_links"])
+    ma_pi_fids = {
+        str(game_objects.get(go_fid, {}).get("prefab_instance", ""))
+        for go_fid in ma_go_fids
+    }
+    ma_pi_fids.discard("")
 
     for pi_fid, pi_info in prefab_instances.items():
         if pi_info["parent_tr"] not in subtree_trs:
@@ -1284,12 +1373,28 @@ def _discover_scene_custom_hair(
         if not src_guid:
             continue
         pi_name = ""
-        pi_active = True
+        root_name_target = ""
+        active_by_target: Dict[str, bool] = {}
         for mod_item in pi_info.get("mods", []):
-            if mod_item["property"] == "m_Name" and mod_item["value"]:
-                pi_name = mod_item["value"]
-            elif mod_item["property"] == "m_IsActive":
-                pi_active = mod_item["value"] != "0"
+            prop_key = mod_item.get("property", "")
+            val_txt = mod_item.get("value", "")
+            tgt_fid = mod_item.get("target_fid", "")
+            tgt_guid = mod_item.get("target_guid", "").lower()
+            if prop_key == "m_Name" and val_txt:
+                is_src_match = bool(tgt_guid and tgt_guid == src_guid.lower())
+                if not pi_name or (is_src_match and root_name_target == ""):
+                    pi_name = val_txt
+                    root_name_target = tgt_fid
+            elif prop_key == "m_IsActive" and tgt_fid:
+                if not tgt_guid or tgt_guid == src_guid.lower():
+                    active_by_target[tgt_fid] = val_txt != "0"
+
+        if root_name_target and root_name_target in active_by_target:
+            pi_active = active_by_target[root_name_target]
+        elif not root_name_target and "100000" in active_by_target:
+            pi_active = active_by_target["100000"]
+        else:
+            pi_active = True
         if not pi_active:
             continue
 
@@ -1300,11 +1405,7 @@ def _discover_scene_custom_hair(
 
         is_under_head = parent_go_name in ("head", "hair_root", "hair root", "hairroot")
         has_hair_keyword = any(tok in candidate_label for tok in HAIR_KEYWORD_TOKENS)
-        has_ma_attachment = any(
-            game_objects.get(tr_item.get("go_fid", ""), {}).get("prefab_instance") == pi_fid
-            and tr_item.get("go_fid") in ma_go_fids
-            for tr_item in transforms.values()
-        )
+        has_ma_attachment = pi_fid in ma_pi_fids
         if resolved_src is not None and resolved_src.exists() and (is_under_head or (has_hair_keyword and (has_ma_attachment or is_under_head or pi_info["parent_tr"] == avatar_root_tr))):
             return {
                 "source_path": resolved_src,
@@ -1697,7 +1798,8 @@ def composite_unity_material_textures(
         for prop_key in prop_names:
             entry = tex_envs.get(prop_key)
             if entry and entry.get("path") and os.path.isfile(entry["path"]):
-                opened_img = pil_image.open(entry["path"]).convert("RGBA")
+                with pil_image.open(entry["path"]) as raw_opened:
+                    opened_img = raw_opened.convert("RGBA")
                 if dilate_black_bg:
                     opened_img = _dilate_black_uv_background_if_detected(
                         opened_img, numpy_mod, pil_image, passes=10

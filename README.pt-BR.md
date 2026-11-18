@@ -35,12 +35,14 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 
 ### Principais Recursos
 
-- **Assistente First-Run e Configuração Externa**: Configuração guiada e arquivo [`vrc2gtav.cfg`](vrc2gtav.cfg.example) mantêm caminhos locais fora do controle de versão.
-- **Suporte Trilíngue (`en` / `ja` / `pt`)**: Detecção automática do idioma do sistema operacional com sobrescrita explícita via `--lang` nos gerenciadores, ferramentas e suítes de teste.
-- **Padrão de Escala `1.0` + Leitor de `.unity`**: Mantém as escalas corporais em `1.0` por padrão no GitHub e extrai automaticamente as escalas reais da hierarquia quando uma cena `.unity` do projeto é fornecida.
-- **Porte Universal de Cabelo Customizado Unity (`.prefab` / `PrefabVariant` / `.fbx`)**: Analisa automaticamente qualquer *prefab* de cabelo VRChat, anexo *Modular Avatar* ou `.fbx` + `.mat`, assa cores/HSV do lilToon no atlas 2K, ajusta o encaixe no crânio do avatar e faz *fallback* automático para o cabelo padrão (`default` / `none` / ausente).
-- **Intercambiabilidade Completa Avatar <-> Protagonista**: Qualquer preset VRChat (`shinano_casual`, `shinano_er`, `miltina_maid`) pode ser atribuído a qualquer protagonista (`michael`, `franklin`, `trevor`) pela opção `[7]` do menu interativo, flags `--avatar` / `--*-avatar` na CLI ou em `vrc2gtav.cfg`.
-- **Testes Automatizados**: Inclui verificação rápida de código-fonte (`7` suítes, compatível com clone limpo do GitHub) e validação completa pós-build/deploy (`10` suítes).
+- **Assistente First-Run, Ingestão de `.zip`/Unity e Download do Blender 4.0.2**: Comece de um repositório limpo ou projeto Unity com apenas VRChat + Shinano usando `--avatar-zip` (`.zip` / `.unitypackage`) ou `--unity-project`. O módulo [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) extrai pacotes com proteção *Zip-Slip*, baixa o Blender `4.0.2` portátil + `Sollumz` (`--download-blender`) quando ausentes e exibe um **menu paginado de avatares (`10` opções/página + botão `Next`/`Prev`)**.
+- **Motor Nativo Modular Avatar (NDMF)**: [`scripts/common_tools/modular_avatar_helper.py`](scripts/common_tools/modular_avatar_helper.py) e [`scripts/common_tools/build_universal_avatar.py`](scripts/common_tools/build_universal_avatar.py) fazem o bake nativo de qualquer vestido ou roupa contendo `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, `VRCPhysBone`s e materiais lilToon para qualquer protagonista (`michael`, `franklin`, `trevor`).
+- **Blendshapes de Rosto e Corpo Separados + `.cfg` Zerado (Incluindo Vestido Customizado)**: Pergunta separadamente se deseja importar *blendshapes* do **rosto** (`--import-face-blendshapes`) e do **corpo** (`--import-body-blendshapes`) do Unity para o `.cfg`, ou gera um `.cfg` completo com todas as chaves zeradas (`0.0`) extraídas do FBX do avatar e dos vestidos customizados.
+- **Módulo Dedicado de Erros e Logs com `--verbose`**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) oferece exceções tipadas, escrita atômica, prevenção de zumbis, saída limpa por padrão e `--verbose` gravando log com data, hora e avatar em `logs/`.
+- **Suporte Trilíngue (`en` / `ja` / `pt`)**: Detecção automática do idioma do sistema operacional com sobrescrita explícita via `--lang`.
+- **Padrão de Escala `1.0` + Leitor de `.unity`**: Mantém escalas em `1.0` por padrão e extrai escalas customizadas da cena `.unity` quando fornecida.
+- **Porte Universal de Cabelo Customizado, PhysBones e Intercambiabilidade**: Suporta cabelos `.prefab`/`PrefabVariant`/`.fbx`, `79` cadeias `VRCPhysBone` (com `--physbones-marshmallow` opcional) e troca livre entre protagonistas (`[7]`, `--avatar`).
+- **Testes Automatizados**: Validação de código-fonte (`8` suítes) e validação completa pós-deploy (`11` suítes).
 
 ---
 
@@ -117,6 +119,8 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | :--- | :--- |
 | `EXECUTAR_GERENCIADOR.bat` / `RUN_MANAGER.bat` | Menu interativo no Windows para First-Run, build e deploy |
 | `python run_mod_manager.py --setup` | Assistente interativo de First-Run e geração de `vrc2gtav.cfg` |
+| `python run_mod_manager.py --setup --avatar-zip "/caminho/Shinano.zip" --download-blender --verbose` | Extrai `.zip`/`.unitypackage`, baixa Blender `4.0.2` + Sollumz se necessário, abre seleção paginada (`10`/página + `Next`), configura MA/Face/Body `.cfg` e grava log em `logs/` |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/caminho/Shinano.zip" --interactive --verbose` | Construtor universal de avatares/roupas Modular Avatar com menu de 10 opções + `Next`, seleção de Rosto/Corpo e log detalhado |
 | `python run_mod_manager.py --check-env` | Valida GTA V, Blender, `rage-cli` e caminhos de assets |
 | `python scripts/common_tools/setup_first_run.py --check-only` | Auditoria não destrutiva de ambiente e arquivos de origem |
 | `python run_mod_manager.py --character all` | Reconstrói tudo no Blender, exporta YDD/YTD e implanta no `x64v.rpf` |
@@ -128,8 +132,8 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | `python run_mod_manager.py --export-physbones` | Importa VRCPhysBones padrão das cenas `.unity` para `configs/*_physbones.cfg` (`--physbones-marshmallow` inclui Marshmallow PB; `--overwrite-physbones-from-unity` sobrescreve edições) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Compila usando os presets `.cfg` de PhysBones em vez de extrair das cenas Unity (adicione `--physbones-marshmallow` para ativar Marshmallow PB) |
 | `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas já compiladas em `mods/x64v.rpf` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `7` suítes de código/config/i18n/intercambiabilidade/cabelo customizado (clone limpo) |
-| `python scripts/common_tools/test_mod_suite.py` | Executa todas as `10` suítes de ponta a ponta (requer build e deploy concluídos) |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `8` suítes de código/config/i18n/First-Run/Modular-Avatar (clone limpo) |
+| `python scripts/common_tools/test_mod_suite.py` | Executa todas as `11` suítes de ponta a ponta (requer build e deploy concluídos) |
 
 ---
 
