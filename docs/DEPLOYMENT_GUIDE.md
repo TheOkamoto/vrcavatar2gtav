@@ -156,6 +156,7 @@ GTA V protagonist outfits span multiple component slots (`uppr`, `lowr`, `feet`,
 
 1. **`b'OPEN'` Header Flag (Offset 12):** after verifying `b'7FPR'` magic, sets offset 12 to `b'OPEN'` so the RAGE Engine loads unencrypted custom RPFs.
 2. **TOC `f_size` Zeroing (16 bytes per TOC entry):** uncompressed nested binary entries written by CLI tools with non-zero compressed-size fields trigger **`ERR_GEN_ZLIB_2`** at game runtime. The repacker walks the TOC and zeroes the compressed-size bytes for uncompressed binary entries.
+3. **16 MiB (`0xFFFFFF`) Resource & 4.00 GiB Offset Guards ([`ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py)):** pre-build polygon budgeting (`enforce_ped_rpf7_poly_budget` for both `ped.sps` and `--no-blood-decals`), `.ydd`/`.yft` validation (`validate_rpf7_resource_file`), automatic 4K→2K `.ytd` downscaling (`enforce_ytd_rpf7_size_budget`), pre-pack directory scans (`assert_directory_rpf7_resources_valid`), and outer + nested RPF TOC audits (`inspect_rpf7_archive_limits`) block any 24-bit resource truncation (`f_size == 0xFFFFFF`) or 23-bit `4.00 GiB` sector offset wrap across `x64v.rpf`, `mppatchesng`, and `patchday4ng`.
 
 ---
 

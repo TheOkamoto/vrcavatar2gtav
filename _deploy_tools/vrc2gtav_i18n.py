@@ -3450,4 +3450,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "GTA V Ped 出血デカール (`ped.sps` + 6ゾーン `UVMap 1` + `#FF8000FF` 頂点カラー)",
         "pt": "Decals de sangue GTA V (`ped.sps` + `UVMap 1` em 6 zonas + vértice `#FF8000FF`)",
     },
+    "tests.rpf7_16mb_safeguards": {
+        "en": "RPF7 16 MiB (`0xFFFFFF`) resource & 4 GiB sector offset crash guards",
+        "ja": "RPF7 16 MiB (`0xFFFFFF`) リソース上限 & 4 GiB セクタオフセット保護",
+        "pt": "Proteções contra limite RPF7 de 16 MiB (`0xFFFFFF`) e offset de 4 GiB",
+    },
 }

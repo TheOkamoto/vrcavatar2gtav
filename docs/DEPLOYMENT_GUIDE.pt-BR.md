@@ -156,6 +156,7 @@ O script [`scripts/common_tools/repack_and_deploy_everything.py`](../scripts/com
 
 1. **Assinatura `b'OPEN'` (Offset 12):** verifica o cabeçalho `b'7FPR'` nos primeiros bytes e grava a flag `b'OPEN'` no offset 12, permitindo carregamento pela Engine RAGE sem criptografia RSA proprietária.
 2. **Zeramento de `f_size` na TOC (16 bytes por entrada):** entradas binárias não comprimidas (como `mppatches.rpf` aninhado dentro de `dlc.rpf`) gravadas com tamanho comprimido diferente de zero causam o erro fatal **`ERR_GEN_ZLIB_2`** no GTA V. O empacotador varre toda a tabela TOC e zera os bytes de tamanho comprimido dessas entradas.
+3. **Proteções de Limite 16 MiB (`0xFFFFFF`) e Offset 4.00 GiB ([`ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py)):** orçamento de polígonos pré-junção (`enforce_ped_rpf7_poly_budget`, ativo tanto em `ped.sps` quanto com `--no-blood-decals`), validação pós-exportação de `.ydd`/`.yft` (`validate_rpf7_resource_file`), redução automática de atlas `.ytd` que excedam 16 MiB (`enforce_ytd_rpf7_size_budget`), bloqueio antes do `rage create` (`assert_directory_rpf7_resources_valid`) e auditoria binária de RPFs externos e aninhados (`inspect_rpf7_archive_limits`) impedem truncamento 24 bits (`f_size == 0xFFFFFF`) ou estouro de setor 23 bits (`4.00 GiB`) em `x64v.rpf`, `mppatchesng` e `patchday4ng`.
 
 ---
 

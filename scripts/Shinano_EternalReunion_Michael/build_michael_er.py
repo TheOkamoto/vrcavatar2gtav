@@ -1726,8 +1726,11 @@ def build_shinano_er_for_gtav(cli_args):
             bpy.data.objects.remove(old_obj)
 
     # 9. Keep total unified polygon budget safely under RPF7's 16 MiB entry ceiling, then join
-    if bool(getattr(cli_args, "blood_decals", True)):
-        ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, processed_objects)
+    ped_damage_helper.enforce_ped_rpf7_poly_budget(
+        bpy,
+        processed_objects,
+        enable_blood_decals=bool(getattr(cli_args, "blood_decals", True)),
+    )
 
     print(
         i18n.translate("michael.build.joining_meshes", count=len(processed_objects))
@@ -1897,6 +1900,9 @@ def build_shinano_er_for_gtav(cli_args):
             target_formats={"NATIVE", "CWXML"},
             limit_to_selected=False,
         )
+        ped_damage_helper.validate_rpf7_resource_file(
+            os.path.join(output_dir, f"{drawable_item_name}.ydd")
+        )
         print(
             i18n.translate(
                 "michael.build.exported_ydd",
@@ -1912,6 +1918,7 @@ def build_shinano_er_for_gtav(cli_args):
         bone_world_targets,
         custom_child_bones=custom_ear_bones or None,
     )
+    ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
     print(
         i18n.translate(
             "michael.build.exported_yft",

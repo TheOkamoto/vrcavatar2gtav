@@ -40,6 +40,7 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import ped_damage_helper
 import texture_calibration_helper as calibration_helper
 import unity_hair_helper
 import unity_scene_helper
@@ -600,6 +601,11 @@ def build_liltoon_er_textures(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+    )
+    ped_damage_helper.enforce_ytd_rpf7_size_budget(
+        rage_cli_path,
+        output_ytd_file,
+        [diffuse_output_path, legacy_spec_path, legacy_normal_path],
     )
     if not custom_output_dir_mode:
         shutil.copy2(output_ytd_file, backup_ytd_file)

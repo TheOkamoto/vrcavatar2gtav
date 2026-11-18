@@ -31,6 +31,7 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import ped_damage_helper
 import texture_calibration_helper as calibration_helper
 import unity_hair_helper
 import vrc2gtav_i18n as project_i18n
@@ -636,6 +637,11 @@ def build_franklin_atlas(
             capture_output=True,
             text=True,
             check=True,
+        )
+        ped_damage_helper.enforce_ytd_rpf7_size_budget(
+            rage_cli_binary,
+            output_ytd_file,
+            [diffuse_final_path, specular_final_path, normal_final_path],
         )
         print(project_i18n.translate("franklin.ytd_generated", path=output_ytd_file))
         return True

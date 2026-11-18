@@ -31,9 +31,11 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 try:
+    import ped_damage_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import ped_damage_helper
     from common_tools import vrc2gtav_i18n as project_i18n
     from common_tools import vrc2gtav_paths as project_paths
 
@@ -141,6 +143,23 @@ def patch_rpf7_open_and_zero_compressed(rpf_file_path: Path) -> int:
             )
         )
         raise
+
+    audit_report = ped_damage_helper.inspect_rpf7_archive_limits(rpf_file_path)
+    if audit_report["resource_overflows"]:
+        raise ValueError(
+            f"RPF7 16 MiB resource overflow (f_size=0xFFFFFF) in {rpf_file_path.name}: "
+            f"{audit_report['resource_overflows'][:5]}"
+        )
+    if audit_report["offset_overflows"] or not audit_report["archive_size_ok"]:
+        raise ValueError(
+            f"RPF7 4.00 GiB sector offset overflow in {rpf_file_path.name}: "
+            f"size={audit_report['total_bytes']:,}, overflows={audit_report['offset_overflows'][:5]}"
+        )
+    if audit_report["compressed_binaries"]:
+        raise ValueError(
+            f"RPF7 uncompressed-binary TOC check failed in {rpf_file_path.name}: "
+            f"{audit_report['compressed_binaries'][:5]}"
+        )
 
     print(
         project_i18n.translate(
@@ -519,7 +538,8 @@ def repack_single_rpf_stage(
     task_description: str,
     rage_cli_binary: str,
 ) -> None:
-    """Remove stale output RPF, rebuild via `rage create`, and patch header/TOC."""
+    """Validate input limits, rebuild via `rage create`, and patch/audit RPF7 TOC."""
+    ped_damage_helper.assert_directory_rpf7_resources_valid(source_directory_path)
     if output_rpf_path.exists():
         output_rpf_path.unlink()
     execute_rage_create_with_progress(
@@ -781,7 +801,29 @@ def run_repack_and_deploy() -> None:
             len(x64v_compressed_entries) == 0 and x64v_encryption_flag == b"OPEN"
         )
 
-        if is_dlc_valid and is_x64v_valid and is_patchday4_valid:
+        rpf_limit_checks_ok = True
+        archives_to_audit = [
+            target_dlc_rpf_path,
+            mppatches_rpf_file,
+            target_x64v_rpf_path,
+            streamedpeds_rpf_file,
+        ]
+        if has_streamedpedprops_staging:
+            archives_to_audit.append(streamedpedprops_rpf_file)
+        if has_patchday4ng_staging and target_patchday4ng_dlc_path.is_file():
+            archives_to_audit.extend([target_patchday4ng_dlc_path, patchday4ng_inner_rpf])
+
+        for audit_archive in archives_to_audit:
+            if audit_archive.is_file():
+                limit_report = ped_damage_helper.inspect_rpf7_archive_limits(audit_archive)
+                if not limit_report["ok"]:
+                    rpf_limit_checks_ok = False
+                    print(
+                        f"    [RPF7 LIMIT FAIL] {audit_archive.name}: {limit_report}",
+                        flush=True,
+                    )
+
+        if is_dlc_valid and is_x64v_valid and is_patchday4_valid and rpf_limit_checks_ok:
             stage_tracker.finish_pipeline()
             print(project_i18n.translate("repack.verify_passed"))
         else:

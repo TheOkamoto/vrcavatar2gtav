@@ -919,9 +919,12 @@ def build_trevor_miltina_avatar(cli_args=None):
                 ) or cloth_obj.vertex_groups.new(name=default_bone_name)
                 vert_group.add([vert_idx], 1.0, "REPLACE")
 
-    # 10. Guard RPF7 16 MiB limit on heavy accessories and join kept meshes
-    if bool(getattr(cli_args, "blood_decals", True)):
-        ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, meshes_to_keep)
+    # 10. Guard RPF7 16 MiB limit on heavy accessories/hair and join kept meshes
+    ped_damage_helper.enforce_ped_rpf7_poly_budget(
+        bpy,
+        meshes_to_keep,
+        enable_blood_decals=bool(getattr(cli_args, "blood_decals", True)),
+    )
 
     for selected_obj in bpy.context.selected_objects:
         selected_obj.select_set(False)
@@ -1183,6 +1186,9 @@ def build_trevor_miltina_avatar(cli_args=None):
             target_formats={"NATIVE", "CWXML"},
             limit_to_selected=False,
         )
+        ped_damage_helper.validate_rpf7_resource_file(
+            Path(output_dir) / f"{drawable_name}.ydd"
+        )
         print(
             i18n.translate(
                 "trevor.build.exported_ydd", name=drawable_name, status=export_status
@@ -1199,6 +1205,7 @@ def build_trevor_miltina_avatar(cli_args=None):
                 custom_child_bones=custom_physbones or None,
             )
         )
+        ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
         print(
             i18n.translate(
                 "trevor.build.exported_yft",

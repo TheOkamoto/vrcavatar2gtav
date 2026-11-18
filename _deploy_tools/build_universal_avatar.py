@@ -531,6 +531,12 @@ def _run_in_blender_bake(manifest_path: Union[str, Path], ma_plan_path: Optional
         mesh_weights, _meta = blendshape_helper.load_blendshapes_cfg(cfg_path)
         blendshape_helper.apply_blendshapes_to_blender_scene(bpy, mesh_weights)
 
+    ped_damage_helper.enforce_ped_rpf7_poly_budget(
+        bpy,
+        [obj_item for obj_item in bpy.data.objects if obj_item.type == "MESH"],
+        enable_blood_decals=bool(manifest.get("blood_decals", True)),
+    )
+
     out_dir = Path(manifest.get("out_dir", project_paths.get_project_root() / "work"))
     out_dir.mkdir(parents=True, exist_ok=True)
     out_blend = out_dir / "universal_ma_baked.blend"

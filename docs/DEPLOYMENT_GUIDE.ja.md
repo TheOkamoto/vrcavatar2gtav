@@ -156,6 +156,7 @@ GTA V の主人公服装は複数スロット (`uppr`, `lowr`, `feet`, `head`, `
 
 1. **`b'OPEN'` ヘッダーフラグ (Offset 12):** `b'7FPR'` マジック検証後、オフセット 12 を `b'OPEN'` に書き換えて非暗号化カスタム RPF を RAGE が読み込めるようにします。
 2. **TOC `f_size` ゼロ化 (1 エントリ 16 バイト):** 非圧縮のネストされたバイナリエントリに 0 以外の圧縮サイズ値が残るとゲーム実行時に **`ERR_GEN_ZLIB_2`** が発生するため、TOC を走査して該当エントリの圧縮サイズバイトをゼロクリアします。
+3. **16 MiB (`0xFFFFFF`) リソース上限 & 4.00 GiB オフセット保護 ([`ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py)):** `ped.sps` / `--no-blood-decals` 両対応のポリゴン予算削減 (`enforce_ped_rpf7_poly_budget`)、`.ydd`/`.yft` サイズ検証 (`validate_rpf7_resource_file`)、16 MiB 超過 `.ytd` の自動ダウンスケール (`enforce_ytd_rpf7_size_budget`)、`rage create` 前のディレクトリ検証、および親・子 RPF TOC 監査 (`inspect_rpf7_archive_limits`) により 24bit `0xFFFFFF` 切り捨てや `4.00 GiB` セクタ溢れを完全に防止します。
 
 ---
 

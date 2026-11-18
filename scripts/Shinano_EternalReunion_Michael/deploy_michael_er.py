@@ -28,6 +28,7 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
     if _tools_dir.is_dir() and str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
 
+import ped_damage_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
 
@@ -93,6 +94,12 @@ def patch_rpf_table_of_contents(rpf_archive_path):
                 file_stream.seek(16 + entry_idx * 16)
                 file_stream.write(entry_chunk)
                 patched_entries_counter += 1
+
+    limit_report = ped_damage_helper.inspect_rpf7_archive_limits(rpf_archive_path)
+    if limit_report["resource_overflows"] or limit_report["offset_overflows"]:
+        raise ValueError(
+            f"RPF7 limit overflow in {rpf_archive_path}: {limit_report}"
+        )
 
     print(i18n.translate("michael.deploy.toc_patched", count=patched_entries_counter))
 

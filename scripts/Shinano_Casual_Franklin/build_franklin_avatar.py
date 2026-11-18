@@ -1007,9 +1007,12 @@ for temp_obj in [shinano_armature] + custom_hair_armatures + [
 ]:
     bpy.data.objects.remove(temp_obj)
 
-# 5. Guard RPF7 16 MiB limit on high-poly accessories and join into a single drawable mesh
-if bool(getattr(CLI_ARGS, "blood_decals", True)):
-    ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, processed_objs)
+# 5. Guard RPF7 16 MiB limit on heavy accessories/hair and join into a single drawable mesh
+ped_damage_helper.enforce_ped_rpf7_poly_budget(
+    bpy,
+    processed_objs,
+    enable_blood_decals=bool(getattr(CLI_ARGS, "blood_decals", True)),
+)
 
 bpy.ops.object.select_all(action="DESELECT")
 for proc_obj in processed_objs:
@@ -1207,6 +1210,9 @@ for slot_name in export_drawables:
         target_formats={"NATIVE", "CWXML"},
         limit_to_selected=False,
     )
+    ped_damage_helper.validate_rpf7_resource_file(
+        Path(exported_dir) / f"{slot_name}.ydd"
+    )
     print(
         project_i18n.translate(
             "franklin.export_result", slot_name=slot_name, result=slot_export_result
@@ -1220,6 +1226,7 @@ updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_y
     hand_bone_world_targets,
     custom_child_bones=custom_physbones or None,
 )
+ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
 print(
     project_i18n.translate(
         "franklin.yft_exported",

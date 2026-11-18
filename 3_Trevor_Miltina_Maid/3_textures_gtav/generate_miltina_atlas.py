@@ -31,6 +31,7 @@ for _tools_candidate in (
     if _tools_candidate.is_dir() and str(_tools_candidate) not in sys.path:
         sys.path.insert(0, str(_tools_candidate))
 
+import ped_damage_helper
 import texture_calibration_helper as calibration_helper
 import unity_hair_helper
 import vrc2gtav_i18n as i18n
@@ -290,6 +291,11 @@ def generate_miltina_texture_atlas(
             capture_output=True,
             text=True,
             check=True,
+        )
+        ped_damage_helper.enforce_ytd_rpf7_size_budget(
+            rage_cli_binary,
+            output_ytd_file,
+            [diffuse_output_path, specular_output_path, normal_output_path],
         )
         print(i18n.translate("trevor.atlas.ytd_done", path=output_ytd_file))
         return True

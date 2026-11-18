@@ -14,11 +14,41 @@ standard ped vertex colors (`Color 1` = `#FF8000FF`, `Color 2` = `#00000000`).
 from __future__ import annotations
 
 import math
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+import os
+import shutil
+import struct
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 
 PED_DAMAGE_SHADER_NAME = "ped.sps"
 PED_NO_DAMAGE_SHADER_NAME = "ped_default.sps"
+
+# GTA V RPF7 TOC stores a 24-bit entry size (`f_size` max = 16,777,215 bytes = 0xFFFFFF)
+# and a 23-bit 512-byte sector offset (`< 0x7FFFFF * 512` ~= 4.00 GiB).
+RPF7_MAX_RESOURCE_BYTES = 0xFFFFFF
+RPF7_SAFE_RESOURCE_TARGET_BYTES = 15_728_640
+RPF7_MAX_ARCHIVE_OFFSET_BYTES = 0x7FFFFE * 512
+RPF7_ARCHIVE_WARNING_BYTES = 4_100_000_000
+RSC7_RESOURCE_EXTENSIONS = frozenset(
+    {
+        ".ydd",
+        ".ytd",
+        ".yft",
+        ".yld",
+        ".ymt",
+        ".ydr",
+        ".ybn",
+        ".ycd",
+        ".ynv",
+        ".ypt",
+        ".ymap",
+        ".ytyp",
+        ".ymf",
+    }
+)
 
 # Standard GTA V ped vertex color byte defaults (`#FF8000FF` and `#00000000`)
 DEFAULT_PED_COLOR1_SRGB: Tuple[float, float, float, float] = (
@@ -876,10 +906,12 @@ def enforce_ped_rpf7_poly_budget(
     bpy_module: Any,
     mesh_objects: Sequence[Any],
     *,
-    max_total_polys: int = 255000,
+    enable_blood_decals: bool = True,
+    max_total_polys: Optional[int] = None,
     decimate_ratio: float = 0.40,
-    fallback_ratio: float = 0.65,
-    min_polys_to_decimate: int = 12000,
+    hair_cloth_ratio: float = 0.62,
+    fallback_ratio: float = 0.72,
+    min_polys_to_decimate: int = 10000,
     accessory_keywords: Tuple[str, ...] = (
         "chain",
         "bag",
@@ -889,13 +921,41 @@ def enforce_ped_rpf7_poly_budget(
         "badge",
         "buckle",
         "jewelry",
+        "halo",
+        "pin",
+        "glasses",
+        "ribbon",
+    ),
+    hair_cloth_keywords: Tuple[str, ...] = (
+        "hair",
+        "twin",
+        "pony",
+        "bang",
+        "tail",
+        "skirt",
+        "dress",
+        "apron",
+        "coat",
+        "cape",
+        "sweater",
+        "stocking",
+        "corset",
+        "shirt",
+        "shoe",
+        "boot",
     ),
 ) -> Dict[str, Any]:
     """
-    Keep total unified ped triangle count comfortably below GTA V RPF7's 24-bit
-    16,777,215-byte compressed `.ydd` resource limit when `ped.sps` adds `TexCoord1`
-    and `Tangent` vertex attributes, trimming only heavy high-poly accessories first.
+    Keep total unified ped triangle count safely below GTA V RPF7's 24-bit
+    16,777,215-byte (`0xFFFFFF`) compressed `.ydd` resource limit for both `ped.sps`
+    (72 B/vert) and `ped_default.sps` (48 B/vert), trimming heavy accessories first,
+    then dense custom hair/outfit meshes iteratively while leaving `Body`/face intact.
     """
+    effective_max_polys = (
+        int(max_total_polys)
+        if max_total_polys is not None
+        else (250000 if enable_blood_decals else 380000)
+    )
     valid_meshes = [
         obj
         for obj in mesh_objects
@@ -904,11 +964,12 @@ def enforce_ped_rpf7_poly_budget(
         and getattr(obj, "data", None) is not None
     ]
     before_total = sum(len(obj.data.polygons) for obj in valid_meshes)
-    if before_total <= int(max_total_polys):
+    if before_total <= effective_max_polys:
         return {
             "trimmed": [],
             "before_polys": before_total,
             "after_polys": before_total,
+            "max_total_polys": effective_max_polys,
         }
 
     def _is_protected_face_or_body(obj_item: Any) -> bool:
@@ -940,9 +1001,28 @@ def enforce_ped_rpf7_poly_budget(
         return (orig_tris, len(obj_item.data.polygons))
 
     trimmed_records: List[Tuple[str, int, int]] = []
+    trimmed_names: set[str] = set()
     running_total = before_total
 
-    accessory_candidates = sorted(
+    def _run_pass(
+        candidates: Sequence[Any], ratio_val: float, label: str
+    ) -> None:
+        nonlocal running_total
+        for candidate in candidates:
+            if running_total <= effective_max_polys:
+                break
+            old_cnt, new_cnt = _decimate_single_object(candidate, ratio_val)
+            if new_cnt < old_cnt:
+                running_total -= old_cnt - new_cnt
+                trimmed_records.append((candidate.name, old_cnt, new_cnt))
+                trimmed_names.add(candidate.name)
+                print(
+                    f"[RPF7 Budget] Decimated {label} '{candidate.name}': "
+                    f"{old_cnt} -> {new_cnt} polys (total={running_total}/{effective_max_polys})",
+                    flush=True,
+                )
+
+    pass1_candidates = sorted(
         [
             obj_item
             for obj_item in valid_meshes
@@ -953,49 +1033,291 @@ def enforce_ped_rpf7_poly_budget(
         key=lambda obj_item: len(obj_item.data.polygons),
         reverse=True,
     )
-    for candidate in accessory_candidates:
-        if running_total <= int(max_total_polys):
-            break
-        old_cnt, new_cnt = _decimate_single_object(candidate, decimate_ratio)
-        if new_cnt < old_cnt:
-            running_total -= old_cnt - new_cnt
-            trimmed_records.append((candidate.name, old_cnt, new_cnt))
-            print(
-                f"[RPF7 Budget] Decimated heavy accessory '{candidate.name}': "
-                f"{old_cnt} -> {new_cnt} polys (total={running_total}/{max_total_polys})",
-                flush=True,
-            )
+    _run_pass(pass1_candidates, decimate_ratio, "heavy accessory")
 
-    if running_total > int(max_total_polys):
-        fallback_candidates = sorted(
+    if running_total > effective_max_polys:
+        pass2_candidates = sorted(
             [
                 obj_item
                 for obj_item in valid_meshes
                 if not _is_protected_face_or_body(obj_item)
-                and len(obj_item.data.polygons) >= 20000
-                and all(rec[0] != obj_item.name for rec in trimmed_records)
+                and obj_item.name not in trimmed_names
+                and len(obj_item.data.polygons) >= 15000
+                and any(keyword in obj_item.name.lower() for keyword in hair_cloth_keywords)
             ],
             key=lambda obj_item: len(obj_item.data.polygons),
             reverse=True,
         )
-        for candidate in fallback_candidates:
-            if running_total <= int(max_total_polys):
-                break
-            old_cnt, new_cnt = _decimate_single_object(candidate, fallback_ratio)
-            if new_cnt < old_cnt:
-                running_total -= old_cnt - new_cnt
-                trimmed_records.append((candidate.name, old_cnt, new_cnt))
-                print(
-                    f"[RPF7 Budget] Decimated heavy mesh '{candidate.name}': "
-                    f"{old_cnt} -> {new_cnt} polys (total={running_total}/{max_total_polys})",
-                    flush=True,
-                )
+        _run_pass(pass2_candidates, hair_cloth_ratio, "dense hair/outfit")
+
+    for _round_idx in range(4):
+        if running_total <= effective_max_polys:
+            break
+        pass3_candidates = sorted(
+            [
+                obj_item
+                for obj_item in valid_meshes
+                if not _is_protected_face_or_body(obj_item)
+                and not getattr(obj_item.data, "shape_keys", None)
+                and len(obj_item.data.polygons) >= 6000
+            ],
+            key=lambda obj_item: len(obj_item.data.polygons),
+            reverse=True,
+        )
+        if not pass3_candidates:
+            break
+        prev_total = running_total
+        _run_pass(pass3_candidates, fallback_ratio, "heavy mesh")
+        if running_total >= prev_total:
+            break
 
     return {
         "trimmed": trimmed_records,
         "before_polys": before_total,
         "after_polys": running_total,
+        "max_total_polys": effective_max_polys,
     }
+
+
+def validate_rpf7_resource_file(
+    file_path: Union[str, Path],
+    max_bytes: int = RPF7_MAX_RESOURCE_BYTES,
+) -> int:
+    """
+    Verify an RSC7 resource file (`.ydd`, `.ytd`, `.yft`, etc.) does not exceed
+    RPF7's 24-bit entry limit (`16,777,215` bytes / `0xFFFFFF`).
+    """
+    target_path = Path(file_path)
+    if not target_path.is_file():
+        raise FileNotFoundError(f"RPF7 resource file not found: {target_path}")
+    file_bytes = target_path.stat().st_size
+    if file_bytes > int(max_bytes):
+        raise ValueError(
+            f"RPF7 16 MiB limit exceeded: '{target_path.name}' is {file_bytes:,} bytes "
+            f"({file_bytes / (1024.0 * 1024.0):.2f} MiB) > {int(max_bytes):,} bytes (0xFFFFFF); "
+            "packing this file would silently truncate TOC f_size and crash RAGE/GTA V."
+        )
+    return file_bytes
+
+
+def inspect_rpf7_archive_limits(rpf_file_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Inspect a binary RPF7 archive TOC for all size/offset/compression limits:
+      - `magic == 0x52504637` (`7FPR`) and `encryption == b'OPEN'`
+      - Zero resource entries clamped at 24-bit overflow `f_size == 0xFFFFFF`
+      - Zero non-resource binary entries with non-zero compressed size (`ERR_GEN_ZLIB_2`)
+      - Zero 23-bit 512-byte sector offsets exceeding ~4.00 GiB (`0x7FFFFE * 512`)
+    """
+    archive_path = Path(rpf_file_path)
+    total_bytes = archive_path.stat().st_size
+    with open(archive_path, "rb") as rpf_handle:
+        header_data = rpf_handle.read(16)
+        if len(header_data) < 16:
+            raise ValueError(f"Invalid RPF7 header (<16 bytes): {archive_path}")
+        magic_num, entry_count, names_len, enc_raw = struct.unpack("<IIII", header_data)
+        enc_bytes = struct.pack("<I", enc_raw)
+        magic_ok = magic_num == 0x52504637
+        toc_bytes = rpf_handle.read(entry_count * 16)
+        names_bytes = rpf_handle.read(names_len)
+
+    resource_overflows: List[Tuple[str, int]] = []
+    compressed_binaries: List[Tuple[str, int]] = []
+    offset_overflows: List[Tuple[str, int]] = []
+    largest_resource_name = ""
+    largest_resource_bytes = 0
+    max_offset_bytes = 0
+
+    for entry_idx in range(entry_count):
+        off_pos = entry_idx * 16
+        d0_val, d1_val, _d2_val, _d3_val = struct.unpack(
+            "<IIII", toc_bytes[off_pos : off_pos + 16]
+        )
+        name_off = d0_val & 0xFFFF
+        f_size = (d0_val >> 16) | ((d1_val & 0xFF) << 16)
+        is_dir = d1_val == 0x7FFFFF00
+        is_resource = (d1_val & 0x80000000) != 0
+        sector_offset = (d1_val >> 8) & 0x7FFFFF
+        name_end = names_bytes.find(b"\x00", name_off)
+        entry_name = names_bytes[
+            name_off : (len(names_bytes) if name_end < 0 else name_end)
+        ].decode("ascii", "replace")
+
+        if is_dir:
+            continue
+
+        byte_offset = sector_offset * 512
+        max_offset_bytes = max(max_offset_bytes, byte_offset)
+        if byte_offset >= RPF7_MAX_ARCHIVE_OFFSET_BYTES or sector_offset >= 0x7FFFFF:
+            offset_overflows.append((entry_name, byte_offset))
+
+        if is_resource:
+            if f_size > largest_resource_bytes:
+                largest_resource_bytes = f_size
+                largest_resource_name = entry_name
+            if f_size == RPF7_MAX_RESOURCE_BYTES:
+                resource_overflows.append((entry_name, f_size))
+        elif f_size != 0:
+            compressed_binaries.append((entry_name, f_size))
+
+    archive_size_ok = total_bytes <= RPF7_MAX_ARCHIVE_OFFSET_BYTES
+    is_ok = (
+        magic_ok
+        and enc_bytes == b"OPEN"
+        and archive_size_ok
+        and not resource_overflows
+        and not compressed_binaries
+        and not offset_overflows
+    )
+    return {
+        "ok": is_ok,
+        "magic_ok": magic_ok,
+        "encryption": enc_bytes,
+        "entry_count": entry_count,
+        "total_bytes": total_bytes,
+        "archive_size_ok": archive_size_ok,
+        "max_offset_bytes": max_offset_bytes,
+        "largest_resource_name": largest_resource_name,
+        "largest_resource_bytes": largest_resource_bytes,
+        "resource_overflows": resource_overflows,
+        "compressed_binaries": compressed_binaries,
+        "offset_overflows": offset_overflows,
+    }
+
+
+def find_oversized_rpf7_resources(
+    source_dir: Union[str, Path],
+    max_bytes: int = RPF7_MAX_RESOURCE_BYTES,
+) -> List[Tuple[Path, int]]:
+    """Return RSC7 resource files inside `source_dir` exceeding `max_bytes` (`0xFFFFFF`)."""
+    oversized: List[Tuple[Path, int]] = []
+    root_dir = Path(source_dir)
+    if not root_dir.is_dir():
+        return oversized
+    for walk_root, dir_names, file_names in os.walk(root_dir):
+        dir_names[:] = dir_names
+        for single_name in file_names:
+            candidate_path = Path(walk_root) / single_name
+            if candidate_path.suffix.lower() not in RSC7_RESOURCE_EXTENSIONS:
+                continue
+            try:
+                file_bytes = candidate_path.stat().st_size
+            except OSError:
+                continue
+            if file_bytes > int(max_bytes):
+                oversized.append((candidate_path, file_bytes))
+    oversized.sort(key=lambda pair: pair[1], reverse=True)
+    return oversized
+
+
+def assert_directory_rpf7_resources_valid(
+    source_dir: Union[str, Path],
+    max_bytes: int = RPF7_MAX_RESOURCE_BYTES,
+    warn_archive_bytes: int = RPF7_ARCHIVE_WARNING_BYTES,
+    max_archive_bytes: int = RPF7_MAX_ARCHIVE_OFFSET_BYTES,
+) -> Dict[str, Any]:
+    """
+    Pre-flight check before `rage create` blocking any >16 MiB RSC7 resource or
+    >4.00 GiB archive total, while warning when approaching the 4.00 GiB RPF7 ceiling.
+    """
+    root_dir = Path(source_dir)
+    oversized = find_oversized_rpf7_resources(root_dir, max_bytes=max_bytes)
+    if oversized:
+        preview = ", ".join(
+            f"{item_path.name} ({item_bytes / (1024.0 * 1024.0):.2f} MiB)"
+            for item_path, item_bytes in oversized[:5]
+        )
+        raise ValueError(
+            f"Refusing to pack RPF7 from '{root_dir}': {len(oversized)} RSC7 resource(s) exceed "
+            f"{max_bytes:,} bytes (16 MiB u24 limit): {preview}"
+        )
+
+    total_bytes = 0
+    for walk_root, dir_names, file_names in os.walk(root_dir):
+        dir_names[:] = dir_names
+        for single_name in file_names:
+            try:
+                total_bytes += (Path(walk_root) / single_name).stat().st_size
+            except OSError:
+                continue
+
+    if total_bytes > int(max_archive_bytes):
+        raise ValueError(
+            f"Refusing to pack RPF7 from '{root_dir}': total content {total_bytes:,} bytes "
+            f"({total_bytes / (1024.0 ** 3):.3f} GiB) exceeds RPF7 4.00 GiB 23-bit sector offset limit."
+        )
+    if total_bytes >= int(warn_archive_bytes):
+        print(
+            f"[RPF7 WARNING] Directory '{root_dir.name}' is {total_bytes / (1024.0 ** 3):.3f} GiB "
+            f"(nearing RPF7 4.00 GiB sector offset limit).",
+            flush=True,
+        )
+    return {"total_bytes": total_bytes, "oversized_count": 0}
+
+
+def enforce_ytd_rpf7_size_budget(
+    rage_cli: Union[str, Path],
+    ytd_path: Union[str, Path],
+    source_image_paths: Sequence[Union[str, Path]],
+    max_bytes: int = RPF7_MAX_RESOURCE_BYTES,
+    target_bytes: int = RPF7_SAFE_RESOURCE_TARGET_BYTES,
+) -> int:
+    """
+    Verify a compiled `.ytd` fits under RPF7's `16,777,215`-byte limit; if an
+    oversized 4K/uncompressed atlas pushed it over 16 MiB, automatically downscale
+    temporary copies by 50% and rebuild via `rage textures build` until safe.
+    """
+    target_ytd = Path(ytd_path)
+    cur_bytes = target_ytd.stat().st_size
+    if cur_bytes <= int(max_bytes):
+        return cur_bytes
+
+    from PIL import Image
+
+    resampling_enum = getattr(Image, "Resampling", Image)
+    lanczos_filter = getattr(resampling_enum, "LANCZOS", Image.LANCZOS)
+    valid_sources = [Path(img_p) for img_p in source_image_paths if Path(img_p).is_file()]
+    if not valid_sources:
+        return validate_rpf7_resource_file(target_ytd, max_bytes=max_bytes)
+
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_ytd_budget_") as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        cur_inputs: List[Path] = []
+        for img_src in valid_sources:
+            dst_img = tmp_dir / img_src.name
+            shutil.copy2(img_src, dst_img)
+            cur_inputs.append(dst_img)
+
+        for scale_step in range(1, 4):
+            for img_path_item in cur_inputs:
+                with Image.open(img_path_item) as pil_img:
+                    new_w = max(256, pil_img.width // 2)
+                    new_h = max(256, pil_img.height // 2)
+                    resized_img = pil_img.resize((new_w, new_h), lanczos_filter)
+                    resized_img.save(img_path_item, format="PNG")
+            print(
+                f"[RPF7 Budget] '{target_ytd.name}' was {cur_bytes / (1024.0 * 1024.0):.2f} MiB "
+                f"(> 16 MiB limit); downscaling textures (step {scale_step})...",
+                flush=True,
+            )
+            subprocess.run(
+                [
+                    str(rage_cli),
+                    "textures",
+                    "build",
+                    "-o",
+                    str(target_ytd),
+                    *[str(item_p) for item_p in cur_inputs],
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            cur_bytes = target_ytd.stat().st_size
+            if cur_bytes <= int(target_bytes) or cur_bytes <= int(max_bytes):
+                break
+
+    return validate_rpf7_resource_file(target_ytd, max_bytes=max_bytes)
 
 
 def format_ped_damage_summary(

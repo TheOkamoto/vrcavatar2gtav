@@ -223,14 +223,18 @@ def test_compiled_drawables_and_textures() -> bool:
         trevor_cfg["ytd_file"],
     ]
 
+    import ped_damage_helper
+
     for asset_file_path in expected_assets_list:
         file_exists = asset_file_path.exists()
-        file_size_mb = (
-            (asset_file_path.stat().st_size / (1024 * 1024)) if file_exists else 0.0
+        file_size_bytes = asset_file_path.stat().st_size if file_exists else 0
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        within_rpf7_cap = (
+            file_exists and file_size_bytes <= ped_damage_helper.RPF7_MAX_RESOURCE_BYTES
         )
         all_assets_present &= print_status_result(
             asset_file_path.name,
-            file_exists,
+            file_exists and within_rpf7_cap,
             i18n.translate(
                 "tests.asset_detail",
                 size=file_size_mb,
@@ -319,6 +323,38 @@ def test_deployed_rpf_encryption_headers() -> bool:
                 )
         except Exception as read_error:
             all_rpfs_valid &= print_status_result(rpf_file_path.name, False, str(read_error))
+
+    import ped_damage_helper
+
+    repacked_archives = [
+        rpf_paths_cfg["mppatches_dlc_extracted"] / rpf_paths_cfg["mppatches_rpf_relative"],
+        rpf_paths_cfg["mppatches_game_rpf"],
+        rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpeds_rpf_relative"],
+        rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpedprops_rpf_relative"],
+        rpf_paths_cfg["x64v_game_rpf"],
+    ]
+    patchday4_inner = (
+        rpf_paths_cfg["patchday4ng_dlc_extracted"] / rpf_paths_cfg["patchday4ng_rpf_relative"]
+    )
+    if patchday4_inner.is_file():
+        repacked_archives.append(patchday4_inner)
+    if rpf_paths_cfg["patchday4ng_game_rpf"].is_file():
+        repacked_archives.append(rpf_paths_cfg["patchday4ng_game_rpf"])
+
+    rpf7_bounds_ok = True
+    max_observed_res = 0
+    for audit_path in repacked_archives:
+        if not audit_path.is_file():
+            continue
+        report = ped_damage_helper.inspect_rpf7_archive_limits(audit_path)
+        max_observed_res = max(max_observed_res, int(report["largest_resource_bytes"]))
+        if not report["ok"]:
+            rpf7_bounds_ok = False
+    all_rpfs_valid &= print_status_result(
+        i18n.translate("tests.rpf7_16mb_safeguards"),
+        rpf7_bounds_ok,
+        f"largest_rsc7={max_observed_res / (1024 * 1024):.2f} MiB <= 16.00 MiB",
+    )
 
     props_extracted_dir = rpf_paths_cfg["streamedpedprops_extracted"]
     prop_dummy_file = project_paths.get_prop_dummy_ydd_path()
@@ -856,7 +892,119 @@ def test_source_templates_and_dummies() -> bool:
         zone_checks_ok and projection_ok and seam_unwrap_ok and counts_ok and ("ped.sps" in summary_text),
         f"zones={zone_counts}",
     )
-    return template_ok and gitignore_check and dummies_ok and physbones_source_ok and damage_decals_ok
+
+    import repack_and_deploy_everything as repack_mod
+
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_rpf7_limit_") as rpf7_tmp:
+        tmp_path = Path(rpf7_tmp)
+        valid_res = tmp_path / "ok_prop.ydd"
+        valid_res.write_bytes(b"\x00" * 1024)
+        oversized_res = tmp_path / "too_big.ytd"
+        oversized_res.write_bytes(b"\x00" * (ped_damage_helper.RPF7_MAX_RESOURCE_BYTES + 1))
+
+        valid_size_ok = (
+            ped_damage_helper.validate_rpf7_resource_file(valid_res) == 1024
+            and len(ped_damage_helper.find_oversized_rpf7_resources(tmp_path)) == 1
+        )
+        rejected_oversized_res = False
+        try:
+            ped_damage_helper.validate_rpf7_resource_file(oversized_res)
+        except ValueError:
+            rejected_oversized_res = True
+
+        rejected_dir_pack = False
+        try:
+            ped_damage_helper.assert_directory_rpf7_resources_valid(tmp_path)
+        except ValueError:
+            rejected_dir_pack = True
+
+        # Build minimal binary RPF7 archives testing f_size == 0xFFFFFF & sector >= 0x7FFFFF
+        def _write_synthetic_rpf7(
+            target_rpf: Path,
+            d1_descriptor: int,
+            f_size_val: int,
+            entry_name_str: str,
+        ) -> None:
+            name_bytes = entry_name_str.encode("ascii") + b"\x00"
+            names_padded = name_bytes + (b"\x00" * ((16 - (len(name_bytes) % 16)) % 16))
+            d0_val = 0 | ((f_size_val & 0xFFFF) << 16)
+            d1_packed = d1_descriptor | ((f_size_val >> 16) & 0xFF)
+            with open(target_rpf, "wb") as synth_handle:
+                synth_handle.write(struct.pack("<II", 0x52504637, 1))
+                synth_handle.write(struct.pack("<I4s", len(names_padded), b"OPEN"))
+                synth_handle.write(struct.pack("<IIII", d0_val, d1_packed, 0, 0))
+                synth_handle.write(names_padded)
+
+        overflow_rpf = tmp_path / "res_overflow.rpf"
+        _write_synthetic_rpf7(
+            overflow_rpf,
+            0x80000100,
+            ped_damage_helper.RPF7_MAX_RESOURCE_BYTES,
+            "oversized.ydd",
+        )
+        overflow_report = ped_damage_helper.inspect_rpf7_archive_limits(overflow_rpf)
+        rejected_rpf_patch = False
+        try:
+            repack_mod.patch_rpf7_open_and_zero_compressed(overflow_rpf)
+        except ValueError:
+            rejected_rpf_patch = True
+
+        sector_rpf = tmp_path / "sector_overflow.rpf"
+        _write_synthetic_rpf7(sector_rpf, 0x7FFFFE00, 0, "late_entry.rpf")
+        sector_report = ped_damage_helper.inspect_rpf7_archive_limits(sector_rpf)
+
+        guards_wired = all(
+            (PROJECT_ROOT_DIR / rel_path).read_text(encoding="utf-8")
+            for rel_path in (
+                "scripts/common_tools/apply_characters.py",
+                "scripts/common_tools/repack_and_deploy_everything.py",
+                "scripts/common_tools/build_universal_avatar.py",
+                "scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py",
+                "scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py",
+                "scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py",
+            )
+        )
+        all_wired_tokens = (
+            "validate_rpf7_resource_file"
+            in (PROJECT_ROOT_DIR / "scripts/common_tools/apply_characters.py").read_text(
+                encoding="utf-8"
+            )
+            and "inspect_rpf7_archive_limits"
+            in (
+                PROJECT_ROOT_DIR / "scripts/common_tools/repack_and_deploy_everything.py"
+            ).read_text(encoding="utf-8")
+            and "enforce_ytd_rpf7_size_budget"
+            in (
+                PROJECT_ROOT_DIR / "scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py"
+            ).read_text(encoding="utf-8")
+            and "enforce_ped_rpf7_poly_budget"
+            in (PROJECT_ROOT_DIR / "scripts/common_tools/build_universal_avatar.py").read_text(
+                encoding="utf-8"
+            )
+        )
+        rpf7_guards_ok = print_status_result(
+            i18n.translate("tests.rpf7_16mb_safeguards"),
+            valid_size_ok
+            and rejected_oversized_res
+            and rejected_dir_pack
+            and not overflow_report["ok"]
+            and len(overflow_report["resource_overflows"]) == 1
+            and rejected_rpf_patch
+            and not sector_report["ok"]
+            and len(sector_report["offset_overflows"]) == 1
+            and guards_wired
+            and all_wired_tokens,
+            "16 MiB resource & 4 GiB offset guards verified",
+        )
+
+    return (
+        template_ok
+        and gitignore_check
+        and dummies_ok
+        and physbones_source_ok
+        and damage_decals_ok
+        and rpf7_guards_ok
+    )
 
 
 def test_unity_scene_and_fallbacks() -> bool:

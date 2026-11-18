@@ -30,9 +30,11 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 try:
+    import ped_damage_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import ped_damage_helper
     from common_tools import vrc2gtav_i18n as project_i18n
     from common_tools import vrc2gtav_paths as project_paths
 
@@ -336,6 +338,15 @@ def apply_selected_characters(
                 )
             )
             return False
+
+        for resource_check_path in (
+            character_data["model_ydd_path"],
+            character_data.get("model_r_ydd_path"),
+            character_data["texture_ytd_path"],
+            character_data["skeleton_yft_path"],
+        ):
+            if resource_check_path and Path(resource_check_path).is_file():
+                ped_damage_helper.validate_rpf7_resource_file(resource_check_path)
 
         for staging_base_path in staging_target_dirs:
             ped_subfolder_path = Path(staging_base_path) / character_key
