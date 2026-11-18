@@ -379,6 +379,9 @@ def prepare_universal_avatar_job(
             override_avatar_name=chosen_avatar_name,
             override_marshmallow=physbones_marshmallow,
             save_cfg_path=pb_cfg_path if selected_scene else None,
+            override_excluded_meshes=ma_plan.get("disabled_meshes", ()) if ma_plan else (),
+            override_active_meshes=ma_plan.get("active_meshes", ()) if ma_plan else (),
+            prune_orphaned=True,
             verbose=verbose,
         )
 
@@ -401,6 +404,7 @@ def prepare_universal_avatar_job(
         "physbones_chains": len(pb_cfg.get("chains", ())),
         "physbones_custom_bones": len(pb_cfg.get("custom_bones", ())),
         "physbones_discarded_chains": len(pb_cfg.get("discarded_chains", ())),
+        "physbones_orphaned_removed": len(pb_cfg.get("orphaned_physbones", ())),
         "physbones_priority_report": pb_cfg.get("priority_report", {}),
         "physbones_marshmallow": bool(physbones_marshmallow),
         "out_dir": str(work_out_dir),
@@ -412,9 +416,19 @@ def prepare_universal_avatar_job(
     active_logger.info(
         f"Prepared universal build for {chosen_avatar_name or 'avatar'} -> {chosen_target_char} "
         f"(MA merges={manifest_data['ma_armature_merges']}, blendshape meshes={manifest_data['blendshapes_mesh_count']}, "
-        f"physbones={manifest_data['physbones_chains']}/drop={manifest_data['physbones_discarded_chains']}, cfg={save_cfg_file.name})",
+        f"physbones={manifest_data['physbones_chains']}/orphans_removed={manifest_data['physbones_orphaned_removed']}/"
+        f"drop={manifest_data['physbones_discarded_chains']}, cfg={save_cfg_file.name})",
         always=True,
     )
+    if manifest_data["physbones_orphaned_removed"] > 0:
+        orphan_preview = ", ".join(
+            f"{item.get('root_bone')} ({item.get('reason')})"
+            for item in (pb_cfg.get("orphaned_physbones") or ())[:8]
+        )
+        active_logger.info(
+            f"Removed {manifest_data['physbones_orphaned_removed']} orphaned/unused PhysBone chain(s): {orphan_preview}",
+            always=True,
+        )
     if manifest_data["physbones_discarded_chains"] > 0:
         active_logger.warning(
             physbone_helper.format_physbone_priority_summary(pb_cfg.get("priority_report"))

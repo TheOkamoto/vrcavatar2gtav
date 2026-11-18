@@ -1783,6 +1783,338 @@ def test_unity_scene_and_fallbacks() -> bool:
             ),
         )
 
+        # Verify automatic orphaned/unused old-dress PhysBone removal during Unity/FBX import
+        import struct as fbx_struct
+
+        def _pack_fbx_prop(prop_val: Any) -> bytes:
+            if isinstance(prop_val, int):
+                return b"L" + fbx_struct.pack("<q", prop_val)
+            if isinstance(prop_val, str):
+                enc_txt = prop_val.encode("utf-8")
+                return b"S" + fbx_struct.pack("<I", len(enc_txt)) + enc_txt
+            if isinstance(prop_val, list):
+                arr_bytes = b"".join(fbx_struct.pack("<d", float(num_val)) for num_val in prop_val)
+                return b"d" + fbx_struct.pack("<III", len(prop_val), 0, len(arr_bytes)) + arr_bytes
+            raise TypeError(f"Unsupported FBX prop: {type(prop_val)}")
+
+        def _build_fbx_node(
+            node_name: str,
+            node_props: Sequence[Any],
+            child_nodes: Sequence[bytes],
+            start_offset: int,
+        ) -> bytes:
+            prop_blob = b"".join(_pack_fbx_prop(item_val) for item_val in node_props)
+            name_bytes = node_name.encode("utf-8")
+            body_start = start_offset + 13 + len(name_bytes) + len(prop_blob)
+            children_blob = b"".join(child_nodes)
+            if child_nodes:
+                children_blob += b"\x00" * 13
+            end_offset = body_start + len(children_blob)
+            hdr_bytes = fbx_struct.pack("<IIIB", end_offset, len(node_props), len(prop_blob), len(name_bytes))
+            return hdr_bytes + name_bytes + prop_blob + children_blob
+
+        def _write_minimal_test_fbx(
+            fbx_out_path: Path,
+            mesh_to_bones: Dict[str, List[str]],
+            all_bone_names: List[str],
+        ) -> None:
+            uid_seq = [1000]
+
+            def _next_id() -> int:
+                uid_seq[0] += 1
+                return uid_seq[0]
+
+            cursor_pos = 27
+            obj_nodes_meta: List[Tuple[str, List[Any], List[Tuple[str, List[Any]]]]] = []
+            conn_pairs: List[Tuple[int, int]] = []
+            bone_id_map: Dict[str, int] = {}
+
+            for bone_nm in all_bone_names:
+                bone_uid = _next_id()
+                bone_id_map[bone_nm] = bone_uid
+                obj_nodes_meta.append(("Model", [bone_uid, f"{bone_nm}\x00\x01Model", "LimbNode"], []))
+
+            for mesh_nm, weighted_names in mesh_to_bones.items():
+                mesh_uid = _next_id()
+                geom_uid = _next_id()
+                skin_uid = _next_id()
+                obj_nodes_meta.append(("Model", [mesh_uid, f"{mesh_nm}\x00\x01Model", "Mesh"], []))
+                obj_nodes_meta.append(("Geometry", [geom_uid, f"{mesh_nm}\x00\x01Geometry", "Mesh"], []))
+                obj_nodes_meta.append(("Deformer", [skin_uid, f"{mesh_nm}_Skin\x00\x01Deformer", "Skin"], []))
+                conn_pairs.append((geom_uid, mesh_uid))
+                conn_pairs.append((skin_uid, geom_uid))
+                for w_bone_nm in weighted_names:
+                    cl_uid = _next_id()
+                    obj_nodes_meta.append(
+                        (
+                            "Deformer",
+                            [cl_uid, f"Cluster_{w_bone_nm}\x00\x01Deformer", "Cluster"],
+                            [("Weights", [[1.0]])],
+                        )
+                    )
+                    conn_pairs.append((cl_uid, skin_uid))
+                    conn_pairs.append((bone_id_map[w_bone_nm], cl_uid))
+
+            obj_prop_cursor = cursor_pos + 13 + len(b"Objects")
+            compiled_obj_children: List[bytes] = []
+            for o_name, o_props, o_kids in obj_nodes_meta:
+                prop_sz = sum(len(_pack_fbx_prop(prop_val)) for prop_val in o_props)
+                kid_cursor = obj_prop_cursor + 13 + len(o_name.encode("utf-8")) + prop_sz
+                compiled_kids: List[bytes] = []
+                for k_name, k_props in o_kids:
+                    k_bytes = _build_fbx_node(k_name, k_props, [], kid_cursor)
+                    compiled_kids.append(k_bytes)
+                    kid_cursor += len(k_bytes)
+                node_bytes = _build_fbx_node(o_name, o_props, compiled_kids, obj_prop_cursor)
+                compiled_obj_children.append(node_bytes)
+                obj_prop_cursor += len(node_bytes)
+            objects_block = _build_fbx_node("Objects", [], compiled_obj_children, cursor_pos)
+            cursor_pos += len(objects_block)
+
+            conn_cursor = cursor_pos + 13 + len(b"Connections")
+            compiled_conns: List[bytes] = []
+            for src_uid, dst_uid in conn_pairs:
+                c_bytes = _build_fbx_node("C", ["OO", src_uid, dst_uid], [], conn_cursor)
+                compiled_conns.append(c_bytes)
+                conn_cursor += len(c_bytes)
+            conns_block = _build_fbx_node("Connections", [], compiled_conns, cursor_pos)
+            file_bytes = (
+                b"Kaydara FBX Binary  \x00\x1a\x00"
+                + fbx_struct.pack("<I", 7400)
+                + objects_block
+                + conns_block
+                + (b"\x00" * 13)
+            )
+            fbx_out_path.write_bytes(file_bytes)
+
+        orphan_root = pb_root / "orphan_test"
+        orphan_root.mkdir(parents=True, exist_ok=True)
+        base_fbx_p = orphan_root / "AvatarWithOldDress.fbx"
+        new_dress_fbx_p = orphan_root / "CustomNewDress.fbx"
+        _write_minimal_test_fbx(
+            base_fbx_p,
+            {
+                "Body": ["Hips", "Ear_L", "Ear_L_Tip"],
+                "OldDress_Mesh": ["OldSkirt_0", "OldSkirt_1"],
+            },
+            ["Hips", "Ear_L", "Ear_L_Tip", "OldSkirt_0", "OldSkirt_1"],
+        )
+        _write_minimal_test_fbx(
+            new_dress_fbx_p,
+            {"NewDress_Mesh": ["NewSkirt_0", "NewSkirt_1"]},
+            ["NewSkirt_0", "NewSkirt_1"],
+        )
+        base_fbx_guid = "11112222333344445555666677778888"
+        new_fbx_guid = "99990000aaaabbbbccccddddeeeeffff"
+        (orphan_root / "AvatarWithOldDress.fbx.meta").write_text(
+            f"fileFormatVersion: 2\nguid: {base_fbx_guid}\n",
+            encoding="utf-8",
+        )
+        (orphan_root / "CustomNewDress.fbx.meta").write_text(
+            f"fileFormatVersion: 2\nguid: {new_fbx_guid}\n",
+            encoding="utf-8",
+        )
+
+        orphan_scene_p = orphan_root / "OrphanDressTest.unity"
+        orphan_scene_p.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &100",
+                    "GameObject:",
+                    "  m_Name: OrphanTestAvatar",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &101",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 100}",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!1 &110",
+                    "GameObject:",
+                    "  m_Name: Body",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &111",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 110}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!137 &112",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 110}",
+                    "  m_Enabled: 1",
+                    f"  m_Mesh: {{fileID: 4300000, guid: {base_fbx_guid}, type: 3}}",
+                    "--- !u!1 &120",
+                    "GameObject:",
+                    "  m_Name: OldDress_Mesh",
+                    "  m_IsActive: 0",
+                    "--- !u!4 &121",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 120}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!137 &122",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 120}",
+                    "  m_Enabled: 0",
+                    f"  m_Mesh: {{fileID: 4300002, guid: {base_fbx_guid}, type: 3}}",
+                    "--- !u!1 &130",
+                    "GameObject:",
+                    "  m_Name: NewDress_Mesh",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &131",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 130}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!137 &132",
+                    "SkinnedMeshRenderer:",
+                    "  m_GameObject: {fileID: 130}",
+                    "  m_Enabled: 1",
+                    f"  m_Mesh: {{fileID: 4300000, guid: {new_fbx_guid}, type: 3}}",
+                    "--- !u!1 &200",
+                    "GameObject:",
+                    "  m_Name: Ear_L",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &201",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 200}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!1 &202",
+                    "GameObject:",
+                    "  m_Name: Ear_L_Tip",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &203",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 202}",
+                    "  m_Father: {fileID: 201}",
+                    "--- !u!1 &210",
+                    "GameObject:",
+                    "  m_Name: OldSkirt_0",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &211",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 210}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!1 &212",
+                    "GameObject:",
+                    "  m_Name: OldSkirt_1",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &213",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 212}",
+                    "  m_Father: {fileID: 211}",
+                    "--- !u!1 &220",
+                    "GameObject:",
+                    "  m_Name: NewSkirt_0",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &221",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 220}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!1 &222",
+                    "GameObject:",
+                    "  m_Name: NewSkirt_1",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &223",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 222}",
+                    "  m_Father: {fileID: 221}",
+                    "--- !u!1 &230",
+                    "GameObject:",
+                    "  m_Name: OldDress_DisabledRoot",
+                    "  m_IsActive: 0",
+                    "--- !u!4 &231",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 230}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!1 &240",
+                    "GameObject:",
+                    "  m_Name: PhysBoneContainer_OldDress",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &241",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 240}",
+                    "  m_Father: {fileID: 101}",
+                    "--- !u!114 &300",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 200}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 201}",
+                    "--- !u!114 &301",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 220}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 221}",
+                    "--- !u!114 &302",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 240}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 211}",
+                    "--- !u!114 &303",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 240}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 999999}",
+                    "--- !u!114 &304",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 240}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 231}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        orphan_extract = physbone_helper.extract_unity_scene_physbones(
+            orphan_scene_p,
+            avatar_name="OrphanTestAvatar",
+            unity_assets_root=orphan_root,
+            fbx_paths=[base_fbx_p, new_dress_fbx_p],
+        )
+        orphan_kept_roots = {rec["root_bone"] for rec in orphan_extract.get("chains", [])}
+        orphan_reasons = {
+            item["root_bone"]: item["reason"]
+            for item in orphan_extract.get("orphaned_physbones", [])
+        }
+        pruned_cfg_res = physbone_helper.prune_orphaned_physbone_chains(
+            {
+                "ear_l": {
+                    "source_key": "ear_l",
+                    "chain_bones": ["PB_Ear_L_0", "PB_Ear_L_1"],
+                    "source_bones": ["Ear_L", "Ear_L_Tip"],
+                    "parent_bone": "SKEL_Head",
+                },
+                "oldskirt_0": {
+                    "source_key": "oldskirt_0",
+                    "chain_bones": ["PB_OldSkirt_0", "PB_OldSkirt_1"],
+                    "source_bones": ["OldSkirt_0", "OldSkirt_1"],
+                    "parent_bone": "SKEL_Pelvis",
+                },
+            },
+            active_weighted_bones_ci={"ear_l", "ear_l_tip", "newskirt_0", "newskirt_1"},
+            bone_mapping={"oldskirt_0": "PB_OldSkirt_0", "ear_l": "PB_Ear_L_0"},
+            disabled_mesh_bones_ci={"oldskirt_0", "oldskirt_1"},
+        )
+        orphan_cleanup_ok = (
+            orphan_kept_roots == {"Ear_L", "NewSkirt_0"}
+            and orphan_reasons.get("OldSkirt_0") == "disabled_old_outfit_mesh"
+            and orphan_reasons.get("PhysBoneContainer_OldDress") == "dangling_root_transform"
+            and orphan_reasons.get("OldDress_DisabledRoot") == "inactive_root_transform"
+            and "oldskirt_0" not in pruned_cfg_res["chains"]
+            and "ear_l" in pruned_cfg_res["chains"]
+            and "oldskirt_0" not in pruned_cfg_res["bone_mapping"]
+            and len(pruned_cfg_res["orphaned_physbones"]) == 1
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.physbones_orphan_cleanup"),
+            orphan_cleanup_ok,
+            (
+                f"kept={sorted(orphan_kept_roots)}, "
+                f"orphans_removed={len(orphan_reasons)}, cfg_pruned={len(pruned_cfg_res['orphaned_physbones'])}"
+            ),
+        )
+
     return suite_passed
 
 

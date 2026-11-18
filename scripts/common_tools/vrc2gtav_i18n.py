@@ -3430,4 +3430,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "PhysBone 優先度ティア (プリセット維持・非必須超過分の剛体フォールバック除外)",
         "pt": "Lista de priorização de PhysBones (mantém essenciais/presets e descarta não essenciais)",
     },
+    "tests.physbones_orphan_cleanup": {
+        "en": "Orphaned/unused old-dress PhysBones detected and removed on import",
+        "ja": "衣装差し替えで孤立した旧衣装 PhysBone の自動検出・除外",
+        "pt": "Detecção e exclusão automática de PhysBones órfãos de vestidos antigos na importação",
+    },
 }
