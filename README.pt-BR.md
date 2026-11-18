@@ -33,17 +33,36 @@ O `vrcavatar2gtav` automatiza a conversão de avatares anime **VRChat (Unity / F
 
 Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **Sollumz v2.9.0** e **`rage-cli` 0.28.1** de ponta a ponta — executando remapeamento de esqueleto, alinhamento de mãos e dedos, pesos de *lip sync*, calibração de texturas e materiais, escala padrão `1.0` (com extração opcional de escalas em cenas `.unity`), empacotamento universal de *slots* e implantação segura em RPF7 (`mods/x64v.rpf`).
 
-### Vídeo de Exemplo
+### Vídeos de Exemplo
 
 <div align="center">
 
-<a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
-  <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="640" alt="Vídeo de exemplo do vrcavatar2gtav (YouTube Shorts)">
-</a>
-
-<br>
-
-[![Assistir no YouTube Shorts](https://img.shields.io/badge/YouTube_Shorts-Assistir_Exemplo-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI)
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+        <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="400" alt="しなのちゃん殴られちゃった (YouTube Shorts)">
+      </a>
+      <br>
+      <sub><b>しなのちゃん殴られちゃった</b></sub>
+      <br>
+      <a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+        <img src="https://img.shields.io/badge/YouTube_Shorts-Assistir_Exemplo_1-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Assistir Exemplo 1 no YouTube Shorts">
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://youtube.com/shorts/Clo0A7oHYhA">
+        <img src="https://img.youtube.com/vi/Clo0A7oHYhA/maxresdefault.jpg" width="400" alt="無敵しなのちゃんだ！！ (YouTube Shorts)">
+      </a>
+      <br>
+      <sub><b>無敵しなのちゃんだ！！</b></sub>
+      <br>
+      <a href="https://youtube.com/shorts/Clo0A7oHYhA">
+        <img src="https://img.shields.io/badge/YouTube_Shorts-Assistir_Exemplo_2-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Assistir Exemplo 2 no YouTube Shorts">
+      </a>
+    </td>
+  </tr>
+</table>
 
 </div>
 

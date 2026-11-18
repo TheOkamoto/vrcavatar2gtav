@@ -37,13 +37,32 @@
 
 <div align="center">
 
-<a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
-  <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="640" alt="vrcavatar2gtav サンプル動画 (YouTube Shorts)">
-</a>
-
-<br>
-
-[![YouTube Shorts で視聴](https://img.shields.io/badge/YouTube_Shorts-%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E5%8B%95%E7%94%BB%E3%82%92%E8%A6%8B%E3%82%8B-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI)
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+        <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="400" alt="しなのちゃん殴られちゃった (YouTube Shorts)">
+      </a>
+      <br>
+      <sub><b>しなのちゃん殴られちゃった</b></sub>
+      <br>
+      <a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+        <img src="https://img.shields.io/badge/YouTube_Shorts-%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E5%8B%95%E7%94%BB%201-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube Shorts でサンプル動画 1 を見る">
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://youtube.com/shorts/Clo0A7oHYhA">
+        <img src="https://img.youtube.com/vi/Clo0A7oHYhA/maxresdefault.jpg" width="400" alt="無敵しなのちゃんだ！！ (YouTube Shorts)">
+      </a>
+      <br>
+      <sub><b>無敵しなのちゃんだ！！</b></sub>
+      <br>
+      <a href="https://youtube.com/shorts/Clo0A7oHYhA">
+        <img src="https://img.shields.io/badge/YouTube_Shorts-%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E5%8B%95%E7%94%BB%202-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube Shorts でサンプル動画 2 を見る">
+      </a>
+    </td>
+  </tr>
+</table>
 
 </div>
 
