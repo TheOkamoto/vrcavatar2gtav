@@ -33,6 +33,20 @@ O `vrcavatar2gtav` automatiza a conversão de avatares anime **VRChat (Unity / F
 
 Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **Sollumz v2.9.0** e **`rage-cli` 0.28.1** de ponta a ponta — executando remapeamento de esqueleto, alinhamento de mãos e dedos, pesos de *lip sync*, calibração de texturas e materiais, escala padrão `1.0` (com extração opcional de escalas em cenas `.unity`), empacotamento universal de *slots* e implantação segura em RPF7 (`mods/x64v.rpf`).
 
+### Vídeo de Exemplo
+
+<div align="center">
+
+<a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+  <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="640" alt="Vídeo de exemplo do vrcavatar2gtav (YouTube Shorts)">
+</a>
+
+<br>
+
+[![Assistir no YouTube Shorts](https://img.shields.io/badge/YouTube_Shorts-Assistir_Exemplo-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI)
+
+</div>
+
 ### Principais Recursos
 
 - **Assistente First-Run, Ingestão de `.zip`/Unity e Download do Blender 4.0.2**: Comece de um repositório limpo ou projeto Unity com apenas VRChat + Shinano usando `--avatar-zip` (`.zip` / `.unitypackage`) ou `--unity-project`. O módulo [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) extrai pacotes com proteção *Zip-Slip*, baixa o Blender `4.0.2` portátil + `Sollumz` (`--download-blender`) quando ausentes e exibe um **menu paginado de avatares (`10` opções/página + botão `Next`/`Prev`)**.

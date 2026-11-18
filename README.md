@@ -33,6 +33,20 @@
 
 Instead of manual bone tweaking and brittle one-off edits, the pipeline coordinates **Blender 4.0.2**, **Sollumz v2.9.0**, and **`rage-cli` 0.28.1** end-to-end — handling skeleton remapping, hand/finger grip alignment, lip-sync morph weights, texture/material calibration, clean `1.0` default scaling (with optional `.unity` scene transform extraction), universal slot packing, and safe RPF7 deployment (`mods/x64v.rpf`).
 
+### Example Video
+
+<div align="center">
+
+<a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+  <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="640" alt="vrcavatar2gtav Example Video (YouTube Shorts)">
+</a>
+
+<br>
+
+[![Watch on YouTube Shorts](https://img.shields.io/badge/YouTube_Shorts-Watch_Example-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI)
+
+</div>
+
 ### Key Features
 
 - **First-Run Wizard, `.zip`/Unity Ingestion & Blender 4.0.2 Auto-Download**: Start from a blank GitHub clone or fresh VRChat-only Unity project via `--avatar-zip` (`.zip` / `.unitypackage`) or `--unity-project`. [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) safely extracts archives, auto-downloads portable Blender `4.0.2` + `Sollumz` (`--download-blender`) when missing, and presents a **10-options-per-page paginated avatar picker (`Next` / `Prev`)** for multi-avatar `.unity` scenes.

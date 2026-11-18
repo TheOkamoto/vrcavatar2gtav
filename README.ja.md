@@ -33,6 +33,20 @@
 
 手作業でのボーン微調整に頼らず、**Blender 4.0.2**、**Sollumz v2.9.0**、**`rage-cli` 0.28.1** を一連の工程として連携させ、スケルトンリマップ、手指の握り補正、リップシンク用モーフ調整、テクスチャ・マテリアル補正、標準スケール `1.0` の適用（および `.unity` シーンからのスケール抽出）、ユニバーサルスロット梱包、RPF7 (`mods/x64v.rpf`) への安全配置までを自動化します。
 
+### サンプル動画
+
+<div align="center">
+
+<a href="https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI">
+  <img src="https://img.youtube.com/vi/xoaqZa0GhC8/maxresdefault.jpg" width="640" alt="vrcavatar2gtav サンプル動画 (YouTube Shorts)">
+</a>
+
+<br>
+
+[![YouTube Shorts で視聴](https://img.shields.io/badge/YouTube_Shorts-%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E5%8B%95%E7%94%BB%E3%82%92%E8%A6%8B%E3%82%8B-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/shorts/xoaqZa0GhC8?is=Y_0Z3Nd31neOgCFI)
+
+</div>
+
 ### 主な機能
 
 - **First-Run・`.zip`/Unity 読込 & Blender 4.0.2 自動取得**: `--avatar-zip` (`.zip` / `.unitypackage`) または `--unity-project` を渡すだけで、VRChat だけの新しい Unity プロジェクトからも開始可能。[`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) が安全に展開し、Blender `4.0.2` + `Sollumz` が未導入なら自動ダウンロードし、**1ページ10件＋`Next`/`Prev` ページング選択メニュー**でアバターを選べます。
