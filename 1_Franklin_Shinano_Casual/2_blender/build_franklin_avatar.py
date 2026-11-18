@@ -31,6 +31,7 @@ for _tools_candidate in (
 import blender_hair_helper
 import blendshape_helper
 import hand_skeleton_helper
+import ped_damage_helper
 import physbone_helper
 import unity_hair_helper
 import unity_scene_helper
@@ -73,6 +74,12 @@ def parse_franklin_cli_args():
         "--physbones-marshmallow",
         action=argparse.BooleanOptionalAction,
         default=None,
+    )
+    arg_parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=project_i18n.translate("ped_damage.cli_blood_decals"),
     )
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
@@ -1000,7 +1007,10 @@ for temp_obj in [shinano_armature] + custom_hair_armatures + [
 ]:
     bpy.data.objects.remove(temp_obj)
 
-# 5. Join all processed meshes into a single drawable mesh
+# 5. Guard RPF7 16 MiB limit on high-poly accessories and join into a single drawable mesh
+if bool(getattr(CLI_ARGS, "blood_decals", True)):
+    ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, processed_objs)
+
 bpy.ops.object.select_all(action="DESELECT")
 for proc_obj in processed_objs:
     proc_obj.select_set(True)
@@ -1026,7 +1036,7 @@ print(
     )
 )
 
-# 6. Create ped_default.sps shader materials bound to the 2x2 Atlas
+# 6. Create ped.sps (blood-decal enabled) shader materials bound to the 2x2 Atlas
 atlas_tex_path = str(FRANKLIN_CFG["atlas_png"])
 norm_tex_path = str(FRANKLIN_CFG["normal_png"])
 spec_tex_path = str(FRANKLIN_CFG["spec_png"])
@@ -1034,6 +1044,7 @@ spec_tex_path = str(FRANKLIN_CFG["spec_png"])
 atlas_img = bpy.data.images.load(atlas_tex_path)
 flat_norm_img = bpy.data.images.load(norm_tex_path)
 black_spec_img = bpy.data.images.load(spec_tex_path)
+enable_blood_decals = bool(getattr(CLI_ARGS, "blood_decals", True))
 
 quadrant_map = {
     "Shinano_face": (0.0, 0.5),
@@ -1044,42 +1055,21 @@ quadrant_map = {
 
 shader_materials = {}
 for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume", "Shinano_hair"]:
-    shader_material = create_shader("ped_default.sps")
-    shader_material.name = mat_name
-
-    diff_node = shader_material.node_tree.nodes.get("DiffuseSampler")
-    if diff_node:
-        diff_node.image = atlas_img
-        diff_node.texture_properties.embedded = False
-
-    bump_node = shader_material.node_tree.nodes.get("BumpSampler")
-    if bump_node:
-        bump_node.image = flat_norm_img
-        bump_node.texture_properties.embedded = False
-
-    spec_node = shader_material.node_tree.nodes.get("SpecSampler")
-    if spec_node:
-        spec_node.image = black_spec_img
-        spec_node.texture_properties.embedded = False
-
-    for shader_node in shader_material.node_tree.nodes:
-        if shader_node.name == "bumpiness" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
-        elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
-            shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings":
-            if hasattr(shader_node, "set_vec3"):
-                shader_node.set_vec3((0.0, 0.0, 0.0))
-            elif hasattr(shader_node, "set_vec4"):
-                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
-        elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
-        elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(1.0)
-        elif shader_node.name == "specularFresnel" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
-
-    shader_materials[mat_name] = shader_material
+    shader_materials[mat_name] = ped_damage_helper.create_ped_material(
+        create_shader,
+        mat_name,
+        enable_blood_decals=enable_blood_decals,
+        diffuse_image=atlas_img,
+        bump_image=flat_norm_img,
+        spec_image=black_spec_img,
+        bumpiness=0.0,
+        specular_intensity=0.0,
+        specular_falloff=1.0,
+        specular_fresnel=0.0,
+        detail_settings=(0.0, 0.0, 0.0),
+        stubble_control=(0.0, 0.0),
+        um_global_params=(0.0, 0.0, 0.0, 0.0),
+    )
 
 slot_to_key = {}
 for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
@@ -1113,19 +1103,13 @@ for poly_item in joined_mesh_obj.data.polygons:
         uv_coord.x = uv_coord.x * 0.5 + uv_offset_u
         uv_coord.y = uv_coord.y * 0.5 + uv_offset_v
 
-bpy.context.view_layer.objects.active = joined_mesh_obj
-bpy.ops.sollumz.color_attrs_add_missing()
-bpy.ops.sollumz.uv_maps_add_missing()
-
-color_attr_1 = joined_mesh_obj.data.color_attributes.get("Color 1")
-if color_attr_1:
-    for color_item in color_attr_1.data:
-        color_item.color = (1.0, 1.0, 1.0, 1.0)
-
-color_attr_2 = joined_mesh_obj.data.color_attributes.get("Color 2")
-if color_attr_2:
-    for color_item in color_attr_2.data:
-        color_item.color = (0.0, 0.0, 0.0, 0.0)
+ped_damage_result = ped_damage_helper.apply_ped_damage_attributes_in_blender(
+    bpy,
+    joined_mesh_obj,
+    franklin_armature,
+    enable_blood_decals=enable_blood_decals,
+)
+print(ped_damage_helper.format_ped_damage_summary(ped_damage_result, project_i18n.translate))
 
 # Apply soft anime spherical face normals
 if kept_body_normals:

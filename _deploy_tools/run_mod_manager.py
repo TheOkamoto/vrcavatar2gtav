@@ -1251,6 +1251,12 @@ def main() -> None:
         help=project_i18n.translate("physbones.cli_marshmallow"),
     )
     argument_parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("ped_damage.cli_blood_decals"),
+    )
+    argument_parser.add_argument(
         "--avatar-zip",
         default=None,
         help="Path to avatar .zip or .unitypackage archive",
@@ -1465,6 +1471,10 @@ def main() -> None:
             universal_argv.append("--auto-download-blender")
         if parsed_arguments.physbones_marshmallow:
             universal_argv.append("--physbones-marshmallow")
+        if parsed_arguments.blood_decals is True:
+            universal_argv.append("--blood-decals")
+        elif parsed_arguments.blood_decals is False:
+            universal_argv.append("--no-blood-decals")
         if not parsed_arguments.non_interactive:
             universal_argv.append("--interactive")
         if parsed_arguments.skip_blender:
@@ -1590,6 +1600,10 @@ def main() -> None:
             extra_blender_args.append("--physbones-marshmallow")
         elif parsed_arguments.physbones_marshmallow is False:
             extra_blender_args.append("--no-physbones-marshmallow")
+        if parsed_arguments.blood_decals is True:
+            extra_blender_args.append("--blood-decals")
+        elif parsed_arguments.blood_decals is False:
+            extra_blender_args.append("--no-blood-decals")
         blender_status = execute_blender_build(
             selected_characters_list,
             extra_blender_args=extra_blender_args,

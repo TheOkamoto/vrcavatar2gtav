@@ -3435,4 +3435,19 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "衣装差し替えで孤立した旧衣装 PhysBone の自動検出・除外",
         "pt": "Detecção e exclusão automática de PhysBones órfãos de vestidos antigos na importação",
     },
+    "ped_damage.cli_blood_decals": {
+        "en": "Enable GTA V ped blood/wound decals (`ped.sps` + 6-zone `UVMap 1`, default enabled)",
+        "ja": "GTA V の出血・傷デカールを有効化 (`ped.sps` + 6ゾーン `UVMap 1`、既定で有効)",
+        "pt": "Habilitar decals de sangue/ferimentos do GTA V (`ped.sps` + `UVMap 1` em 6 zonas, ativo por padrão)",
+    },
+    "ped_damage.applied": {
+        "en": "[OK] Ped blood decals configured: shader={shader}, torso={torso}, head={head}, arms={arms}, legs={legs}, unmapped={unmapped}",
+        "ja": "[OK] 出血デカール設定完了: shader={shader}, torso={torso}, head={head}, arms={arms}, legs={legs}, unmapped={unmapped}",
+        "pt": "[OK] Decals de sangue configurados: shader={shader}, tronco={torso}, cabeça={head}, braços={arms}, pernas={legs}, excluídos={unmapped}",
+    },
+    "tests.ped_damage_decals": {
+        "en": "GTA V ped blood decals (`ped.sps` + 6-zone `UVMap 1` + vanilla `#FF8000FF` colors)",
+        "ja": "GTA V Ped 出血デカール (`ped.sps` + 6ゾーン `UVMap 1` + `#FF8000FF` 頂点カラー)",
+        "pt": "Decals de sangue GTA V (`ped.sps` + `UVMap 1` em 6 zonas + vértice `#FF8000FF`)",
+    },
 }

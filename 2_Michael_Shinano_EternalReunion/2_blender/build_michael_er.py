@@ -46,6 +46,7 @@ import blender_hair_helper
 import blendshape_helper
 import hand_skeleton_helper
 import mathutils
+import ped_damage_helper
 import physbone_helper
 import unity_hair_helper
 import unity_scene_helper
@@ -1724,7 +1725,10 @@ def build_shinano_er_for_gtav(cli_args):
         if old_obj != ped_armature and old_obj not in processed_objects:
             bpy.data.objects.remove(old_obj)
 
-    # 9. Join all processed meshes into SKEL_ROOT
+    # 9. Keep total unified polygon budget safely under RPF7's 16 MiB entry ceiling, then join
+    if bool(getattr(cli_args, "blood_decals", True)):
+        ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, processed_objects)
+
     print(
         i18n.translate("michael.build.joining_meshes", count=len(processed_objects))
     )
@@ -1766,40 +1770,22 @@ def build_shinano_er_for_gtav(cli_args):
     flat_normal_image = bpy.data.images.load(normal_image_path)
     specular_image = bpy.data.images.load(spec_image_path)
 
-    ped_material = create_shader("ped_default.sps")
-    ped_material.name = "shinano_er_mat"
-
-    diffuse_node = ped_material.node_tree.nodes.get("DiffuseSampler")
-    if diffuse_node:
-        diffuse_node.image = atlas_image
-        diffuse_node.texture_properties.embedded = False
-
-    bump_node = ped_material.node_tree.nodes.get("BumpSampler")
-    if bump_node:
-        bump_node.image = flat_normal_image
-        bump_node.texture_properties.embedded = False
-
-    specular_node = ped_material.node_tree.nodes.get("SpecSampler")
-    if specular_node:
-        specular_node.image = specular_image
-        specular_node.texture_properties.embedded = False
-
-    for shader_node in ped_material.node_tree.nodes:
-        if shader_node.name == "bumpiness" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.35)
-        elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
-            shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings":
-            if hasattr(shader_node, "set_vec3"):
-                shader_node.set_vec3((0.0, 0.0, 0.0))
-            elif hasattr(shader_node, "set_vec4"):
-                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
-        elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.85)
-        elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(24.0)
-        elif shader_node.name == "specularFresnel" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.70)
+    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
+    ped_material = ped_damage_helper.create_ped_material(
+        create_shader,
+        "shinano_er_mat",
+        enable_blood_decals=enable_blood_decals,
+        diffuse_image=atlas_image,
+        bump_image=flat_normal_image,
+        spec_image=specular_image,
+        bumpiness=0.35,
+        specular_intensity=0.85,
+        specular_falloff=24.0,
+        specular_fresnel=0.70,
+        detail_settings=(0.0, 0.0, 0.0),
+        stubble_control=(0.0, 0.0),
+        um_global_params=(0.0, 0.0, 0.0, 0.0),
+    )
 
     joined_mesh_obj.data.materials.clear()
     joined_mesh_obj.data.materials.append(ped_material)
@@ -1807,22 +1793,13 @@ def build_shinano_er_for_gtav(cli_args):
     for poly_item in joined_mesh_obj.data.polygons:
         poly_item.material_index = 0
 
-    if joined_mesh_obj.data.uv_layers:
-        joined_mesh_obj.data.uv_layers[0].name = "UVMap 0"
-
-    bpy.context.view_layer.objects.active = joined_mesh_obj
-    bpy.ops.sollumz.color_attrs_add_missing()
-    bpy.ops.sollumz.uv_maps_add_missing()
-
-    color_attr_1 = joined_mesh_obj.data.color_attributes.get("Color 1")
-    if color_attr_1:
-        for corner_item in color_attr_1.data:
-            corner_item.color = (1.0, 1.0, 1.0, 1.0)
-
-    color_attr_2 = joined_mesh_obj.data.color_attributes.get("Color 2")
-    if color_attr_2:
-        for corner_item in color_attr_2.data:
-            corner_item.color = (0.0, 0.0, 0.0, 0.0)
+    ped_damage_result = ped_damage_helper.apply_ped_damage_attributes_in_blender(
+        bpy,
+        joined_mesh_obj,
+        ped_armature,
+        enable_blood_decals=enable_blood_decals,
+    )
+    print(ped_damage_helper.format_ped_damage_summary(ped_damage_result, i18n.translate))
 
     if fbx_face_normals and preserved_body_normals:
         joined_mesh_obj.data.use_auto_smooth = True
@@ -2109,6 +2086,12 @@ def parse_blender_cli_args():
         action=argparse.BooleanOptionalAction,
         default=None,
         help=i18n.translate("physbones.cli_marshmallow"),
+    )
+    argument_parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=i18n.translate("ped_damage.cli_blood_decals"),
     )
     argument_parser.add_argument(
         "--texture-dir",

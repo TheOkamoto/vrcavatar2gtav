@@ -30,6 +30,7 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
 import blender_hair_helper
 import blendshape_helper
 import hand_skeleton_helper
+import ped_damage_helper
 import physbone_helper
 import unity_hair_helper
 import unity_scene_helper
@@ -918,7 +919,10 @@ def build_trevor_miltina_avatar(cli_args=None):
                 ) or cloth_obj.vertex_groups.new(name=default_bone_name)
                 vert_group.add([vert_idx], 1.0, "REPLACE")
 
-    # 10. Join all kept meshes into one unified object
+    # 10. Guard RPF7 16 MiB limit on heavy accessories and join kept meshes
+    if bool(getattr(cli_args, "blood_decals", True)):
+        ped_damage_helper.enforce_ped_rpf7_poly_budget(bpy, meshes_to_keep)
+
     for selected_obj in bpy.context.selected_objects:
         selected_obj.select_set(False)
 
@@ -976,70 +980,47 @@ def build_trevor_miltina_avatar(cli_args=None):
     atlas_image = bpy.data.images.load(atlas_img_path)
     atlas_image.name = "miltina_atlas_2k"
 
-    ped_material = create_shader("ped_default.sps")
-    ped_material.name = "miltina_maid_mat"
-
-    diffuse_node = ped_material.node_tree.nodes.get("DiffuseSampler")
-    if diffuse_node:
-        diffuse_node.image = atlas_image
-        diffuse_node.texture_properties.embedded = False
-
+    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
+    specular_image = None
     spec_img_path = str(trevor_cfg["spec_png"])
     if os.path.exists(spec_img_path):
-        specular_node = ped_material.node_tree.nodes.get("SpecSampler")
-        if specular_node:
-            specular_image = bpy.data.images.load(spec_img_path)
-            specular_image.name = "miltina_spec"
-            specular_node.image = specular_image
-            specular_node.texture_properties.embedded = False
+        specular_image = bpy.data.images.load(spec_img_path)
+        specular_image.name = "miltina_spec"
 
+    normal_image = None
     normal_img_path = str(trevor_cfg["normal_png"])
     if os.path.exists(normal_img_path):
-        normal_node = ped_material.node_tree.nodes.get("BumpSampler")
-        if normal_node:
-            normal_image = bpy.data.images.load(normal_img_path)
-            normal_image.name = "miltina_normal"
-            normal_node.image = normal_image
-            normal_node.texture_properties.embedded = False
+        normal_image = bpy.data.images.load(normal_img_path)
+        normal_image.name = "miltina_normal"
 
-    for shader_node in ped_material.node_tree.nodes:
-        if shader_node.name == "bumpiness" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
-        elif shader_node.name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
-            shader_node.set_vec2((0.0, 0.0))
-        elif shader_node.name == "detailSettings":
-            if hasattr(shader_node, "set_vec3"):
-                shader_node.set_vec3((0.0, 0.0, 0.0))
-            elif hasattr(shader_node, "set_vec4"):
-                shader_node.set_vec4((0.0, 0.0, 0.0, 0.0))
-        elif shader_node.name == "specularIntensityMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
-        elif shader_node.name == "specularFalloffMult" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(1.0)
-        elif shader_node.name == "specularFresnel" and hasattr(shader_node, "set_float"):
-            shader_node.set_float(0.0)
+    ped_material = ped_damage_helper.create_ped_material(
+        create_shader,
+        "miltina_maid_mat",
+        enable_blood_decals=enable_blood_decals,
+        diffuse_image=atlas_image,
+        bump_image=normal_image,
+        spec_image=specular_image,
+        bumpiness=0.0,
+        specular_intensity=0.0,
+        specular_falloff=1.0,
+        specular_fresnel=0.0,
+        detail_settings=(0.0, 0.0, 0.0),
+        stubble_control=(0.0, 0.0),
+        um_global_params=(0.0, 0.0, 0.0, 0.0),
+    )
 
     unified_obj.data.materials.clear()
     unified_obj.data.materials.append(ped_material)
     for poly_item in unified_obj.data.polygons:
         poly_item.material_index = 0
 
-    if unified_obj.data.uv_layers:
-        unified_obj.data.uv_layers[0].name = "UVMap 0"
-
-    bpy.context.view_layer.objects.active = unified_obj
-    bpy.ops.sollumz.color_attrs_add_missing()
-    bpy.ops.sollumz.uv_maps_add_missing()
-
-    color_attr_1 = unified_obj.data.color_attributes.get("Color 1")
-    if color_attr_1:
-        for corner_item in color_attr_1.data:
-            corner_item.color = (1.0, 1.0, 1.0, 1.0)
-
-    color_attr_2 = unified_obj.data.color_attributes.get("Color 2")
-    if color_attr_2:
-        for corner_item in color_attr_2.data:
-            corner_item.color = (0.0, 0.0, 0.0, 0.0)
+    ped_damage_result = ped_damage_helper.apply_ped_damage_attributes_in_blender(
+        bpy,
+        unified_obj,
+        ped_armature,
+        enable_blood_decals=enable_blood_decals,
+    )
+    print(ped_damage_helper.format_ped_damage_summary(ped_damage_result, i18n.translate))
 
     # Set forward-biased smooth anime face normals
     bpy.context.view_layer.objects.active = unified_obj
@@ -1357,6 +1338,12 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=None,
         help=i18n.translate("physbones.cli_marshmallow"),
+    )
+    parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=i18n.translate("ped_damage.cli_blood_decals"),
     )
     parser.add_argument(
         "--unity-scene",

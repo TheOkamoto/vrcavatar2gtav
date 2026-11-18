@@ -129,6 +129,12 @@ def main() -> int:
         default=None,
         help=i18n.translate("physbones.cli_marshmallow"),
     )
+    parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=i18n.translate("ped_damage.cli_blood_decals"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
@@ -172,6 +178,10 @@ def main() -> int:
         extra_blender_args.append("--physbones-marshmallow")
     elif parsed_args.physbones_marshmallow is False:
         extra_blender_args.append("--no-physbones-marshmallow")
+    if parsed_args.blood_decals is True:
+        extra_blender_args.append("--blood-decals")
+    elif parsed_args.blood_decals is False:
+        extra_blender_args.append("--no-blood-decals")
 
     blender_command, blender_env = project_paths.build_blender_command(
         blender_script,

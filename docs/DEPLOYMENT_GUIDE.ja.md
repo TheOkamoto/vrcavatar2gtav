@@ -132,7 +132,7 @@ $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 ### 5.1 2K (2048×2048) アトラスと DXT5 圧縮
 - すべてのアトラス生成スクリプト ([`generate_franklin_atlas.py`](../scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py)、[`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py)、[`generate_miltina_atlas.py`](../scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py)) は **2048×2048** テクスチャを出力し、`rage` 経由でミップマップ付き **DXT5 (BC3)** に変換します。
 - Michael (*Eternal Reunion*) は UN1〜UN3 衣装に加え懐中時計用 UN4、金属パーツ、バックル、レンズを **4×2 アトラス** へ統合します。
-- コンパイル済みメッシュは `ped_default.sps` を使用し、`DiffuseSampler`・`BumpSampler`・`SpecSampler` を接続します。
+- コンパイル済みメッシュは `ped.sps` に `DiffuseSampler`・`BumpSampler`・`SpecSampler` を接続し、[`scripts/common_tools/ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py) が `peddamage.xml` (`CPedDamageCylinderInfoSet::HUMAN`) 準拠の 6 ゾーン円筒 `UVMap 1` (`TexCoord1`) と標準頂点カラー (`Color 1 = #FF8000FF`, `Color 2 = #00000000`) を生成して GTA V の出血・傷デカールを有効化します（`--blood-decals` 既定有効、`--no-blood-decals` で `ped_default.sps` へ切替可）。高密度アバターで `TexCoord1` + `Tangent` 追加により RPF7 の 24bit 上限 `16 MiB` (`0xFFFFFF`) を超える場合は、`enforce_ped_rpf7_poly_budget` が顔・素体を保護したまま高ポリ小物のみを自動削減します。
 
 ### 5.2 JOAAT ハッシュ登録順の安定性
 RAGE Engine は Jenkins One-at-a-Time (**JOAAT**) ハッシュで `.ytd` 内のテクスチャを参照します。順序や名前の不整合があるとモデルが真っ黒になったりテクスチャが入れ替わります。各生成スクリプトと Blender ビルダーは拡散・スペキュラ・法線マップを一貫した順序でバインドします。

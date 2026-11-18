@@ -42,6 +42,7 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 - **Suporte Trilíngue (`en` / `ja` / `pt`)**: Detecção automática do idioma do sistema operacional com sobrescrita explícita via `--lang`.
 - **Padrão de Escala `1.0` + Leitor de `.unity`**: Mantém escalas em `1.0` por padrão e extrai escalas customizadas da cena `.unity` quando fornecida.
 - **Porte Universal de Cabelo Customizado, PhysBones e Intercambiabilidade**: Suporta cabelos `.prefab`/`PrefabVariant`/`.fbx`, `79` cadeias `VRCPhysBone` (com `--physbones-marshmallow` opcional) e troca livre entre protagonistas (`[7]`, `--avatar`).
+- **Decals de Sangue e Ferimentos do GTA V (`ped.sps` + `UVMap 1` em 6 Zonas)**: O módulo [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) habilita perfurações de bala, cortes e manchas de sangue nativas em tronco/saia, cabeça, braços e pernas (`--blood-decals`, ativo por padrão), excluindo caudas e cabelos longos abaixo do pescoço.
 - **Testes Automatizados**: Validação de código-fonte (`8` suítes) e validação completa pós-deploy (`11` suítes).
 
 ---
@@ -131,6 +132,7 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | `python run_mod_manager.py --character all --blendshapes-source cfg` | Compila usando os presets `.cfg` de blendshapes em vez das cenas Unity |
 | `python run_mod_manager.py --export-physbones` | Importa VRCPhysBones padrão das cenas `.unity` para `configs/*_physbones.cfg` (`--physbones-marshmallow` inclui Marshmallow PB; `--overwrite-physbones-from-unity` sobrescreve edições) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Compila usando os presets `.cfg` de PhysBones em vez de extrair das cenas Unity (adicione `--physbones-marshmallow` para ativar Marshmallow PB) |
+| `python run_mod_manager.py --character all --blood-decals` | Compila com decals de sangue/ferimentos do GTA V habilitados (padrão; use `--no-blood-decals` para retornar a `ped_default.sps`) |
 | `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas já compiladas em `mods/x64v.rpf` |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `8` suítes de código/config/i18n/First-Run/Modular-Avatar (clone limpo) |
 | `python scripts/common_tools/test_mod_suite.py` | Executa todas as `11` suítes de ponta a ponta (requer build e deploy concluídos) |

@@ -550,6 +550,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "setup_first_run.py", root_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
         (common_dir / "physbone_helper.py", deploy_dir / "physbone_helper.py"),
+        (common_dir / "ped_damage_helper.py", deploy_dir / "ped_damage_helper.py"),
         (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
         (common_dir / "unity_hair_helper.py", deploy_dir / "unity_hair_helper.py"),
         (common_dir / "blender_hair_helper.py", deploy_dir / "blender_hair_helper.py"),
@@ -751,7 +752,111 @@ def test_source_templates_and_dummies() -> bool:
         configs_valid and tags_unique and simulator_step_ok,
         f"bones={len(combined_pb_bones)}, unique_tags={len(set(computed_bone_tags))}, solver={simulator_step_ok}",
     )
-    return template_ok and gitignore_check and dummies_ok and physbones_source_ok
+
+    import ped_damage_helper
+
+    damage_cylinders = ped_damage_helper.build_damage_cylinders()
+    zone_checks_ok = (
+        ped_damage_helper.resolve_ped_shader_filename(True) == "ped.sps"
+        and ped_damage_helper.resolve_ped_shader_filename(False) == "ped_default.sps"
+        and round(ped_damage_helper.DEFAULT_PED_COLOR1_SRGB[1] * 255.0) == 128
+        and ped_damage_helper.DEFAULT_PED_COLOR2_SRGB == (0.0, 0.0, 0.0, 0.0)
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_Spine2")
+        == ped_damage_helper.DAMAGE_ZONE_TORSO
+        and ped_damage_helper.classify_bone_name_to_damage_zone("Skirt_Front_01")
+        == ped_damage_helper.DAMAGE_ZONE_TORSO
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_Head")
+        == ped_damage_helper.DAMAGE_ZONE_HEAD
+        and ped_damage_helper.classify_bone_name_to_damage_zone("Hair_Bang_L", 0.03, 0.62)
+        == ped_damage_helper.DAMAGE_ZONE_HEAD
+        and ped_damage_helper.classify_bone_name_to_damage_zone("Hair_Back_03", 0.0, 0.20)
+        == ped_damage_helper.DAMAGE_ZONE_NONE
+        and ped_damage_helper.classify_bone_name_to_damage_zone("Tail_02")
+        == ped_damage_helper.DAMAGE_ZONE_NONE
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_L_Forearm")
+        == ped_damage_helper.DAMAGE_ZONE_LEFT_ARM
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_R_Forearm")
+        == ped_damage_helper.DAMAGE_ZONE_RIGHT_ARM
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_L_Calf")
+        == ped_damage_helper.DAMAGE_ZONE_LEFT_LEG
+        and ped_damage_helper.classify_bone_name_to_damage_zone("SKEL_R_Calf")
+        == ped_damage_helper.DAMAGE_ZONE_RIGHT_LEG
+        and ped_damage_helper.classify_bone_name_to_damage_zone("Pocket Watch_Root", -0.10, 0.13)
+        == ped_damage_helper.DAMAGE_ZONE_TORSO
+    )
+    sample_points = [
+        (ped_damage_helper.DAMAGE_ZONE_TORSO, (0.0, -0.10, 0.20)),
+        (ped_damage_helper.DAMAGE_ZONE_HEAD, (0.0, -0.09, 0.65)),
+        (ped_damage_helper.DAMAGE_ZONE_LEFT_ARM, (0.30, -0.04, 0.28)),
+        (ped_damage_helper.DAMAGE_ZONE_RIGHT_ARM, (-0.30, -0.04, 0.28)),
+        (ped_damage_helper.DAMAGE_ZONE_LEFT_LEG, (0.12, -0.06, -0.50)),
+        (ped_damage_helper.DAMAGE_ZONE_RIGHT_LEG, (-0.12, -0.06, -0.50)),
+    ]
+    projection_ok = (
+        ped_damage_helper.project_point_onto_damage_zone(
+            (0.0, 0.20, -0.10), ped_damage_helper.DAMAGE_ZONE_NONE, damage_cylinders
+        )
+        == (0.0, 0.0)
+    )
+    for expected_zone, sample_pt in sample_points:
+        proj_u, proj_v_blender = ped_damage_helper.project_point_onto_damage_zone(
+            sample_pt, expected_zone, damage_cylinders
+        )
+        v_ydd = 1.0 - proj_v_blender
+        decoded_zone = int(((-v_ydd) + 0.5) * 0.5)
+        projection_ok &= (proj_u >= 1.0 and proj_u <= 2.0 and decoded_zone == expected_zone)
+
+    unwrapped_u = ped_damage_helper.unwrap_polygon_seam_u([1.95, 1.05, 1.98])
+    seam_unwrap_ok = (
+        all(val > 0.05 for val in unwrapped_u)
+        and (max(unwrapped_u) - min(unwrapped_u)) < 0.5
+    )
+
+    sample_verts = [
+        (0.02, -0.10, 0.20), (-0.02, -0.10, 0.20), (0.0, -0.10, 0.30),
+        (0.02, -0.09, 0.62), (-0.02, -0.09, 0.62), (0.0, -0.09, 0.70),
+        (0.28, -0.04, 0.30), (0.32, -0.04, 0.25), (0.30, -0.04, 0.20),
+        (-0.28, -0.04, 0.30), (-0.32, -0.04, 0.25), (-0.30, -0.04, 0.20),
+        (0.11, -0.06, -0.45), (0.14, -0.06, -0.50), (0.12, -0.06, -0.55),
+        (-0.11, -0.06, -0.45), (-0.14, -0.06, -0.50), (-0.12, -0.06, -0.55),
+        (0.0, 0.25, -0.05), (0.02, 0.30, -0.08), (-0.02, 0.30, -0.08),
+    ]
+    sample_polys = [
+        (0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, 14), (15, 16, 17), (18, 19, 20)
+    ]
+    sample_weights = (
+        [{"SKEL_Spine2": 1.0}] * 3
+        + [{"SKEL_Head": 1.0}] * 3
+        + [{"SKEL_L_Forearm": 1.0}] * 3
+        + [{"SKEL_R_Forearm": 1.0}] * 3
+        + [{"SKEL_L_Calf": 1.0}] * 3
+        + [{"SKEL_R_Calf": 1.0}] * 3
+        + [{"Tail_02": 1.0}] * 3
+    )
+    computed_damage = ped_damage_helper.compute_mesh_damage_uvs(
+        sample_verts, sample_polys, vertex_bone_weights=sample_weights
+    )
+    zone_counts = computed_damage["zone_poly_counts"]
+    counts_ok = (
+        zone_counts.get("torso") == 1
+        and zone_counts.get("head") == 1
+        and zone_counts.get("left_arm") == 1
+        and zone_counts.get("right_arm") == 1
+        and zone_counts.get("left_leg") == 1
+        and zone_counts.get("right_leg") == 1
+        and zone_counts.get("unmapped") == 1
+        and len(computed_damage["loop_uvs"]) == 21
+    )
+    summary_text = ped_damage_helper.format_ped_damage_summary(
+        {"shader": "ped.sps", "zone_poly_counts": zone_counts},
+        translate_func=i18n.translate,
+    )
+    damage_decals_ok = print_status_result(
+        i18n.translate("tests.ped_damage_decals"),
+        zone_checks_ok and projection_ok and seam_unwrap_ok and counts_ok and ("ped.sps" in summary_text),
+        f"zones={zone_counts}",
+    )
+    return template_ok and gitignore_check and dummies_ok and physbones_source_ok and damage_decals_ok
 
 
 def test_unity_scene_and_fallbacks() -> bool:
@@ -2250,6 +2355,14 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-marshmallow"),
         (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-marshmallow"),
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-marshmallow"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--blood-decals"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--blood-decals"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--blood-decals"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--blood-decals"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--blood-decals"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--blood-decals"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--blood-decals"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--blood-decals"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")

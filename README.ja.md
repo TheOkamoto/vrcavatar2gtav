@@ -41,6 +41,7 @@
 - **専用エラーハンドラ＆ `--verbose` 日時ログ**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) により、通常時は簡潔に出力し、`--verbose` 指定時は詳細出力と同時に `logs/` へ日時・アバター名付きログを保存します。
 - **3言語対応 (`en` / `ja` / `pt`)**: OS のロケール自動判定と `--lang` 指定。
 - **スケール `1.0` 標準 + `.unity` シーン抽出**・**汎用カスタムヘア移植**・**標準 VRCPhysBone 自動抽出**・**アバター <-> 主人公の完全な相互切替**。
+- **GTA V 出血・傷デカール対応 (`ped.sps` + 6ゾーン `UVMap 1`)**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) により胴体/スカート・頭部・両腕・両脚へ銃痕や出血表現（`--blood-decals`、既定で有効）を正しく投影し、尻尾や首より下のロングヘアへの誤投影を防ぎます。
 - **自動検証テストスイート**: ソース検証 (`8` スイート) およびフル検証 (`11` スイート)。
 
 ---
@@ -130,6 +131,7 @@
 | `python run_mod_manager.py --character all --blendshapes-source cfg` | Unity シーンではなく `.cfg` プリセットを使ってビルドを実行 |
 | `python run_mod_manager.py --export-physbones` | `.unity` シーンから標準 VRCPhysBone を `configs/*_physbones.cfg` へ自動同期（`--physbones-marshmallow` で Marshmallow PB 含める、`--overwrite-physbones-from-unity` で上書き） |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Unity シーンではなく `.cfg` プリセットの PhysBone 設定を使ってビルド（`--physbones-marshmallow` で Marshmallow PB 有効化可能） |
+| `python run_mod_manager.py --character all --blood-decals` | GTA V の出血・傷デカール有効でビルド（既定；`--no-blood-decals` で従来の `ped_default.sps` に切替可能） |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド済みフォルダから `mods/x64v.rpf` へ再梱包・配置 |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・First-Run・Modular Avatar の `8` スイートを実行（クローン直後対応） |
 | `python scripts/common_tools/test_mod_suite.py` | 全 `11` スイートの統合検証を実行（ビルド・配置済み環境が必要） |

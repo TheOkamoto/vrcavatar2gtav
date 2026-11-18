@@ -30,6 +30,7 @@ import error_handler_helper as err_helper
 import avatar_archive_helper
 import modular_avatar_helper
 import blendshape_helper
+import ped_damage_helper
 import physbone_helper
 import vrc2gtav_paths as project_paths
 
@@ -155,6 +156,7 @@ def prepare_universal_avatar_job(
     import_face: Optional[bool] = None,
     import_body: Optional[bool] = None,
     physbones_marshmallow: bool = False,
+    blood_decals: bool = True,
     out_dir: Optional[str] = None,
     interactive: bool = False,
     auto_download_blender: bool = False,
@@ -407,6 +409,8 @@ def prepare_universal_avatar_job(
         "physbones_orphaned_removed": len(pb_cfg.get("orphaned_physbones", ())),
         "physbones_priority_report": pb_cfg.get("priority_report", {}),
         "physbones_marshmallow": bool(physbones_marshmallow),
+        "blood_decals": bool(blood_decals),
+        "blood_decals_shader": ped_damage_helper.resolve_ped_shader_filename(bool(blood_decals)),
         "out_dir": str(work_out_dir),
         "blender_exe": str(resolved_blender) if resolved_blender else "",
     }
@@ -579,6 +583,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable optional chest/breast Marshmallow PhysBones",
     )
+    parser.add_argument(
+        "--blood-decals",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable GTA V ped blood/wound decals (ped.sps + 6-zone UVMap 1)",
+    )
     parser.add_argument("--out-dir", help="Output working directory")
     parser.add_argument("--blender-exe", help="Explicit path to Blender 4.0.2 executable")
     parser.add_argument(
@@ -625,6 +635,7 @@ def main(argv_list: Optional[Sequence[str]] = None) -> int:
             import_face=args.import_face_blendshapes,
             import_body=args.import_body_blendshapes,
             physbones_marshmallow=bool(args.physbones_marshmallow),
+            blood_decals=bool(getattr(args, "blood_decals", True)),
             out_dir=args.out_dir,
             interactive=bool(args.interactive) and not bool(args.non_interactive),
             auto_download_blender=bool(args.auto_download_blender),
