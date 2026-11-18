@@ -1184,9 +1184,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "  [{opt}] {protagonist} ({ped_name}) -> {avatar}",
     },
     "manager.menu_input_choice": {
-        "en": "Enter desired option [0-9]: ",
-        "ja": "オプション番号を入力してください [0-9]: ",
-        "pt": "Digite a opção desejada [0-9]: ",
+        "en": "Enter desired option [0-10]: ",
+        "ja": "オプション番号を入力してください [0-10]: ",
+        "pt": "Digite a opção desejada [0-10]: ",
     },
     "manager.cancelled": {
         "en": "[INFO] Operation cancelled by user.",
@@ -3299,5 +3299,100 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "FBX full channel discovery merges missing blendshapes as 0.0 without resetting existing .cfg edits",
         "ja": "FBX 全チャンネル読込が既存 .cfg 値をリセットせず未設定項目のみ 0.0 で補完",
         "pt": "Leitura completa de blendshapes do FBX preenche ausentes em 0.0 sem zerar edições do .cfg",
+    },
+    "manager.menu_opt_10": {
+        "en": "  [10] Sync / Export All Unity PhysBones -> configs/*_physbones.cfg",
+        "ja": "  [10] Unity 全 PhysBone を configs/*_physbones.cfg に同期/書き出し",
+        "pt": "  [10] Sincronizar / Exportar Todos os PhysBones do Unity -> configs/*_physbones.cfg",
+    },
+    "manager.physbones_header": {
+        "en": "SYNC UNITY PHYSBONES TO .CFG PRESETS",
+        "ja": "UNITY PHYSBONE を .CFG プリセットへ同期",
+        "pt": "SINCRONIZAR PHYSBONES DO UNITY PARA PRESETS .CFG",
+    },
+    "manager.physbones_select_avatar": {
+        "en": "Select which avatar preset to sync from Unity scene + Marshmallow PB:",
+        "ja": "Unity シーン + Marshmallow PB から PhysBone を同期するアバターを選択:",
+        "pt": "Selecione qual avatar atualizar com os PhysBones do Unity + Marshmallow PB:",
+    },
+    "manager.physbones_prompt_choice": {
+        "en": "Enter choice [0-4]: ",
+        "ja": "番号を入力してください [0-4]: ",
+        "pt": "Digite a opção [0-4]: ",
+    },
+    "manager.cli_export_physbones": {
+        "en": "Export and sync Unity VRCPhysBones (+ Marshmallow PB) into configs/*_physbones.cfg",
+        "ja": "Unity VRCPhysBone (+ Marshmallow PB) を configs/*_physbones.cfg へ同期書き出し",
+        "pt": "Exportar e sincronizar VRCPhysBones (+ Marshmallow PB) do Unity para configs/*_physbones.cfg",
+    },
+    "manager.cli_overwrite_physbones_from_unity": {
+        "en": "When exporting PhysBones, reload active Unity/Marshmallow parameters instead of preserving existing .cfg edits",
+        "ja": "PhysBone 書き出し時に既存 .cfg 編集を保持せず Unity シーンから再読み込みする",
+        "pt": "Ao exportar PhysBones, recarregar valores ativos do Unity em vez de manter edições do .cfg",
+    },
+    "manager.export_physbones_ok": {
+        "en": "[OK] Exported PhysBones for {char}: {path}",
+        "ja": "[OK] {char} の PhysBone を書き出しました: {path}",
+        "pt": "[OK] PhysBones exportados para {char}: {path}",
+    },
+    "manager.export_physbones_skipped": {
+        "en": "[WARNING] Skipped {char}: no Unity scene or .cfg PhysBone preset found.",
+        "ja": "[警告] {char} をスキップしました: Unity シーンまたは .cfg PhysBone が見つかりません。",
+        "pt": "[AVISO] {char} ignorado: nenhuma cena Unity ou .cfg de PhysBones encontrado.",
+    },
+    "physbones.cli_cfg": {
+        "en": "Path to a PhysBones .cfg preset file",
+        "ja": "PhysBone .cfg プリセットファイルへのパス",
+        "pt": "Caminho para o arquivo de predefinição .cfg de PhysBones",
+    },
+    "physbones.cli_source": {
+        "en": "PhysBones source priority: auto, unity, or cfg",
+        "ja": "PhysBone の取得元優先順: auto, unity, または cfg",
+        "pt": "Origem prioritária dos PhysBones: auto, unity ou cfg",
+    },
+    "physbones.cli_save_cfg": {
+        "en": "Save resolved PhysBone chains and mapping to this .cfg preset file",
+        "ja": "解決済み PhysBone チェーン設定をこの .cfg ファイルに保存",
+        "pt": "Salvar as cadeias de PhysBones resolvidas neste arquivo .cfg",
+    },
+    "physbones.loaded_source": {
+        "en": "[INFO] PhysBones loaded via '{source}': {chains} chains, {bones} custom bones ({detail})",
+        "ja": "[情報] '{source}' から PhysBone を読込: {chains} チェーン / {bones} ボーン ({detail})",
+        "pt": "[INFO] PhysBones carregados via '{source}': {chains} cadeias, {bones} ossos customizados ({detail})",
+    },
+    "physbones.saved_cfg": {
+        "en": "[OK] Saved PhysBones preset file: {path}",
+        "ja": "[OK] PhysBone プリセットファイルを保存しました: {path}",
+        "pt": "[OK] Arquivo .cfg de PhysBones salvo: {path}",
+    },
+    "setup.physbones_cfg_ready": {
+        "en": "[OK] PhysBones preset for {char} ready: {path}",
+        "ja": "[OK] {char} 用 PhysBone プリセット準備完了: {path}",
+        "pt": "[OK] Predefinição de PhysBones para {char} pronta: {path}",
+    },
+    "setup.physbones_cfg_exported": {
+        "en": "[OK] Exported Unity PhysBones for {char} -> {path}",
+        "ja": "[OK] {char} の Unity PhysBone を書き出しました -> {path}",
+        "pt": "[OK] PhysBones do Unity exportados para {char} -> {path}",
+    },
+    "setup.physbones_cfg_missing": {
+        "en": "[WARNING] No PhysBones .cfg or Unity scene found for {char}: {path}",
+        "ja": "[警告] {char} の PhysBone .cfg または Unity シーンが見つかりません: {path}",
+        "pt": "[AVISO] Nenhum arquivo .cfg de PhysBones ou cena Unity encontrado para {char}: {path}",
+    },
+    "tests.physbones_unity_extract": {
+        "en": "Unity scene + nested prefab + Marshmallow PB PhysBone extraction across all 3 avatars",
+        "ja": "3アバター全体の Unity シーン + ネスト Prefab + Marshmallow PB 自動抽出",
+        "pt": "Extração de VRCPhysBones + Marshmallow PB do Unity nos 3 avatares",
+    },
+    "tests.physbones_budget_pack": {
+        "en": "RAGE <= 128-bone (.ydd) & <= 63 custom-bone packer with zero ELF hash collisions",
+        "ja": "RAGE 128ボーン上限 (カスタム <= 63) パッカーと ELF タグ衝突ゼロ検証",
+        "pt": "Empacotador <= 128 ossos (.ydd) / <= 63 customizados sem colisões ELF",
+    },
+    "tests.physbones_cfg_roundtrip": {
+        "en": "Tracked configs/*_physbones.cfg & dynamic chain builder round-trip",
+        "ja": "configs/*_physbones.cfg と動的 PhysBone チェーン構築の往復テスト",
+        "pt": "Presets configs/*_physbones.cfg e leitura/gravação + builder dinâmico",
     },
 }

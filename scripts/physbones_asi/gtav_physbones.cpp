@@ -22,14 +22,15 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr int kMaxBonesPerChain = 16;
-constexpr int kMaxSyncNodes = 32;
-constexpr int kMaxTrackedPeds = 4;
+constexpr int kMaxSyncNodes = 256;
+constexpr int kMaxTrackedPeds = 8;
 constexpr int kMaxWorldPedsScan = 256;
 constexpr int kRescanCooldownFrames = 30;
 constexpr int kSkelHeadTag = 31086;
@@ -796,8 +797,8 @@ bool SafeApplySyncSnapshot(const SyncSnapshot& snap) {
 }
 
 DWORD WINAPI SyncThreadProc(LPVOID /*param*/) {
+    static SyncSnapshotList localCopy{};
     while (InterlockedCompareExchange(&g_stopSyncThread, 0, 0) == 0) {
-        SyncSnapshotList localCopy{};
         EnterCriticalSection(&g_syncLock);
         localCopy = g_syncStateList;
         LeaveCriticalSection(&g_syncLock);
@@ -1411,6 +1412,8 @@ void ComputeChainMatrices(
         chain.prevPosePos[0] = posePos[0];
 
         // Stage 1: Sub-damped Verlet prediction + steady-locomotion shift + head-bob impulse
+        float gravFalloffClamped = (chain.gravityFalloff < 0.0f) ? 0.0f : (chain.gravityFalloff > 1.0f ? 1.0f : chain.gravityFalloff);
+        float effGravity = chain.gravity * (1.0f - gravFalloffClamped);
         for (size_t idx = 1; idx < n; ++idx) {
             Vec3 nodeOscDelta = ClampVecLen(VecSub(VecSub(posePos[idx], chain.prevPosePos[idx]), steadyShift), 0.06f);
             chain.prevPosePos[idx] = posePos[idx];
@@ -1419,7 +1422,7 @@ void ComputeChainMatrices(
             Vec3 shiftedCurr = VecAdd(chain.worldPos[idx], immobileShift);
             Vec3 vel = VecScale(VecSub(shiftedCurr, shiftedPrev), velRetention);
             Vec3 oscKick = VecScale(nodeOscDelta, -impulseGain * (1.0f - immobileScale));
-            Vec3 grav{0.0f, 0.0f, -9.81f * chain.gravity * clampedDt * clampedDt};
+            Vec3 grav{0.0f, 0.0f, -9.81f * effGravity * clampedDt * clampedDt};
 
             chain.prevWorldPos[idx] = shiftedCurr;
             Vec3 pred = VecAdd(VecAdd(VecAdd(shiftedCurr, vel), oscKick), grav);
@@ -1439,7 +1442,7 @@ void ComputeChainMatrices(
         Quat restNodeRot = QuatNorm(QuatMul(expParentRot, chain.bones[idx].localRot));
         Vec3 restSegDir = VecNorm(QuatRotateVec(restNodeRot, chain.bones[idx + 1].localPos));
 
-        if (chain.limitType == 1) {
+        if (chain.limitType > 0) {
             Vec3 limRef = VecNorm(QuatRotateVec(restNodeRot, chain.bones[idx].limitAxisLocal));
             float cosAng = VecDot(curDir, limRef);
             if (cosAng > 1.0f) cosAng = 1.0f;
@@ -1498,6 +1501,16 @@ void UpdatePedChainsAndBuildSync(
     outSnap.refPosA = slot.refA.expectedLocalPos;
 
     for (auto& ch : slot.chains) {
+        if (ch.bones.size() < 2 || ch.bones.size() > static_cast<size_t>(kMaxBonesPerChain)) continue;
+        bool allBonesValid = true;
+        for (const auto& bn : ch.bones) {
+            if (bn.skelIndex < 0 || static_cast<uint32_t>(bn.skelIndex) >= slot.skel.numBones) {
+                allBonesValid = false;
+                break;
+            }
+        }
+        if (!allBonesValid) continue;
+
         Mat34V parentObjMtx{};
         if (ch.parentSkelIndex < 0 || static_cast<uint32_t>(ch.parentSkelIndex) >= slot.skel.numBones) continue;
         if (!SafeReadMat34(
@@ -1569,6 +1582,9 @@ bool ResolveChainBoneIndices(
     bool changed = false;
     ProbeRefBone nextRefA{};
     ProbeRefBone nextRefB{};
+    std::vector<ProbeRefBone> rootRefs;
+    std::vector<ProbeRefBone> allResolvedRefs;
+
     for (size_t cIdx = 0; cIdx < chains.size(); ++cIdx) {
         PhysBoneChain& ch = chains[cIdx];
         int nextParent = CallGetPedBoneIndex(ped, ch.parentBoneTag);
@@ -1586,13 +1602,24 @@ bool ResolveChainBoneIndices(
                 changed = true;
                 bn.skelIndex = resolved;
             }
+            if (resolved >= 0) {
+                ProbeRefBone candidate{resolved, bn.localPos};
+                if (bIdx == 0) {
+                    rootRefs.push_back(candidate);
+                }
+                allResolvedRefs.push_back(candidate);
+            }
         }
-        if (cIdx == 0 && !ch.bones.empty()) {
-            nextRefA.skelIndex = ch.bones[0].skelIndex;
-            nextRefA.expectedLocalPos = ch.bones[0].localPos;
-        } else if (cIdx == 1 && !ch.bones.empty()) {
-            nextRefB.skelIndex = ch.bones[0].skelIndex;
-            nextRefB.expectedLocalPos = ch.bones[0].localPos;
+    }
+
+    const std::vector<ProbeRefBone>& refSource = (rootRefs.size() >= 2) ? rootRefs : allResolvedRefs;
+    if (!refSource.empty()) {
+        nextRefA = refSource[0];
+        for (size_t i = 1; i < refSource.size(); ++i) {
+            if (refSource[i].skelIndex != nextRefA.skelIndex) {
+                nextRefB = refSource[i];
+                break;
+            }
         }
     }
     if (outRefA.skelIndex != nextRefA.skelIndex || outRefB.skelIndex != nextRefB.skelIndex) {
@@ -1608,7 +1635,10 @@ void LogBoneIndexChange(const TrackedPedSlot& slot) {
     oss << "[INFO] Bone indices changed ped=0x"
         << std::hex << reinterpret_cast<uintptr_t>(slot.pedAddr)
         << " model=0x" << slot.modelHash << std::dec;
+    int activeCount = 0;
     for (const auto& ch : slot.chains) {
+        if (ch.parentSkelIndex < 0 || ch.bones.empty() || ch.bones[0].skelIndex < 0) continue;
+        ++activeCount;
         oss << " | " << ch.name << " parent=" << ch.parentSkelIndex << " nodes=[";
         for (size_t i = 0; i < ch.bones.size(); ++i) {
             if (i > 0) oss << ",";
@@ -1616,32 +1646,53 @@ void LogBoneIndexChange(const TrackedPedSlot& slot) {
         }
         oss << "]";
     }
+    oss << " (active=" << activeCount << "/" << slot.chains.size() << ")";
     WriteLog(oss.str());
 }
 
-bool HasCustomChainBones(int ped) {
+bool HasCustomChainBones(int ped, bool& outHasHead) {
+    outHasHead = false;
     if (g_cfg.chains.empty()) return false;
     if (CallGetPedBoneIndex(ped, kSkelHeadTag) < 0) return false;
+    outHasHead = true;
     for (const auto& ch : g_cfg.chains) {
-        if (ch.bones.empty()) return false;
+        if (ch.bones.empty()) continue;
         int rootTag = ch.bones[0].tag;
         if (rootTag != 0) {
-            if (CallGetPedBoneIndex(ped, rootTag) < 0) return false;
+            if (CallGetPedBoneIndex(ped, rootTag) >= 0) {
+                return true;
+            }
         } else if (!ch.bones[0].name.empty()) {
-            if (CallGetEntityBoneIndexByName(ped, ch.bones[0].name.c_str()) < 0) return false;
-        } else {
+            if (CallGetEntityBoneIndexByName(ped, ch.bones[0].name.c_str()) >= 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool IsEligiblePhysBonePed(int ped, bool bypassNegCache, int scanTick, uint32_t& outModelHash) {
+    static std::unordered_map<uint32_t, int> s_negModelCooldownTick;
+    outModelHash = CallGetEntityModel(ped);
+    if (!bypassNegCache && outModelHash != 0) {
+        auto it = s_negModelCooldownTick.find(outModelHash);
+        if (it != s_negModelCooldownTick.end() && scanTick < it->second) {
             return false;
         }
     }
-    return true;
-}
-
-bool IsEligiblePhysBonePed(int ped, uint32_t& outModelHash) {
-    outModelHash = CallGetEntityModel(ped);
-    if (g_cfg.targetModelHash == 0 || outModelHash == g_cfg.targetModelHash) {
-        return true;
+    bool hasHead = false;
+    bool eligible = HasCustomChainBones(ped, hasHead);
+    if (outModelHash != 0) {
+        if (eligible) {
+            s_negModelCooldownTick.erase(outModelHash);
+        } else if (hasHead) {
+            if (s_negModelCooldownTick.size() > 512) {
+                s_negModelCooldownTick.clear();
+            }
+            s_negModelCooldownTick[outModelHash] = scanTick + 180;
+        }
     }
-    return HasCustomChainBones(ped);
+    return eligible;
 }
 
 int CollectCandidatePeds(
@@ -1650,8 +1701,10 @@ int CollectCandidatePeds(
     uint32_t* outModels,
     int maxOut
 ) {
+    static int s_scanTick = 0;
+    ++s_scanTick;
     int count = 0;
-    auto tryAdd = [&](int ped) {
+    auto tryAdd = [&](int ped, bool bypassNegCache) {
         if (count >= maxOut || ped == 0 || !CallDoesEntityExist(ped)) return;
         uint8_t* addr = g_shv.getEntityAddress(ped);
         if (!IsCanonicalUserPtr(reinterpret_cast<uint64_t>(addr))) return;
@@ -1659,20 +1712,20 @@ int CollectCandidatePeds(
             if (outAddrs[i] == addr) return;
         }
         uint32_t modelHash = 0;
-        if (!IsEligiblePhysBonePed(ped, modelHash)) return;
+        if (!IsEligiblePhysBonePed(ped, bypassNegCache, s_scanTick, modelHash)) return;
         outHandles[count] = ped;
         outAddrs[count] = addr;
         outModels[count] = modelHash;
         count++;
     };
 
-    tryAdd(CallPlayerPedId());
+    tryAdd(CallPlayerPedId(), true);
 
     if (g_shv.worldGetAllPeds && count < maxOut) {
         int worldPeds[kMaxWorldPedsScan]{};
         int found = g_shv.worldGetAllPeds(worldPeds, kMaxWorldPedsScan);
         for (int i = 0; i < found && count < maxOut; ++i) {
-            tryAdd(worldPeds[i]);
+            tryAdd(worldPeds[i], false);
         }
     }
     return count;
@@ -1694,7 +1747,10 @@ void LogSkeletonResolution(const TrackedPedSlot& slot, bool isReResolve) {
         << " boneDataRotOff=0x" << slot.skel.boneDataRotOff
         << std::dec << " numBones=" << slot.skel.numBones
         << " headIdx=" << slot.skel.headIndex;
+    int activeCount = 0;
     for (const auto& ch : slot.chains) {
+        if (ch.parentSkelIndex < 0 || ch.bones.empty() || ch.bones[0].skelIndex < 0) continue;
+        ++activeCount;
         oss << " | " << ch.name << " parent=" << ch.parentSkelIndex << " nodes=[";
         for (size_t i = 0; i < ch.bones.size(); ++i) {
             if (i > 0) oss << ",";
@@ -1702,6 +1758,7 @@ void LogSkeletonResolution(const TrackedPedSlot& slot, bool isReResolve) {
         }
         oss << "]";
     }
+    oss << " (active=" << activeCount << "/" << slot.chains.size() << ")";
     WriteLog(oss.str());
 }
 
@@ -1809,7 +1866,12 @@ void ScriptMain() {
             }
         }
 
-        SyncSnapshotList nextSyncList{};
+        static SyncSnapshotList nextSyncList{};
+        nextSyncList.slotCount = 0;
+        for (int i = 0; i < kMaxTrackedPeds; ++i) {
+            nextSyncList.slots[i].active = false;
+            nextSyncList.slots[i].count = 0;
+        }
         for (int s = 0; s < kMaxTrackedPeds; ++s) {
             TrackedPedSlot& slot = slots[s];
             if (!slot.occupied || !slot.seenThisFrame) continue;

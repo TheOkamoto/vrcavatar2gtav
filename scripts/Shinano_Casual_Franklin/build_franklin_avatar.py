@@ -31,6 +31,7 @@ for _tools_candidate in (
 import blender_hair_helper
 import blendshape_helper
 import hand_skeleton_helper
+import physbone_helper
 import unity_hair_helper
 import unity_scene_helper
 import vrc2gtav_i18n as project_i18n
@@ -61,6 +62,13 @@ def parse_franklin_cli_args():
         default=None,
     )
     arg_parser.add_argument("--save-blendshapes-cfg", default=None)
+    arg_parser.add_argument("--physbones-cfg", default=None)
+    arg_parser.add_argument(
+        "--physbones-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+    )
+    arg_parser.add_argument("--save-physbones-cfg", default=None)
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
     arg_parser.add_argument("--face-anim", default=None)
@@ -401,6 +409,41 @@ applied_scene_summary = blendshape_helper.apply_blendshapes_to_blender_scene(
 )
 body_active_count = applied_scene_summary.get("Body", (0, 0))[1]
 print(project_i18n.translate("franklin.applied_blendshapes", count=body_active_count))
+
+franklin_pb_resolution = physbone_helper.resolve_character_physbones(
+    FRANKLIN_CFG,
+    fbx_paths=blendshape_fbx_paths,
+    character_hints=("shinano", "casual"),
+    override_source=CLI_ARGS.physbones_source,
+    override_cfg_path=CLI_ARGS.physbones_cfg,
+    override_unity_scene=CLI_ARGS.unity_scene,
+    override_avatar_name=CLI_ARGS.unity_avatar_name,
+    save_cfg_path=CLI_ARGS.save_physbones_cfg,
+    verbose=True,
+)
+pb_detail_str = (
+    franklin_pb_resolution.get("cfg_path")
+    or franklin_pb_resolution.get("unity_scene")
+    or "-"
+)
+print(
+    project_i18n.translate(
+        "physbones.loaded_source",
+        source=franklin_pb_resolution["source_used"],
+        chains=len(franklin_pb_resolution["chain_specs"]),
+        bones=len(franklin_pb_resolution["custom_bones"]),
+        detail=pb_detail_str,
+    ),
+    flush=True,
+)
+if franklin_pb_resolution.get("saved_cfg_path"):
+    print(
+        project_i18n.translate(
+            "physbones.saved_cfg",
+            path=franklin_pb_resolution["saved_cfg_path"],
+        ),
+        flush=True,
+    )
 print(
     project_i18n.translate(
         "blendshapes.applied_scene",
@@ -609,10 +652,17 @@ def compute_skirt_vertex_weights(
             if grp_elem.weight <= 0.001 or grp_elem.group not in vgroup_target_names:
                 continue
             raw_name = vgroup_names_by_idx.get(grp_elem.group, "")
+            target_bone = vgroup_target_names[grp_elem.group]
             if "skirt" in raw_name.lower():
-                skirt_weight += grp_elem.weight
+                if target_bone.startswith("PB_SC_Skirt"):
+                    pb_w = grp_elem.weight * 0.75
+                    remapped_weights[target_bone] = (
+                        remapped_weights.get(target_bone, 0.0) + pb_w
+                    )
+                    skirt_weight += grp_elem.weight * 0.25
+                else:
+                    skirt_weight += grp_elem.weight
             else:
-                target_bone = vgroup_target_names[grp_elem.group]
                 remapped_weights[target_bone] = (
                     remapped_weights.get(target_bone, 0.0) + grp_elem.weight
                 )
@@ -654,10 +704,17 @@ def compute_skirt_vertex_weights(
 
 def get_target_bone(source_bone_name: str, mesh_name: str = None) -> str:
     """Resolve a Shinano source vertex group name to its GTA V bone name."""
-    if mesh_name in HEAD_ACCESSORY_MESH_NAMES:
-        return "SKEL_Head"
     if mesh_name == "Cloth_tights" and source_bone_name == "Head":
         return "SKEL_Pelvis"
+    pb_bone = physbone_helper.resolve_shinano_casual_gtav_bone(
+        source_bone_name,
+        mesh_name,
+        bone_mapping_ci=franklin_pb_resolution.get("bone_mapping_ci"),
+    )
+    if pb_bone is not None:
+        return pb_bone
+    if mesh_name in HEAD_ACCESSORY_MESH_NAMES:
+        return "SKEL_Head"
     if source_bone_name in bone_mapping_table:
         return bone_mapping_table[source_bone_name]
     resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
@@ -880,6 +937,46 @@ relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
 )
 print(project_i18n.translate("franklin.arm_bones_relocated", count=relocated_arm_bones))
 
+# Inject articulated PhysBone chains (ears, tail, BeltA/B, ribbon, hair, breasts, butt, skirt)
+bpy.context.view_layer.update()
+shinano_bones_ci = {
+    pose_item.name.lower(): pose_item for pose_item in shinano_armature.pose.bones
+}
+franklin_ped_world_mats = {
+    bone_item.name: (franklin_armature.matrix_world @ bone_item.matrix_local).copy()
+    for bone_item in franklin_armature.data.bones
+}
+
+def _map_franklin_world_mat(src_world_mat):
+    loc = src_world_mat.translation
+    target_loc = mathutils.Vector(
+        (loc.x * scale_factor, loc.y * scale_factor, loc.z * scale_factor + z_offset)
+    )
+    return mathutils.Matrix.Translation(target_loc) @ src_world_mat.to_quaternion().to_matrix().to_4x4()
+
+def _resolve_franklin_pb_world_mat(src_bone_name):
+    pose_item = shinano_bones_ci.get(src_bone_name.strip().lower())
+    if pose_item is None:
+        return None
+    return _map_franklin_world_mat(shinano_armature.matrix_world @ pose_item.matrix)
+
+custom_physbones, physbone_chain_records = physbone_helper.build_dynamic_physbone_chains(
+    ped_armature=franklin_armature,
+    chain_specs=franklin_pb_resolution["chain_specs"],
+    parent_map=franklin_pb_resolution["parent_map"],
+    chain_cfgs=franklin_pb_resolution["chains"],
+    source_world_mat_fn=_resolve_franklin_pb_world_mat,
+    ped_world_matrices=franklin_ped_world_mats,
+)
+if custom_physbones:
+    injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+        franklin_armature,
+        custom_physbones,
+        bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+    )
+    target_bones.update(pb_item["name"] for pb_item in custom_physbones)
+    print(f"[PhysBones] Injected {injected_pb_count} Shinano Casual bones into Franklin armature ({len(physbone_chain_records)} chains)", flush=True)
+
 # Remove temporary source meshes and armatures
 for temp_obj in [shinano_armature] + custom_hair_armatures + [
     bpy.data.objects.get(mesh_name_item)
@@ -1078,8 +1175,10 @@ franklin_armature.drawable_properties.lod_dist_med = 9998.0
 franklin_armature.drawable_properties.lod_dist_low = 9998.0
 franklin_armature.drawable_properties.lod_dist_vlow = 9998.0
 
+custom_pb_name_set = {pb_item["name"] for pb_item in custom_physbones} if custom_physbones else set()
 for arm_bone in franklin_armature.data.bones:
-    set_recommended_bone_properties(arm_bone)
+    if arm_bone.name not in custom_pb_name_set:
+        set_recommended_bone_properties(arm_bone)
 
 convert_obj_to_model(joined_mesh_obj)
 joined_mesh_obj.parent = franklin_armature
@@ -1114,7 +1213,10 @@ for slot_name in export_drawables:
 
 yft_output_path = Path(FRANKLIN_CFG["target_yft"])
 updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_yft_skeleton(
-    skeleton_yft_path, yft_output_path, hand_bone_world_targets
+    skeleton_yft_path,
+    yft_output_path,
+    hand_bone_world_targets,
+    custom_child_bones=custom_physbones or None,
 )
 print(
     project_i18n.translate(
@@ -1125,4 +1227,28 @@ print(
         max_delta=max_yft_delta,
     )
 )
+if physbone_chain_records:
+    out_ini_path = Path(exported_dir) / "GTAVPhysBones.ini"
+    physbone_helper.export_physbone_asi_ini(
+        out_ini_path,
+        physbone_chain_records,
+        target_ped_model=str(FRANKLIN_CFG.get("ped_name", "player_one")),
+    )
+    repo_root = project_paths.get_project_root()
+    sync_targets = [
+        repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "GTAVPhysBones.ini",
+        repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini",
+        repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package" / "GTAVPhysBones.ini",
+    ]
+    gtav_root = project_paths.get_gtav_root_dir()
+    if gtav_root.is_dir():
+        sync_targets.append(gtav_root / "GTAVPhysBones.ini")
+    physbone_helper.merge_physbone_asi_ini(
+        sync_targets[1],
+        physbone_chain_records,
+        own_prefixes=("PB_SC_",),
+        target_ped_model="all",
+        extra_sync_paths=sync_targets,
+    )
+    print(f"[PhysBones] Exported & merged Franklin PhysBones INI ({len(physbone_chain_records)} chains)")
 print(project_i18n.translate("franklin.build_done"))

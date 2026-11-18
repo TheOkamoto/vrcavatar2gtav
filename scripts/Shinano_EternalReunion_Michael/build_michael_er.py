@@ -393,10 +393,17 @@ def compute_skirt_vertex_weights(
             if grp_elem.weight <= 0.001 or grp_elem.group not in vgroup_target_names:
                 continue
             raw_name = vgroup_names_by_idx.get(grp_elem.group, "")
+            target_bone = vgroup_target_names[grp_elem.group]
             if "skirt" in raw_name.lower():
-                skirt_weight += grp_elem.weight
+                if target_bone.startswith("PB_ER_Skirt"):
+                    pb_weight = grp_elem.weight * 0.75
+                    remapped_weights[target_bone] = (
+                        remapped_weights.get(target_bone, 0.0) + pb_weight
+                    )
+                    skirt_weight += grp_elem.weight * 0.25
+                else:
+                    skirt_weight += grp_elem.weight
             else:
-                target_bone = vgroup_target_names[grp_elem.group]
                 remapped_weights[target_bone] = (
                     remapped_weights.get(target_bone, 0.0) + grp_elem.weight
                 )
@@ -440,7 +447,7 @@ def compute_skirt_vertex_weights(
     return remapped_weights
 
 
-def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
+def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=None):
     """Map a VRChat/Unity bone name to its target GTA V RAGE skeleton bone."""
     if mesh_name == "UN3_Bag":
         lower_bone_name = source_bone_name.lower()
@@ -452,6 +459,11 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
             return "SKEL_L_UpperArm"
         if "upper_arm.r" in lower_bone_name or "upperarm.r" in lower_bone_name:
             return "SKEL_R_UpperArm"
+        phys_bag_bone = physbone_helper.resolve_michael_er_gtav_bone(
+            source_bone_name, bone_mapping_ci=bone_mapping_ci
+        )
+        if phys_bag_bone is not None:
+            return phys_bag_bone
         # Bind bag body, rings, and chains strictly to Spine2 so straps follow the chest
         return "SKEL_Spine2"
 
@@ -472,6 +484,12 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None):
             else "R"
         )
         return f"SKEL_{side_code}_Hand"
+
+    phys_er_bone = physbone_helper.resolve_michael_er_gtav_bone(
+        source_bone_name, bone_mapping_ci=bone_mapping_ci
+    )
+    if phys_er_bone is not None:
+        return phys_er_bone
 
     if (
         lower_name.startswith("breast")
@@ -672,6 +690,7 @@ def build_shinano_er_for_gtav(cli_args):
                 valid_gtav_bones.add(f"SKEL_{side_code}_Finger{finger_idx}{sub_idx}")
     valid_gtav_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
     valid_gtav_bones.update(physbone_helper.NEKO_MIMI_CUSTOM_BONES)
+    valid_gtav_bones.update(physbone_helper.MICHAEL_ER_CUSTOM_BONES)
 
     bpy.context.view_layer.objects.active = ped_armature
     bpy.ops.object.mode_set(mode="EDIT")
@@ -958,6 +977,45 @@ def build_shinano_er_for_gtav(cli_args):
         )
 
     bpy.context.view_layer.update()
+
+    physbone_fbx_paths = [
+        cli_args.shinano_fbx,
+        cli_args.outfit_fbx,
+        cli_args.watch_fbx,
+        cli_args.hair_fbx,
+    ]
+    if hair_mode == "custom":
+        for extra_hair_fbx in hair_spec.get("all_fbxs", []):
+            if extra_hair_fbx and extra_hair_fbx not in physbone_fbx_paths:
+                physbone_fbx_paths.append(extra_hair_fbx)
+    pb_resolution = physbone_helper.resolve_character_physbones(
+        effective_cfg,
+        fbx_paths=physbone_fbx_paths,
+        character_hints=("shinano", "reunion"),
+        override_source=getattr(cli_args, "physbones_source", None),
+        override_cfg_path=getattr(cli_args, "physbones_cfg", None),
+        override_unity_scene=getattr(cli_args, "unity_scene", None),
+        override_avatar_name=getattr(cli_args, "unity_avatar_name", None),
+        save_cfg_path=getattr(cli_args, "save_physbones_cfg", None),
+        verbose=True,
+    )
+    valid_gtav_bones.update(pb_resolution.get("custom_bones") or ())
+    pb_detail = pb_resolution.get("cfg_path") or pb_resolution.get("unity_scene") or "-"
+    print(
+        i18n.translate(
+            "physbones.loaded_source",
+            source=pb_resolution["source_used"],
+            chains=len(pb_resolution["chain_specs"]),
+            bones=len(pb_resolution["custom_bones"]),
+            detail=pb_detail,
+        ),
+        flush=True,
+    )
+    if pb_resolution.get("saved_cfg_path"):
+        print(
+            i18n.translate("physbones.saved_cfg", path=pb_resolution["saved_cfg_path"]),
+            flush=True,
+        )
 
     # Extract deformed cranial/head reference before optionally removing default hair
     skull_ref = blender_hair_helper.extract_skull_reference(
@@ -1408,11 +1466,15 @@ def build_shinano_er_for_gtav(cli_args):
                     loop_entry.uv = (u_offset + (orig_u * u_scale), v_offset + (orig_v * v_scale))
 
         # Assign vertex weights to valid GTA V bones
+        pb_active_bones = set(pb_resolution.get("custom_bones") or ())
+        pb_bmap_ci = pb_resolution.get("bone_mapping_ci")
         vgroup_names_by_idx = {
             vgroup.index: vgroup.name for vgroup in source_obj.vertex_groups
         }
         vgroup_target_names = {
-            vgroup.index: resolve_gtav_target_bone(vgroup.name, mesh_name)
+            vgroup.index: resolve_gtav_target_bone(
+                vgroup.name, mesh_name, bone_mapping_ci=pb_bmap_ci
+            )
             for vgroup in source_obj.vertex_groups
         }
         vertex_weight_map = {
@@ -1431,13 +1493,14 @@ def build_shinano_er_for_gtav(cli_args):
                     vgroup_target_names,
                 )
         elif mesh_name == "_Halo":
+            use_legacy_halo_split = "PB_ER_Halo_0" not in pb_active_bones
             for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
                 if orig_vert_idx < len(source_obj.data.vertices):
                     src_vert = source_obj.data.vertices[orig_vert_idx]
                     for grp_elem in src_vert.groups:
                         if grp_elem.weight > 0.001 and grp_elem.group in vgroup_target_names:
                             src_grp_name = vgroup_names_by_idx.get(grp_elem.group, "").strip().lower()
-                            if src_grp_name in ("halo", "halo.001"):
+                            if use_legacy_halo_split and src_grp_name in ("halo", "halo.001"):
                                 for split_bone, split_ratio in physbone_helper.NEKO_MIMI_HALO_WEIGHT_SPLIT:
                                     cur_val = vertex_weight_map[new_vert_idx].get(split_bone, 0.0)
                                     vertex_weight_map[new_vert_idx][split_bone] = (
@@ -1522,168 +1585,138 @@ def build_shinano_er_for_gtav(cli_args):
         i18n.translate("michael.build.bones_relocated", count=relocated_armature_bones)
     )
 
+    bpy.context.view_layer.update()
     custom_ear_bones = []
     physbone_chain_records = []
-    if is_calibrated_neko and arm_hair is not None and hair_root_rest_pos is not None:
-        hair_bones_ci = {
-            pose_item.name.lower(): pose_item for pose_item in arm_hair.pose.bones
-        }
-        has_all_ear_bones = all(
-            src_key in hair_bones_ci for src_key in physbone_helper.NEKO_MIMI_BONE_MAP
+
+    hair_bones_ci = (
+        {pose_item.name.lower(): pose_item for pose_item in arm_hair.pose.bones}
+        if is_calibrated_neko and arm_hair is not None and hair_root_rest_pos is not None
+        else {}
+    )
+    outfit_bones_ci = (
+        {pose_item.name.lower(): pose_item for pose_item in arm_outfit.pose.bones}
+        if arm_outfit is not None
+        else {}
+    )
+    watch_bones_ci = (
+        {pose_item.name.lower(): pose_item for pose_item in arm_watch.pose.bones}
+        if arm_watch is not None
+        else {}
+    )
+    base_bones_ci = (
+        {pose_item.name.lower(): pose_item for pose_item in arm_base.pose.bones}
+        if arm_base is not None
+        else {}
+    )
+
+    map_hair_world_fn = None
+    if hair_bones_ci and hair_root_rest_pos is not None:
+        baseline_neck_scale = 0.9
+        baseline_hair_scale = 1.08696
+        baseline_head_to_hair_offset = mathutils.Vector((0.000653, -0.002032, 0.074354))
+        neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
+        custom_hair_node_scale = unity_scene_helper.get_uniform_scale(
+            unity_config,
+            ("Neko BoB_Lime", "Neko Tied Bob hair", "Hair Root", "Hair_root"),
+            default_scale=1.0,
         )
-        if has_all_ear_bones:
-            baseline_neck_scale = 0.9
-            baseline_hair_scale = 1.08696
-            baseline_head_to_hair_offset = mathutils.Vector((0.000653, -0.002032, 0.074354))
-            neko_target_hair_root = mathutils.Vector((0.000653, 0.010790, 1.202636))
-            custom_hair_node_scale = unity_scene_helper.get_uniform_scale(
-                unity_config,
-                ("Neko BoB_Lime", "Neko Tied Bob hair", "Hair Root", "Hair_root"),
-                default_scale=1.0,
+        head_pose_bone = arm_base.pose.bones.get("Head") if arm_base else None
+        if head_pose_bone is not None and arm_base is not None:
+            head_world_scale = (arm_base.matrix_world @ head_pose_bone.matrix).to_scale().x
+            head_scale_ratio = head_world_scale / baseline_neck_scale
+            head_world_pos = arm_base.matrix_world @ head_pose_bone.head
+            neko_target_hair_root = head_world_pos + (
+                baseline_head_to_hair_offset * head_scale_ratio
             )
-            head_pose_bone = arm_base.pose.bones.get("Head") if arm_base else None
-            if head_pose_bone is not None and arm_base is not None:
-                head_world_scale = (arm_base.matrix_world @ head_pose_bone.matrix).to_scale().x
-                head_scale_ratio = head_world_scale / baseline_neck_scale
-                head_world_pos = arm_base.matrix_world @ head_pose_bone.head
-                neko_target_hair_root = head_world_pos + (
-                    baseline_head_to_hair_offset * head_scale_ratio
-                )
-                neko_hair_scale = (
-                    baseline_hair_scale * custom_hair_node_scale * head_scale_ratio
-                )
-            else:
-                neko_hair_scale = baseline_hair_scale * custom_hair_node_scale
-            neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
-
-            def map_hair_world_mat(src_bone_pose) -> mathutils.Matrix:
-                fbx_world = arm_hair.matrix_world @ src_bone_pose.matrix
-                rel_pt = (fbx_world.translation - hair_root_rest_pos) * neko_hair_scale
-                aligned_pt = neko_target_hair_root + (neko_hair_rot_matrix @ rel_pt)
-                gtav_pos = mathutils.Vector(
-                    (
-                        aligned_pt.x * scale_factor,
-                        aligned_pt.y * scale_factor,
-                        aligned_pt.z * scale_factor + vertical_offset,
-                    )
-                )
-                gtav_rot_3x3 = (neko_hair_rot_matrix @ fbx_world.to_3x3().normalized()).normalized()
-                out_mat = gtav_rot_3x3.to_4x4()
-                out_mat.translation = gtav_pos
-                return out_mat
-
-            repo_configs_dir = _REPO_ROOT_CANDIDATE / "configs"
-            neko_cfg_path = repo_configs_dir / "michael_neko_mimi_physbones.cfg"
-            if neko_cfg_path.is_file():
-                loaded_pb = physbone_helper.load_physbone_config(neko_cfg_path)
-                chain_cfgs = loaded_pb["chains"]
-            else:
-                chain_cfgs = {}
-
-            unity_assets_val = effective_cfg.get("unity_assets_root") or ""
-            prefab_candidate = (
-                Path(unity_assets_val)
-                / "Li-ne"
-                / "Neko Tied Bob hair"
-                / "Prefab"
-                / "MA Full"
-                / "MA Shinano.prefab"
-                if unity_assets_val
-                else None
+            neko_hair_scale = (
+                baseline_hair_scale * custom_hair_node_scale * head_scale_ratio
             )
-            if prefab_candidate and prefab_candidate.is_file():
-                prefab_chains = physbone_helper.extract_unity_physbones_from_prefab(
-                    prefab_candidate
+        else:
+            neko_hair_scale = baseline_hair_scale * custom_hair_node_scale
+        neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
+
+        def map_hair_world_mat(src_bone_pose) -> mathutils.Matrix:
+            fbx_world = arm_hair.matrix_world @ src_bone_pose.matrix
+            rel_pt = (fbx_world.translation - hair_root_rest_pos) * neko_hair_scale
+            aligned_pt = neko_target_hair_root + (neko_hair_rot_matrix @ rel_pt)
+            gtav_pos = mathutils.Vector(
+                (
+                    aligned_pt.x * scale_factor,
+                    aligned_pt.y * scale_factor,
+                    aligned_pt.z * scale_factor + vertical_offset,
                 )
-                if prefab_chains:
-                    chain_cfgs = prefab_chains
-
-            skel_head_pose = ped_armature.pose.bones.get("SKEL_Head")
-            if skel_head_pose is not None:
-                skel_head_world = ped_armature.matrix_world @ skel_head_pose.matrix
-            else:
-                skel_head_world = mathutils.Matrix.Identity(4)
-
-            for chain_key, gtav_chain_name, src_chain_bones, gtav_chain_bones in physbone_helper.NEKO_MIMI_CHAIN_SPECS:
-                mapped_world_mats = [
-                    map_hair_world_mat(hair_bones_ci[src_name.lower()])
-                    for src_name in src_chain_bones
-                ]
-                cfg_entry = chain_cfgs.get(chain_key, {})
-                lim_rot = cfg_entry.get("limit_rotation", (14.12, 0.0, 0.0))
-                lim_rx_rad = math.radians(float(lim_rot[0]))
-                lim_rz_rad = math.radians(float(lim_rot[2]))
-                lim_axis_vec = (
-                    -math.sin(lim_rz_rad),
-                    math.cos(lim_rx_rad) * math.cos(lim_rz_rad),
-                    math.sin(lim_rx_rad),
-                )
-                axis_len = math.sqrt(
-                    lim_axis_vec[0] ** 2 + lim_axis_vec[1] ** 2 + lim_axis_vec[2] ** 2
-                ) or 1.0
-                lim_axis_norm = (
-                    lim_axis_vec[0] / axis_len,
-                    lim_axis_vec[1] / axis_len,
-                    lim_axis_vec[2] / axis_len,
-                )
-
-                chain_bone_records = []
-                parent_world_mat = skel_head_world
-                for node_idx, gtav_bone_name in enumerate(gtav_chain_bones):
-                    cur_world_mat = mapped_world_mats[node_idx]
-                    parent_name = physbone_helper.NEKO_MIMI_PARENT_MAP[gtav_bone_name]
-                    bone_tag = physbone_helper.compute_gtav_bone_tag(gtav_bone_name)
-                    if node_idx + 1 < len(mapped_world_mats):
-                        seg_len = (
-                            mapped_world_mats[node_idx + 1].translation
-                            - cur_world_mat.translation
-                        ).length
-                    else:
-                        seg_len = 0.025
-
-                    custom_ear_bones.append(
-                        {
-                            "name": gtav_bone_name,
-                            "parent_name": parent_name,
-                            "tag": bone_tag,
-                            "world_matrix": cur_world_mat,
-                            "length": max(0.015, float(seg_len)),
-                        }
-                    )
-
-                    local_mat = parent_world_mat.inverted() @ cur_world_mat
-                    loc_pos, loc_rot, _unused_scale = local_mat.decompose()
-                    chain_bone_records.append(
-                        {
-                            "name": gtav_bone_name,
-                            "tag": bone_tag,
-                            "local_pos": (float(loc_pos.x), float(loc_pos.y), float(loc_pos.z)),
-                            "local_rot": (
-                                float(loc_rot.x),
-                                float(loc_rot.y),
-                                float(loc_rot.z),
-                                float(loc_rot.w),
-                            ),
-                            "limit_axis_local": lim_axis_norm,
-                        }
-                    )
-                    parent_world_mat = cur_world_mat
-
-                physbone_chain_records.append(
-                    {
-                        "name": gtav_chain_name,
-                        "parent_bone_tag": physbone_helper.SKEL_HEAD_TAG,
-                        "config": cfg_entry,
-                        "bones": chain_bone_records,
-                    }
-                )
-
-            injected_ear_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
-                ped_armature,
-                custom_ear_bones,
-                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
             )
-            print(f"[PhysBones] Injected {injected_ear_count} neko mimi bones into Blender armature")
+            gtav_rot_3x3 = (neko_hair_rot_matrix @ fbx_world.to_3x3().normalized()).normalized()
+            out_mat = gtav_rot_3x3.to_4x4()
+            out_mat.translation = gtav_pos
+            return out_mat
+
+        map_hair_world_fn = map_hair_world_mat
+
+    hat_pivot = mathutils.Vector((0.0, 0.0314, 1.2534))
+    hat_rot_matrix = mathutils.Matrix.Rotation(math.radians(-11.464), 4, "X")
+    hat_pos_delta = mathutils.Vector((0.0, 0.02655, 0.01388))
+
+    def _to_gtav_world_mat(fbx_world):
+        gtav_pos = mathutils.Vector(
+            (
+                fbx_world.translation.x * scale_factor,
+                fbx_world.translation.y * scale_factor,
+                fbx_world.translation.z * scale_factor + vertical_offset,
+            )
+        )
+        gtav_rot = fbx_world.to_quaternion().to_matrix().to_4x4()
+        gtav_rot.translation = gtav_pos
+        return gtav_rot
+
+    hair_bone_prefixes = ("ear.", "halo", "aho", "bangs.", "side.", "back.", "ribbon.00")
+
+    def resolve_michael_er_world_mat(src_bone_name):
+        src_low = src_bone_name.strip().lower()
+        if map_hair_world_fn is not None and src_low.startswith(hair_bone_prefixes) and src_low in hair_bones_ci:
+            return map_hair_world_fn(hair_bones_ci[src_low])
+        if src_low.startswith("pocket watch") and src_low in watch_bones_ci and arm_watch is not None:
+            fbx_world = watch_transform_matrix @ (arm_watch.matrix_world @ watch_bones_ci[src_low].matrix)
+            return _to_gtav_world_mat(fbx_world)
+        if src_low in outfit_bones_ci and arm_outfit is not None:
+            fbx_world = (arm_outfit.matrix_world @ outfit_bones_ci[src_low].matrix).copy()
+            if src_low.startswith(("un_hatroot", "un_hat_")):
+                rel_pos = fbx_world.translation - hat_pivot
+                rotated_3x3 = (hat_rot_matrix.to_3x3() @ fbx_world.to_3x3().normalized()).normalized()
+                adj_mat = rotated_3x3.to_4x4()
+                adj_mat.translation = hat_pivot + (hat_rot_matrix @ rel_pos) + hat_pos_delta
+                fbx_world = adj_mat
+            return _to_gtav_world_mat(fbx_world)
+        if src_low in base_bones_ci and arm_base is not None:
+            fbx_world = arm_base.matrix_world @ base_bones_ci[src_low].matrix
+            return _to_gtav_world_mat(fbx_world)
+        return None
+
+    ped_world_matrices = {
+        bone_item.name: (ped_armature.matrix_world @ bone_item.matrix_local).copy()
+        for bone_item in ped_armature.data.bones
+    }
+    custom_ear_bones, physbone_chain_records = physbone_helper.build_dynamic_physbone_chains(
+        ped_armature=ped_armature,
+        chain_specs=pb_resolution["chain_specs"],
+        parent_map=pb_resolution["parent_map"],
+        chain_cfgs=pb_resolution["chains"],
+        source_world_mat_fn=resolve_michael_er_world_mat,
+        ped_world_matrices=ped_world_matrices,
+        default_limit_rotation=(14.12, 0.0, 0.0),
+    )
+    if custom_ear_bones:
+        injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+            ped_armature,
+            custom_ear_bones,
+            bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+        )
+        valid_gtav_bones.update(item["name"] for item in custom_ear_bones)
+        print(
+            f"[PhysBones] Injected {injected_pb_count} Eternal Reunion bones into Blender armature ({len(physbone_chain_records)} chains)",
+            flush=True,
+        )
 
     # 8. Remove source armatures and raw meshes
     for old_obj in list(bpy.data.objects):
@@ -1854,7 +1887,7 @@ def build_shinano_er_for_gtav(cli_args):
     ped_armature.drawable_properties.lod_dist_low = 9998.0
     ped_armature.drawable_properties.lod_dist_vlow = 9998.0
 
-    custom_ear_name_set = set(physbone_helper.NEKO_MIMI_CUSTOM_BONES)
+    custom_ear_name_set = {item["name"] for item in custom_ear_bones}
     for bone_obj in ped_armature.data.bones:
         if bone_obj.name not in custom_ear_name_set:
             set_recommended_bone_properties(bone_obj)
@@ -1915,19 +1948,23 @@ def build_shinano_er_for_gtav(cli_args):
             target_ped_model=char_profile["ped_name"],
         )
         print(f"[PhysBones] Exported runtime INI: {out_ini_path}")
-        if char_key == "michael":
-            pkg_ini_path = (
-                _REPO_ROOT_CANDIDATE
-                / "2_Michael_Shinano_EternalReunion"
-                / "5_rpf_package"
-                / "GTAVPhysBones.ini"
-            )
-            physbone_helper.export_physbone_asi_ini(
-                pkg_ini_path,
-                physbone_chain_records,
-                target_ped_model=char_profile["ped_name"],
-            )
-            print(f"[PhysBones] Synced package INI: {pkg_ini_path}")
+        repo_root = project_paths.get_project_root()
+        sync_targets = [
+            repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "GTAVPhysBones.ini",
+            repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini",
+            repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package" / "GTAVPhysBones.ini",
+        ]
+        gtav_root = project_paths.get_gtav_root_dir()
+        if gtav_root.is_dir():
+            sync_targets.append(gtav_root / "GTAVPhysBones.ini")
+        physbone_helper.merge_physbone_asi_ini(
+            sync_targets[1],
+            physbone_chain_records,
+            own_prefixes=("PB_Ear_", "PB_ER_"),
+            target_ped_model="all",
+            extra_sync_paths=sync_targets,
+        )
+        print(f"[PhysBones] Merged & synced global INI: {sync_targets[1]}")
 
 
 def extract_custom_blender_args():
@@ -2048,6 +2085,22 @@ def parse_blender_cli_args():
         help=i18n.translate("blendshapes.cli_save_cfg"),
     )
     argument_parser.add_argument(
+        "--physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_cfg"),
+    )
+    argument_parser.add_argument(
+        "--physbones-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("physbones.cli_source"),
+    )
+    argument_parser.add_argument(
+        "--save-physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_save_cfg"),
+    )
+    argument_parser.add_argument(
         "--texture-dir",
         default=None,
         help=i18n.translate("michael.build.arg_texture_dir"),
@@ -2130,6 +2183,16 @@ def parse_blender_cli_args():
         if parsed_args.blendshapes_source is not None
         else str(target_cfg.get("blendshapes_source", "auto"))
     )
+    parsed_args.physbones_cfg = (
+        parsed_args.physbones_cfg
+        if parsed_args.physbones_cfg is not None
+        else str(target_cfg.get("physbones_cfg", ""))
+    )
+    parsed_args.physbones_source = (
+        parsed_args.physbones_source
+        if parsed_args.physbones_source is not None
+        else str(target_cfg.get("physbones_source", "auto"))
+    )
     parsed_args.texture_dir = parsed_args.texture_dir or str(target_cfg["textures_dir"])
     parsed_args.atlas_png = parsed_args.atlas_png or Path(target_cfg["atlas_png"]).name
     parsed_args.normal_png = parsed_args.normal_png or Path(target_cfg["normal_png"]).name
@@ -2160,6 +2223,8 @@ def parse_blender_cli_args():
         "face_anim",
         "blendshapes_cfg",
         "save_blendshapes_cfg",
+        "physbones_cfg",
+        "save_physbones_cfg",
         "texture_dir",
         "output_dir",
     ):

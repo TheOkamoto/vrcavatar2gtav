@@ -11,59 +11,714 @@ Starts with Michael (player_zero) neko mimi articulated ear chains
 
 from configparser import ConfigParser
 import math
+import os as operating_system
 from pathlib import Path
-import re
-from typing import Dict, List, Optional, Sequence, Tuple
+import re as regex_module
+import struct
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+import zlib
 
 
-NEKO_MIMI_BONE_MAP: Dict[str, str] = {
+SKEL_HEAD_TAG: int = 31086
+SKEL_NECK_1_TAG: int = 39317
+SKEL_SPINE0_TAG: int = 23553
+SKEL_SPINE1_TAG: int = 24816
+SKEL_SPINE2_TAG: int = 24817
+SKEL_SPINE3_TAG: int = 24818
+SKEL_PELVIS_TAG: int = 11816
+SKEL_L_THIGH_TAG: int = 58271
+SKEL_R_THIGH_TAG: int = 51826
+SKEL_L_CLAVICLE_TAG: int = 64729
+SKEL_R_CLAVICLE_TAG: int = 10706
+SKEL_L_UPPERARM_TAG: int = 45509
+SKEL_R_UPPERARM_TAG: int = 40269
+
+MAX_CUSTOM_PHYSBONES_PER_PED: int = 63
+
+PARENT_BONE_TAGS: Dict[str, int] = {
+    "SKEL_Head": SKEL_HEAD_TAG,
+    "SKEL_Neck_1": SKEL_NECK_1_TAG,
+    "SKEL_Spine0": SKEL_SPINE0_TAG,
+    "SKEL_Spine1": SKEL_SPINE1_TAG,
+    "SKEL_Spine2": SKEL_SPINE2_TAG,
+    "SKEL_Spine3": SKEL_SPINE3_TAG,
+    "SKEL_Pelvis": SKEL_PELVIS_TAG,
+    "SKEL_L_Thigh": SKEL_L_THIGH_TAG,
+    "SKEL_R_Thigh": SKEL_R_THIGH_TAG,
+    "SKEL_L_Clavicle": SKEL_L_CLAVICLE_TAG,
+    "SKEL_R_Clavicle": SKEL_R_CLAVICLE_TAG,
+    "SKEL_L_UpperArm": SKEL_L_UPPERARM_TAG,
+    "SKEL_R_UpperArm": SKEL_R_UPPERARM_TAG,
+}
+
+UNITY_ANCESTOR_TO_GTAV_PARENT: Dict[str, str] = {
+    "head": "SKEL_Head",
+    "hair_root": "SKEL_Head",
+    "hair root": "SKEL_Head",
+    "un_hatroot": "SKEL_Head",
+    "neck": "SKEL_Neck_1",
+    "upperchest": "SKEL_Spine3",
+    "upper_chest": "SKEL_Spine3",
+    "chest": "SKEL_Spine2",
+    "ribbon_root": "SKEL_Spine2",
+    "ribbonroot": "SKEL_Spine2",
+    "spine": "SKEL_Spine1",
+    "hips": "SKEL_Pelvis",
+    "pelvis": "SKEL_Pelvis",
+    "skirt_root": "SKEL_Pelvis",
+    "un_skirt": "SKEL_Pelvis",
+    "upper_leg.l": "SKEL_L_Thigh",
+    "upper_leg_l": "SKEL_L_Thigh",
+    "upper_leg.r": "SKEL_R_Thigh",
+    "upper_leg_r": "SKEL_R_Thigh",
+    "shoulder.l": "SKEL_L_Clavicle",
+    "shoulder_l": "SKEL_L_Clavicle",
+    "shoulder.r": "SKEL_R_Clavicle",
+    "shoulder_r": "SKEL_R_Clavicle",
+    "upper_arm.l": "SKEL_L_UpperArm",
+    "upper_arm_l": "SKEL_L_UpperArm",
+    "upper_arm.r": "SKEL_R_UpperArm",
+    "upper_arm_r": "SKEL_R_UpperArm",
+}
+
+
+def resolve_parent_bone_from_unity_chain(ancestor_names: Sequence[str]) -> Tuple[str, int]:
+    """Resolve nearest Unity skeleton ancestor name to a GTA V parent bone + uint16 tag."""
+    for raw_name in ancestor_names:
+        mapped = UNITY_ANCESTOR_TO_GTAV_PARENT.get(str(raw_name).strip().lower())
+        if mapped is not None:
+            return mapped, PARENT_BONE_TAGS[mapped]
+    return "SKEL_Pelvis", SKEL_PELVIS_TAG
+
+
+def _chain_parent_map(
+    chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
+    root_parents: Dict[str, str],
+) -> Dict[str, str]:
+    parent_map: Dict[str, str] = {}
+    for chain_key, _gtav_name, _src_bones, gtav_bones in chain_specs:
+        parent_map[gtav_bones[0]] = root_parents[chain_key]
+        for bone_idx in range(1, len(gtav_bones)):
+            parent_map[gtav_bones[bone_idx]] = gtav_bones[bone_idx - 1]
+    return parent_map
+
+
+# ---------------------------------------------------------------------------
+# Michael (Shinano Eternal Reunion - Full Hair + Outfit + Watch + Marshmallow PB)
+# ---------------------------------------------------------------------------
+NEKO_MIMI_HALO_WEIGHT_SPLIT: Tuple[Tuple[str, float], ...] = (
+    ("PB_Ear_L_0", 0.5),
+    ("PB_Ear_L_1", 0.5),
+)
+
+MICHAEL_ER_BONE_MAP: Dict[str, str] = {
     "ear.l": "PB_Ear_L_0",
     "ear.l.001": "PB_Ear_L_1",
     "ear.l.002": "PB_Ear_L_2",
     "ear.r": "PB_Ear_R_0",
     "ear.r.001": "PB_Ear_R_1",
     "ear.r.002": "PB_Ear_R_2",
-    "halo": "PB_Ear_L_0",
-    "halo.001": "PB_Ear_L_1",
+    "halo": "PB_ER_Halo_0",
+    "halo.001": "PB_ER_Halo_1",
+    "aho": "PB_ER_Aho_0",
+    "aho.001": "PB_ER_Aho_0",
+    "aho.002": "PB_ER_Aho_0",
+    "aho.003": "PB_ER_Aho_0",
+    "aho.004": "PB_ER_Aho_1",
+    "aho.005": "PB_ER_Aho_1",
+    "bangs": "PB_ER_Bang_L_0",
+    "bangs.001": "PB_ER_Bang_L_1",
+    "bangs.l": "PB_ER_Bang_L_0",
+    "bangs.l.001": "PB_ER_Bang_L_1",
+    "bangs.l.002": "PB_ER_Bang_L_1",
+    "bangs.l.003": "PB_ER_Bang_L_0",
+    "bangs.l.004": "PB_ER_Bang_L_1",
+    "bangs.r": "PB_ER_Bang_R_0",
+    "bangs.r.001": "PB_ER_Bang_R_1",
+    "bangs.r.002": "PB_ER_Bang_R_0",
+    "bangs.r.003": "PB_ER_Bang_R_1",
+    "side.l": "PB_ER_Side_L_0",
+    "side.l.001": "PB_ER_Side_L_0",
+    "side.l.002": "PB_ER_Side_L_1",
+    "side.l.003": "PB_ER_Side_L_1",
+    "side.l.004": "PB_ER_Side_L_0",
+    "side.l.005": "PB_ER_Side_L_1",
+    "side.r": "PB_ER_Side_R_0",
+    "side.r.001": "PB_ER_Side_R_0",
+    "side.r.002": "PB_ER_Side_R_1",
+    "side.r.003": "PB_ER_Side_R_0",
+    "side.r.004": "PB_ER_Side_R_1",
+    "back.001": "PB_ER_Back_L_0",
+    "back.002": "PB_ER_Back_L_1",
+    "back.l.001": "PB_ER_Back_L_0",
+    "back.l.002": "PB_ER_Back_L_0",
+    "back.l.003": "PB_ER_Back_L_1",
+    "back.l.004": "PB_ER_Back_L_1",
+    "back.l.005": "PB_ER_Back_L_0",
+    "back.l.006": "PB_ER_Back_L_1",
+    "back.r.001": "PB_ER_Back_R_0",
+    "back.r.002": "PB_ER_Back_R_0",
+    "back.r.003": "PB_ER_Back_R_0",
+    "back.r.004": "PB_ER_Back_R_1",
+    "back.r.005": "PB_ER_Back_R_0",
+    "back.r.006": "PB_ER_Back_R_1",
+    "back.r.007": "PB_ER_Back_R_0",
+    "back.r.008": "PB_ER_Back_R_1",
+    "back.r.009": "PB_ER_Back_R_0",
+    "back.r.010": "PB_ER_Back_R_1",
+    "ribbon": "PB_ER_HRib_L_0",
+    "ribbon.001": "PB_ER_HRib_L_0",
+    "ribbon.002": "PB_ER_HRib_L_1",
+    "ribbon.005": "PB_ER_HRib_L_0",
+    "ribbon.006": "PB_ER_HRib_L_1",
+    "ribbon.003": "PB_ER_HRib_R_0",
+    "ribbon.004": "PB_ER_HRib_R_1",
+    "ribbon.007": "PB_ER_HRib_R_0",
+    "ribbon.008": "PB_ER_HRib_R_1",
+    "un_hatroot.001_l": "PB_ER_Hat_L_0",
+    "un_hatroot.001_l.001": "PB_ER_Hat_L_1",
+    "un_hat_l.001": "PB_ER_Hat_L_0",
+    "un_hat_l.002": "PB_ER_Hat_L_0",
+    "un_hat_l.003": "PB_ER_Hat_L_0",
+    "un_hat_l.004": "PB_ER_Hat_L_1",
+    "un_hat_l.005": "PB_ER_Hat_L_1",
+    "un_hat_l.006": "PB_ER_Hat_L_1",
+    "un_hatroot.001_r": "PB_ER_Hat_R_0",
+    "un_hatroot.001_r.001": "PB_ER_Hat_R_1",
+    "un_hat_r.001": "PB_ER_Hat_R_0",
+    "un_hat_r.002": "PB_ER_Hat_R_0",
+    "un_hat_r.003": "PB_ER_Hat_R_0",
+    "un_hat_r.004": "PB_ER_Hat_R_1",
+    "un_hat_r.005": "PB_ER_Hat_R_1",
+    "un_hat_r.006": "PB_ER_Hat_R_1",
+    "un_necklace": "PB_ER_Neck_0",
+    "un_necklace.001": "PB_ER_Neck_1",
+    "un_necklace.002": "PB_ER_Neck_1",
+    "breast_1.l": "PB_ER_Breast_L_0",
+    "breast_2.l": "PB_ER_Breast_L_1",
+    "breast_1.r": "PB_ER_Breast_R_0",
+    "breast_2.r": "PB_ER_Breast_R_1",
+    "un_ribbon": "PB_ER_Rib_L_0",
+    "un_ribbon_l.002": "PB_ER_Rib_L_0",
+    "un_ribbon_l.003": "PB_ER_Rib_L_1",
+    "un_ribbon.001_l.002": "PB_ER_Rib_L_0",
+    "un_ribbon.001_l.003": "PB_ER_Rib_L_1",
+    "un_ribbon.001_l.004": "PB_ER_Rib_L_1",
+    "un_ribbon2_1_l": "PB_ER_Rib_L_0",
+    "un_ribbon2_1_l.001": "PB_ER_Rib_L_1",
+    "un_ribbon2_2_l": "PB_ER_Rib_L_0",
+    "un_ribbon2_2_l.002": "PB_ER_Rib_L_1",
+    "un_ribbon2_2_l.004": "PB_ER_Rib_L_1",
+    "un_ribbon_r.002": "PB_ER_Rib_R_0",
+    "un_ribbon_r.003": "PB_ER_Rib_R_1",
+    "un_ribbon.001_r.002": "PB_ER_Rib_R_0",
+    "un_ribbon.001_r.003": "PB_ER_Rib_R_1",
+    "un_ribbon.001_r.004": "PB_ER_Rib_R_1",
+    "un_ribbon2_1_r": "PB_ER_Rib_R_0",
+    "un_ribbon2_1_r.001": "PB_ER_Rib_R_1",
+    "un_ribbon2_2_r": "PB_ER_Rib_R_0",
+    "un_ribbon2_2_r.002": "PB_ER_Rib_R_1",
+    "un_ribbon2_2_r.004": "PB_ER_Rib_R_1",
+    "un_bag.001": "PB_ER_Bag_0",
+    "un_bag.002": "PB_ER_Bag_0",
+    "un_bag_ring": "PB_ER_Bag_0",
+    "un_bag": "PB_ER_Bag_0",
+    "un_bagchain": "PB_ER_Bag_0",
+    "un_bagchain.001": "PB_ER_Bag_0",
+    "un_bagchain.002": "PB_ER_Bag_1",
+    "un_bagchain.003": "PB_ER_Bag_1",
+    "un_bagchain.004": "PB_ER_Bag_1",
+    "un_bagchain.005": "PB_ER_Bag_1",
+    "un_watchring": "PB_ER_Watch_0",
+    "pocket watch_root": "PB_ER_Watch_0",
+    "pocket watch_root_1": "PB_ER_Watch_0",
+    "pocket watch": "PB_ER_Watch_1",
+    "pocket watch_cover": "PB_ER_Watch_1",
+    "pocket watch_gear_1": "PB_ER_Watch_1",
+    "pocket watch_gear_2": "PB_ER_Watch_1",
+    "pocket watch_gear_3": "PB_ER_Watch_1",
+    "pocket watch_gear_4": "PB_ER_Watch_1",
+    "pocket watch_gear_5": "PB_ER_Watch_1",
+    "pocket watch_gear_6": "PB_ER_Watch_1",
+    "pocket watch_gear_7": "PB_ER_Watch_1",
+    "pocket watch_hourgear": "PB_ER_Watch_1",
+    "pocket watch_minutegear": "PB_ER_Watch_1",
+    "pocket watch_secondgear": "PB_ER_Watch_1",
+    "un_sidechainleft": "PB_ER_Waist_L_0",
+    "un_sidechainleft.001": "PB_ER_Waist_L_0",
+    "un_sidechainleft.002": "PB_ER_Waist_L_1",
+    "un_sidechain": "PB_ER_Waist_R_0",
+    "un_sidechain.001": "PB_ER_Waist_R_0",
+    "un_sidechain.002": "PB_ER_Waist_R_0",
+    "un_sidechain.003": "PB_ER_Waist_R_1",
+    "un_sidechain.004": "PB_ER_Waist_R_1",
+    "un_sidechain.005": "PB_ER_Waist_R_1",
+    "coin": "PB_ER_Waist_R_0",
+    "coin.001": "PB_ER_Waist_R_1",
+    "un_heartchain": "PB_ER_HeartCh_0",
+    "un_heartchain.001": "PB_ER_HeartCh_0",
+    "un_heartchain.002": "PB_ER_HeartCh_1",
+    "un_heartchain.003": "PB_ER_HeartCh_1",
+    "butt.l": "PB_ER_Butt_L_0",
+    "butt.r": "PB_ER_Butt_R_0",
 }
 
-NEKO_MIMI_HALO_WEIGHT_SPLIT: Tuple[Tuple[str, float], ...] = (
-    ("PB_Ear_L_0", 0.5),
-    ("PB_Ear_L_1", 0.5),
+for _er_side in ("L", "R"):
+    _er_low = _er_side.lower()
+    for _spoke_idx in range(1, 12):
+        _quad_key = "SkirtF" if _spoke_idx <= 5 else "SkirtB"
+        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}"] = f"PB_ER_{_quad_key}{_er_side}_0"
+        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_001"] = f"PB_ER_{_quad_key}{_er_side}_1"
+        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_002"] = f"PB_ER_{_quad_key}{_er_side}_1"
+
+MICHAEL_ER_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+    ("ear.L", "PB_Ear_L", ("ear.L", "ear.L.001", "ear.L.002"), ("PB_Ear_L_0", "PB_Ear_L_1", "PB_Ear_L_2")),
+    ("ear.R", "PB_Ear_R", ("ear.R", "ear.R.001", "ear.R.002"), ("PB_Ear_R_0", "PB_Ear_R_1", "PB_Ear_R_2")),
+    ("Halo", "PB_ER_Halo", ("Halo", "Halo.001"), ("PB_ER_Halo_0", "PB_ER_Halo_1")),
+    ("Aho", "PB_ER_Aho", ("Aho.002", "Aho.005"), ("PB_ER_Aho_0", "PB_ER_Aho_1")),
+    ("Bangs.L", "PB_ER_Bang_L", ("Bangs.L", "Bangs.L.002"), ("PB_ER_Bang_L_0", "PB_ER_Bang_L_1")),
+    ("Bangs.R", "PB_ER_Bang_R", ("Bangs.R", "Bangs.R.002"), ("PB_ER_Bang_R_0", "PB_ER_Bang_R_1")),
+    ("Side.L", "PB_ER_Side_L", ("Side.L", "Side.L.003"), ("PB_ER_Side_L_0", "PB_ER_Side_L_1")),
+    ("Side.R", "PB_ER_Side_R", ("Side.R", "Side.R.003"), ("PB_ER_Side_R_0", "PB_ER_Side_R_1")),
+    ("Back.L", "PB_ER_Back_L", ("Back.L.001", "Back.L.004"), ("PB_ER_Back_L_0", "PB_ER_Back_L_1")),
+    ("Back.R", "PB_ER_Back_R", ("Back.R.001", "Back.R.006"), ("PB_ER_Back_R_0", "PB_ER_Back_R_1")),
+    ("Ribbon.001", "PB_ER_HRib_L", ("Ribbon.001", "Ribbon.002"), ("PB_ER_HRib_L_0", "PB_ER_HRib_L_1")),
+    ("Ribbon.003", "PB_ER_HRib_R", ("Ribbon.003", "Ribbon.004"), ("PB_ER_HRib_R_0", "PB_ER_HRib_R_1")),
+    ("UN_Hat.L", "PB_ER_Hat_L", ("UN_HatRoot.001_L", "UN_Hat_L.004"), ("PB_ER_Hat_L_0", "PB_ER_Hat_L_1")),
+    ("UN_Hat.R", "PB_ER_Hat_R", ("UN_HatRoot.001_R", "UN_Hat_R.004"), ("PB_ER_Hat_R_0", "PB_ER_Hat_R_1")),
+    ("UN_Necklace", "PB_ER_Neck", ("UN_Necklace", "UN_Necklace.002"), ("PB_ER_Neck_0", "PB_ER_Neck_1")),
+    ("breast.L", "PB_ER_Breast_L", ("Breast_1.L", "Breast_2.L"), ("PB_ER_Breast_L_0", "PB_ER_Breast_L_1")),
+    ("breast.R", "PB_ER_Breast_R", ("Breast_1.R", "Breast_2.R"), ("PB_ER_Breast_R_0", "PB_ER_Breast_R_1")),
+    ("UN_Ribbon.L", "PB_ER_Rib_L", ("UN_Ribbon_L.002", "UN_Ribbon_L.003"), ("PB_ER_Rib_L_0", "PB_ER_Rib_L_1")),
+    ("UN_Ribbon.R", "PB_ER_Rib_R", ("UN_Ribbon_R.002", "UN_Ribbon_R.003"), ("PB_ER_Rib_R_0", "PB_ER_Rib_R_1")),
+    ("UN_Bag", "PB_ER_Bag", ("UN_Bag.002", "UN_Bagchain.005"), ("PB_ER_Bag_0", "PB_ER_Bag_1")),
+    ("Pocket_Watch", "PB_ER_Watch", ("Pocket Watch_Root", "Pocket Watch"), ("PB_ER_Watch_0", "PB_ER_Watch_1")),
+    ("UN_SideChainLeft", "PB_ER_Waist_L", ("UN_SideChainLeft", "UN_SideChainLeft.002"), ("PB_ER_Waist_L_0", "PB_ER_Waist_L_1")),
+    ("UN_SideChain", "PB_ER_Waist_R", ("UN_SideChain", "UN_SideChain.004"), ("PB_ER_Waist_R_0", "PB_ER_Waist_R_1")),
+    ("UN_HeartChain", "PB_ER_HeartCh", ("UN_HeartChain", "UN_HeartChain.003"), ("PB_ER_HeartCh_0", "PB_ER_HeartCh_1")),
+    ("Butt.L", "PB_ER_Butt_L", ("Butt.L",), ("PB_ER_Butt_L_0", "PB_ER_Butt_L_1")),
+    ("Butt.R", "PB_ER_Butt_R", ("Butt.R",), ("PB_ER_Butt_R_0", "PB_ER_Butt_R_1")),
+    ("UN_SkirtFL", "PB_ER_SkirtFL", ("UN_Skirt_L.02", "UN_Skirt_L.02_002"), ("PB_ER_SkirtFL_0", "PB_ER_SkirtFL_1")),
+    ("UN_SkirtFR", "PB_ER_SkirtFR", ("UN_Skirt_R.02", "UN_Skirt_R.02_002"), ("PB_ER_SkirtFR_0", "PB_ER_SkirtFR_1")),
+    ("UN_SkirtBL", "PB_ER_SkirtBL", ("UN_Skirt_L.08", "UN_Skirt_L.08_002"), ("PB_ER_SkirtBL_0", "PB_ER_SkirtBL_1")),
+    ("UN_SkirtBR", "PB_ER_SkirtBR", ("UN_Skirt_R.08", "UN_Skirt_R.08_002"), ("PB_ER_SkirtBR_0", "PB_ER_SkirtBR_1")),
 )
 
-NEKO_MIMI_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
-    (
-        "ear.L",
-        "PB_Ear_L",
-        ("ear.L", "ear.L.001", "ear.L.002"),
-        ("PB_Ear_L_0", "PB_Ear_L_1", "PB_Ear_L_2"),
-    ),
-    (
-        "ear.R",
-        "PB_Ear_R",
-        ("ear.R", "ear.R.001", "ear.R.002"),
-        ("PB_Ear_R_0", "PB_Ear_R_1", "PB_Ear_R_2"),
-    ),
-)
-
-NEKO_MIMI_CUSTOM_BONES: Tuple[str, ...] = (
-    "PB_Ear_L_0",
-    "PB_Ear_L_1",
-    "PB_Ear_L_2",
-    "PB_Ear_R_0",
-    "PB_Ear_R_1",
-    "PB_Ear_R_2",
-)
-
-NEKO_MIMI_PARENT_MAP: Dict[str, str] = {
-    "PB_Ear_L_0": "SKEL_Head",
-    "PB_Ear_L_1": "PB_Ear_L_0",
-    "PB_Ear_L_2": "PB_Ear_L_1",
-    "PB_Ear_R_0": "SKEL_Head",
-    "PB_Ear_R_1": "PB_Ear_R_0",
-    "PB_Ear_R_2": "PB_Ear_R_1",
+MICHAEL_ER_ROOT_PARENTS: Dict[str, str] = {
+    "ear.L": "SKEL_Head",
+    "ear.R": "SKEL_Head",
+    "Halo": "SKEL_Head",
+    "Aho": "SKEL_Head",
+    "Bangs.L": "SKEL_Head",
+    "Bangs.R": "SKEL_Head",
+    "Side.L": "SKEL_Head",
+    "Side.R": "SKEL_Head",
+    "Back.L": "SKEL_Head",
+    "Back.R": "SKEL_Head",
+    "Ribbon.001": "SKEL_Head",
+    "Ribbon.003": "SKEL_Head",
+    "UN_Hat.L": "SKEL_Head",
+    "UN_Hat.R": "SKEL_Head",
+    "UN_Necklace": "SKEL_Spine2",
+    "breast.L": "SKEL_Spine2",
+    "breast.R": "SKEL_Spine2",
+    "UN_Ribbon.L": "SKEL_Spine2",
+    "UN_Ribbon.R": "SKEL_Spine2",
+    "UN_Bag": "SKEL_Spine2",
+    "Pocket_Watch": "SKEL_Pelvis",
+    "UN_SideChainLeft": "SKEL_Pelvis",
+    "UN_SideChain": "SKEL_Pelvis",
+    "UN_HeartChain": "SKEL_Pelvis",
+    "Butt.L": "SKEL_Pelvis",
+    "Butt.R": "SKEL_Pelvis",
+    "UN_SkirtFL": "SKEL_Pelvis",
+    "UN_SkirtFR": "SKEL_Pelvis",
+    "UN_SkirtBL": "SKEL_Pelvis",
+    "UN_SkirtBR": "SKEL_Pelvis",
 }
+
+MICHAEL_ER_CUSTOM_BONES: Tuple[str, ...] = tuple(
+    bone_name
+    for _key, _gtav_name, _src, gtav_bones in MICHAEL_ER_CHAIN_SPECS
+    for bone_name in gtav_bones
+)
+
+MICHAEL_ER_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    MICHAEL_ER_CHAIN_SPECS, MICHAEL_ER_ROOT_PARENTS
+)
+
+NEKO_MIMI_BONE_MAP: Dict[str, str] = {
+    key: val for key, val in MICHAEL_ER_BONE_MAP.items() if val.startswith("PB_Ear_")
+}
+NEKO_MIMI_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = MICHAEL_ER_CHAIN_SPECS[:2]
+NEKO_MIMI_CUSTOM_BONES: Tuple[str, ...] = tuple(
+    bone_name for _key, _gtav_name, _src, gtav_bones in NEKO_MIMI_CHAIN_SPECS for bone_name in gtav_bones
+)
+NEKO_MIMI_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    NEKO_MIMI_CHAIN_SPECS,
+    {"ear.L": "SKEL_Head", "ear.R": "SKEL_Head"},
+)
+
+
+# ---------------------------------------------------------------------------
+# Franklin (Shinano Casual: Full Ears, Tail, BeltA, BeltB, Ribbons, Hair, Marshmallow PB, Butt, Skirt)
+# ---------------------------------------------------------------------------
+SHINANO_CASUAL_BONE_MAP: Dict[str, str] = {
+    "hair_ear_1.l": "PB_SC_Ear_L_0",
+    "hair_ear_2.l": "PB_SC_Ear_L_1",
+    "hair_ear_3.l": "PB_SC_Ear_L_2",
+    "hair_ear_1.r": "PB_SC_Ear_R_0",
+    "hair_ear_2.r": "PB_SC_Ear_R_1",
+    "hair_ear_3.r": "PB_SC_Ear_R_2",
+    "tail1": "PB_SC_Tail_0",
+    "tail2": "PB_SC_Tail_0",
+    "tail3": "PB_SC_Tail_1",
+    "tail4": "PB_SC_Tail_1",
+    "tail5": "PB_SC_Tail_2",
+    "tail6": "PB_SC_Tail_2",
+    "tail7": "PB_SC_Tail_3",
+    "tail8": "PB_SC_Tail_3",
+    "belta1": "PB_SC_BeltA_0",
+    "belta2": "PB_SC_BeltA_0",
+    "belta3": "PB_SC_BeltA_1",
+    "beltb1.l": "PB_SC_BeltB_L_0",
+    "beltb2.l": "PB_SC_BeltB_L_0",
+    "beltb3.l": "PB_SC_BeltB_L_0",
+    "beltb4.l": "PB_SC_BeltB_L_0",
+    "beltb5.l": "PB_SC_BeltB_L_0",
+    "beltb6.l": "PB_SC_BeltB_L_1",
+    "beltb7.l": "PB_SC_BeltB_L_1",
+    "beltb8.l": "PB_SC_BeltB_L_1",
+    "beltb9.l": "PB_SC_BeltB_L_1",
+    "beltb10.l": "PB_SC_BeltB_L_1",
+    "beltb1.r": "PB_SC_BeltB_R_0",
+    "beltb2.r": "PB_SC_BeltB_R_0",
+    "beltb3.r": "PB_SC_BeltB_R_0",
+    "beltb4.r": "PB_SC_BeltB_R_0",
+    "beltb5.r": "PB_SC_BeltB_R_0",
+    "beltb6.r": "PB_SC_BeltB_R_1",
+    "beltb7.r": "PB_SC_BeltB_R_1",
+    "beltb8.r": "PB_SC_BeltB_R_1",
+    "beltb9.r": "PB_SC_BeltB_R_1",
+    "beltb10.r": "PB_SC_BeltB_R_1",
+    "ribbon_a1.l": "PB_SC_Rib_L_0",
+    "ribbon_a2.l": "PB_SC_Rib_L_1",
+    "ribbon_b1.l": "PB_SC_Rib_L_0",
+    "ribbon_b2.l": "PB_SC_Rib_L_1",
+    "ribbon_a1.r": "PB_SC_Rib_R_0",
+    "ribbon_a2.r": "PB_SC_Rib_R_1",
+    "ribbon_b1.r": "PB_SC_Rib_R_0",
+    "ribbon_b2.r": "PB_SC_Rib_R_1",
+    "hair_ahogea1": "PB_SC_HAho_0",
+    "hair_ahogea2": "PB_SC_HAho_0",
+    "hair_ahogea3": "PB_SC_HAho_1",
+    "hair_ahogeb1": "PB_SC_HAho_0",
+    "hair_ahogeb2": "PB_SC_HAho_0",
+    "hair_ahogeb3": "PB_SC_HAho_0",
+    "hair_ahogeb4": "PB_SC_HAho_1",
+    "hair_ahogeb5": "PB_SC_HAho_1",
+    "hair_ahogeb6": "PB_SC_HAho_1",
+    "hair_fronta1": "PB_SC_HBang_0",
+    "hair_fronta2": "PB_SC_HBang_0",
+    "hair_fronta3": "PB_SC_HBang_1",
+    "hair_frontb1": "PB_SC_HBang_0",
+    "hair_frontb2": "PB_SC_HBang_1",
+    "hair_frontb3": "PB_SC_HBang_1",
+    "hair_frontc1": "PB_SC_HBang_0",
+    "hair_frontc2": "PB_SC_HBang_1",
+    "hair_sideb1": "PB_SC_HSide_L_0",
+    "hair_sideb2": "PB_SC_HSide_L_1",
+    "hair_sideb3": "PB_SC_HSide_L_1",
+    "hair_sideb4": "PB_SC_HSide_L_2",
+    "hair_sideb5": "PB_SC_HSide_L_2",
+    "hair_side_ahogea1": "PB_SC_HSide_L_0",
+    "hair_side_ahogea2": "PB_SC_HSide_L_1",
+    "hair_side_ahogea3": "PB_SC_HSide_L_1",
+    "hair_side_ahogea4": "PB_SC_HSide_L_2",
+    "hair_side_ahogeb1": "PB_SC_HSide_R_0",
+    "hair_side_ahogeb2": "PB_SC_HSide_R_1",
+    "hair_side_ahogeb3": "PB_SC_HSide_R_1",
+    "hair_side_ahogeb4": "PB_SC_HSide_R_2",
+    "hair_sidea1": "PB_SC_HSide_R_0",
+    "hair_sidea2": "PB_SC_HSide_R_1",
+    "hair_sidea2_sub1": "PB_SC_HSide_R_1",
+    "hair_sidea2_sub2": "PB_SC_HSide_R_2",
+    "hair_sidea3": "PB_SC_HSide_R_2",
+    "hair_sidec1": "PB_SC_HSide_R_0",
+    "hair_sidec2": "PB_SC_HSide_R_1",
+    "hair_sidec2_sub1": "PB_SC_HSide_R_1",
+    "hair_sidec2_sub2": "PB_SC_HSide_R_1",
+    "hair_sideb2_subb1.r": "PB_SC_HSide_R_1",
+    "hair_sideb2_subb2.r": "PB_SC_HSide_R_1",
+    "hair_sidec3": "PB_SC_HSide_R_1",
+    "hair_sidec3_sub1": "PB_SC_HSide_R_1",
+    "hair_sidec3_sub2": "PB_SC_HSide_R_1",
+    "hair_sidec4": "PB_SC_HSide_R_2",
+    "hair_sidec4_sub1": "PB_SC_HSide_R_2",
+    "hair_sidec4_sub2": "PB_SC_HSide_R_2",
+    "hair_sidec5": "PB_SC_HSide_R_2",
+    "hair_sidec6": "PB_SC_HSide_R_2",
+    "hair_backa1": "PB_SC_HBack_L_0",
+    "hair_backa2": "PB_SC_HBack_L_1",
+    "hair_backa3": "PB_SC_HBack_L_2",
+    "hair_backa4": "PB_SC_HBack_L_2",
+    "hair_backb1": "PB_SC_HBack_R_0",
+    "hair_backb2": "PB_SC_HBack_R_1",
+    "hair_backb3": "PB_SC_HBack_R_2",
+    "hair_backd1.l": "PB_SC_HBack_L_0",
+    "hair_backc1.l": "PB_SC_HBack_L_0",
+    "hair_backe1.l": "PB_SC_HBack_L_0",
+    "hair_inside1.l": "PB_SC_HBack_L_0",
+    "hair_backd2.l": "PB_SC_HBack_L_1",
+    "hair_backc2.l": "PB_SC_HBack_L_1",
+    "hair_backe2.l": "PB_SC_HBack_L_1",
+    "hair_inside2.l": "PB_SC_HBack_L_1",
+    "hair_backd3.l": "PB_SC_HBack_L_2",
+    "hair_backd4.l": "PB_SC_HBack_L_2",
+    "hair_backc3.l": "PB_SC_HBack_L_2",
+    "hair_backc4.l": "PB_SC_HBack_L_2",
+    "hair_backe3.l": "PB_SC_HBack_L_2",
+    "hair_inside3.l": "PB_SC_HBack_L_2",
+    "hair_backd1.r": "PB_SC_HBack_R_0",
+    "hair_backc1.r": "PB_SC_HBack_R_0",
+    "hair_backe1.r": "PB_SC_HBack_R_0",
+    "hair_inside1.r": "PB_SC_HBack_R_0",
+    "hair_backd2.r": "PB_SC_HBack_R_1",
+    "hair_backc2.r": "PB_SC_HBack_R_1",
+    "hair_backe2.r": "PB_SC_HBack_R_1",
+    "hair_inside2.r": "PB_SC_HBack_R_1",
+    "hair_backd3.r": "PB_SC_HBack_R_2",
+    "hair_backd4.r": "PB_SC_HBack_R_2",
+    "hair_backc3.r": "PB_SC_HBack_R_2",
+    "hair_backc4.r": "PB_SC_HBack_R_2",
+    "hair_backe3.r": "PB_SC_HBack_R_2",
+    "hair_inside3.r": "PB_SC_HBack_R_2",
+    "breast_1.l": "PB_SC_Breast_L_0",
+    "breast_2.l": "PB_SC_Breast_L_1",
+    "breast_1.r": "PB_SC_Breast_R_0",
+    "breast_2.r": "PB_SC_Breast_R_1",
+    "butt.l": "PB_SC_Butt_L_0",
+    "butt.r": "PB_SC_Butt_R_0",
+}
+
+for _side_code in ("L", "R"):
+    _side_low = _side_code.lower()
+    for _prefix, _grp_code in (("fronta", "SkirtF"), ("frontb", "SkirtF"), ("frontc", "SkirtF"), ("sidea", "SkirtS"), ("sideb", "SkirtS"), ("sidec", "SkirtS"), ("sided", "SkirtS"), ("backa", "SkirtB"), ("backb", "SkirtB")):
+        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}1.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_0"
+        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}2.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_1"
+        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}3.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
+        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}4.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
+
+SHINANO_CASUAL_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+    ("ear.L", "PB_SC_Ear_L", ("Hair_ear_1.L", "Hair_ear_2.L", "Hair_ear_3.L"), ("PB_SC_Ear_L_0", "PB_SC_Ear_L_1", "PB_SC_Ear_L_2")),
+    ("ear.R", "PB_SC_Ear_R", ("Hair_ear_1.R", "Hair_ear_2.R", "Hair_ear_3.R"), ("PB_SC_Ear_R_0", "PB_SC_Ear_R_1", "PB_SC_Ear_R_2")),
+    ("tail", "PB_SC_Tail", ("Tail1", "Tail3", "Tail5", "Tail7"), ("PB_SC_Tail_0", "PB_SC_Tail_1", "PB_SC_Tail_2", "PB_SC_Tail_3")),
+    ("belt_a", "PB_SC_BeltA", ("BeltA1", "BeltA3"), ("PB_SC_BeltA_0", "PB_SC_BeltA_1")),
+    ("belt_b.L", "PB_SC_BeltB_L", ("BeltB1.L", "BeltB7.L"), ("PB_SC_BeltB_L_0", "PB_SC_BeltB_L_1")),
+    ("belt_b.R", "PB_SC_BeltB_R", ("BeltB1.R", "BeltB7.R"), ("PB_SC_BeltB_R_0", "PB_SC_BeltB_R_1")),
+    ("ribbon.L", "PB_SC_Rib_L", ("Ribbon_A1.L", "Ribbon_A2.L"), ("PB_SC_Rib_L_0", "PB_SC_Rib_L_1")),
+    ("ribbon.R", "PB_SC_Rib_R", ("Ribbon_A1.R", "Ribbon_A2.R"), ("PB_SC_Rib_R_0", "PB_SC_Rib_R_1")),
+    ("hair_ahoge", "PB_SC_HAho", ("Hair_ahogeB1", "Hair_ahogeB5"), ("PB_SC_HAho_0", "PB_SC_HAho_1")),
+    ("hair_bang", "PB_SC_HBang", ("Hair_frontB1", "Hair_frontB3"), ("PB_SC_HBang_0", "PB_SC_HBang_1")),
+    ("hair_side.L", "PB_SC_HSide_L", ("Hair_sideB1", "Hair_sideB2", "Hair_sideB4"), ("PB_SC_HSide_L_0", "PB_SC_HSide_L_1", "PB_SC_HSide_L_2")),
+    ("hair_side.R", "PB_SC_HSide_R", ("Hair_sideC1", "Hair_sideC2", "Hair_sideC4"), ("PB_SC_HSide_R_0", "PB_SC_HSide_R_1", "PB_SC_HSide_R_2")),
+    ("hair_back.L", "PB_SC_HBack_L", ("Hair_backD1.L", "Hair_backD2.L", "Hair_backD3.L"), ("PB_SC_HBack_L_0", "PB_SC_HBack_L_1", "PB_SC_HBack_L_2")),
+    ("hair_back.R", "PB_SC_HBack_R", ("Hair_backD1.R", "Hair_backD2.R", "Hair_backD3.R"), ("PB_SC_HBack_R_0", "PB_SC_HBack_R_1", "PB_SC_HBack_R_2")),
+    ("breast.L", "PB_SC_Breast_L", ("Breast_1.L", "Breast_2.L"), ("PB_SC_Breast_L_0", "PB_SC_Breast_L_1")),
+    ("breast.R", "PB_SC_Breast_R", ("Breast_1.R", "Breast_2.R"), ("PB_SC_Breast_R_0", "PB_SC_Breast_R_1")),
+    ("butt.L", "PB_SC_Butt_L", ("Butt.L",), ("PB_SC_Butt_L_0", "PB_SC_Butt_L_1")),
+    ("butt.R", "PB_SC_Butt_R", ("Butt.R",), ("PB_SC_Butt_R_0", "PB_SC_Butt_R_1")),
+    ("skirt_front.L", "PB_SC_SkirtFL", ("Skirt_FrontB1.L", "Skirt_FrontB2.L", "Skirt_FrontB4.L"), ("PB_SC_SkirtFL_0", "PB_SC_SkirtFL_1", "PB_SC_SkirtFL_2")),
+    ("skirt_front.R", "PB_SC_SkirtFR", ("Skirt_FrontB1.R", "Skirt_FrontB2.R", "Skirt_FrontB4.R"), ("PB_SC_SkirtFR_0", "PB_SC_SkirtFR_1", "PB_SC_SkirtFR_2")),
+    ("skirt_side.L", "PB_SC_SkirtSL", ("Skirt_SideB1.L", "Skirt_SideB2.L", "Skirt_SideB4.L"), ("PB_SC_SkirtSL_0", "PB_SC_SkirtSL_1", "PB_SC_SkirtSL_2")),
+    ("skirt_side.R", "PB_SC_SkirtSR", ("Skirt_SideB1.R", "Skirt_SideB2.R", "Skirt_SideB4.R"), ("PB_SC_SkirtSR_0", "PB_SC_SkirtSR_1", "PB_SC_SkirtSR_2")),
+    ("skirt_back.L", "PB_SC_SkirtBL", ("Skirt_BackB1.L", "Skirt_BackB2.L", "Skirt_BackB4.L"), ("PB_SC_SkirtBL_0", "PB_SC_SkirtBL_1", "PB_SC_SkirtBL_2")),
+    ("skirt_back.R", "PB_SC_SkirtBR", ("Skirt_BackB1.R", "Skirt_BackB2.R", "Skirt_BackB4.R"), ("PB_SC_SkirtBR_0", "PB_SC_SkirtBR_1", "PB_SC_SkirtBR_2")),
+)
+
+SHINANO_CASUAL_ROOT_PARENTS: Dict[str, str] = {
+    "ear.L": "SKEL_Head",
+    "ear.R": "SKEL_Head",
+    "tail": "SKEL_Pelvis",
+    "belt_a": "SKEL_Spine2",
+    "belt_b.L": "SKEL_Spine2",
+    "belt_b.R": "SKEL_Spine2",
+    "ribbon.L": "SKEL_Spine2",
+    "ribbon.R": "SKEL_Spine2",
+    "hair_ahoge": "SKEL_Head",
+    "hair_bang": "SKEL_Head",
+    "hair_side.L": "SKEL_Head",
+    "hair_side.R": "SKEL_Head",
+    "hair_back.L": "SKEL_Head",
+    "hair_back.R": "SKEL_Head",
+    "breast.L": "SKEL_Spine2",
+    "breast.R": "SKEL_Spine2",
+    "butt.L": "SKEL_Pelvis",
+    "butt.R": "SKEL_Pelvis",
+    "skirt_front.L": "SKEL_Pelvis",
+    "skirt_front.R": "SKEL_Pelvis",
+    "skirt_side.L": "SKEL_Pelvis",
+    "skirt_side.R": "SKEL_Pelvis",
+    "skirt_back.L": "SKEL_Pelvis",
+    "skirt_back.R": "SKEL_Pelvis",
+}
+
+SHINANO_CASUAL_CUSTOM_BONES: Tuple[str, ...] = tuple(
+    bone_name
+    for _key, _gtav_name, _src, gtav_bones in SHINANO_CASUAL_CHAIN_SPECS
+    for bone_name in gtav_bones
+)
+
+SHINANO_CASUAL_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    SHINANO_CASUAL_CHAIN_SPECS, SHINANO_CASUAL_ROOT_PARENTS
+)
+
+
+# ---------------------------------------------------------------------------
+# Trevor (Miltina Maid: Full Twintails 1&2, Front/Side Hair, Ears, Breasts, Ruffles, Ribbons, Butt, 7-Sector Skirt, Tail)
+# ---------------------------------------------------------------------------
+MILTINA_MAID_BONE_MAP: Dict[str, str] = {
+    "cow ear_l.001": "PB_MT_Ear_L_0",
+    "cow ear_l.002": "PB_MT_Ear_L_1",
+    "cow ear_r.001": "PB_MT_Ear_R_0",
+    "cow ear_r.002": "PB_MT_Ear_R_1",
+    "front hair.001": "PB_MT_HFnt_0",
+    "front hair.002": "PB_MT_HFnt_0",
+    "front hair.003": "PB_MT_HFnt_1",
+    "breast_l": "PB_MT_Breast_L_0",
+    "breast_l.001": "PB_MT_Breast_L_1",
+    "breast_l.002": "PB_MT_Breast_L_1",
+    "breast_r": "PB_MT_Breast_R_0",
+    "breast_r.001": "PB_MT_Breast_R_1",
+    "breast_r.002": "PB_MT_Breast_R_1",
+    "butt_l": "PB_MT_Butt_L_0",
+    "butt_l.001": "PB_MT_Butt_L_1",
+    "butt_r": "PB_MT_Butt_R_0",
+    "butt_r.001": "PB_MT_Butt_R_1",
+    "tail.001": "PB_MT_Tail_0",
+    "tail.002": "PB_MT_Tail_0",
+    "tail.003": "PB_MT_Tail_1",
+    "tail.004": "PB_MT_Tail_1",
+    "tail.005": "PB_MT_Tail_2",
+    "tail.006": "PB_MT_Tail_2",
+    "tail.007": "PB_MT_Tail_2",
+    "tail.008": "PB_MT_Tail_3",
+    "tail.009": "PB_MT_Tail_3",
+}
+
+for _side_code in ("L", "R"):
+    _side_low = _side_code.lower()
+    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_2"
+    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.004"] = f"PB_MT_Twin1_{_side_code}_2"
+    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_2"
+    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.004"] = f"PB_MT_Twin2_{_side_code}_2"
+    for _rib_grp in ("a1", "a2"):
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_1"
+    for _rib_grp in ("b1", "b2"):
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
+        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.001"] = f"PB_MT_Side_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.002"] = f"PB_MT_Side_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.003"] = f"PB_MT_Side_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.004"] = f"PB_MT_Side_{_side_code}_1"
+    for _ruffle_num in range(1, 7):
+        MILTINA_MAID_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}"] = f"PB_MT_Ruffle_{_side_code}_0"
+        MILTINA_MAID_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}_end"] = f"PB_MT_Ruffle_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"ribbona_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"ribbona_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.003"] = f"PB_MT_NRib_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"apron ribbona_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
+    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.002"] = f"PB_MT_Apron_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.003"] = f"PB_MT_Apron_{_side_code}_1"
+    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.004"] = f"PB_MT_Apron_{_side_code}_2"
+    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.005"] = f"PB_MT_Apron_{_side_code}_2"
+    for _idx_num, _grp_code in ((1, "SkirtF"), (2, "SkirtF"), (3, "SkirtS"), (4, "SkirtS"), (5, "SkirtB"), (6, "SkirtB")):
+        for _seg in range(1, 9):
+            _tier = 0 if _seg <= 4 else 1
+            MILTINA_MAID_BONE_MAP[f"skirt{_idx_num}_{_side_low}.00{_seg}"] = f"PB_MT_{_grp_code}{_side_code}_{_tier}"
+
+for _seg7 in range(1, 9):
+    MILTINA_MAID_BONE_MAP[f"skirt7.00{_seg7}"] = f"PB_MT_SkirtBC_{0 if _seg7 <= 4 else 1}"
+
+MILTINA_MAID_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+    ("twintail1.L", "PB_MT_Twin1_L", ("twin tail1_L.001", "twin tail1_L.002", "twin tail1_L.004"), ("PB_MT_Twin1_L_0", "PB_MT_Twin1_L_1", "PB_MT_Twin1_L_2")),
+    ("twintail1.R", "PB_MT_Twin1_R", ("twin tail1_R.001", "twin tail1_R.002", "twin tail1_R.004"), ("PB_MT_Twin1_R_0", "PB_MT_Twin1_R_1", "PB_MT_Twin1_R_2")),
+    ("twintail2.L", "PB_MT_Twin2_L", ("twin tail2_L.001", "twin tail2_L.002", "twin tail2_L.004"), ("PB_MT_Twin2_L_0", "PB_MT_Twin2_L_1", "PB_MT_Twin2_L_2")),
+    ("twintail2.R", "PB_MT_Twin2_R", ("twin tail2_R.001", "twin tail2_R.002", "twin tail2_R.004"), ("PB_MT_Twin2_R_0", "PB_MT_Twin2_R_1", "PB_MT_Twin2_R_2")),
+    ("hair_front", "PB_MT_HFnt", ("Front hair.001", "Front hair.003"), ("PB_MT_HFnt_0", "PB_MT_HFnt_1")),
+    ("hair_side.L", "PB_MT_Side_L", ("Front hair3_L.001", "Front hair3_L.004"), ("PB_MT_Side_L_0", "PB_MT_Side_L_1")),
+    ("hair_side.R", "PB_MT_Side_R", ("Front hair3_R.001", "Front hair3_R.004"), ("PB_MT_Side_R_0", "PB_MT_Side_R_1")),
+    ("ear.L", "PB_MT_Ear_L", ("Cow ear_L.001", "Cow ear_L.002"), ("PB_MT_Ear_L_0", "PB_MT_Ear_L_1")),
+    ("ear.R", "PB_MT_Ear_R", ("Cow ear_R.001", "Cow ear_R.002"), ("PB_MT_Ear_R_0", "PB_MT_Ear_R_1")),
+    ("breast.L", "PB_MT_Breast_L", ("Breast_L", "Breast_L.001"), ("PB_MT_Breast_L_0", "PB_MT_Breast_L_1")),
+    ("breast.R", "PB_MT_Breast_R", ("Breast_R", "Breast_R.001"), ("PB_MT_Breast_R_0", "PB_MT_Breast_R_1")),
+    ("ruffle.L", "PB_MT_Ruffle_L", ("Ruffle_L.003", "Ruffle_L.003_end"), ("PB_MT_Ruffle_L_0", "PB_MT_Ruffle_L_1")),
+    ("ruffle.R", "PB_MT_Ruffle_R", ("Ruffle_R.003", "Ruffle_R.003_end"), ("PB_MT_Ruffle_R_0", "PB_MT_Ruffle_R_1")),
+    ("neck_ribbon.L", "PB_MT_NRib_L", ("RibbonB_L.001", "RibbonB_L.002"), ("PB_MT_NRib_L_0", "PB_MT_NRib_L_1")),
+    ("neck_ribbon.R", "PB_MT_NRib_R", ("RibbonB_R.001", "RibbonB_R.002"), ("PB_MT_NRib_R_0", "PB_MT_NRib_R_1")),
+    ("apron_ribbon.L", "PB_MT_Apron_L", ("apron ribbon_L.001", "apron ribbon_L.002", "apron ribbon_L.004"), ("PB_MT_Apron_L_0", "PB_MT_Apron_L_1", "PB_MT_Apron_L_2")),
+    ("apron_ribbon.R", "PB_MT_Apron_R", ("apron ribbon_R.001", "apron ribbon_R.002", "apron ribbon_R.004"), ("PB_MT_Apron_R_0", "PB_MT_Apron_R_1", "PB_MT_Apron_R_2")),
+    ("butt.L", "PB_MT_Butt_L", ("Butt_L", "Butt_L.001"), ("PB_MT_Butt_L_0", "PB_MT_Butt_L_1")),
+    ("butt.R", "PB_MT_Butt_R", ("Butt_R", "Butt_R.001"), ("PB_MT_Butt_R_0", "PB_MT_Butt_R_1")),
+    ("skirt_front.L", "PB_MT_SkirtFL", ("skirt1_L.002", "skirt1_L.006"), ("PB_MT_SkirtFL_0", "PB_MT_SkirtFL_1")),
+    ("skirt_front.R", "PB_MT_SkirtFR", ("skirt1_R.002", "skirt1_R.006"), ("PB_MT_SkirtFR_0", "PB_MT_SkirtFR_1")),
+    ("skirt_side.L", "PB_MT_SkirtSL", ("skirt3_L.002", "skirt3_L.006"), ("PB_MT_SkirtSL_0", "PB_MT_SkirtSL_1")),
+    ("skirt_side.R", "PB_MT_SkirtSR", ("skirt3_R.002", "skirt3_R.006"), ("PB_MT_SkirtSR_0", "PB_MT_SkirtSR_1")),
+    ("skirt_back.L", "PB_MT_SkirtBL", ("skirt5_L.002", "skirt5_L.006"), ("PB_MT_SkirtBL_0", "PB_MT_SkirtBL_1")),
+    ("skirt_back.R", "PB_MT_SkirtBR", ("skirt5_R.002", "skirt5_R.006"), ("PB_MT_SkirtBR_0", "PB_MT_SkirtBR_1")),
+    ("skirt_back.C", "PB_MT_SkirtBC", ("skirt7.002", "skirt7.006"), ("PB_MT_SkirtBC_0", "PB_MT_SkirtBC_1")),
+    ("tail", "PB_MT_Tail", ("tail.001", "tail.003", "tail.005", "tail.008"), ("PB_MT_Tail_0", "PB_MT_Tail_1", "PB_MT_Tail_2", "PB_MT_Tail_3")),
+)
+
+MILTINA_MAID_ROOT_PARENTS: Dict[str, str] = {
+    "twintail1.L": "SKEL_Head",
+    "twintail1.R": "SKEL_Head",
+    "twintail2.L": "SKEL_Head",
+    "twintail2.R": "SKEL_Head",
+    "hair_front": "SKEL_Head",
+    "hair_side.L": "SKEL_Head",
+    "hair_side.R": "SKEL_Head",
+    "ear.L": "SKEL_Head",
+    "ear.R": "SKEL_Head",
+    "breast.L": "SKEL_Spine2",
+    "breast.R": "SKEL_Spine2",
+    "ruffle.L": "SKEL_Spine2",
+    "ruffle.R": "SKEL_Spine2",
+    "neck_ribbon.L": "SKEL_Spine2",
+    "neck_ribbon.R": "SKEL_Spine2",
+    "apron_ribbon.L": "SKEL_Pelvis",
+    "apron_ribbon.R": "SKEL_Pelvis",
+    "butt.L": "SKEL_Pelvis",
+    "butt.R": "SKEL_Pelvis",
+    "skirt_front.L": "SKEL_Pelvis",
+    "skirt_front.R": "SKEL_Pelvis",
+    "skirt_side.L": "SKEL_Pelvis",
+    "skirt_side.R": "SKEL_Pelvis",
+    "skirt_back.L": "SKEL_Pelvis",
+    "skirt_back.R": "SKEL_Pelvis",
+    "skirt_back.C": "SKEL_Pelvis",
+    "tail": "SKEL_Pelvis",
+}
+
+MILTINA_MAID_CUSTOM_BONES: Tuple[str, ...] = tuple(
+    bone_name
+    for _key, _gtav_name, _src, gtav_bones in MILTINA_MAID_CHAIN_SPECS
+    for bone_name in gtav_bones
+)
+
+MILTINA_MAID_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    MILTINA_MAID_CHAIN_SPECS, MILTINA_MAID_ROOT_PARENTS
+)
 
 CUSTOM_BONE_FLAGS: Tuple[str, ...] = (
     "RotX",
@@ -74,8 +729,18 @@ CUSTOM_BONE_FLAGS: Tuple[str, ...] = (
     "TransZ",
 )
 
-SKEL_HEAD_TAG: int = 31086
 VRCHAT_PHYSBONE_SCRIPT_GUID: str = "2a2c05204084d904aa4945ccff20d8e5"
+VRCHAT_PHYSBONE_CLASS_FILE_ID: str = "1661641543"
+VALID_PHYSBONE_SOURCES: Tuple[str, ...] = ("auto", "unity", "cfg")
+
+DEFAULT_PHYSBONE_PRESET_RELATIVE_PATHS: Dict[str, str] = {
+    "shinano_er": "configs/michael_neko_mimi_physbones.cfg",
+    "shinano_casual": "configs/shinano_casual_physbones.cfg",
+    "miltina_maid": "configs/miltina_maid_physbones.cfg",
+    "michael": "configs/michael_neko_mimi_physbones.cfg",
+    "franklin": "configs/shinano_casual_physbones.cfg",
+    "trevor": "configs/miltina_maid_physbones.cfg",
+}
 
 
 def compute_gtav_bone_tag(bone_name: str) -> int:
@@ -90,10 +755,57 @@ def compute_gtav_bone_tag(bone_name: str) -> int:
     return (hash_val % 0xFE8F) + 0x170
 
 
+def resolve_bone_from_mapping(
+    raw_group_name: str,
+    bone_mapping_ci: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Resolve a lowercase vertex group name through a dynamic bone_mapping dict."""
+    if not bone_mapping_ci:
+        return None
+    return bone_mapping_ci.get(str(raw_group_name).strip().lower())
+
+
+def resolve_michael_er_gtav_bone(
+    raw_group_name: str,
+    mesh_name: Optional[str] = None,
+    bone_mapping_ci: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Map a Shinano Eternal Reunion + hair bone name to its PB_Ear_* or PB_ER_* bone."""
+    _ = mesh_name
+    lowered_name = raw_group_name.strip().lower()
+    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
+        return bone_mapping_ci[lowered_name]
+    return MICHAEL_ER_BONE_MAP.get(lowered_name)
+
+
 def resolve_neko_mimi_gtav_bone(raw_group_name: str) -> Optional[str]:
     """Map an ear.* Blender vertex group name to its PB_Ear_* GTA V bone."""
     lowered_name = raw_group_name.strip().lower()
     return NEKO_MIMI_BONE_MAP.get(lowered_name)
+
+
+def resolve_shinano_casual_gtav_bone(
+    raw_group_name: str,
+    mesh_name: Optional[str] = None,
+    bone_mapping_ci: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Map a Shinano Casual Blender vertex group name to its PB_SC_* GTA V bone."""
+    lowered_name = raw_group_name.strip().lower()
+    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
+        return bone_mapping_ci[lowered_name]
+    return SHINANO_CASUAL_BONE_MAP.get(lowered_name)
+
+
+def resolve_miltina_maid_gtav_bone(
+    raw_group_name: str,
+    mesh_name: Optional[str] = None,
+    bone_mapping_ci: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Map a Miltina Maid Blender vertex group name to its PB_MT_* GTA V bone."""
+    lowered_name = raw_group_name.strip().lower()
+    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
+        return bone_mapping_ci[lowered_name]
+    return MILTINA_MAID_BONE_MAP.get(lowered_name)
 
 
 def parse_vec3_string(raw_text: str, default_val: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> Tuple[float, float, float]:
@@ -143,7 +855,17 @@ def evaluate_curve(points: Sequence[Tuple[float, float]], param_t: float, defaul
     return float(points[-1][1])
 
 
-def load_physbone_config(cfg_path: str | Path) -> Dict[str, object]:
+def _normalize_gtav_chain_name(raw_name: str, fallback_prefix: str = "PB_Chain", index_num: int = 0) -> str:
+    """Sanitize a chain section name into a valid GTA V PB_* identifier."""
+    cleaned = regex_module.sub(r"[^A-Za-z0-9_]+", "_", str(raw_name).strip()).strip("_")
+    if not cleaned:
+        cleaned = f"{fallback_prefix}_{index_num}"
+    if not cleaned.upper().startswith("PB_"):
+        cleaned = f"PB_{cleaned}"
+    return cleaned[:48]
+
+
+def load_physbone_config(cfg_path: Union[str, Path]) -> Dict[str, Any]:
     """Load character PhysBone configuration from an INI-style .cfg file."""
     resolved_path = Path(cfg_path)
     if not resolved_path.is_file():
@@ -151,11 +873,16 @@ def load_physbone_config(cfg_path: str | Path) -> Dict[str, object]:
 
     parser = ConfigParser()
     parser.optionxform = str
-    with resolved_path.open("r", encoding="utf-8") as cfg_file:
+    with resolved_path.open("r", encoding="utf-8-sig") as cfg_file:
         parser.read_file(cfg_file)
 
     metadata = dict(parser["metadata"]) if parser.has_section("metadata") else {}
     bone_mapping = dict(parser["bone_mapping"]) if parser.has_section("bone_mapping") else {}
+    bone_mapping_ci = {
+        str(src_name).strip().lower(): str(dst_name).strip()
+        for src_name, dst_name in bone_mapping.items()
+        if str(src_name).strip() and str(dst_name).strip()
+    }
 
     chains: Dict[str, Dict[str, object]] = {}
     for section_name in parser.sections():
@@ -165,13 +892,23 @@ def load_physbone_config(cfg_path: str | Path) -> Dict[str, object]:
         sec = parser[section_name]
         chain_bones = [item.strip() for item in sec.get("chain_bones", "").split(",") if item.strip()]
         source_bones = [item.strip() for item in sec.get("source_bones", "").split(",") if item.strip()]
+        parent_bone_name = sec.get("parent_bone", "SKEL_Head").strip() or "SKEL_Head"
+        default_parent_tag = PARENT_BONE_TAGS.get(parent_bone_name, SKEL_HEAD_TAG)
+        gtav_chain_name = sec.get("gtav_chain_name", "").strip()
+        if not gtav_chain_name and chain_bones:
+            first_gtav = chain_bones[0]
+            if first_gtav.endswith("_0"):
+                gtav_chain_name = first_gtav[:-2]
+            else:
+                gtav_chain_name = _normalize_gtav_chain_name(chain_key)
         chains[chain_key] = {
             "source_key": chain_key,
+            "gtav_chain_name": gtav_chain_name or _normalize_gtav_chain_name(chain_key),
             "root_bone": sec.get("root_bone", chain_bones[0] if chain_bones else ""),
             "chain_bones": chain_bones,
             "source_bones": source_bones,
-            "parent_bone": sec.get("parent_bone", "SKEL_Head"),
-            "parent_bone_tag": sec.getint("parent_bone_tag", SKEL_HEAD_TAG),
+            "parent_bone": parent_bone_name,
+            "parent_bone_tag": sec.getint("parent_bone_tag", default_parent_tag),
             "version": sec.getint("version", 1),
             "integration_type": sec.getint("integration_type", 0),
             "multi_child_type": sec.getint("multi_child_type", 0),
@@ -190,7 +927,7 @@ def load_physbone_config(cfg_path: str | Path) -> Dict[str, object]:
             "max_angle_x": sec.getfloat("max_angle_x", 50.0),
             "max_angle_x_curve": parse_curve_string(sec.get("max_angle_x_curve", "0.0:1.0, 1.0:0.6")),
             "max_angle_z": sec.getfloat("max_angle_z", 45.0),
-            "limit_rotation": parse_vec3_string(sec.get("limit_rotation", "14.12, 0.0, 0.0")),
+            "limit_rotation": parse_vec3_string(sec.get("limit_rotation", "0.0, 0.0, 0.0")),
             "allow_grabbing": sec.getint("allow_grabbing", 1),
             "allow_posing": sec.getint("allow_posing", 1),
             "grab_movement": sec.getfloat("grab_movement", 0.5),
@@ -203,24 +940,77 @@ def load_physbone_config(cfg_path: str | Path) -> Dict[str, object]:
     return {
         "metadata": metadata,
         "bone_mapping": bone_mapping,
+        "bone_mapping_ci": bone_mapping_ci,
         "chains": chains,
     }
 
 
+def build_chain_specs_from_config(
+    loaded_cfg: Dict[str, Any],
+) -> Tuple[
+    Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...],
+    Dict[str, str],
+    Tuple[str, ...],
+    Dict[str, str],
+]:
+    """Derive chain_specs, parent_map, custom_bones, and bone_mapping_ci dynamically from loaded .cfg."""
+    chains = loaded_cfg.get("chains") or {}
+    specs_list: List[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]] = []
+    root_parents: Dict[str, str] = {}
+    for chain_idx, (chain_key, chain_data) in enumerate(chains.items()):
+        gtav_bones = tuple(
+            str(bone_item).strip()
+            for bone_item in (chain_data.get("chain_bones") or [])
+            if str(bone_item).strip()
+        )
+        src_bones = tuple(
+            str(bone_item).strip()
+            for bone_item in (chain_data.get("source_bones") or [])
+            if str(bone_item).strip()
+        )
+        if len(gtav_bones) < 2 or not src_bones:
+            continue
+        gtav_chain_name = str(chain_data.get("gtav_chain_name") or "").strip()
+        if not gtav_chain_name:
+            first_name = gtav_bones[0]
+            gtav_chain_name = (
+                first_name[:-2]
+                if first_name.endswith("_0")
+                else _normalize_gtav_chain_name(chain_key, index_num=chain_idx)
+            )
+        parent_name = str(chain_data.get("parent_bone") or "SKEL_Pelvis").strip() or "SKEL_Pelvis"
+        specs_list.append((chain_key, gtav_chain_name, src_bones, gtav_bones))
+        root_parents[chain_key] = parent_name
+
+    chain_specs = tuple(specs_list)
+    parent_map = _chain_parent_map(chain_specs, root_parents)
+    custom_bones = tuple(bone_name for _ck, _gn, _sb, gbs in chain_specs for bone_name in gbs)
+    bone_mapping_ci = dict(loaded_cfg.get("bone_mapping_ci") or {})
+    if not bone_mapping_ci:
+        bone_mapping_ci = {
+            str(src_name).strip().lower(): str(dst_name).strip()
+            for src_name, dst_name in (loaded_cfg.get("bone_mapping") or {}).items()
+            if str(src_name).strip() and str(dst_name).strip()
+        }
+    return chain_specs, parent_map, custom_bones, bone_mapping_ci
+
+
 def save_physbone_config(
-    cfg_path: str | Path,
+    cfg_path: Union[str, Path],
     chain_configs: Dict[str, Dict[str, object]],
     metadata: Optional[Dict[str, object]] = None,
     bone_mapping: Optional[Dict[str, str]] = None,
+    header_comments: Optional[Sequence[str]] = None,
 ) -> Path:
     """Write PhysBone parameters and bone mappings to an INI-style .cfg file."""
     resolved_path = Path(cfg_path)
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
-    lines: List[str] = [
-        "# VRC2GTAV PhysBone Preset - Auto-generated/verified character PhysBones",
-        "",
-        "[metadata]",
-    ]
+    lines: List[str] = list(
+        header_comments
+        if header_comments
+        else ("# VRC2GTAV PhysBone Preset - Auto-generated/verified character PhysBones",)
+    )
+    lines.extend(["", "[metadata]"])
     meta_dict = metadata or {
         "avatar": "Shinano Eternal Reunion",
         "character": "michael",
@@ -233,24 +1023,21 @@ def save_physbone_config(
         lines.append(f"{meta_key} = {meta_val}")
 
     lines.extend(["", "[bone_mapping]"])
-    map_dict = bone_mapping or {
-        "ear.L": "PB_Ear_L_0",
-        "ear.L.001": "PB_Ear_L_1",
-        "ear.L.002": "PB_Ear_L_2",
-        "ear.R": "PB_Ear_R_0",
-        "ear.R.001": "PB_Ear_R_1",
-        "ear.R.002": "PB_Ear_R_2",
-    }
+    map_dict = bone_mapping or dict(MICHAEL_ER_BONE_MAP)
     for src_name, dst_name in map_dict.items():
         lines.append(f"{src_name} = {dst_name}")
 
     for chain_key, cfg_data in chain_configs.items():
         lines.extend(["", f"[chain.{chain_key}]"])
+        if cfg_data.get("gtav_chain_name"):
+            lines.append(f"gtav_chain_name = {cfg_data['gtav_chain_name']}")
         lines.append(f"root_bone = {cfg_data.get('root_bone', '')}")
         lines.append(f"chain_bones = {', '.join(cfg_data.get('chain_bones', []))}")
         lines.append(f"source_bones = {', '.join(cfg_data.get('source_bones', []))}")
-        lines.append(f"parent_bone = {cfg_data.get('parent_bone', 'SKEL_Head')}")
-        lines.append(f"parent_bone_tag = {int(cfg_data.get('parent_bone_tag', SKEL_HEAD_TAG))}")
+        parent_bone = str(cfg_data.get("parent_bone", "SKEL_Head"))
+        parent_tag = int(cfg_data.get("parent_bone_tag", PARENT_BONE_TAGS.get(parent_bone, SKEL_HEAD_TAG)))
+        lines.append(f"parent_bone = {parent_bone}")
+        lines.append(f"parent_bone_tag = {parent_tag}")
         lines.append(f"component_guid = {VRCHAT_PHYSBONE_SCRIPT_GUID}")
         lines.append(f"version = {int(cfg_data.get('version', 1))}")
         lines.append(f"integration_type = {int(cfg_data.get('integration_type', 0))}")
@@ -284,10 +1071,10 @@ def save_physbone_config(
 
 def _parse_yaml_scalar_vec3(block_text: str, field_name: str, default_val: Tuple[float, float, float]) -> Tuple[float, float, float]:
     """Extract `{x: ..., y: ..., z: ...}` from a Unity YAML MonoBehaviour block."""
-    match = re.search(
-        rf"^\s*{re.escape(field_name)}:\s*\{{x:\s*([^,]+),\s*y:\s*([^,]+),\s*z:\s*([^}}]+)\}}",
+    match = regex_module.search(
+        rf"^\s*{regex_module.escape(field_name)}:\s*\{{x:\s*([^,]+),\s*y:\s*([^,]+),\s*z:\s*([^}}]+)\}}",
         block_text,
-        re.MULTILINE,
+        regex_module.MULTILINE,
     )
     if not match:
         return default_val
@@ -296,20 +1083,20 @@ def _parse_yaml_scalar_vec3(block_text: str, field_name: str, default_val: Tuple
 
 def _parse_yaml_curve(block_text: str, curve_field: str) -> List[Tuple[float, float]]:
     """Extract keyframe (time, value) pairs from a Unity AnimationCurve YAML block."""
-    match = re.search(
-        rf"^\s*{re.escape(curve_field)}:\s*\n\s*serializedVersion:\s*\d+\s*\n\s*m_Curve:\s*(.*?)(?=^\s*[A-Za-z_]\w*:|\Z)",
+    match = regex_module.search(
+        rf"^\s*{regex_module.escape(curve_field)}:\s*\n\s*serializedVersion:\s*\d+\s*\n\s*m_Curve:\s*(.*?)(?=^\s*[A-Za-z_]\w*:|\Z)",
         block_text,
-        re.MULTILINE | re.DOTALL,
+        regex_module.MULTILINE | regex_module.DOTALL,
     )
     if not match:
         return []
     curve_body = match.group(1)
-    pairs = re.findall(r"time:\s*([^\n\r]+)\s*\n\s*value:\s*([^\n\r]+)", curve_body)
+    pairs = regex_module.findall(r"time:\s*([^\n\r]+)\s*\n\s*value:\s*([^\n\r]+)", curve_body)
     return [(float(time_str), float(val_str)) for time_str, val_str in pairs]
 
 
 def extract_unity_physbones_from_prefab(
-    prefab_path: str | Path,
+    prefab_path: Union[str, Path],
     target_names: Sequence[str] = ("ear.L", "ear.R"),
 ) -> Dict[str, Dict[str, object]]:
     """
@@ -323,24 +1110,28 @@ def extract_unity_physbones_from_prefab(
         raise FileNotFoundError(f"Unity prefab not found: {resolved_prefab}")
 
     raw_text = resolved_prefab.read_text(encoding="utf-8", errors="replace")
-    documents = re.split(r"(?=^--- !u!\d+ &\d+)", raw_text, flags=re.MULTILINE)
+    documents = regex_module.split(r"(?=^--- !u!\d+ &\d+)", raw_text, flags=regex_module.MULTILINE)
 
     gameobject_names: Dict[str, str] = {}
     physbone_blocks: Dict[str, str] = {}
     target_lookup = {name.lower(): name for name in target_names}
 
     for doc_text in documents:
-        header_match = re.match(r"^--- !u!(\d+) &(\d+)", doc_text)
+        header_match = regex_module.match(r"^--- !u!(\d+) &(\d+)", doc_text)
         if not header_match:
             continue
         class_id = header_match.group(1)
         file_id = header_match.group(2)
         if class_id == "1":
-            name_match = re.search(r"^\s*m_Name:\s*(.+?)\s*$", doc_text, re.MULTILINE)
+            name_match = regex_module.search(r"^\s*m_Name:\s*(.+?)\s*$", doc_text, regex_module.MULTILINE)
             if name_match:
                 gameobject_names[file_id] = name_match.group(1).strip()
-        elif class_id == "114" and VRCHAT_PHYSBONE_SCRIPT_GUID in doc_text:
-            go_match = re.search(r"^\s*m_GameObject:\s*\{fileID:\s*(\d+)\}", doc_text, re.MULTILINE)
+        elif (
+            class_id == "114"
+            and VRCHAT_PHYSBONE_SCRIPT_GUID in doc_text
+            and f"fileID: {VRCHAT_PHYSBONE_CLASS_FILE_ID}" in doc_text
+        ):
+            go_match = regex_module.search(r"^\s*m_GameObject:\s*\{fileID:\s*(\d+)\}", doc_text, regex_module.MULTILINE)
             if go_match:
                 physbone_blocks[go_match.group(1)] = doc_text
 
@@ -348,11 +1139,11 @@ def extract_unity_physbones_from_prefab(
     spec_by_key = {spec[0].lower(): spec for spec in NEKO_MIMI_CHAIN_SPECS}
 
     def read_float(block_text: str, key_name: str, default_val: float) -> float:
-        matched = re.search(rf"^\s*{re.escape(key_name)}:\s*([-+0-9.eE]+)\s*$", block_text, re.MULTILINE)
+        matched = regex_module.search(rf"^\s*{regex_module.escape(key_name)}:\s*([-+0-9.eE]+)\s*$", block_text, regex_module.MULTILINE)
         return float(matched.group(1)) if matched else default_val
 
     def read_int(block_text: str, key_name: str, default_val: int) -> int:
-        matched = re.search(rf"^\s*{re.escape(key_name)}:\s*([-+]?\d+)\s*$", block_text, re.MULTILINE)
+        matched = regex_module.search(rf"^\s*{regex_module.escape(key_name)}:\s*([-+]?\d+)\s*$", block_text, regex_module.MULTILINE)
         return int(matched.group(1)) if matched else default_val
 
     for go_id, block_text in physbone_blocks.items():
@@ -402,6 +1193,2306 @@ def extract_unity_physbones_from_prefab(
     return extracted
 
 
+def _parse_unity_yaml_ref(line_val: str) -> Optional[Tuple[str, str]]:
+    """Parse `{fileID: 123, guid: abc}` reference text into `(file_id, guid)`."""
+    matched = regex_module.search(r"fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-fA-F]+))?", line_val)
+    if not matched:
+        return None
+    return (matched.group(1), (matched.group(2) or "").lower())
+
+
+def collect_fbx_weighted_bones(
+    fbx_paths: Sequence[Union[str, Path]],
+    excluded_meshes: Sequence[str] = (),
+) -> Tuple[Set[str], Set[str], Dict[str, str]]:
+    """
+    Fast pure-Python binary FBX inspector extracting all armature bone names (lowercase),
+    nonzero vertex-weighted bone names (lowercase), and lowercase `child -> parent` map.
+    """
+    all_bones_ci: Set[str] = set()
+    weighted_bones_ci: Set[str] = set()
+    parent_map_ci: Dict[str, str] = {}
+    excluded_low = {str(name_item).strip().lower() for name_item in excluded_meshes if str(name_item).strip()}
+
+    def _read_prop(raw_bytes: bytes, byte_pos: int) -> Tuple[Any, int]:
+        type_code = chr(raw_bytes[byte_pos])
+        byte_pos += 1
+        if type_code == "Y":
+            return struct.unpack_from("<h", raw_bytes, byte_pos)[0], byte_pos + 2
+        if type_code == "C":
+            return bool(raw_bytes[byte_pos]), byte_pos + 1
+        if type_code == "I":
+            return struct.unpack_from("<i", raw_bytes, byte_pos)[0], byte_pos + 4
+        if type_code == "F":
+            return struct.unpack_from("<f", raw_bytes, byte_pos)[0], byte_pos + 4
+        if type_code == "D":
+            return struct.unpack_from("<d", raw_bytes, byte_pos)[0], byte_pos + 8
+        if type_code == "L":
+            return struct.unpack_from("<q", raw_bytes, byte_pos)[0], byte_pos + 8
+        if type_code in ("S", "R"):
+            str_len = struct.unpack_from("<I", raw_bytes, byte_pos)[0]
+            byte_pos += 4
+            raw_slice = raw_bytes[byte_pos : byte_pos + str_len]
+            val = raw_slice.decode("utf-8", errors="replace") if type_code == "S" else str_len
+            return val, byte_pos + str_len
+        if type_code in ("f", "d", "l", "i", "b"):
+            arr_len, enc_flag, comp_len = struct.unpack_from("<III", raw_bytes, byte_pos)
+            byte_pos += 12
+            if type_code == "d" and arr_len > 0:
+                buf_bytes = raw_bytes[byte_pos : byte_pos + comp_len]
+                if enc_flag == 1:
+                    buf_bytes = zlib.decompress(buf_bytes)
+                vals = struct.unpack_from(f"<{arr_len}d", buf_bytes)
+                return max(vals) if vals else 0.0, byte_pos + comp_len
+            return arr_len, byte_pos + comp_len
+        raise ValueError(f"Unsupported FBX property code: {type_code}")
+
+    def _read_node(
+        raw_bytes: bytes,
+        byte_pos: int,
+        hdr_fmt: str,
+        hdr_size: int,
+        parse_props: bool = False,
+        parse_children: bool = False,
+    ) -> Tuple[Optional[Tuple[str, List[Any], List[Any]]], int]:
+        end_offset, prop_cnt, prop_len, name_len = struct.unpack_from(hdr_fmt, raw_bytes, byte_pos)
+        if end_offset == 0:
+            return None, byte_pos + hdr_size
+        byte_pos += hdr_size
+        node_name = raw_bytes[byte_pos : byte_pos + name_len].decode("utf-8", errors="replace")
+        byte_pos += name_len
+        prop_list: List[Any] = []
+        prop_end = byte_pos + prop_len
+        if parse_props:
+            for _prop_idx in range(prop_cnt):
+                prop_val, byte_pos = _read_prop(raw_bytes, byte_pos)
+                prop_list.append(prop_val)
+        byte_pos = prop_end
+        child_list: List[Any] = []
+        if parse_children:
+            while byte_pos < end_offset:
+                child_node, byte_pos = _read_node(
+                    raw_bytes,
+                    byte_pos,
+                    hdr_fmt,
+                    hdr_size,
+                    parse_props=True,
+                    parse_children=(node_name == "Objects"),
+                )
+                if child_node is None:
+                    break
+                child_list.append(child_node)
+        return (node_name, prop_list, child_list), end_offset
+
+    for raw_path in fbx_paths:
+        if not raw_path:
+            continue
+        fbx_file = Path(raw_path)
+        if not fbx_file.is_file():
+            continue
+        raw_bytes = fbx_file.read_bytes()
+        if len(raw_bytes) < 27:
+            continue
+        fbx_ver = struct.unpack_from("<I", raw_bytes, 23)[0]
+        is_64bit = fbx_ver >= 7500
+        hdr_fmt = "<QQQB" if is_64bit else "<IIIB"
+        hdr_size = 25 if is_64bit else 13
+
+        cursor = 27
+        models_map: Dict[int, Tuple[str, str]] = {}
+        geom_ids: Set[int] = set()
+        skin_ids: Set[int] = set()
+        cluster_maxw: Dict[int, float] = {}
+        conns_list: List[Tuple[int, int]] = []
+
+        while cursor < len(raw_bytes) - hdr_size:
+            end_offset, _pc, _pl, name_len = struct.unpack_from(hdr_fmt, raw_bytes, cursor)
+            if end_offset == 0:
+                break
+            top_name = raw_bytes[cursor + hdr_size : cursor + hdr_size + name_len].decode(
+                "utf-8", errors="replace"
+            )
+            if top_name in ("Objects", "Connections"):
+                parsed_top, cursor = _read_node(
+                    raw_bytes, cursor, hdr_fmt, hdr_size, parse_props=True, parse_children=True
+                )
+                if parsed_top is None:
+                    break
+                if top_name == "Objects":
+                    for sub_node in parsed_top[2]:
+                        sub_type = sub_node[0]
+                        sub_props = sub_node[1]
+                        if sub_type == "Model" and len(sub_props) >= 3:
+                            models_map[sub_props[0]] = (
+                                str(sub_props[1]).split("\x00")[0],
+                                str(sub_props[2]),
+                            )
+                        elif sub_type == "Geometry" and len(sub_props) >= 1:
+                            geom_ids.add(sub_props[0])
+                        elif sub_type == "Deformer" and len(sub_props) >= 3:
+                            if sub_props[2] == "Skin":
+                                skin_ids.add(sub_props[0])
+                            elif sub_props[2] == "Cluster":
+                                max_weight = 0.0
+                                for csub in sub_node[2]:
+                                    if csub[0] == "Weights" and csub[1] and isinstance(csub[1][0], (int, float)):
+                                        max_weight = float(csub[1][0])
+                                cluster_maxw[sub_props[0]] = max_weight
+                else:
+                    for sub_node in parsed_top[2]:
+                        if sub_node[0] == "C" and len(sub_node[1]) >= 3:
+                            conns_list.append((sub_node[1][1], sub_node[1][2]))
+            else:
+                cursor = end_offset
+
+        children_of: Dict[int, List[int]] = {}
+        for src_id, dst_id in conns_list:
+            children_of.setdefault(dst_id, []).append(src_id)
+            if src_id in models_map and dst_id in models_map:
+                src_name, src_subtype = models_map[src_id]
+                dst_name, dst_subtype = models_map[dst_id]
+                if src_subtype in ("LimbNode", "Null", "Root") and dst_subtype in ("LimbNode", "Null", "Root"):
+                    parent_map_ci.setdefault(src_name.lower(), dst_name.lower())
+
+        for model_id, (model_name, model_subtype) in models_map.items():
+            if model_subtype in ("LimbNode", "Null", "Root"):
+                all_bones_ci.add(model_name.lower())
+            if model_subtype != "Mesh" or model_name.strip().lower() in excluded_low:
+                continue
+            for geom_id in children_of.get(model_id, []):
+                if geom_id not in geom_ids:
+                    continue
+                for skin_id in children_of.get(geom_id, []):
+                    if skin_id not in skin_ids:
+                        continue
+                    for cluster_id in children_of.get(skin_id, []):
+                        if cluster_maxw.get(cluster_id, 0.0) <= 1e-4:
+                            continue
+                        for bone_id in children_of.get(cluster_id, []):
+                            if bone_id in models_map:
+                                weighted_bones_ci.add(models_map[bone_id][0].lower())
+
+    return all_bones_ci, weighted_bones_ci, parent_map_ci
+
+
+_UNITY_GUID_CACHE: Dict[str, Dict[str, Path]] = {}
+
+
+def _index_unity_asset_guids(
+    unity_assets_root: Optional[Union[str, Path]],
+    needed_guids: Set[str],
+    seed_files: Sequence[Union[str, Path]] = (),
+    character_hints: Sequence[str] = (),
+    deadline_sec: float = 6.0,
+) -> Dict[str, Path]:
+    """
+    Fast breadth-first GUID indexer scanning prioritized Unity asset subfolders.
+
+    Always prioritizes `marshmallow_PB` and package directories of `seed_files`,
+    never blindly walks `unity_assets_root` or its parents, and skips heavy
+    texture, material, and animation directories so resolution stays sub-second.
+    """
+    import time as time_mod
+
+    needed_low = {guid_str.strip().lower() for guid_str in needed_guids if guid_str}
+    if not needed_low:
+        return {}
+
+    try:
+        import unity_scene_helper
+    except ImportError:
+        unity_scene_helper = None
+
+    skip_dirs = (
+        set(getattr(unity_scene_helper, "_SKIP_SEARCH_DIRS", set()))
+        if unity_scene_helper
+        else {".git", "Library", "Temp", "Obj", "Logs"}
+    ) | {
+        "texture", "textures", "tex", "material", "materials", "mat",
+        "shader", "shaders", "animation", "animations", "anim", "psd",
+        "audio", "sound", "sfx", "vfx", "particle", "particles", "sprites",
+        "fx", "mask", "masks", "normal", "normals", "plugins", "editor",
+        "vrcsdk", "samples", "__backup",
+    }
+
+    assets_dir_resolved = (
+        Path(unity_assets_root).resolve()
+        if unity_assets_root and Path(unity_assets_root).is_dir()
+        else None
+    )
+    cache_key = str(assets_dir_resolved or "")
+    cached_map = _UNITY_GUID_CACHE.setdefault(cache_key, {})
+    guid_map: Dict[str, Path] = {
+        guid_key: cached_map[guid_key]
+        for guid_key in needed_low
+        if guid_key in cached_map and cached_map[guid_key].is_file()
+    }
+    remaining = needed_low - set(guid_map)
+    if not remaining:
+        return guid_map
+
+    def _is_safe_subdir(dir_path: Path) -> bool:
+        if not dir_path.is_dir():
+            return False
+        res_dir = dir_path.resolve()
+        if assets_dir_resolved is not None and (
+            res_dir == assets_dir_resolved or res_dir in assets_dir_resolved.parents
+        ):
+            return False
+        if res_dir == res_dir.parent:
+            return False
+        return True
+
+    candidate_roots: List[Path] = []
+    if assets_dir_resolved is not None:
+        marsh_dir = assets_dir_resolved / "marshmallow_PB"
+        if _is_safe_subdir(marsh_dir):
+            candidate_roots.append(marsh_dir)
+
+    for seed_item in seed_files:
+        if not seed_item:
+            continue
+        seed_path = Path(seed_item).resolve()
+        cur_parent = seed_path.parent
+        best_pkg_dir: Optional[Path] = None
+        for _step in range(5):
+            if _is_safe_subdir(cur_parent):
+                best_pkg_dir = cur_parent
+            if assets_dir_resolved is not None and cur_parent.parent == assets_dir_resolved:
+                break
+            cur_parent = cur_parent.parent
+        if best_pkg_dir is not None:
+            candidate_roots.append(best_pkg_dir)
+
+    if assets_dir_resolved is not None:
+        pkg_keywords = {
+            "shinano", "miltina", "milltina", "eternal",
+            "reunion", "dolos", "vagrant", "li-ne", "marshmallow",
+        }
+        for hint_str in character_hints:
+            hint_low = str(hint_str).strip().lower()
+            if len(hint_low) >= 3:
+                pkg_keywords.add(hint_low)
+        try:
+            for dir_entry in operating_system.scandir(assets_dir_resolved):
+                if dir_entry.is_dir(follow_symlinks=False) and not dir_entry.name.startswith("."):
+                    low_name = dir_entry.name.lower()
+                    if any(word_tok in low_name for word_tok in pkg_keywords):
+                        cand_dir = Path(dir_entry.path)
+                        if _is_safe_subdir(cand_dir):
+                            candidate_roots.append(cand_dir)
+        except OSError:
+            pass
+
+    seen_dirs: Set[Path] = set()
+    bfs_queue: List[Tuple[Path, int]] = []
+    for root_dir in candidate_roots:
+        res_root = root_dir.resolve()
+        if res_root not in seen_dirs and _is_safe_subdir(res_root):
+            seen_dirs.add(res_root)
+            bfs_queue.append((res_root, 0))
+
+    start_time = time_mod.monotonic()
+
+    def _scan_meta_dir(dir_queue: List[Tuple[Path, int]], max_depth: int, max_dirs: int) -> None:
+        dirs_scanned = 0
+        while dir_queue and remaining and dirs_scanned < max_dirs:
+            if (time_mod.monotonic() - start_time) > deadline_sec:
+                break
+            cur_dir, cur_depth = dir_queue.pop(0)
+            dirs_scanned += 1
+            try:
+                dir_entries = list(operating_system.scandir(cur_dir))
+            except OSError:
+                continue
+            for entry_item in dir_entries:
+                entry_name = entry_item.name
+                if entry_item.is_dir(follow_symlinks=False):
+                    low_dir = entry_name.lower()
+                    if (
+                        cur_depth < max_depth
+                        and not entry_name.startswith(".")
+                        and low_dir not in skip_dirs
+                    ):
+                        sub_res = Path(entry_item.path).resolve()
+                        if sub_res not in seen_dirs:
+                            seen_dirs.add(sub_res)
+                            dir_queue.append((sub_res, cur_depth + 1))
+                elif entry_name.endswith(".meta"):
+                    base_name = entry_name[:-5]
+                    if not base_name.lower().endswith((".prefab", ".fbx", ".asset")):
+                        continue
+                    try:
+                        with open(entry_item.path, "r", encoding="utf-8", errors="ignore") as meta_file:
+                            for _line_idx in range(8):
+                                meta_line = meta_file.readline()
+                                if not meta_line:
+                                    break
+                                if meta_line.startswith("guid:"):
+                                    guid_val = meta_line.split(":", 1)[1].strip().lower()
+                                    asset_path = Path(cur_dir) / base_name
+                                    cached_map[guid_val] = asset_path
+                                    if guid_val in remaining:
+                                        guid_map[guid_val] = asset_path
+                                        remaining.discard(guid_val)
+                                    break
+                    except OSError:
+                        pass
+
+    _scan_meta_dir(bfs_queue, max_depth=4, max_dirs=500)
+
+    # Shallow depth <= 2 scan across remaining asset folders only if GUIDs are still missing
+    if remaining and assets_dir_resolved is not None and (time_mod.monotonic() - start_time) < deadline_sec:
+        extra_queue: List[Tuple[Path, int]] = []
+        try:
+            for dir_entry in operating_system.scandir(assets_dir_resolved):
+                if dir_entry.is_dir(follow_symlinks=False) and not dir_entry.name.startswith("."):
+                    if dir_entry.name.lower() not in skip_dirs:
+                        sub_res = Path(dir_entry.path).resolve()
+                        if sub_res not in seen_dirs:
+                            seen_dirs.add(sub_res)
+                            extra_queue.append((sub_res, 0))
+        except OSError:
+            pass
+        _scan_meta_dir(extra_queue, max_depth=2, max_dirs=400)
+
+    return guid_map
+
+
+def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
+    """O(N) streaming YAML parser extracting GO, Transform, VRCPhysBone, Marshmallow PB, and PrefabInstance."""
+    gameobjects: Dict[str, Dict[str, Any]] = {}
+    transforms: Dict[str, Dict[str, Any]] = {}
+    physbones: Dict[str, Dict[str, Any]] = {}
+    marshmallow_setups: Dict[str, Dict[str, Any]] = {}
+    skinned_meshes: Dict[str, Dict[str, Any]] = {}
+    prefab_instances: Dict[str, Dict[str, Any]] = {}
+
+    cur_cls: Optional[str] = None
+    cur_id: Optional[str] = None
+    cur_stripped = False
+    cur_obj: Optional[Dict[str, Any]] = None
+    in_ignored = False
+    in_mods = False
+    cur_mod: Optional[Dict[str, Any]] = None
+    cur_curve_name: Optional[str] = None
+    cur_curve_time: Optional[float] = None
+    cur_marsh_list: Optional[str] = None
+
+    hdr_re = regex_module.compile(r"^--- !u!(\d+) &(-?\d+)(\s+stripped)?")
+
+    def _flush_cur() -> None:
+        nonlocal cur_obj
+        if cur_obj is None or cur_id is None:
+            cur_obj = None
+            return
+        cur_obj["stripped"] = cur_stripped
+        if cur_cls == "1":
+            gameobjects[cur_id] = cur_obj
+        elif cur_cls == "4":
+            transforms[cur_id] = cur_obj
+        elif cur_cls == "137":
+            skinned_meshes[cur_id] = cur_obj
+        elif cur_cls == "1001":
+            prefab_instances[cur_id] = cur_obj
+        elif cur_cls == "114":
+            if cur_obj.get("is_physbone"):
+                physbones[cur_id] = cur_obj
+            elif cur_obj.get("is_marshmallow"):
+                marshmallow_setups[cur_id] = cur_obj
+        cur_obj = None
+
+    with doc_path.open("r", encoding="utf-8", errors="ignore") as yaml_file:
+        for raw_line in yaml_file:
+            if raw_line.startswith("--- !u!"):
+                _flush_cur()
+                matched_hdr = hdr_re.match(raw_line)
+                in_ignored = False
+                in_mods = False
+                cur_mod = None
+                cur_curve_name = None
+                cur_curve_time = None
+                cur_marsh_list = None
+                if not matched_hdr:
+                    cur_cls = None
+                    continue
+                cur_cls = matched_hdr.group(1)
+                cur_id = matched_hdr.group(2)
+                cur_stripped = bool(matched_hdr.group(3))
+                if cur_cls in ("1", "4", "114", "137", "1001"):
+                    cur_obj = {"id": cur_id, "cls": cur_cls}
+                    if cur_cls == "1001":
+                        cur_obj["mods"] = []
+                else:
+                    cur_obj = None
+                continue
+
+            if cur_obj is None:
+                continue
+
+            stripped = raw_line.strip()
+            if cur_cls == "1":
+                if stripped.startswith("m_Name:"):
+                    cur_obj["name"] = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("m_IsActive:"):
+                    cur_obj["active"] = stripped.split(":", 1)[1].strip() != "0"
+                elif stripped.startswith("m_TagString:"):
+                    cur_obj["tag"] = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("m_PrefabInstance:"):
+                    cur_obj["pi"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_CorrespondingSourceObject:"):
+                    cur_obj["src"] = _parse_unity_yaml_ref(stripped)
+            elif cur_cls == "4":
+                if stripped.startswith("m_GameObject:"):
+                    cur_obj["go"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_Father:"):
+                    cur_obj["father"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_LocalPosition:"):
+                    cur_obj["local_pos"] = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("m_PrefabInstance:"):
+                    cur_obj["pi"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_CorrespondingSourceObject:"):
+                    cur_obj["src"] = _parse_unity_yaml_ref(stripped)
+            elif cur_cls == "137":
+                if stripped.startswith("m_GameObject:"):
+                    cur_obj["go"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_Enabled:"):
+                    cur_obj["enabled"] = stripped.split(":", 1)[1].strip() != "0"
+            elif cur_cls == "1001":
+                if stripped.startswith("m_TransformParent:"):
+                    in_mods = False
+                    cur_obj["parent_tf"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_SourcePrefab:"):
+                    in_mods = False
+                    cur_obj["source_prefab"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_Modifications:"):
+                    in_mods = True
+                    cur_mod = None
+                elif stripped.startswith(("m_Removed", "m_Added")):
+                    in_mods = False
+                    cur_mod = None
+                elif in_mods:
+                    if stripped.startswith("- target:"):
+                        cur_mod = {"target": _parse_unity_yaml_ref(stripped)}
+                        cur_obj["mods"].append(cur_mod)
+                    elif cur_mod is not None:
+                        if stripped.startswith("propertyPath:"):
+                            cur_mod["path"] = stripped.split(":", 1)[1].strip()
+                        elif stripped.startswith("value:"):
+                            cur_mod["value"] = stripped.split(":", 1)[1].strip()
+                        elif stripped.startswith("objectReference:"):
+                            cur_mod["objref"] = _parse_unity_yaml_ref(stripped)
+            elif cur_cls == "114":
+                if stripped.startswith("m_Script:"):
+                    ref_val = _parse_unity_yaml_ref(stripped)
+                    if (
+                        ref_val
+                        and ref_val[1] == VRCHAT_PHYSBONE_SCRIPT_GUID
+                        and ref_val[0] == VRCHAT_PHYSBONE_CLASS_FILE_ID
+                    ):
+                        cur_obj["is_physbone"] = True
+                elif stripped.startswith("m_GameObject:"):
+                    cur_obj["go"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_Enabled:"):
+                    cur_obj["enabled"] = stripped.split(":", 1)[1].strip() != "0"
+                elif stripped.startswith("m_PrefabInstance:"):
+                    cur_obj["pi"] = _parse_unity_yaml_ref(stripped)
+                elif stripped.startswith("m_CorrespondingSourceObject:"):
+                    cur_obj["src"] = _parse_unity_yaml_ref(stripped)
+                elif cur_obj.get("is_physbone"):
+                    if stripped.startswith("ignoreTransforms:"):
+                        in_ignored = True
+                        cur_obj["ignored"] = []
+                        cur_curve_name = None
+                    elif in_ignored:
+                        if stripped.startswith("- {fileID:"):
+                            cur_obj["ignored"].append(_parse_unity_yaml_ref(stripped))
+                        elif ":" in stripped and not stripped.startswith("-"):
+                            in_ignored = False
+                    if stripped in ("radiusCurve:", "maxAngleXCurve:"):
+                        cur_curve_name = stripped[:-1]
+                        cur_curve_time = None
+                        cur_obj.setdefault(cur_curve_name, [])
+                    elif cur_curve_name is not None:
+                        if stripped.startswith("time:"):
+                            try:
+                                cur_curve_time = float(stripped.split(":", 1)[1].strip())
+                            except ValueError:
+                                cur_curve_time = None
+                        elif stripped.startswith("value:") and cur_curve_time is not None:
+                            try:
+                                cur_obj[cur_curve_name].append(
+                                    (cur_curve_time, float(stripped.split(":", 1)[1].strip()))
+                                )
+                            except ValueError:
+                                pass
+                            cur_curve_time = None
+                        elif (
+                            ":" in stripped
+                            and not stripped.startswith(("-", "serializedVersion:", "m_Curve:", "inSlope:", "outSlope:", "tangentMode:", "weightedMode:", "inWeight:", "outWeight:", "m_PreInfinity:", "m_PostInfinity:", "m_RotationOrder:"))
+                        ):
+                            cur_curve_name = None
+                    if not in_ignored and cur_curve_name is None:
+                        if stripped.startswith("rootTransform:"):
+                            cur_obj["root_tf"] = _parse_unity_yaml_ref(stripped)
+                        elif stripped.startswith("endpointPosition:"):
+                            cur_obj["endpoint_position"] = _parse_yaml_scalar_vec3(raw_line, "endpointPosition", (0.0, 0.0, 0.0))
+                        elif stripped.startswith("limitRotation:"):
+                            cur_obj["limit_rotation"] = _parse_yaml_scalar_vec3(raw_line, "limitRotation", (0.0, 0.0, 0.0))
+                        else:
+                            for scalar_key, out_field in (
+                                ("version:", "version"),
+                                ("integrationType:", "integration_type"),
+                                ("multiChildType:", "multi_child_type"),
+                                ("pull:", "pull"),
+                                ("spring:", "spring"),
+                                ("stiffness:", "stiffness"),
+                                ("gravity:", "gravity"),
+                                ("gravityFalloff:", "gravity_falloff"),
+                                ("immobileType:", "immobile_type"),
+                                ("immobile:", "immobile"),
+                                ("allowCollision:", "allow_collision"),
+                                ("radius:", "radius"),
+                                ("limitType:", "limit_type"),
+                                ("maxAngleX:", "max_angle_x"),
+                                ("maxAngleZ:", "max_angle_z"),
+                                ("allowGrabbing:", "allow_grabbing"),
+                                ("allowPosing:", "allow_posing"),
+                                ("grabMovement:", "grab_movement"),
+                                ("maxStretch:", "max_stretch"),
+                                ("maxSquish:", "max_squish"),
+                                ("stretchMotion:", "stretch_motion"),
+                                ("isAnimated:", "is_animated"),
+                            ):
+                                if stripped.startswith(scalar_key):
+                                    cur_obj[out_field] = stripped.split(":", 1)[1].strip()
+                                    break
+                else:
+                    if stripped in ("_presets:", "_pbpresets:"):
+                        cur_marsh_list = stripped[:-1]
+                        cur_obj.setdefault(cur_marsh_list + "_list", [])
+                    elif cur_marsh_list is not None:
+                        if stripped.startswith("- {fileID:"):
+                            ref_item = _parse_unity_yaml_ref(stripped)
+                            cur_obj[cur_marsh_list + "_list"].append(ref_item)
+                            continue
+                        if ":" in stripped and not stripped.startswith("-"):
+                            cur_marsh_list = None
+                    if stripped.startswith("_marshmallowPBEnabled:"):
+                        cur_obj["is_marshmallow"] = True
+                        cur_obj[stripped.split(":", 1)[0]] = stripped.split(":", 1)[1].strip()
+                    elif stripped.startswith(("_PhysBone_", "_index:", "_presets.Array.data", "_pbpresets.Array.data")):
+                        key_tok, val_tok = stripped.split(":", 1)
+                        cur_obj[key_tok] = val_tok.strip()
+                        if "_PhysBone_Pull" in key_tok:
+                            cur_obj["is_marshmallow"] = True
+
+    _flush_cur()
+    return {
+        "path": doc_path,
+        "gos": gameobjects,
+        "tfs": transforms,
+        "pbs": physbones,
+        "marsh": marshmallow_setups,
+        "smrs": skinned_meshes,
+        "pis": prefab_instances,
+    }
+
+
+def _parse_marshmallow_asset_file(asset_path: Path) -> Dict[str, Any]:
+    """Read key-value fields from a Marshmallow PB `.asset` preset file."""
+    if not asset_path.is_file():
+        return {}
+    data: Dict[str, Any] = {}
+    for raw_line in asset_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        st_line = raw_line.strip()
+        for fld in (
+            "path_breast_L",
+            "path_breast_R",
+            "_PhysBone_Pull",
+            "_PhysBone_Momentum",
+            "_PhysBone_Stiffness",
+            "_PhysBone_Gravity",
+            "_PhysBone_GravityFalloff",
+            "_PhysBone_Immobile",
+            "_PhysBone_Immobile_type",
+            "_PhysBone_Stretch_Motion",
+            "_PhysBone_Max_Stretch",
+            "_PhysBone_Max_Squish",
+            "limit_angle_0",
+            "breast_collider_radius_0",
+        ):
+            if st_line.startswith(f"{fld}:"):
+                data[fld] = st_line.split(":", 1)[1].strip()
+                break
+    return data
+
+
+def _collect_marshmallow_pb_overrides(
+    scene_doc: Dict[str, Any],
+    visited_pis: Set[str],
+    guid_map: Dict[str, Path],
+    doc_cache: Dict[Path, Dict[str, Any]],
+    unity_assets_root: Optional[Union[str, Path]] = None,
+    is_tf_active_fn: Optional[Callable[[str], bool]] = None,
+) -> List[Dict[str, Any]]:
+    """Extract active Marshmallow PB breast presets and overrides from PrefabInstances."""
+    results: List[Dict[str, Any]] = []
+    for pi_id in sorted(visited_pis, key=lambda val_str: int(val_str)):
+        pi_info = scene_doc["pis"].get(pi_id)
+        if not pi_info:
+            continue
+        ptf_ref = pi_info.get("parent_tf")
+        ptf_id = ptf_ref[0] if ptf_ref else "0"
+        if is_tf_active_fn is not None and not is_tf_active_fn(ptf_id):
+            continue
+        sp_ref = pi_info.get("source_prefab")
+        src_path = guid_map.get(sp_ref[1]) if sp_ref else None
+        if not src_path or "marshmallow" not in src_path.name.lower() or not src_path.is_file():
+            continue
+        if src_path not in doc_cache:
+            doc_cache[src_path] = _stream_parse_unity_physbone_doc(src_path)
+        pref_doc = doc_cache[src_path]
+        base_marsh = next(iter(pref_doc["marsh"].values()), {})
+        merged: Dict[str, Any] = dict(base_marsh)
+        preset_refs: Dict[str, Tuple[str, str]] = {}
+        pbpreset_refs: Dict[str, Tuple[str, str]] = {}
+        explicit_mods: Dict[str, Any] = {}
+        root_active = True
+        root_tag = "Untagged"
+
+        for mod_item in pi_info.get("mods", []):
+            prop_path = mod_item.get("path", "")
+            val_str = mod_item.get("value", "")
+            obj_ref = mod_item.get("objref")
+            if prop_path == "m_IsActive":
+                root_active = val_str != "0"
+            elif prop_path == "m_TagString":
+                root_tag = val_str
+            elif prop_path in (
+                "_index",
+                "_marshmallowPBEnabled",
+                "_PhysBone_index",
+                "_PhysBone_Pull",
+                "_PhysBone_Momentum",
+                "_PhysBone_Stiffness",
+                "_PhysBone_Gravity",
+                "_PhysBone_GravityFalloff",
+                "_PhysBone_Immobile",
+                "_PhysBone_Immobile_type",
+                "_PhysBone_Limit_Angle",
+                "_PhysBone_Stretch_Motion",
+                "_PhysBone_Max_Stretch",
+                "_PhysBone_Max_Squish",
+                "_PhysBone_AllowCollision",
+                "_PhysBone_Collision_Radius",
+            ):
+                explicit_mods[prop_path] = val_str
+            elif prop_path.startswith("_presets.Array.data["):
+                idx_token = prop_path[len("_presets.Array.data[") :].rstrip("]")
+                if obj_ref and obj_ref[1]:
+                    preset_refs[idx_token] = obj_ref
+            elif prop_path.startswith("_pbpresets.Array.data["):
+                idx_token = prop_path[len("_pbpresets.Array.data[") :].rstrip("]")
+                if obj_ref and obj_ref[1]:
+                    pbpreset_refs[idx_token] = obj_ref
+
+        if not root_active or root_tag == "EditorOnly":
+            continue
+
+        # Apply _pbpresets[_PhysBone_index] only when explicitly selected via _PhysBone_index
+        pb_idx_str = str(explicit_mods.get("_PhysBone_index") or merged.get("_PhysBone_index", "")).strip()
+        pbpreset_data: Dict[str, Any] = {}
+        if "_PhysBone_index" in explicit_mods and pb_idx_str.isdigit():
+            pb_idx_num = int(pb_idx_str)
+            pb_ref = pbpreset_refs.get(pb_idx_str)
+            if not pb_ref:
+                pb_list = base_marsh.get("_pbpresets_list", [])
+                if 0 <= pb_idx_num < len(pb_list):
+                    pb_ref = pb_list[pb_idx_num]
+            if pb_ref and pb_ref[1]:
+                pb_path = guid_map.get(pb_ref[1])
+                if pb_path:
+                    pbpreset_data = _parse_marshmallow_asset_file(pb_path)
+
+        merged.update(pbpreset_data)
+        merged.update(explicit_mods)
+
+        if str(merged.get("_marshmallowPBEnabled", "1")).strip() == "0":
+            continue
+
+        preset_idx = str(merged.get("_index", "")).strip()
+        preset_data: Dict[str, Any] = {}
+        if preset_idx in preset_refs:
+            preset_path = guid_map.get(preset_refs[preset_idx][1])
+            if preset_path:
+                preset_data = _parse_marshmallow_asset_file(preset_path)
+        elif preset_idx.isdigit():
+            preset_list = base_marsh.get("_presets_list", [])
+            preset_num = int(preset_idx)
+            if 0 <= preset_num < len(preset_list) and preset_list[preset_num][1]:
+                preset_path = guid_map.get(preset_list[preset_num][1])
+                if preset_path:
+                    preset_data = _parse_marshmallow_asset_file(preset_path)
+        if not preset_data and unity_assets_root and preset_idx.isdigit():
+            cand_asset = (
+                Path(unity_assets_root)
+                / "marshmallow_PB"
+                / "Setup"
+                / "Preset"
+                / f"{int(preset_idx):02d}.asset"
+            )
+            if cand_asset.is_file():
+                preset_data = _parse_marshmallow_asset_file(cand_asset)
+
+        left_path = str(preset_data.get("path_breast_L") or "").strip()
+        right_path = str(preset_data.get("path_breast_R") or "").strip()
+        left_bone = left_path.rsplit("/", 1)[-1] if left_path else "Breast_1.L"
+        right_bone = right_path.rsplit("/", 1)[-1] if right_path else "Breast_1.R"
+
+        def _fval(field_key: str, default_num: float) -> float:
+            try:
+                return float(merged.get(field_key, default_num))
+            except (TypeError, ValueError):
+                return default_num
+
+        def _ival(field_key: str, default_num: int) -> int:
+            try:
+                return int(float(merged.get(field_key, default_num)))
+            except (TypeError, ValueError):
+                return default_num
+
+        raw_radius = _fval("_PhysBone_Collision_Radius", 0.06)
+        if raw_radius > 0.5:
+            # Slider scale in some Marshmallow presets is serialized in cm/percent (e.g. 4 -> 0.04 m)
+            raw_radius = max(0.01, min(0.15, raw_radius * 0.01))
+
+        lim_rot = _parse_yaml_scalar_vec3(
+            f"_PhysBone_Limit_Rotation: {merged.get('_PhysBone_Limit_Rotation', '{x: -10, y: 0, z: 0}')}",
+            "_PhysBone_Limit_Rotation",
+            (-10.0, 0.0, 0.0),
+        )
+        shared_params = {
+            "version": 1,
+            "integration_type": 0,
+            "multi_child_type": 0,
+            "endpoint_position": (0.0, 0.08, 0.0),
+            "pull": _fval("_PhysBone_Pull", 0.08),
+            "spring": _fval("_PhysBone_Momentum", 0.5),
+            "stiffness": _fval("_PhysBone_Stiffness", 0.25),
+            "gravity": _fval("_PhysBone_Gravity", 0.25),
+            "gravity_falloff": _fval("_PhysBone_GravityFalloff", 1.0),
+            "immobile_type": _ival("_PhysBone_Immobile_type", 0),
+            "immobile": _fval("_PhysBone_Immobile", 0.5),
+            "allow_collision": _ival("_PhysBone_AllowCollision", 1),
+            "radius": raw_radius,
+            "radius_curve": [],
+            "limit_type": 1,
+            "max_angle_x": _fval("_PhysBone_Limit_Angle", 35.0),
+            "max_angle_x_curve": [],
+            "max_angle_z": 45.0,
+            "limit_rotation": lim_rot,
+            "allow_grabbing": 1,
+            "allow_posing": 0,
+            "grab_movement": 0.1,
+            "max_stretch": _fval("_PhysBone_Max_Stretch", 0.3),
+            "max_squish": _fval("_PhysBone_Max_Squish", 0.6),
+            "stretch_motion": _fval("_PhysBone_Stretch_Motion", 0.5),
+            "is_animated": 1,
+            "from_marshmallow_pb": True,
+        }
+        for side_code, root_bone_name in (("L", left_bone), ("R", right_bone)):
+            entry = dict(shared_params)
+            entry["source_key"] = f"breast.{side_code}"
+            entry["root_bone"] = root_bone_name
+            entry["parent_bone"] = "SKEL_Spine2"
+            entry["parent_bone_tag"] = SKEL_SPINE2_TAG
+            results.append(entry)
+    return results
+
+
+def _collect_linear_spokes(
+    root_tf_id: str,
+    children_map: Dict[str, List[str]],
+    name_fn: Callable[[str], str],
+    ignored_tf_ids: Set[str],
+    allowed_bones_ci: Optional[Set[str]] = None,
+) -> Tuple[List[List[str]], List[str]]:
+    """
+    Walk a Unity transform subtree from root_tf_id, returning:
+      - list of linear spoke chains `[root_or_spoke, ..., leaf]`
+      - flat list of all valid visited bone names in subtree
+    """
+    root_name = name_fn(root_tf_id)
+    all_desc: List[str] = [root_name]
+    spokes: List[List[str]] = []
+
+    def _walk(cur_tf: str, cur_path: List[str], depth_val: int) -> None:
+        if depth_val > 16:
+            spokes.append(cur_path)
+            return
+        raw_children = [
+            child_tf
+            for child_tf in children_map.get(cur_tf, [])
+            if child_tf not in ignored_tf_ids
+        ]
+        # Filter out pure non-bone helpers when allowed_bones_ci is given (preserving at least direct path)
+        valid_children = raw_children
+        if allowed_bones_ci is not None:
+            filtered = [
+                child_tf
+                for child_tf in raw_children
+                if name_fn(child_tf).strip().lower() in allowed_bones_ci
+            ]
+            if filtered:
+                valid_children = filtered
+        if not valid_children:
+            spokes.append(cur_path)
+            return
+        for child_tf in valid_children:
+            child_name = name_fn(child_tf)
+            all_desc.append(child_name)
+            _walk(child_tf, cur_path + [child_name], depth_val + 1)
+
+    _walk(root_tf_id, [root_name], 0)
+    return spokes, all_desc
+
+
+def extract_unity_scene_physbones(
+    unity_path: Union[str, Path],
+    avatar_name: Optional[str] = None,
+    unity_assets_root: Optional[Union[str, Path]] = None,
+    fbx_paths: Sequence[Union[str, Path]] = (),
+    fallback_prefab_paths: Sequence[Union[str, Path]] = (),
+    include_marshmallow_pb: bool = True,
+    character_hints: Sequence[str] = (),
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """
+    Fast, general O(N) VRChat Unity scene & nested-prefab VRCPhysBone extractor.
+
+    Resolves direct `VRCPhysBone` (`fileID == 1661641543`, excluding colliders `-1631200402`),
+    child `PrefabInstance` hierarchies (`m_SourcePrefab` + `m_Modification` active/tag/property overrides),
+    `.fbx.meta` recycle names, `ignoreTransforms`, Marshmallow PB presets, and filters out non-mesh
+    VRChat contact gimmicks against FBX skinned bones when `fbx_paths` are provided.
+    """
+    resolved_unity = Path(unity_path)
+    if not resolved_unity.is_file():
+        return {"loaded": False, "chains": [], "marshmallow_breasts": [], "warnings": [f"Missing Unity file: {resolved_unity}"]}
+
+    if verbose:
+        print(f"[PhysBones] Scanning Unity scene {resolved_unity.name} ({avatar_name or 'auto'})...", flush=True)
+
+    all_fbx_bones, weighted_fbx_bones, fbx_parent_map = collect_fbx_weighted_bones(fbx_paths)
+    allowed_bones_ci: Optional[Set[str]] = weighted_fbx_bones or all_fbx_bones or None
+
+    scene_doc = _stream_parse_unity_physbone_doc(resolved_unity)
+    doc_cache: Dict[Path, Dict[str, Any]] = {resolved_unity: scene_doc}
+
+    # Find target avatar root Transform
+    root_tf_id: Optional[str] = None
+    selected_name = str(avatar_name or "").strip()
+    top_roots: List[Tuple[str, str]] = []
+    for tf_id, tf_data in scene_doc["tfs"].items():
+        father_ref = tf_data.get("father")
+        if not father_ref or father_ref[0] == "0":
+            go_ref = tf_data.get("go")
+            go_name = scene_doc["gos"].get(go_ref[0], {}).get("name", "") if go_ref else ""
+            top_roots.append((tf_id, go_name))
+
+    if selected_name:
+        for tf_id, go_name in top_roots:
+            if go_name == selected_name:
+                root_tf_id = tf_id
+                break
+        if root_tf_id is None:
+            for tf_id, tf_data in scene_doc["tfs"].items():
+                go_ref = tf_data.get("go")
+                go_name = scene_doc["gos"].get(go_ref[0], {}).get("name", "") if go_ref else ""
+                if go_name == selected_name:
+                    root_tf_id = tf_id
+                    break
+    if root_tf_id is None and top_roots:
+        # Prefer first root matching hints
+        hint_lows = [str(hint_item).strip().lower() for hint_item in character_hints if str(hint_item).strip()]
+        for tf_id, go_name in top_roots:
+            if any(hint_tok in go_name.lower() for hint_tok in hint_lows):
+                root_tf_id = tf_id
+                selected_name = go_name
+                break
+        if root_tf_id is None:
+            root_tf_id, selected_name = top_roots[0]
+
+    if root_tf_id is None:
+        return {"loaded": False, "chains": [], "marshmallow_breasts": [], "warnings": ["Avatar root transform not found"]}
+
+    children_tfs: Dict[str, List[str]] = {}
+    children_pis: Dict[str, List[str]] = {}
+    for tf_id, tf_data in scene_doc["tfs"].items():
+        father_ref = tf_data.get("father")
+        if father_ref and father_ref[0] != "0":
+            children_tfs.setdefault(father_ref[0], []).append(tf_id)
+    for pi_id, pi_data in scene_doc["pis"].items():
+        ptf_ref = pi_data.get("parent_tf")
+        if ptf_ref and ptf_ref[0] != "0":
+            children_pis.setdefault(ptf_ref[0], []).append(pi_id)
+
+    visited_tfs: Set[str] = set()
+    visited_pis: Set[str] = set()
+    bfs_queue: List[str] = [root_tf_id]
+    while bfs_queue:
+        cur_tf = bfs_queue.pop(0)
+        if cur_tf in visited_tfs:
+            continue
+        visited_tfs.add(cur_tf)
+        for child_tf in children_tfs.get(cur_tf, []):
+            bfs_queue.append(child_tf)
+        for child_pi in children_pis.get(cur_tf, []):
+            if child_pi not in visited_pis:
+                visited_pis.add(child_pi)
+                for tf_id, tf_data in scene_doc["tfs"].items():
+                    pi_ref = tf_data.get("pi")
+                    if pi_ref and pi_ref[0] == child_pi and tf_id not in visited_tfs:
+                        bfs_queue.append(tf_id)
+
+    # Collect GUIDs needed from PIs and FBX/prefab refs
+    needed_guids: Set[str] = set()
+    for pi_id in visited_pis:
+        sp_ref = scene_doc["pis"][pi_id].get("source_prefab")
+        if sp_ref and sp_ref[1]:
+            needed_guids.add(sp_ref[1])
+        for mod_item in scene_doc["pis"][pi_id].get("mods", []):
+            obj_ref = mod_item.get("objref")
+            if obj_ref and obj_ref[1]:
+                needed_guids.add(obj_ref[1])
+    for tf_id in visited_tfs:
+        src_ref = scene_doc["tfs"][tf_id].get("src")
+        if src_ref and src_ref[1]:
+            needed_guids.add(src_ref[1])
+
+    guid_map = _index_unity_asset_guids(
+        unity_assets_root,
+        needed_guids,
+        seed_files=[resolved_unity] + list(fbx_paths) + list(fallback_prefab_paths),
+        character_hints=character_hints,
+    )
+
+    try:
+        import unity_scene_helper
+    except ImportError:
+        unity_scene_helper = None
+    fbx_name_cache: Dict[Path, Dict[str, str]] = {}
+
+    def _get_doc(doc_p: Path) -> Dict[str, Any]:
+        if doc_p not in doc_cache:
+            doc_cache[doc_p] = _stream_parse_unity_physbone_doc(doc_p)
+        return doc_cache[doc_p]
+
+    def _resolve_tf_name(doc_obj: Dict[str, Any], tf_id: str) -> str:
+        tf_entry = doc_obj["tfs"].get(tf_id)
+        if not tf_entry:
+            return ""
+        go_ref = tf_entry.get("go")
+        if go_ref:
+            go_entry = doc_obj["gos"].get(go_ref[0])
+            if go_entry and go_entry.get("name"):
+                return str(go_entry["name"])
+        src_ref = tf_entry.get("src")
+        if src_ref and src_ref[1]:
+            asset_p = guid_map.get(src_ref[1])
+            if asset_p and asset_p.is_file():
+                low_suf = asset_p.suffix.lower()
+                if low_suf == ".fbx" and unity_scene_helper is not None:
+                    if asset_p not in fbx_name_cache:
+                        fbx_name_cache[asset_p] = unity_scene_helper._load_prefab_file_id_names(asset_p)
+                    if src_ref[0] in fbx_name_cache[asset_p]:
+                        return fbx_name_cache[asset_p][src_ref[0]]
+                elif low_suf == ".prefab":
+                    ext_doc = _get_doc(asset_p)
+                    ext_tf = ext_doc["tfs"].get(src_ref[0])
+                    if ext_tf and ext_tf.get("go"):
+                        return str(ext_doc["gos"].get(ext_tf["go"][0], {}).get("name", ""))
+        return ""
+
+    def _is_scene_tf_active(tf_id: str) -> bool:
+        cur_id = tf_id
+        while cur_id and cur_id != "0" and cur_id != root_tf_id:
+            tf_entry = scene_doc["tfs"].get(cur_id)
+            if not tf_entry:
+                break
+            go_ref = tf_entry.get("go")
+            if go_ref:
+                go_entry = scene_doc["gos"].get(go_ref[0])
+                if go_entry:
+                    if go_entry.get("active") is False or go_entry.get("tag") == "EditorOnly":
+                        return False
+            father_ref = tf_entry.get("father")
+            cur_id = father_ref[0] if father_ref else ""
+        return True
+
+    def _scene_ancestor_names(tf_id: str) -> List[str]:
+        ancestors: List[str] = []
+        cur_id = tf_id
+        for _step in range(32):
+            tf_entry = scene_doc["tfs"].get(cur_id)
+            if not tf_entry:
+                break
+            father_ref = tf_entry.get("father")
+            cur_id = father_ref[0] if father_ref else ""
+            if not cur_id or cur_id == "0":
+                break
+            anc_name = _resolve_tf_name(scene_doc, cur_id)
+            if anc_name:
+                ancestors.append(anc_name)
+        return ancestors
+
+    def _pb_to_record(
+        pb_raw: Dict[str, Any],
+        root_name: str,
+        spoke_bones: List[str],
+        all_desc: List[str],
+        ancestors: List[str],
+        default_parent_override: Optional[Tuple[str, int]] = None,
+    ) -> Dict[str, Any]:
+        parent_name, parent_tag = (
+            default_parent_override
+            if default_parent_override is not None
+            else resolve_parent_bone_from_unity_chain(ancestors)
+        )
+
+        def _fval(field_key: str, default_num: float) -> float:
+            try:
+                return float(pb_raw.get(field_key, default_num))
+            except (TypeError, ValueError):
+                return default_num
+
+        def _ival(field_key: str, default_num: int) -> int:
+            try:
+                return int(float(pb_raw.get(field_key, default_num)))
+            except (TypeError, ValueError):
+                return default_num
+
+        return {
+            "root_bone": root_name,
+            "spoke_bones": list(spoke_bones),
+            "all_descendants": list(all_desc),
+            "parent_bone": parent_name,
+            "parent_bone_tag": parent_tag,
+            "version": _ival("version", 1),
+            "integration_type": _ival("integration_type", 0),
+            "multi_child_type": _ival("multi_child_type", 0),
+            "endpoint_position": tuple(pb_raw.get("endpoint_position", (0.0, 0.0, 0.0))),
+            "pull": _fval("pull", 0.2),
+            "spring": _fval("spring", 0.35),
+            "stiffness": _fval("stiffness", 0.2),
+            "gravity": _fval("gravity", 0.0),
+            "gravity_falloff": _fval("gravity_falloff", 0.0),
+            "immobile_type": _ival("immobile_type", 0),
+            "immobile": _fval("immobile", 0.3),
+            "allow_collision": _ival("allow_collision", 1),
+            "radius": _fval("radius", 0.025),
+            "radius_curve": list(pb_raw.get("radiusCurve", [])),
+            "limit_type": _ival("limit_type", 1),
+            "max_angle_x": _fval("max_angle_x", 50.0),
+            "max_angle_x_curve": list(pb_raw.get("maxAngleXCurve", [])),
+            "max_angle_z": _fval("max_angle_z", 45.0),
+            "limit_rotation": tuple(pb_raw.get("limit_rotation", (0.0, 0.0, 0.0))),
+            "allow_grabbing": _ival("allow_grabbing", 1),
+            "allow_posing": _ival("allow_posing", 1),
+            "grab_movement": _fval("grab_movement", 0.5),
+            "max_stretch": _fval("max_stretch", 0.0),
+            "max_squish": _fval("max_squish", 0.0),
+            "stretch_motion": _fval("stretch_motion", 0.0),
+            "is_animated": _ival("is_animated", 1),
+        }
+
+    extracted_spokes: List[Dict[str, Any]] = []
+    go_to_tf = {
+        tf_data["go"][0]: tf_id
+        for tf_id, tf_data in scene_doc["tfs"].items()
+        if tf_data.get("go")
+    }
+
+    # 1. Direct scene VRCPhysBones under avatar root
+    for pb_id, pb_data in scene_doc["pbs"].items():
+        if pb_data.get("stripped") or pb_data.get("enabled", True) is False:
+            continue
+        go_ref = pb_data.get("go")
+        if not go_ref:
+            continue
+        tf_id = go_to_tf.get(go_ref[0])
+        if tf_id not in visited_tfs or not _is_scene_tf_active(tf_id):
+            continue
+        rt_ref = pb_data.get("root_tf")
+        rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and not rt_ref[1] and rt_ref[0] in scene_doc["tfs"]) else tf_id
+        rt_name = _resolve_tf_name(scene_doc, rt_tid) or _resolve_tf_name(scene_doc, tf_id)
+        if not rt_name:
+            continue
+        ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
+        spokes, all_desc = _collect_linear_spokes(
+            rt_tid,
+            children_tfs,
+            lambda tid_arg: _resolve_tf_name(scene_doc, tid_arg),
+            ignored_ids,
+            allowed_bones_ci=allowed_bones_ci,
+        )
+        # Skip gimmick PBs whose bones are not in avatar's weighted FBX bones
+        if allowed_bones_ci is not None and not any(
+            bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+        ):
+            continue
+        ancestors = _scene_ancestor_names(rt_tid)
+        for spoke_bones in spokes:
+            extracted_spokes.append(_pb_to_record(pb_data, rt_name, spoke_bones, all_desc, ancestors))
+
+    # 2. Active child PrefabInstance VRCPhysBones (e.g. MA Shinano hair, outfits)
+    for pi_id in sorted(visited_pis, key=lambda val_s: int(val_s)):
+        pi_data = scene_doc["pis"][pi_id]
+        ptf_ref = pi_data.get("parent_tf")
+        ptf_id = ptf_ref[0] if ptf_ref else "0"
+        if ptf_id not in visited_tfs or not _is_scene_tf_active(ptf_id):
+            continue
+        sp_ref = pi_data.get("source_prefab")
+        if not sp_ref or not sp_ref[1]:
+            continue
+        prefab_path = guid_map.get(sp_ref[1])
+        if not prefab_path or not prefab_path.is_file() or prefab_path.suffix.lower() != ".prefab":
+            continue
+        pref_doc = _get_doc(prefab_path)
+        mods_by_target: Dict[str, List[Dict[str, Any]]] = {}
+        for mod_item in pi_data.get("mods", []):
+            target_ref = mod_item.get("target")
+            if target_ref:
+                mods_by_target.setdefault(target_ref[0], []).append(mod_item)
+
+        # Check root GO override in PI (active/EditorOnly)
+        pref_root_tid = next(
+            (tid for tid, tf_d in pref_doc["tfs"].items() if not tf_d.get("father") or tf_d["father"][0] == "0"),
+            None,
+        )
+        if pref_root_tid and pref_doc["tfs"][pref_root_tid].get("go"):
+            rgo_id = pref_doc["tfs"][pref_root_tid]["go"][0]
+            rgo = pref_doc["gos"].get(rgo_id, {})
+            root_active = rgo.get("active", True)
+            root_tag = rgo.get("tag", "")
+            for mod_item in mods_by_target.get(rgo_id, []):
+                if mod_item.get("path") == "m_IsActive":
+                    root_active = mod_item.get("value") != "0"
+                elif mod_item.get("path") == "m_TagString":
+                    root_tag = mod_item.get("value", "")
+            if not root_active or root_tag == "EditorOnly":
+                continue
+
+        pref_children: Dict[str, List[str]] = {}
+        for tid, tf_d in pref_doc["tfs"].items():
+            fref = tf_d.get("father")
+            if fref and fref[0] != "0":
+                pref_children.setdefault(fref[0], []).append(tid)
+        pref_go_to_tf = {
+            tf_d["go"][0]: tid for tid, tf_d in pref_doc["tfs"].items() if tf_d.get("go")
+        }
+        pi_ancestors = [_resolve_tf_name(scene_doc, ptf_id)] + _scene_ancestor_names(ptf_id)
+
+        for pb_id, pb_raw in pref_doc["pbs"].items():
+            eff_pb = dict(pb_raw)
+            eff_enabled = eff_pb.get("enabled", True)
+            for mod_item in mods_by_target.get(pb_id, []):
+                m_path = mod_item.get("path", "")
+                if m_path == "m_Enabled":
+                    eff_enabled = mod_item.get("value") != "0"
+                elif m_path in (
+                    "pull", "spring", "stiffness", "gravity", "immobile",
+                    "limitType", "maxAngleX", "maxAngleZ",
+                ):
+                    key_map = {
+                        "limitType": "limit_type",
+                        "maxAngleX": "max_angle_x",
+                        "maxAngleZ": "max_angle_z",
+                    }.get(m_path, m_path)
+                    eff_pb[key_map] = mod_item.get("value")
+            if not eff_enabled:
+                continue
+            go_ref = eff_pb.get("go")
+            if not go_ref:
+                continue
+            pref_tid = pref_go_to_tf.get(go_ref[0])
+            if not pref_tid:
+                continue
+            # Check active along prefab chain
+            chain_ok = True
+            cur_pt = pref_tid
+            while cur_pt and cur_pt != "0":
+                pt_entry = pref_doc["tfs"].get(cur_pt)
+                if not pt_entry:
+                    break
+                cgo_id = pt_entry.get("go", ("0",))[0]
+                cgo = pref_doc["gos"].get(cgo_id, {})
+                c_active = cgo.get("active", True)
+                c_tag = cgo.get("tag", "")
+                for mod_item in mods_by_target.get(cgo_id, []):
+                    if mod_item.get("path") == "m_IsActive":
+                        c_active = mod_item.get("value") != "0"
+                    elif mod_item.get("path") == "m_TagString":
+                        c_tag = mod_item.get("value", "")
+                if not c_active or c_tag == "EditorOnly":
+                    chain_ok = False
+                    break
+                cur_pt = pt_entry.get("father", ("0",))[0]
+            if not chain_ok:
+                continue
+
+            rt_ref = eff_pb.get("root_tf")
+            rt_tid = (
+                rt_ref[0]
+                if (rt_ref and rt_ref[0] != "0" and (not rt_ref[1] or rt_ref[1] == sp_ref[1]) and rt_ref[0] in pref_doc["tfs"])
+                else pref_tid
+            )
+            rt_name = _resolve_tf_name(pref_doc, rt_tid) or _resolve_tf_name(pref_doc, pref_tid)
+            if not rt_name:
+                continue
+            ignored_ids = {ref[0] for ref in eff_pb.get("ignored", []) if ref and ref[0] != "0"}
+            spokes, all_desc = _collect_linear_spokes(
+                rt_tid,
+                pref_children,
+                lambda tid_arg, pd_ref=pref_doc: _resolve_tf_name(pd_ref, tid_arg),
+                ignored_ids,
+                allowed_bones_ci=allowed_bones_ci,
+            )
+            if allowed_bones_ci is not None and not any(
+                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            ):
+                continue
+            # Ancestors inside prefab + scene parent chain
+            anc_names: List[str] = []
+            cur_anc = rt_tid
+            for _step in range(16):
+                cur_anc = pref_doc["tfs"].get(cur_anc, {}).get("father", ("0",))[0]
+                if not cur_anc or cur_anc == "0":
+                    break
+                aname = _resolve_tf_name(pref_doc, cur_anc)
+                if aname:
+                    anc_names.append(aname)
+            anc_names.extend(pi_ancestors)
+            for spoke_bones in spokes:
+                extracted_spokes.append(_pb_to_record(eff_pb, rt_name, spoke_bones, all_desc, anc_names))
+
+    # 3. Fallback prefabs (e.g. Shinano.prefab when vrc2gtav.cfg sets custom_hair = default while scene had EditorOnly hair)
+    seen_root_bones_ci = {rec["root_bone"].strip().lower() for rec in extracted_spokes}
+    for fb_pref_path in fallback_prefab_paths:
+        fb_p = Path(fb_pref_path)
+        if not fb_p.is_file():
+            continue
+        fb_doc = _get_doc(fb_p)
+        fb_children: Dict[str, List[str]] = {}
+        fb_go_to_tf: Dict[str, str] = {}
+        for tid, tf_d in fb_doc["tfs"].items():
+            fref = tf_d.get("father")
+            if fref and fref[0] != "0":
+                fb_children.setdefault(fref[0], []).append(tid)
+            if tf_d.get("go"):
+                fb_go_to_tf[tf_d["go"][0]] = tid
+        # Also resolve .fbx.meta fileIDs used inside fallback prefab
+        for tid, tf_d in fb_doc["tfs"].items():
+            sref = tf_d.get("src")
+            if sref and sref[1] and sref[1] not in guid_map and fbx_paths:
+                for cand_fbx in fbx_paths:
+                    if cand_fbx and Path(cand_fbx).is_file():
+                        guid_map[sref[1]] = Path(cand_fbx)
+                        break
+
+        for pb_id, pb_raw in fb_doc["pbs"].items():
+            if not pb_raw.get("enabled", True):
+                continue
+            go_ref = pb_raw.get("go")
+            if not go_ref:
+                continue
+            tid = fb_go_to_tf.get(go_ref[0])
+            if not tid:
+                continue
+            rt_ref = pb_raw.get("root_tf")
+            rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and rt_ref[0] in fb_doc["tfs"]) else tid
+            rt_name = _resolve_tf_name(fb_doc, rt_tid) or _resolve_tf_name(fb_doc, tid)
+            if not rt_name or rt_name.strip().lower() in seen_root_bones_ci:
+                continue
+            if "physbone_" in rt_name.lower() or "breast" in rt_name.lower():
+                continue
+            spokes, all_desc = _collect_linear_spokes(
+                rt_tid,
+                fb_children,
+                lambda tid_arg, fd_ref=fb_doc: _resolve_tf_name(fd_ref, tid_arg),
+                set(),
+                allowed_bones_ci=allowed_bones_ci,
+            )
+            if allowed_bones_ci is not None and not any(
+                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            ):
+                continue
+            seen_root_bones_ci.add(rt_name.strip().lower())
+            anc_names = []
+            cur_anc = rt_tid
+            for _step in range(16):
+                cur_anc = fb_doc["tfs"].get(cur_anc, {}).get("father", ("0",))[0]
+                if not cur_anc or cur_anc == "0":
+                    break
+                aname = _resolve_tf_name(fb_doc, cur_anc)
+                if aname:
+                    anc_names.append(aname)
+            for spoke_bones in spokes:
+                extracted_spokes.append(_pb_to_record(pb_raw, rt_name, spoke_bones, all_desc, anc_names))
+
+    # 3b. Recover direct base-armature PBs tagged EditorOnly when custom_hair=default fallback is active
+    if fallback_prefab_paths:
+        for pb_id, pb_data in scene_doc["pbs"].items():
+            if pb_data.get("stripped") or pb_data.get("enabled", True) is False:
+                continue
+            go_ref = pb_data.get("go")
+            if not go_ref:
+                continue
+            go_info = scene_doc["gos"].get(go_ref[0], {})
+            # Only recover direct base armature objects (not disabled third-party PrefabInstance objects)
+            if go_info.get("pi") and go_info["pi"][0] != "0":
+                continue
+            tf_id = go_to_tf.get(go_ref[0])
+            if tf_id not in visited_tfs or go_info.get("active") is False:
+                continue
+            rt_ref = pb_data.get("root_tf")
+            rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and not rt_ref[1] and rt_ref[0] in scene_doc["tfs"]) else tf_id
+            rt_name = _resolve_tf_name(scene_doc, rt_tid) or _resolve_tf_name(scene_doc, tf_id)
+            if not rt_name or rt_name.strip().lower() in seen_root_bones_ci:
+                continue
+            ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
+            spokes, all_desc = _collect_linear_spokes(
+                rt_tid,
+                children_tfs,
+                lambda tid_arg: _resolve_tf_name(scene_doc, tid_arg),
+                ignored_ids,
+                allowed_bones_ci=allowed_bones_ci,
+            )
+            if allowed_bones_ci is not None and not any(
+                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            ):
+                continue
+            seen_root_bones_ci.add(rt_name.strip().lower())
+            ancestors = _scene_ancestor_names(rt_tid)
+            for spoke_bones in spokes:
+                extracted_spokes.append(_pb_to_record(pb_data, rt_name, spoke_bones, all_desc, ancestors))
+
+    # 4. Marshmallow PB overrides (Breast_1.L/R or Breast_L/R)
+    marshmallow_breasts: List[Dict[str, Any]] = []
+    if include_marshmallow_pb:
+        marshmallow_breasts = _collect_marshmallow_pb_overrides(
+            scene_doc,
+            visited_pis,
+            guid_map,
+            doc_cache,
+            unity_assets_root=unity_assets_root,
+            is_tf_active_fn=_is_scene_tf_active,
+        )
+        for mb_rec in marshmallow_breasts:
+            mb_root_low = mb_rec["root_bone"].strip().lower()
+            child_chain = [mb_rec["root_bone"]]
+            for cand_b in sorted(all_fbx_bones):
+                if fbx_parent_map.get(cand_b) == mb_root_low:
+                    # Preserve canonical casing if weighted
+                    child_chain.append(cand_b)
+                    break
+            mb_rec["spoke_bones"] = child_chain
+            mb_rec["all_descendants"] = list(child_chain)
+            # Replace existing raw Breast entry for same root bone
+            extracted_spokes = [
+                item for item in extracted_spokes
+                if item["root_bone"].strip().lower() != mb_root_low
+            ]
+            extracted_spokes.append(mb_rec)
+
+    # Guarantee symmetry pair when one Breast side exists (e.g. Franklin Breast_1.R active while Breast_1.L was off)
+    breast_sides = {
+        ("L" if rec["root_bone"].lower().endswith((".l", "_l")) else ("R" if rec["root_bone"].lower().endswith((".r", "_r")) else "")): rec
+        for rec in extracted_spokes
+        if "breast" in rec["root_bone"].lower()
+    }
+    if "R" in breast_sides and "L" not in breast_sides:
+        clone = dict(breast_sides["R"])
+        clone["root_bone"] = regex_module.sub(r"([._])R$", r"\1L", clone["root_bone"])
+        clone["spoke_bones"] = [regex_module.sub(r"([._])R(\b|$)", r"\1L\2", bname) for bname in clone["spoke_bones"]]
+        extracted_spokes.append(clone)
+    elif "L" in breast_sides and "R" not in breast_sides:
+        clone = dict(breast_sides["L"])
+        clone["root_bone"] = regex_module.sub(r"([._])L$", r"\1R", clone["root_bone"])
+        clone["spoke_bones"] = [regex_module.sub(r"([._])L(\b|$)", r"\1R\2", bname) for bname in clone["spoke_bones"]]
+        extracted_spokes.append(clone)
+
+    return {
+        "loaded": True,
+        "source_path": str(resolved_unity),
+        "root_name": selected_name,
+        "chains": extracted_spokes,
+        "marshmallow_breasts": marshmallow_breasts,
+        "fbx_weighted_bones": sorted(weighted_fbx_bones),
+        "warnings": [],
+    }
+
+
+def _match_extracted_unity_params(
+    template_chain_key: str,
+    template_src_bones: Tuple[str, ...],
+    extracted_spokes: Sequence[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Find the extracted Unity PhysBone record matching a packed chain spec."""
+    src_lows = [src_name.strip().lower() for src_name in template_src_bones]
+    root_low = src_lows[0] if src_lows else template_chain_key.strip().lower()
+    key_low = template_chain_key.strip().lower()
+
+    for rec in extracted_spokes:
+        if rec["root_bone"].strip().lower() == root_low:
+            return rec
+    for rec in extracted_spokes:
+        if rec["root_bone"].strip().lower() == key_low:
+            return rec
+    for rec in extracted_spokes:
+        rec_root = rec["root_bone"].strip().lower()
+        if rec_root in src_lows:
+            return rec
+    for rec in extracted_spokes:
+        desc_lows = {desc_b.strip().lower() for desc_b in rec.get("all_descendants", ())}
+        spoke_lows = {spk_b.strip().lower() for spk_b in rec.get("spoke_bones", ())}
+        if root_low in desc_lows or root_low in spoke_lows:
+            return rec
+    # Prefix match fallback (e.g. Skirt_FrontB -> Skirt)
+    prefix_tok = root_low.split(".", 1)[0].rstrip("0123456789")
+    for rec in extracted_spokes:
+        if rec["root_bone"].strip().lower().startswith(prefix_tok):
+            return rec
+    return None
+
+
+def pack_physbone_chains_to_gtav_budget(
+    extracted_spokes: Sequence[Dict[str, Any]],
+    gtav_prefix: str = "PB_Auto",
+    max_custom_bones: int = MAX_CUSTOM_PHYSBONES_PER_PED,
+    template_chain_specs: Optional[Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...]] = None,
+    template_root_parents: Optional[Dict[str, str]] = None,
+    template_bone_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Pack extracted VRChat Unity PhysBone chains safely within GTA V's `<= 63` custom-bone limit.
+
+    When a curated template matches (`>= 4` matching active source bones), populates each chain's
+    exact physics parameters directly from Unity + Marshmallow PB while preserving the clean
+    grouped hierarchy. For arbitrary avatars, clusters spoke/redundant chains automatically into
+    `<= max_custom_bones` with `>= 2` bones per chain and zero ELF tag collisions.
+    """
+    if template_chain_specs and template_root_parents and template_bone_map:
+        extracted_bone_lows = {
+            bone_str.strip().lower()
+            for rec in extracted_spokes
+            for bone_str in ([rec["root_bone"]] + list(rec.get("spoke_bones", ())) + list(rec.get("all_descendants", ())))
+        }
+        overlap_count = sum(1 for key_name in template_bone_map if key_name in extracted_bone_lows)
+        if overlap_count >= 4:
+            chains_out: Dict[str, Dict[str, object]] = {}
+            for chain_key, gtav_name, src_bones, gtav_bones in template_chain_specs:
+                matched = _match_extracted_unity_params(chain_key, src_bones, extracted_spokes)
+                parent_bone_name = template_root_parents.get(chain_key, "SKEL_Pelvis")
+                parent_bone_tag = PARENT_BONE_TAGS.get(parent_bone_name, SKEL_PELVIS_TAG)
+                base_params = matched or {}
+                chains_out[chain_key] = {
+                    "source_key": chain_key,
+                    "gtav_chain_name": gtav_name,
+                    "root_bone": gtav_bones[0],
+                    "chain_bones": list(gtav_bones),
+                    "source_bones": list(src_bones),
+                    "parent_bone": parent_bone_name,
+                    "parent_bone_tag": int(base_params.get("parent_bone_tag", parent_bone_tag)) if base_params.get("parent_bone") == parent_bone_name else parent_bone_tag,
+                    "version": int(base_params.get("version", 1)),
+                    "integration_type": int(base_params.get("integration_type", 0)),
+                    "multi_child_type": int(base_params.get("multi_child_type", 0)),
+                    "endpoint_position": tuple(base_params.get("endpoint_position", (0.0, 0.05, 0.0))),
+                    "pull": float(base_params.get("pull", 0.2)),
+                    "spring": float(base_params.get("spring", 0.35)),
+                    "stiffness": float(base_params.get("stiffness", 0.2)),
+                    "gravity": float(base_params.get("gravity", 0.1)),
+                    "gravity_falloff": float(base_params.get("gravity_falloff", 0.0)),
+                    "immobile_type": int(base_params.get("immobile_type", 0)),
+                    "immobile": float(base_params.get("immobile", 0.3)),
+                    "allow_collision": int(base_params.get("allow_collision", 1)),
+                    "radius": float(base_params.get("radius", 0.025)),
+                    "radius_curve": list(base_params.get("radius_curve", [])),
+                    "limit_type": int(base_params.get("limit_type", 1)),
+                    "max_angle_x": float(base_params.get("max_angle_x", 45.0)),
+                    "max_angle_x_curve": list(base_params.get("max_angle_x_curve", [])),
+                    "max_angle_z": float(base_params.get("max_angle_z", 45.0)),
+                    "limit_rotation": tuple(base_params.get("limit_rotation", (0.0, 0.0, 0.0))),
+                    "allow_grabbing": int(base_params.get("allow_grabbing", 1)),
+                    "allow_posing": int(base_params.get("allow_posing", 1)),
+                    "grab_movement": float(base_params.get("grab_movement", 0.5)),
+                    "max_stretch": float(base_params.get("max_stretch", 0.0)),
+                    "max_squish": float(base_params.get("max_squish", 0.0)),
+                    "stretch_motion": float(base_params.get("stretch_motion", 0.0)),
+                    "is_animated": int(base_params.get("is_animated", 1)),
+                }
+            # Preserve exact casing for bone_mapping keys where available
+            bone_map_out = {src_k: dst_v for src_k, dst_v in template_bone_map.items()}
+            custom_bones = [bone_nm for _ck, _gn, _sb, gbs in template_chain_specs for bone_nm in gbs]
+            return {
+                "chains": chains_out,
+                "bone_mapping": bone_map_out,
+                "custom_bones": custom_bones,
+                "strategy": "unity_template_synced",
+            }
+
+    # General automatic clustering + budget packing for arbitrary Unity avatars
+    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for rec in extracted_spokes:
+        spokes = rec.get("spoke_bones") or [rec["root_bone"]]
+        root_tok = spokes[0].strip()
+        low_tok = root_tok.lower()
+        side_suf = "_L" if (low_tok.endswith(".l") or "_l." in low_tok or low_tok.endswith("_l")) else ("_R" if (low_tok.endswith(".r") or "_r." in low_tok or low_tok.endswith("_r")) else "")
+        stem_tok = regex_module.sub(r"[._]?([lLrR]|\d+)+(\.\d+)*$", "", root_tok).strip("._ ")
+        if not stem_tok:
+            stem_tok = root_tok
+        group_key = (f"{stem_tok}{side_suf}", rec["parent_bone"])
+        grouped.setdefault(group_key, []).append(rec)
+
+    max_chains_at_2 = max(1, max_custom_bones // 2)
+    sorted_groups = sorted(
+        grouped.items(),
+        key=lambda item_kv: (
+            0 if any(tok in item_kv[0][0].lower() for tok in ("ear", "tail", "breast", "twin", "hair", "skirt")) else 1,
+            -len(item_kv[1][0].get("spoke_bones", [])),
+            item_kv[0][0],
+        ),
+    )
+
+    used_tags: Set[int] = set(PARENT_BONE_TAGS.values())
+    chains_out = {}
+    bone_map_out: Dict[str, str] = {}
+    custom_bones_out: List[str] = []
+
+    for grp_idx, ((group_stem, parent_bone_name), rec_list) in enumerate(sorted_groups):
+        if len(custom_bones_out) + 2 > max_custom_bones or len(chains_out) >= max_chains_at_2:
+            # Map remaining vertices to nearest existing chain sharing parent_bone
+            fallback_target = None
+            for existing_chain in chains_out.values():
+                if existing_chain["parent_bone"] == parent_bone_name:
+                    fallback_target = existing_chain["chain_bones"][0]
+                    break
+            if fallback_target:
+                for rec_item in rec_list:
+                    for b_item in rec_item.get("spoke_bones", []):
+                        bone_map_out.setdefault(b_item.lower(), str(fallback_target))
+            continue
+
+        rep_rec = rec_list[len(rec_list) // 2]
+        rep_spokes = list(rep_rec.get("spoke_bones") or [rep_rec["root_bone"]])
+        if len(rep_spokes) >= 3 and len(custom_bones_out) + 3 + (len(sorted_groups) - grp_idx - 1) * 2 <= max_custom_bones:
+            sampled_src = [rep_spokes[0], rep_spokes[len(rep_spokes) // 2], rep_spokes[-1]]
+        elif len(rep_spokes) >= 2:
+            sampled_src = [rep_spokes[0], rep_spokes[-1]]
+        else:
+            sampled_src = [rep_spokes[0]]
+
+        seg_slots = max(2, len(sampled_src))
+        clean_stem = regex_module.sub(r"[^A-Za-z0-9_]+", "", group_stem)[:18] or f"Ch{grp_idx}"
+        gtav_chain_name = f"{gtav_prefix}_{clean_stem}"
+        candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
+        # Guarantee zero ELF uint16 hash collisions
+        suffix_num = 1
+        while any(compute_gtav_bone_tag(b_nm) in used_tags or b_nm in custom_bones_out for b_nm in candidate_bones):
+            gtav_chain_name = f"{gtav_prefix}_{clean_stem}_{suffix_num}"
+            candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
+            suffix_num += 1
+        for b_nm in candidate_bones:
+            used_tags.add(compute_gtav_bone_tag(b_nm))
+            custom_bones_out.append(b_nm)
+
+        chain_key = group_stem.lower()
+        while chain_key in chains_out:
+            chain_key = f"{group_stem.lower()}_{grp_idx}"
+
+        chains_out[chain_key] = {
+            "source_key": chain_key,
+            "gtav_chain_name": gtav_chain_name,
+            "root_bone": candidate_bones[0],
+            "chain_bones": candidate_bones,
+            "source_bones": sampled_src,
+            "parent_bone": parent_bone_name,
+            "parent_bone_tag": int(rep_rec.get("parent_bone_tag", PARENT_BONE_TAGS.get(parent_bone_name, SKEL_PELVIS_TAG))),
+            "version": int(rep_rec.get("version", 1)),
+            "integration_type": int(rep_rec.get("integration_type", 0)),
+            "multi_child_type": int(rep_rec.get("multi_child_type", 0)),
+            "endpoint_position": tuple(rep_rec.get("endpoint_position", (0.0, 0.05, 0.0))),
+            "pull": float(rep_rec.get("pull", 0.2)),
+            "spring": float(rep_rec.get("spring", 0.35)),
+            "stiffness": float(rep_rec.get("stiffness", 0.2)),
+            "gravity": float(rep_rec.get("gravity", 0.1)),
+            "gravity_falloff": float(rep_rec.get("gravity_falloff", 0.0)),
+            "immobile_type": int(rep_rec.get("immobile_type", 0)),
+            "immobile": float(rep_rec.get("immobile", 0.3)),
+            "allow_collision": int(rep_rec.get("allow_collision", 1)),
+            "radius": float(rep_rec.get("radius", 0.025)),
+            "radius_curve": list(rep_rec.get("radius_curve", [])),
+            "limit_type": int(rep_rec.get("limit_type", 1)),
+            "max_angle_x": float(rep_rec.get("max_angle_x", 45.0)),
+            "max_angle_x_curve": list(rep_rec.get("max_angle_x_curve", [])),
+            "max_angle_z": float(rep_rec.get("max_angle_z", 45.0)),
+            "limit_rotation": tuple(rep_rec.get("limit_rotation", (0.0, 0.0, 0.0))),
+            "allow_grabbing": int(rep_rec.get("allow_grabbing", 1)),
+            "allow_posing": int(rep_rec.get("allow_posing", 1)),
+            "grab_movement": float(rep_rec.get("grab_movement", 0.5)),
+            "max_stretch": float(rep_rec.get("max_stretch", 0.0)),
+            "max_squish": float(rep_rec.get("max_squish", 0.0)),
+            "stretch_motion": float(rep_rec.get("stretch_motion", 0.0)),
+            "is_animated": int(rep_rec.get("is_animated", 1)),
+        }
+
+        for rec_item in rec_list:
+            sp_list = list(rec_item.get("spoke_bones") or [rec_item["root_bone"]])
+            for sp_idx, b_item in enumerate(sp_list):
+                mapped_tier = min(
+                    seg_slots - 1,
+                    int((sp_idx / max(1, len(sp_list) - 1)) * (seg_slots - 1) + 0.5)
+                    if len(sp_list) > 1
+                    else 0,
+                )
+                bone_map_out[b_item.lower()] = candidate_bones[mapped_tier]
+
+    return {
+        "chains": chains_out,
+        "bone_mapping": bone_map_out,
+        "custom_bones": custom_bones_out,
+        "strategy": "unity_auto_packed",
+    }
+
+
+def _select_character_physbone_template(
+    avatar_id_or_char: str,
+) -> Tuple[
+    str,
+    Optional[Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...]],
+    Optional[Dict[str, str]],
+    Optional[Dict[str, str]],
+]:
+    """Return `(prefix, chain_specs, root_parents, bone_map)` for built-in presets."""
+    low_id = str(avatar_id_or_char).strip().lower()
+    if low_id in ("shinano_er", "michael", "player_zero"):
+        return "PB_ER", MICHAEL_ER_CHAIN_SPECS, MICHAEL_ER_ROOT_PARENTS, MICHAEL_ER_BONE_MAP
+    if low_id in ("shinano_casual", "franklin", "player_one"):
+        return "PB_SC", SHINANO_CASUAL_CHAIN_SPECS, SHINANO_CASUAL_ROOT_PARENTS, SHINANO_CASUAL_BONE_MAP
+    if low_id in ("miltina_maid", "trevor", "player_two"):
+        return "PB_MT", MILTINA_MAID_CHAIN_SPECS, MILTINA_MAID_ROOT_PARENTS, MILTINA_MAID_BONE_MAP
+    return "PB_Auto", None, None, None
+
+
+def resolve_character_physbones(
+    char_cfg: Dict[str, Any],
+    fbx_paths: Sequence[Union[str, Path]] = (),
+    character_hints: Sequence[str] = (),
+    unity_assets_root: Optional[Union[str, Path]] = None,
+    override_source: Optional[str] = None,
+    override_cfg_path: Optional[Union[str, Path]] = None,
+    override_unity_scene: Optional[Union[str, Path]] = None,
+    override_avatar_name: Optional[str] = None,
+    save_cfg_path: Optional[Union[str, Path]] = None,
+    max_custom_bones: int = MAX_CUSTOM_PHYSBONES_PER_PED,
+    header_comments: Optional[Sequence[str]] = None,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """
+    Resolve active character PhysBones from `physbones_source` (`auto | unity | cfg`).
+
+    - `cfg`: load directly from `physbones_cfg` (or fallback built-in template).
+    - `unity`: extract directly from `unity_scene` + Marshmallow PB + FBXs and pack <= 63 bones.
+    - `auto`: extract from `unity_scene` when configured and present on disk; else load `cfg`.
+    """
+    try:
+        import vrc2gtav_paths as project_paths
+    except ImportError:
+        project_paths = None
+
+    requested_source = (
+        override_source
+        or str(char_cfg.get("physbones_source", "auto") or "auto")
+    ).strip().lower()
+    if requested_source not in VALID_PHYSBONE_SOURCES:
+        raise ValueError(
+            f"Unsupported physbones_source {requested_source!r}; expected one of {VALID_PHYSBONE_SOURCES}"
+        )
+
+    effective_cfg = (
+        str(override_cfg_path)
+        if override_cfg_path
+        else str(char_cfg.get("physbones_cfg", "") or "")
+    ).strip()
+    effective_scene = (
+        str(override_unity_scene)
+        if override_unity_scene is not None
+        else str(char_cfg.get("unity_scene", "") or "")
+    ).strip()
+    effective_avatar = (
+        str(override_avatar_name)
+        if override_avatar_name is not None
+        else str(char_cfg.get("unity_avatar_name", "") or "")
+    ).strip()
+
+    if project_paths is not None:
+        if effective_cfg:
+            effective_cfg = str(project_paths.to_host_path(effective_cfg))
+        if effective_scene:
+            effective_scene = str(project_paths.to_host_path(effective_scene))
+        if save_cfg_path:
+            save_cfg_path = project_paths.to_host_path(str(save_cfg_path))
+        if not unity_assets_root:
+            try:
+                unity_assets_root = project_paths.get_vrc_assets_dir()
+            except Exception:
+                unity_assets_root = None
+
+    scene_exists = bool(effective_scene) and Path(effective_scene).is_file()
+    cfg_exists = bool(effective_cfg) and Path(effective_cfg).is_file()
+
+    avatar_id = str(char_cfg.get("avatar_id") or char_cfg.get("protagonist") or "shinano_er")
+    prefix_tok, tmpl_specs, tmpl_parents, tmpl_bmap = _select_character_physbone_template(avatar_id)
+
+    fallback_prefabs: List[Path] = []
+    custom_hair_mode = str(char_cfg.get("custom_hair", "") or "").strip().lower()
+    if unity_assets_root and custom_hair_mode == "default":
+        shin_pref = Path(unity_assets_root) / "Shinano" / "Prefab" / "Shinano.prefab"
+        if shin_pref.is_file():
+            fallback_prefabs.append(shin_pref)
+
+    candidate_fbxs = list(fbx_paths)
+    if not candidate_fbxs:
+        for fbx_key in ("source_fbx", "fbx_shinano", "fbx_outfit", "fbx_watch", "fbx_hair"):
+            fbx_val = char_cfg.get(fbx_key)
+            if fbx_val and fbx_val not in candidate_fbxs:
+                candidate_fbxs.append(fbx_val)
+
+    use_unity = requested_source == "unity" or (requested_source == "auto" and scene_exists)
+    loaded_data: Dict[str, Any] = {}
+    source_used = "builtin"
+
+    if use_unity and scene_exists:
+        extracted = extract_unity_scene_physbones(
+            effective_scene,
+            avatar_name=effective_avatar or None,
+            unity_assets_root=unity_assets_root,
+            fbx_paths=candidate_fbxs,
+            fallback_prefab_paths=fallback_prefabs,
+            include_marshmallow_pb=True,
+            character_hints=character_hints,
+            verbose=verbose,
+        )
+        if extracted.get("loaded") and extracted.get("chains"):
+            packed = pack_physbone_chains_to_gtav_budget(
+                extracted["chains"],
+                gtav_prefix=prefix_tok,
+                max_custom_bones=max_custom_bones,
+                template_chain_specs=tmpl_specs,
+                template_root_parents=tmpl_parents,
+                template_bone_map=tmpl_bmap,
+            )
+            source_used = "unity"
+            default_slot_by_avatar = {
+                "shinano_er": "player_zero",
+                "shinano_casual": "player_one",
+                "miltina_maid": "player_two",
+            }
+            loaded_data = {
+                "metadata": {
+                    "avatar": extracted.get("root_name") or effective_avatar or avatar_id,
+                    "character": str(char_cfg.get("protagonist") or avatar_id),
+                    "slot": str(
+                        char_cfg.get("ped_name")
+                        or default_slot_by_avatar.get(avatar_id, "player_zero")
+                    ),
+                    "source": packed.get("strategy", "unity_scene"),
+                    "unity_scene": Path(effective_scene).name,
+                    "custom_bones": len(packed["custom_bones"]),
+                    "chain_count": len(packed["chains"]),
+                },
+                "bone_mapping": packed["bone_mapping"],
+                "chains": packed["chains"],
+            }
+
+    if source_used != "unity" and cfg_exists:
+        loaded_data = load_physbone_config(effective_cfg)
+        source_used = "cfg"
+    elif source_used != "unity" and tmpl_specs and tmpl_parents and tmpl_bmap:
+        packed_fallback = pack_physbone_chains_to_gtav_budget(
+            [],
+            gtav_prefix=prefix_tok,
+            max_custom_bones=max_custom_bones,
+            template_chain_specs=tmpl_specs,
+            template_root_parents=tmpl_parents,
+            template_bone_map=tmpl_bmap,
+        )
+        # Keep explicit fallback from builtin template when scene and cfg are both absent
+        fallback_chains: Dict[str, Dict[str, object]] = {}
+        for ck_str, gn_str, sb_tup, gb_tup in tmpl_specs:
+            p_name = tmpl_parents[ck_str]
+            fallback_chains[ck_str] = {
+                "source_key": ck_str,
+                "gtav_chain_name": gn_str,
+                "root_bone": gb_tup[0],
+                "chain_bones": list(gb_tup),
+                "source_bones": list(sb_tup),
+                "parent_bone": p_name,
+                "parent_bone_tag": PARENT_BONE_TAGS.get(p_name, SKEL_PELVIS_TAG),
+            }
+        loaded_data = {
+            "metadata": {"avatar": effective_avatar or avatar_id, "source": "builtin"},
+            "bone_mapping": dict(tmpl_bmap),
+            "chains": fallback_chains,
+        }
+        source_used = "builtin"
+
+    chain_specs, parent_map, custom_bones, bone_mapping_ci = build_chain_specs_from_config(loaded_data)
+    saved_path_str = ""
+    if save_cfg_path and loaded_data.get("chains"):
+        written = save_physbone_config(
+            save_cfg_path,
+            loaded_data["chains"],
+            metadata=loaded_data.get("metadata"),
+            bone_mapping=loaded_data.get("bone_mapping"),
+            header_comments=header_comments,
+        )
+        saved_path_str = str(written)
+
+    return {
+        "source_used": source_used,
+        "mode_requested": requested_source,
+        "chains": loaded_data.get("chains") or {},
+        "metadata": loaded_data.get("metadata") or {},
+        "bone_mapping": loaded_data.get("bone_mapping") or {},
+        "bone_mapping_ci": bone_mapping_ci,
+        "chain_specs": chain_specs,
+        "parent_map": parent_map,
+        "custom_bones": custom_bones,
+        "cfg_path": effective_cfg,
+        "unity_scene": effective_scene,
+        "saved_cfg_path": saved_path_str,
+    }
+
+
+def export_character_physbones_to_cfg(
+    character_section: str,
+    output_cfg_path: Optional[Union[str, Path]] = None,
+    unity_scene_override: Optional[Union[str, Path]] = None,
+    avatar_name_override: Optional[str] = None,
+    preserve_existing_cfg: bool = True,
+) -> Optional[Path]:
+    """
+    Export or synchronize PhysBone chains & bone mappings for a protagonist or avatar preset
+    into its `configs/*_physbones.cfg` preset file.
+    """
+    import vrc2gtav_paths as project_paths
+
+    resolved_avatar_id: Optional[str] = None
+    try:
+        resolved_avatar_id = project_paths.normalize_avatar_id(character_section)
+    except KeyError:
+        resolved_avatar_id = None
+
+    if resolved_avatar_id is not None:
+        char_cfg = project_paths.get_avatar_paths(resolved_avatar_id)
+        avatar_id = resolved_avatar_id
+    else:
+        char_cfg = project_paths.get_character_paths(character_section)
+        avatar_id = str(char_cfg.get("avatar_id") or character_section)
+
+    candidate_fbxs: List[Union[str, Path]] = []
+    for fbx_key in ("source_fbx", "fbx_shinano", "fbx_outfit", "fbx_watch", "fbx_hair"):
+        fbx_val = char_cfg.get(fbx_key)
+        if fbx_val and fbx_val not in candidate_fbxs:
+            candidate_fbxs.append(fbx_val)
+
+    target_out = output_cfg_path or char_cfg.get("physbones_cfg")
+    if not target_out:
+        rel_default = DEFAULT_PHYSBONE_PRESET_RELATIVE_PATHS.get(
+            avatar_id
+        ) or DEFAULT_PHYSBONE_PRESET_RELATIVE_PATHS.get(character_section)
+        if rel_default:
+            target_out = project_paths.get_project_root() / rel_default
+    if not target_out:
+        raise ValueError(f"No physbones_cfg output path configured for {character_section}")
+
+    target_path_obj = Path(project_paths.to_host_path(str(target_out)))
+    should_preserve = (
+        preserve_existing_cfg
+        and target_path_obj.is_file()
+        and unity_scene_override is None
+    )
+
+    hints_by_avatar = {
+        "shinano_casual": ("shinano",),
+        "shinano_er": ("shinano", "reunion"),
+        "miltina_maid": ("milltina", "miltina"),
+        "franklin": ("shinano",),
+        "michael": ("shinano", "reunion"),
+        "trevor": ("milltina", "miltina"),
+    }
+    resolved = resolve_character_physbones(
+        char_cfg,
+        fbx_paths=candidate_fbxs,
+        character_hints=hints_by_avatar.get(avatar_id, (character_section,)),
+        override_source="cfg" if should_preserve else "unity",
+        override_cfg_path=target_path_obj if should_preserve else None,
+        override_unity_scene=unity_scene_override,
+        override_avatar_name=avatar_name_override,
+        save_cfg_path=target_path_obj,
+    )
+    return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
+
+
+def build_dynamic_physbone_chains(
+    ped_armature: Any,
+    chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
+    parent_map: Dict[str, str],
+    chain_cfgs: Dict[str, Dict[str, object]],
+    source_world_mat_fn: Callable[[str], Optional[Any]],
+    ped_world_matrices: Optional[Dict[str, Any]] = None,
+    default_limit_rotation: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """
+    Build articulated PB_* bone injection descriptors and runtime chain records
+    supporting multi-armature lookup and automatic 1-bone endpoint synthesis.
+    """
+    import mathutils
+
+    custom_bones_out: List[Dict[str, object]] = []
+    chain_records_out: List[Dict[str, object]] = []
+
+    for chain_key, gtav_chain_name, src_chain_bones, gtav_chain_bones in chain_specs:
+        if len(gtav_chain_bones) < 2 or not src_chain_bones:
+            continue
+
+        mapped_mats = []
+        missing_flag = False
+        for src_name in src_chain_bones:
+            world_mat = source_world_mat_fn(src_name)
+            if world_mat is None:
+                missing_flag = True
+                break
+            mapped_mats.append(world_mat.copy())
+
+        if missing_flag or not mapped_mats:
+            continue
+
+        cfg_entry = dict(chain_cfgs.get(chain_key, {}))
+        # Synthesize virtual tip matrix when Unity chain has only 1 bone (e.g. Butt.L/R, UN_Bag_Ring)
+        while len(mapped_mats) < len(gtav_chain_bones):
+            last_mat = mapped_mats[-1]
+            end_pt = cfg_entry.get("endpoint_position", (0.0, 0.04, 0.0))
+            end_vec = mathutils.Vector(
+                (float(end_pt[0]), float(end_pt[1]), float(end_pt[2]))
+            )
+            if end_vec.length < 0.015:
+                end_vec = mathutils.Vector((0.0, 0.035, 0.0))
+            # Respect previous world scale (~1.1x) roughly via normalized orientation offset
+            world_tip_pos = last_mat.translation + (last_mat.to_3x3().normalized() @ end_vec)
+            tip_mat = last_mat.to_3x3().to_4x4()
+            tip_mat.translation = world_tip_pos
+            mapped_mats.append(tip_mat)
+
+        lim_rot = cfg_entry.get("limit_rotation", default_limit_rotation)
+        lim_rx_rad = math.radians(float(lim_rot[0]))
+        lim_rz_rad = math.radians(float(lim_rot[2]))
+        lim_axis_vec = (
+            -math.sin(lim_rz_rad),
+            math.cos(lim_rx_rad) * math.cos(lim_rz_rad),
+            math.sin(lim_rx_rad),
+        )
+        axis_len = (
+            math.sqrt(lim_axis_vec[0] ** 2 + lim_axis_vec[1] ** 2 + lim_axis_vec[2] ** 2)
+            or 1.0
+        )
+        lim_axis_norm = (
+            lim_axis_vec[0] / axis_len,
+            lim_axis_vec[1] / axis_len,
+            lim_axis_vec[2] / axis_len,
+        )
+
+        root_parent_name = parent_map.get(gtav_chain_bones[0], "SKEL_Pelvis")
+        if ped_world_matrices and root_parent_name in ped_world_matrices:
+            root_parent_world = ped_world_matrices[root_parent_name]
+        else:
+            parent_pose = ped_armature.pose.bones.get(root_parent_name)
+            root_parent_world = (
+                (ped_armature.matrix_world @ parent_pose.matrix)
+                if parent_pose is not None
+                else mathutils.Matrix.Identity(4)
+            )
+
+        parent_world_mat = root_parent_world
+        chain_bone_records: List[Dict[str, object]] = []
+        for node_idx, gtav_bone_name in enumerate(gtav_chain_bones):
+            cur_world_mat = mapped_mats[node_idx]
+            parent_name = parent_map.get(
+                gtav_bone_name,
+                root_parent_name if node_idx == 0 else gtav_chain_bones[node_idx - 1],
+            )
+            bone_tag = compute_gtav_bone_tag(gtav_bone_name)
+            if node_idx + 1 < len(mapped_mats):
+                seg_len = (
+                    mapped_mats[node_idx + 1].translation - cur_world_mat.translation
+                ).length
+            else:
+                seg_len = 0.025
+
+            custom_bones_out.append(
+                {
+                    "name": gtav_bone_name,
+                    "parent_name": parent_name,
+                    "tag": bone_tag,
+                    "world_matrix": cur_world_mat,
+                    "length": max(0.015, float(seg_len)),
+                }
+            )
+
+            local_mat = parent_world_mat.inverted() @ cur_world_mat
+            loc_pos, loc_rot, _unused_scale = local_mat.decompose()
+            chain_bone_records.append(
+                {
+                    "name": gtav_bone_name,
+                    "tag": bone_tag,
+                    "local_pos": (float(loc_pos.x), float(loc_pos.y), float(loc_pos.z)),
+                    "local_rot": (
+                        float(loc_rot.x),
+                        float(loc_rot.y),
+                        float(loc_rot.z),
+                        float(loc_rot.w),
+                    ),
+                    "limit_axis_local": lim_axis_norm,
+                }
+            )
+            parent_world_mat = cur_world_mat
+
+        chain_records_out.append(
+            {
+                "name": gtav_chain_name,
+                "parent_bone_tag": int(
+                    cfg_entry.get(
+                        "parent_bone_tag",
+                        PARENT_BONE_TAGS.get(root_parent_name, SKEL_PELVIS_TAG),
+                    )
+                ),
+                "config": cfg_entry,
+                "bones": chain_bone_records,
+            }
+        )
+
+    return custom_bones_out, chain_records_out
+
+
+def build_avatar_physbone_chains(
+    ped_armature,
+    vrc_armature,
+    chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
+    parent_map: Dict[str, str],
+    cfg_path: Optional[str | Path] = None,
+    world_transform_fn: Optional[Callable[[object], object]] = None,
+    default_limit_rotation: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """
+    Build articulated PB_* bone injection descriptors and runtime chain records
+    for a posed source armature mapped onto ped_armature.
+    """
+    import mathutils
+
+    loaded_cfg = (
+        load_physbone_config(cfg_path)
+        if cfg_path and Path(cfg_path).is_file()
+        else {"chains": {}}
+    )
+    chain_cfgs = loaded_cfg.get("chains", {})
+    vrc_bones_ci = {pbone.name.lower(): pbone for pbone in vrc_armature.pose.bones}
+    identity_mat = mathutils.Matrix.Identity(4)
+
+    custom_bones: List[Dict[str, object]] = []
+    chain_records: List[Dict[str, object]] = []
+
+    for chain_key, gtav_chain_name, src_chain_bones, gtav_chain_bones in chain_specs:
+        if any(src_name.lower() not in vrc_bones_ci for src_name in src_chain_bones):
+            continue
+        if len(gtav_chain_bones) < 2:
+            continue
+
+        mapped_world_mats: List[mathutils.Matrix] = []
+        for src_name in src_chain_bones:
+            pose_bone = vrc_bones_ci[src_name.lower()]
+            src_world = vrc_armature.matrix_world @ pose_bone.matrix
+            tgt_world = world_transform_fn(src_world) if world_transform_fn else src_world.copy()
+            mapped_world_mats.append(tgt_world)
+
+        cfg_entry = dict(chain_cfgs.get(chain_key, {}))
+        lim_rot = cfg_entry.get("limit_rotation", default_limit_rotation)
+        lim_euler = mathutils.Euler(
+            (math.radians(float(lim_rot[0])), math.radians(float(lim_rot[1])), math.radians(float(lim_rot[2]))),
+            "XYZ",
+        ).to_matrix()
+
+        root_parent_name = parent_map[gtav_chain_bones[0]]
+        root_parent_tag = int(
+            cfg_entry.get("parent_bone_tag")
+            or PARENT_BONE_TAGS.get(root_parent_name, SKEL_HEAD_TAG)
+        )
+        parent_pose = ped_armature.pose.bones.get(root_parent_name)
+        parent_world_mat = (
+            (ped_armature.matrix_world @ parent_pose.matrix)
+            if parent_pose is not None
+            else identity_mat
+        )
+
+        chain_bone_records: List[Dict[str, object]] = []
+        cur_parent_world = parent_world_mat
+        for node_idx, gtav_bone_name in enumerate(gtav_chain_bones):
+            cur_world_mat = mapped_world_mats[node_idx]
+            parent_name = parent_map[gtav_bone_name]
+            bone_tag = compute_gtav_bone_tag(gtav_bone_name)
+            if node_idx + 1 < len(mapped_world_mats):
+                next_world_pos = mapped_world_mats[node_idx + 1].translation
+                seg_vec_world = next_world_pos - cur_world_mat.translation
+                seg_len = max(0.015, float(seg_vec_world.length))
+                local_child_dir = (cur_world_mat.inverted() @ next_world_pos).normalized()
+                if local_child_dir.length <= 1e-6:
+                    local_child_dir = mathutils.Vector((0.0, 1.0, 0.0))
+                lim_axis_vec = (lim_euler @ local_child_dir).normalized()
+            else:
+                seg_len = 0.025
+                lim_axis_vec = (lim_euler @ mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+
+            custom_bones.append(
+                {
+                    "name": gtav_bone_name,
+                    "parent_name": parent_name,
+                    "tag": bone_tag,
+                    "world_matrix": cur_world_mat,
+                    "length": seg_len,
+                }
+            )
+
+            local_mat = cur_parent_world.inverted() @ cur_world_mat
+            loc_pos, loc_rot, _unused_scale = local_mat.decompose()
+            chain_bone_records.append(
+                {
+                    "name": gtav_bone_name,
+                    "tag": bone_tag,
+                    "local_pos": (float(loc_pos.x), float(loc_pos.y), float(loc_pos.z)),
+                    "local_rot": (float(loc_rot.x), float(loc_rot.y), float(loc_rot.z), float(loc_rot.w)),
+                    "limit_axis_local": (float(lim_axis_vec.x), float(lim_axis_vec.y), float(lim_axis_vec.z)),
+                }
+            )
+            cur_parent_world = cur_world_mat
+
+        chain_records.append(
+            {
+                "name": gtav_chain_name,
+                "parent_bone_tag": root_parent_tag,
+                "config": cfg_entry,
+                "bones": chain_bone_records,
+            }
+        )
+
+    return custom_bones, chain_records
+
+
+def _load_ini_chain_records(ini_path: Path) -> List[Dict[str, object]]:
+    """Parse existing [Chain_*] sections from GTAVPhysBones.ini into record dicts."""
+    if not ini_path.is_file():
+        return []
+    parser = ConfigParser()
+    parser.optionxform = str
+    with ini_path.open("r", encoding="utf-8", errors="replace") as handle:
+        parser.read_file(handle)
+
+    records: List[Dict[str, object]] = []
+    chain_secs = [sec_item for sec_item in parser.sections() if sec_item.startswith("Chain_")]
+    chain_secs.sort(key=lambda sec_item: int(sec_item.split("_", 1)[1]) if sec_item.split("_", 1)[1].isdigit() else 0)
+    for sec_name in chain_secs:
+        sec = parser[sec_name]
+        bone_count = sec.getint("bone_count", 0)
+        bones: List[Dict[str, object]] = []
+        for idx in range(bone_count):
+            prefix = f"bone_{idx}_"
+            loc_pos = parse_vec3_string(sec.get(prefix + "local_pos", "0, 0, 0"))
+            rot_parts = [float(val_str.strip()) for val_str in sec.get(prefix + "local_rot", "0,0,0,1").split(",") if val_str.strip()]
+            loc_rot = tuple(rot_parts[:4]) if len(rot_parts) >= 4 else (0.0, 0.0, 0.0, 1.0)
+            lim_axis = parse_vec3_string(sec.get(prefix + "limit_axis", "0, 1, 0"), (0.0, 1.0, 0.0))
+            bones.append(
+                {
+                    "name": sec.get(prefix + "name", ""),
+                    "tag": sec.getint(prefix + "tag", 0),
+                    "max_angle": sec.getfloat(prefix + "max_angle", 50.0),
+                    "local_pos": loc_pos,
+                    "local_rot": loc_rot,
+                    "limit_axis_local": lim_axis,
+                }
+            )
+        records.append(
+            {
+                "name": sec.get("name", sec_name),
+                "parent_bone_tag": sec.getint("parent_bone_tag", SKEL_HEAD_TAG),
+                "config": {
+                    "integration_type": sec.getint("integration_type", 0),
+                    "pull": sec.getfloat("pull", 0.2),
+                    "spring": sec.getfloat("spring", 0.35),
+                    "stiffness": sec.getfloat("stiffness", 0.2),
+                    "gravity": sec.getfloat("gravity", 0.0),
+                    "gravity_falloff": sec.getfloat("gravity_falloff", 0.0),
+                    "immobile": sec.getfloat("immobile", 0.3),
+                    "limit_type": sec.getint("limit_type", 1),
+                    "max_angle_x": sec.getfloat("max_angle_x", 50.0),
+                    "max_angle_z": sec.getfloat("max_angle_z", 45.0),
+                    "is_animated": sec.getint("is_animated", 1),
+                },
+                "bones": bones,
+            }
+        )
+    return records
+
+
+def merge_physbone_asi_ini(
+    ini_path: str | Path,
+    chain_records: Sequence[Dict[str, object]],
+    own_prefixes: Sequence[str] = (),
+    target_ped_model: str = "all",
+    extra_sync_paths: Sequence[str | Path] = (),
+) -> Path:
+    """
+    Merge new chain_records into ini_path, replacing chains matching own_prefixes
+    or record names while preserving other protagonists' chains, then sync copies.
+    """
+    resolved_ini = Path(ini_path)
+    existing = _load_ini_chain_records(resolved_ini)
+    if not existing:
+        for alt_path in extra_sync_paths:
+            alt_records = _load_ini_chain_records(Path(alt_path))
+            if alt_records:
+                existing = alt_records
+                break
+
+    new_names = {str(rec["name"]) for rec in chain_records}
+    merged: List[Dict[str, object]] = []
+    for rec in existing:
+        rec_name = str(rec.get("name", ""))
+        if rec_name in new_names:
+            continue
+        if any(rec_name.startswith(pref) for pref in own_prefixes):
+            continue
+        merged.append(rec)
+    merged.extend(chain_records)
+
+    export_physbone_asi_ini(resolved_ini, merged, target_ped_model=target_ped_model)
+    for sync_target in extra_sync_paths:
+        sync_path = Path(sync_target)
+        if sync_path.resolve() == resolved_ini.resolve():
+            continue
+        if sync_path.parent.is_dir():
+            export_physbone_asi_ini(sync_path, merged, target_ped_model=target_ped_model)
+    return resolved_ini
+
+
 def export_physbone_asi_ini(
     ini_path: str | Path,
     chain_records: Sequence[Dict[str, object]],
@@ -411,8 +3502,8 @@ def export_physbone_asi_ini(
     Export runtime chain parameters and baked GTA V rest transforms to GTAVPhysBones.ini.
 
     Each entry in `chain_records` contains:
-      - `name`: string identifier (`PB_Ear_L`, `PB_Ear_R`)
-      - `parent_bone_tag`: uint16 tag (`31086` for `SKEL_Head`)
+      - `name`: string identifier (`PB_Ear_L`, `PB_SC_Tail`, `PB_MT_Twin_L`, ...)
+      - `parent_bone_tag`: uint16 tag (`31086` for `SKEL_Head`, `11816` for `SKEL_Pelvis`, `24817` for `SKEL_Spine2`)
       - `config`: chain physics config dict (pull, spring, max_angle_x, ...)
       - `bones`: list of dicts per joint with keys:
           `name`, `tag`, `local_pos` (3 floats), `local_rot` (4 floats XYZW),
@@ -463,9 +3554,12 @@ def export_physbone_asi_ini(
         base_angle_x = float(cfg_data.get("max_angle_x", 50.0))
 
         for bone_idx, bone_entry in enumerate(bone_list):
-            chain_t = min(1.0, max(0.0, cum_len / total_len))
-            angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
-            node_max_angle = base_angle_x * angle_scale
+            if "max_angle" in bone_entry and not max_angle_curve:
+                node_max_angle = float(bone_entry["max_angle"])
+            else:
+                chain_t = min(1.0, max(0.0, cum_len / total_len))
+                angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+                node_max_angle = base_angle_x * angle_scale
             loc_pos = bone_entry["local_pos"]
             loc_rot = bone_entry["local_rot"]
             lim_axis = bone_entry.get("limit_axis_local", (0.0, 1.0, 0.0))
@@ -650,6 +3744,8 @@ class PhysBoneChainSimulator:
         pull_val = float(self.config.get("pull", 0.2))
         spring_val = float(self.config.get("spring", 0.35))
         gravity_val = float(self.config.get("gravity", 0.0))
+        gravity_falloff_val = max(0.0, min(1.0, float(self.config.get("gravity_falloff", 0.0))))
+        eff_gravity_val = gravity_val * (1.0 - gravity_falloff_val)
         immobile_val = float(self.config.get("immobile", 0.3))
         limit_type = int(self.config.get("limit_type", 1))
 
@@ -669,7 +3765,7 @@ class PhysBoneChainSimulator:
             shifted_prev = _vec_add(self.prev_pos[idx], immobile_shift)
             shifted_curr = _vec_add(self.world_pos[idx], immobile_shift)
             velocity_vec = _vec_scale(_vec_sub(shifted_curr, shifted_prev), vel_retention)
-            gravity_disp = (0.0, 0.0, -9.81 * gravity_val * clamped_dt * clamped_dt)
+            gravity_disp = (0.0, 0.0, -9.81 * eff_gravity_val * clamped_dt * clamped_dt)
 
             self.prev_pos[idx] = shifted_curr
             predicted_pos = _vec_add(_vec_add(shifted_curr, velocity_vec), gravity_disp)
@@ -688,7 +3784,7 @@ class PhysBoneChainSimulator:
             rest_node_rot = _quat_mul(expected_parent_rot, self.rest_local_rot[idx])
             rest_seg_dir = _vec_norm(_quat_rotate_vec(rest_node_rot, self.rest_local_pos[idx + 1]))
 
-            if limit_type == 1:
+            if limit_type > 0:
                 lim_ref = _vec_norm(_quat_rotate_vec(rest_node_rot, self.limit_axes_local[idx]))
                 cos_ang = max(-1.0, min(1.0, _vec_dot(cur_dir, lim_ref)))
                 cur_ang = math.acos(cos_ang)

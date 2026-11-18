@@ -26,12 +26,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "common_too
 sys.path.insert(0, str(Path(__file__).resolve().parent / "_deploy_tools"))
 try:
     import blendshape_helper
+    import physbone_helper
     import setup_first_run
     import unity_hair_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
     from common_tools import blendshape_helper
+    from common_tools import physbone_helper
     from common_tools import setup_first_run
     from common_tools import unity_hair_helper
     from common_tools import vrc2gtav_i18n as project_i18n
@@ -755,6 +757,68 @@ def run_interactive_blendshape_sync() -> bool:
     return run_blendshape_cfg_export(selected_avatars, preserve_existing_cfg=True)
 
 
+def run_physbone_cfg_export(
+    target_avatars: List[str],
+    output_override: Optional[str] = None,
+    preserve_existing_cfg: bool = True,
+) -> bool:
+    """Export/sync Unity VRCPhysBones & Marshmallow PB into configs/*_physbones.cfg."""
+    all_exported = True
+    for char_section in target_avatars:
+        single_override = (
+            output_override if len(target_avatars) == 1 and output_override else None
+        )
+        exported_path = physbone_helper.export_character_physbones_to_cfg(
+            char_section,
+            output_cfg_path=single_override,
+            preserve_existing_cfg=preserve_existing_cfg,
+        )
+        if exported_path is not None:
+            print(
+                project_i18n.translate(
+                    "manager.export_physbones_ok",
+                    char=char_section,
+                    path=exported_path,
+                ),
+                flush=True,
+            )
+        else:
+            print(
+                project_i18n.translate(
+                    "manager.export_physbones_skipped",
+                    char=char_section,
+                ),
+                flush=True,
+            )
+            all_exported = False
+    return all_exported
+
+
+def run_interactive_physbone_sync() -> bool:
+    """Interactively populate configs/*_physbones.cfg from Unity scenes + Marshmallow PB."""
+    print_section_header(project_i18n.translate("manager.physbones_header"))
+    print(project_i18n.translate("manager.physbones_select_avatar"))
+    avatars = list(project_paths.list_available_avatars())
+    for opt_index, avatar_id in enumerate(avatars, start=1):
+        print(f"  [{opt_index}] {project_i18n.translate(f'avatar.{avatar_id}')} ({avatar_id})")
+    all_opt_index = len(avatars) + 1
+    print(project_i18n.translate("manager.blendshapes_opt_all", opt=all_opt_index))
+    print(project_i18n.translate("manager.menu_opt_0"))
+
+    user_choice = input(project_i18n.translate("manager.physbones_prompt_choice")).strip()
+    if user_choice == "0":
+        return False
+    if user_choice == str(all_opt_index):
+        selected_avatars = avatars
+    elif user_choice in {str(opt_index) for opt_index in range(1, len(avatars) + 1)}:
+        selected_avatars = [avatars[int(user_choice) - 1]]
+    else:
+        print(project_i18n.translate("manager.invalid_option"))
+        return False
+
+    return run_physbone_cfg_export(selected_avatars, preserve_existing_cfg=False)
+
+
 def run_interactive_menu() -> None:
     """Display the interactive menu and orchestrate selected pipeline stages."""
     if setup_first_run.is_first_run_needed():
@@ -801,6 +865,7 @@ def run_interactive_menu() -> None:
         print(project_i18n.translate("manager.menu_opt_7"))
         print(project_i18n.translate("manager.menu_opt_8"))
         print(project_i18n.translate("manager.menu_opt_9"))
+        print(project_i18n.translate("manager.menu_opt_10"))
         print(project_i18n.translate("manager.menu_opt_0"))
         print(f"{'-' * 70}")
 
@@ -811,6 +876,14 @@ def run_interactive_menu() -> None:
         if user_menu_choice == "0":
             print(project_i18n.translate("manager.cancelled"))
             sys.exit(0)
+
+        if user_menu_choice == "10":
+            if not project_paths.has_project_config_file():
+                print(project_i18n.translate("manager.missing_cfg_option6"))
+                sys.exit(1)
+            load_runtime_context(force_reload=True)
+            run_interactive_physbone_sync()
+            continue
 
         if user_menu_choice == "9":
             if not project_paths.has_project_config_file():
@@ -1087,6 +1160,27 @@ def main() -> None:
         default=None,
         help=project_i18n.translate("blendshapes.cli_cfg"),
     )
+    argument_parser.add_argument(
+        "--export-physbones",
+        action="store_true",
+        help=project_i18n.translate("manager.cli_export_physbones"),
+    )
+    argument_parser.add_argument(
+        "--overwrite-physbones-from-unity",
+        action="store_true",
+        help=project_i18n.translate("manager.cli_overwrite_physbones_from_unity"),
+    )
+    argument_parser.add_argument(
+        "--physbones-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=project_i18n.translate("physbones.cli_source"),
+    )
+    argument_parser.add_argument(
+        "--physbones-cfg",
+        default=None,
+        help=project_i18n.translate("physbones.cli_cfg"),
+    )
 
     parsed_arguments = argument_parser.parse_args()
     active_language = project_i18n.set_active_language(parsed_arguments.lang)
@@ -1104,6 +1198,21 @@ def main() -> None:
             target_chars,
             output_override=parsed_arguments.blendshapes_cfg,
             preserve_existing_cfg=not parsed_arguments.overwrite_from_unity,
+        )
+        sys.exit(0 if all_exported else 1)
+
+    # Export Unity PhysBone (+ Marshmallow PB) presets to configs/*_physbones.cfg
+    if parsed_arguments.export_physbones:
+        if parsed_arguments.avatar:
+            target_chars = [project_paths.normalize_avatar_id(parsed_arguments.avatar)]
+        elif parsed_arguments.character in (None, "all"):
+            target_chars = list(project_paths.list_available_avatars())
+        else:
+            target_chars = [parsed_arguments.character]
+        all_exported = run_physbone_cfg_export(
+            target_chars,
+            output_override=parsed_arguments.physbones_cfg,
+            preserve_existing_cfg=not parsed_arguments.overwrite_physbones_from_unity,
         )
         sys.exit(0 if all_exported else 1)
 
@@ -1285,6 +1394,14 @@ def main() -> None:
         if parsed_arguments.blendshapes_cfg and len(selected_characters_list) == 1:
             extra_blender_args.extend(
                 ["--blendshapes-cfg", parsed_arguments.blendshapes_cfg]
+            )
+        if parsed_arguments.physbones_source:
+            extra_blender_args.extend(
+                ["--physbones-source", parsed_arguments.physbones_source]
+            )
+        if parsed_arguments.physbones_cfg and len(selected_characters_list) == 1:
+            extra_blender_args.extend(
+                ["--physbones-cfg", parsed_arguments.physbones_cfg]
             )
         blender_status = execute_blender_build(
             selected_characters_list,

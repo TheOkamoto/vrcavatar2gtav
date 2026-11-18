@@ -25,7 +25,7 @@ vrc2gtav/
 ├── EXECUTAR_GERENCIADOR.bat                         # Portuguese-named launcher mirror
 ├── run_mod_manager.py                               # Master orchestrator (interactive menu + CLI)
 ├── vrc2gtav.cfg.example                             # Versioned INI configuration template
-├── configs/                                         # Portable per-avatar blendshape presets (*_blendshapes.cfg)
+├── configs/                                         # Blendshape presets (*_blendshapes.cfg) & PhysBones (*_physbones.cfg)
 ├── README.md / README.pt-BR.md / README.ja.md       # Trilingual GitHub landing READMEs
 ├── docs/                                            # Deep-dive deployment & architecture guides
 │   ├── DEPLOYMENT_GUIDE.md                          # This technical guide in English
@@ -39,8 +39,9 @@ vrc2gtav/
 │   ├── repack_and_deploy_everything.py              # RPF7 repacker + TOC patcher + installer
 │   └── ...                                          # Mirrors of unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
 │
-├── scripts/                                         # Canonical Python source tree (English + i18n)
+├── scripts/                                         # Canonical Python/C++ source tree (English + i18n)
 │   ├── common_tools/                                # Shared helpers, manager, and test suite
+│   ├── physbones_asi/                               # Real-time VRChat PhysBones ASI solver (GTAVPhysBones.asi / .ini)
 │   ├── Shinano_Casual_Franklin/                     # Franklin texture & Blender build pipeline
 │   ├── Shinano_EternalReunion_Michael/              # Michael texture, Blender build & deploy pipeline
 │   └── Miltina_Maid_Trevor/                         # Trevor texture, Blender build & staging pipeline
@@ -72,6 +73,7 @@ Paths are never hardcoded in scripts. [`scripts/common_tools/vrc2gtav_paths.py`]
 6. **Default hair & texture fallback (`texture_calibration_helper.py`):** Blank or missing `custom_hair` / `fbx_hair` (*Neko Tied Bob hair*) or optional eye/makeup packs automatically fall back to the base avatar's built-in hair (`Hair_*` / `Shinano_hair.png` for Shinano, `Milltina_hair_*` / calibrated `Milltina_Hair.png` for Miltina) and base face texture (`Shinano_face.png`, `Milltina_Face.png`).
 7. **Unity & `.cfg` blendshape resolution (`blendshape_helper.py`):** Hardcoded blendshape tables are removed from build scripts. Per-mesh blendshapes (facial `.anim` curves, body shrinks, outfit, accessory, and hair keys) are extracted live from `unity_scene` (+ nested `.prefab`s and FBX channel tables) or loaded from portable UTF-8 `.cfg` presets (`configs/shinano_blendshapes.cfg`, `configs/shinano_er_blendshapes.cfg`, `configs/miltina_blendshapes.cfg`) according to `blendshapes_source = auto | unity | cfg` and `--blendshapes-source` / `--blendshapes-cfg` / `--save-blendshapes-cfg` / `--export-blendshapes`.
 8. **Universal custom Unity hair porting (`unity_hair_helper.py` + `blender_hair_helper.py`):** Any VRChat Unity hair (`.prefab`, `PrefabVariant` chains via `m_SourcePrefab`, Modular Avatar `MergeArmature`/`BoneProxy` setups, or raw `.fbx` + `.mat`) can be assigned via `--hair` (`auto | default | none | <path>`), `custom_hair` in `vrc2gtav.cfg`, or interactive menu option `[8]` on `shinano_casual`, `shinano_er`, or `miltina_maid`. `unity_hair_helper.py` resolves `.fbx.meta` material maps, suppresses inactive/editor-only hair parts, bakes lilToon textures/`_Color`/`_MainTexHSVG` tints into UV tiles (`custom_hair_manifest.json`), and `blender_hair_helper.py` fits the mesh to the avatar skull (with `--hair-scale` and `--hair-offset`), transfers `SKEL_Head` skinning, and preserves base animal ears.
+9. **Complete multi-protagonist VRChat PhysBones & Auto-Importer ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** Custom articulated `PB_*` chains (`186` custom bones across `81` chains — `62` bones per protagonist inside RAGE's `<= 63` custom / `<= 128` total `.ydd` ceiling, with `0` ELF tag collisions) are injected into Blender armatures + `.yft` skeletons and driven live in-game by `GTAVPhysBones.asi` and the unified `GTAVPhysBones.ini`: Michael (`configs/michael_neko_mimi_physbones.cfg`, `30` `PB_Ear_*`/`PB_ER_*` chains for ears, halo, ahoge, bangs/side/back hair, ribbons, hat flaps, necklace, breasts, backpack bag, pocket watch, waist/heart chains, butt, and 4-sector pleated skirt), Franklin (`configs/shinano_casual_physbones.cfg`, `24` `PB_SC_*` chains for fox ears, tail, `BeltA`/`BeltB` straps, sweater ribbons, ahoge/bangs/side/back hair, Marshmallow PB breasts, butt, and 6-sector skirt), and Trevor (`configs/miltina_maid_physbones.cfg`, `27` `PB_MT_*` chains for full `Twin1`/`Twin2` twintails + hair ribbons, front/side hair, cow ears, Marshmallow PB breasts, sleeve ruffles, neck/apron ribbons, butt, 7-sector maid skirt, and cow tail). Controlled via `physbones_source = auto | unity | cfg`, `--physbones-source`, `--physbones-cfg`, `--save-physbones-cfg`, `--export-physbones`, `--overwrite-physbones-from-unity`, and interactive menu option `[10]`.
 
 ### 2.2 Trilingual Localization (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) provides full runtime translations in **English (`en`)**, **Japanese (`ja`)**, and **Portuguese (`pt`)**:

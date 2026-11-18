@@ -113,6 +113,14 @@ def compile_physbones_asi(
             shutil.copy2(ini_source, dest_ini)
             print(f"Deployed INI -> {dest_ini}")
 
+    for pkg_folder in ("1_Franklin_Shinano_Casual", "3_Trevor_Miltina_Maid"):
+        pkg_dir = _REPO_ROOT / pkg_folder / "5_rpf_package"
+        if pkg_dir.is_dir():
+            pkg_asi = pkg_dir / output_asi.name
+            if pkg_asi.resolve() != output_asi.resolve():
+                shutil.copy2(output_asi, pkg_asi)
+                print(f"Synced ASI -> {pkg_asi}")
+
     return output_asi
 
 

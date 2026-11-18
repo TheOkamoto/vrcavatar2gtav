@@ -611,6 +611,8 @@ def build_blender_command(
             "--unity-scene",
             "--blendshapes-cfg",
             "--save-blendshapes-cfg",
+            "--physbones-cfg",
+            "--save-physbones-cfg",
             "--face-anim",
             "--shinano-fbx",
             "--outfit-fbx",
@@ -791,6 +793,7 @@ AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "unity_hints": ("shinano",),
         "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
         "default_blendshapes_cfg": "configs/shinano_blendshapes.cfg",
+        "default_physbones_cfg": "configs/shinano_casual_physbones.cfg",
         "default_face_mesh": "Body",
     },
     "shinano_er": {
@@ -802,6 +805,7 @@ AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "unity_hints": ("shinano", "reunion"),
         "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
         "default_blendshapes_cfg": "configs/shinano_er_blendshapes.cfg",
+        "default_physbones_cfg": "configs/michael_neko_mimi_physbones.cfg",
         "default_face_mesh": "Body",
     },
     "miltina_maid": {
@@ -813,6 +817,7 @@ AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "unity_hints": ("milltina", "miltina"),
         "default_anim_files": ("Miltina_close eyes_Base_adult.anim",),
         "default_blendshapes_cfg": "configs/miltina_blendshapes.cfg",
+        "default_physbones_cfg": "configs/miltina_maid_physbones.cfg",
         "default_face_mesh": "Body",
     },
 }
@@ -838,6 +843,7 @@ _PROTAGONIST_ONLY_KEYS = frozenset(
         "ped_name",
         "prop_ped_name",
         "skeleton_yft",
+        "physbones_cfg",
         "target_z_min",
         "target_z_max",
         "arm_pose_degrees",
@@ -865,6 +871,7 @@ _NON_PATH_OPTION_KEYS = frozenset(
         "ytd_name",
         "unity_avatar_name",
         "blendshapes_source",
+        "physbones_source",
         "hair_scale",
         "hair_offset",
         "target_z_min",
@@ -1022,6 +1029,11 @@ def get_avatar_paths(
         fallback_cfg_path = root_directory / str(preset_info["default_blendshapes_cfg"])
         resolved_avatar["blendshapes_cfg"] = (
             to_windows_path(fallback_cfg_path) if as_windows_path else fallback_cfg_path
+        )
+    if "physbones_cfg" not in resolved_avatar and preset_info.get("default_physbones_cfg"):
+        fallback_pb_path = root_directory / str(preset_info["default_physbones_cfg"])
+        resolved_avatar["physbones_cfg"] = (
+            to_windows_path(fallback_pb_path) if as_windows_path else fallback_pb_path
         )
     return resolved_avatar
 

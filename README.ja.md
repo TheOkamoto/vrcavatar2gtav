@@ -102,6 +102,7 @@
 - **外部設定 (`vrc2gtav.cfg`)**: [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) を `vrc2gtav.cfg` としてコピー（または `--setup` で生成）することで、コードを編集せずに GTA V Legacy、Blender、`rage-cli`、およびローカル FBX/Unity アセットへのパスを指定できます。
 - **体格スケール (`1.0` 既定 + `.unity` 解析)**: 体格スケールは既定で `[1.0, 1.0, 1.0]` に設定されています。`.unity` シーンファイルを指定すると、`Transform` 階層のスケール値を自動抽出してビルドへ反映します。
 - **ブレンドシェイプ設定 (`Unity` & `configs/*_blendshapes.cfg`)**: 顔・素体シュリンク・衣装・小物・ヘアのすべてのブレンドシェイプを [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) 経由で解決します。Unity プロジェクト（`.unity` + ネスト `.prefab` + `.anim`）からの自動取得、または [`configs/`](configs/) 配下の `.cfg` プリセット（`shinano_blendshapes.cfg` / `shinano_er_blendshapes.cfg` / `miltina_blendshapes.cfg`）を `blendshapes_source = auto | unity | cfg` と `blendshapes_cfg` で切り替えられます。
+- **VRChat PhysBones & Marshmallow PB 自動インポーター (`Unity` & `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) が有効な `VRCPhysBone`（`PrefabInstance` 上書き・`marshmallow_PB` プリセットを含む）を自動抽出し、RAGE `.ydd` のカスタム `<= 63`（合計 `<= 128`）ボーン上限内に ELF ハッシュ衝突 `0` で最適化パッキングしてポータブル `.cfg` へ読み書きします（`michael_neko_mimi_physbones.cfg`: `30` チェーン / `62` ボーン、`shinano_casual_physbones.cfg`: `24` チェーン / `62` ボーン、`miltina_maid_physbones.cfg`: `27` チェーン / `62` ボーン、計 `81` チェーン / `186` カスタムボーン）。`physbones_source = auto | unity | cfg`、`physbones_cfg`、対話メニュー `[10]` で制御できます。
 - **汎用カスタムヘア & フォールバック仕様**:
   - **全アバタープリセット対応**: `shinano_casual`・`shinano_er`・`miltina_maid` すべてで、`vrc2gtav.cfg` (`custom_hair = auto | default | none | <.prefab または .fbx パス>` および `hair_mat`, `hair_tex`, `hair_scale`, `hair_offset`)、対話メニュー `[8]`、または CLI の `--hair` フラグを利用できます。[`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) が `PrefabVariant` 継承、Modular Avatar 構造、`.fbx.meta` のマテリアル対応表、lilToon テクスチャ/色調補正を `custom_hair_manifest.json` へベイクし、[`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py) が頭部位置合わせ・UV リマップ・元ケモ耳保持を行います。
   - **しなの**: `custom_hair` / *ねこタイドボブヘア* がある場合はそちらを使用し、無い場合は自動的に標準ヘア（`Hair_base`、`Hair_bang`、`Hair_side`、`Hair_back`、`Other_ear`、`Other_tail`）および `ShinanoDefAdultNewv5.anim` / 標準アイテクスチャを使用します。
@@ -124,6 +125,8 @@
 | `python run_mod_manager.py --character michael --hair "/path/Hair.prefab" --save-hair` | 任意の Unity `.prefab` / `PrefabVariant` / `.fbx` ヘアを主人公へ自動移植 (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset` 対応) |
 | `python run_mod_manager.py --export-blendshapes` | 設定済みの `.unity` シーンから `configs/*_blendshapes.cfg` へ書き出す |
 | `python run_mod_manager.py --character all --blendshapes-source cfg` | Unity シーンではなく `.cfg` プリセットを使ってビルドを実行 |
+| `python run_mod_manager.py --export-physbones` | `.unity` シーンから VRCPhysBone + Marshmallow PB を `configs/*_physbones.cfg` へ自動同期（`--overwrite-physbones-from-unity` で上書き） |
+| `python run_mod_manager.py --character all --physbones-source cfg` | Unity シーンではなく `.cfg` プリセットの PhysBone 設定を使ってビルド |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド済みフォルダから `mods/x64v.rpf` へ再梱包・配置 |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・相互切替・カスタムヘアの `7` スイートを実行（クローン直後対応） |
 | `python scripts/common_tools/test_mod_suite.py` | 全 `10` スイートの統合検証を実行（ビルド・配置済み環境が必要） |
@@ -134,13 +137,14 @@
 
 ```text
 vrcavatar2gtav/
-├── configs/                         # アバター用ブレンドシェイプ設定ファイル (*_blendshapes.cfg)
+├── configs/                         # ブレンドシェイプ設定 (*_blendshapes.cfg) および PhysBones (*_physbones.cfg)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # 技術・導入ガイド全文 (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # 技術・導入ガイド全文 (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # 内部設計・リギング・Sollumz・RPF7 技術ガイド (JA)
 ├── scripts/
-│   ├── common_tools/                # First-Run、.unity/ヘア/ブレンドシェイプ解析、i18n、test_mod_suite.py
+│   ├── common_tools/                # First-Run、.unity/ヘア/ブレンドシェイプ/PhysBones 解析、i18n、test_mod_suite.py
+│   ├── physbones_asi/               # リアルタイム VRChat PhysBones ASI プラグイン (GTAVPhysBones.asi / .ini)
 │   ├── Shinano_Casual_Franklin/     # フランクリン (player_one) ビルドスクリプト
 │   ├── Shinano_EternalReunion_Michael/ # マイケル (player_zero) ビルドスクリプト
 │   └── Miltina_Maid_Trevor/         # トレバー (player_two) ビルドスクリプト

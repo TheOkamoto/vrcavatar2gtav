@@ -30,6 +30,7 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
 import blender_hair_helper
 import blendshape_helper
 import hand_skeleton_helper
+import physbone_helper
 import unity_hair_helper
 import unity_scene_helper
 import vrc2gtav_i18n as i18n
@@ -119,11 +120,17 @@ BONE_MAP = {
 }
 
 
-def resolve_target_bone(source_bone_name):
+def resolve_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=None):
     """Map a Miltina FBX bone name to its corresponding GTA V RAGE bone."""
     resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
     if resolved_arm_or_finger is not None:
         return resolved_arm_or_finger
+
+    resolved_pb = physbone_helper.resolve_miltina_maid_gtav_bone(
+        source_bone_name, mesh_name, bone_mapping_ci=bone_mapping_ci
+    )
+    if resolved_pb is not None:
+        return resolved_pb
 
     if source_bone_name in BONE_MAP:
         return BONE_MAP[source_bone_name]
@@ -435,6 +442,34 @@ def build_trevor_miltina_avatar(cli_args=None):
             )
         )
 
+    pb_resolution = physbone_helper.resolve_character_physbones(
+        trevor_cfg,
+        fbx_paths=blendshape_fbx_paths,
+        character_hints=("milltina", "miltina"),
+        override_source=getattr(cli_args, "physbones_source", None) if cli_args else None,
+        override_cfg_path=getattr(cli_args, "physbones_cfg", None) if cli_args else None,
+        override_unity_scene=getattr(cli_args, "unity_scene", None) if cli_args else None,
+        override_avatar_name=getattr(cli_args, "unity_avatar_name", None) if cli_args else None,
+        save_cfg_path=getattr(cli_args, "save_physbones_cfg", None) if cli_args else None,
+        verbose=True,
+    )
+    pb_detail_str = pb_resolution.get("cfg_path") or pb_resolution.get("unity_scene") or "-"
+    print(
+        i18n.translate(
+            "physbones.loaded_source",
+            source=pb_resolution["source_used"],
+            chains=len(pb_resolution["chain_specs"]),
+            bones=len(pb_resolution["custom_bones"]),
+            detail=pb_detail_str,
+        ),
+        flush=True,
+    )
+    if pb_resolution.get("saved_cfg_path"):
+        print(
+            i18n.translate("physbones.saved_cfg", path=pb_resolution["saved_cfg_path"]),
+            flush=True,
+        )
+
     # 4. Bake facial expression & lip-sync jaw weights on Body
     face_obj = bpy.data.objects.get("Body")
     if face_obj and face_obj.data.shape_keys:
@@ -717,9 +752,90 @@ def build_trevor_miltina_avatar(cli_args=None):
             loop_item.uv[0] = loop_item.uv[0] * 0.5 + offset_u_val
             loop_item.uv[1] = loop_item.uv[1] * 0.5 + offset_v_val
 
+    # Relocate GTA V arm/hand/finger bones and inject PhysBones BEFORE Step 9 weight retargeting
+    hand_bone_world_targets = {}
+    custom_physbones = []
+    physbone_chain_records = []
+    if vrc_armature:
+        hand_bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
+            vrc_armature, uniform_scale, vertical_translation
+        )
+        relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
+            ped_armature, hand_bone_world_targets
+        )
+        print(i18n.translate("trevor.build.bones_relocated", count=relocated_arm_bones))
+
+        bpy.context.view_layer.update()
+        vrc_bones_ci = {
+            pose_item.name.lower(): pose_item for pose_item in vrc_armature.pose.bones
+        }
+        ped_world_matrices = {
+            bone_item.name: (ped_armature.matrix_world @ bone_item.matrix_local).copy()
+            for bone_item in ped_armature.data.bones
+        }
+
+        def _map_trevor_world_mat(src_world_mat):
+            loc = src_world_mat.translation
+            target_loc = mathutils.Vector(
+                (
+                    loc.x * uniform_scale,
+                    loc.y * uniform_scale,
+                    loc.z * uniform_scale + vertical_translation,
+                )
+            )
+            return (
+                mathutils.Matrix.Translation(target_loc)
+                @ src_world_mat.to_quaternion().to_matrix().to_4x4()
+            )
+
+        def _resolve_trevor_pb_world_mat(src_bone_name):
+            pose_item = vrc_bones_ci.get(src_bone_name.strip().lower())
+            if pose_item is None:
+                return None
+            return _map_trevor_world_mat(vrc_armature.matrix_world @ pose_item.matrix)
+
+        custom_physbones, physbone_chain_records = physbone_helper.build_dynamic_physbone_chains(
+            ped_armature=ped_armature,
+            chain_specs=pb_resolution["chain_specs"],
+            parent_map=pb_resolution["parent_map"],
+            chain_cfgs=pb_resolution["chains"],
+            source_world_mat_fn=_resolve_trevor_pb_world_mat,
+            ped_world_matrices=ped_world_matrices,
+        )
+        if custom_physbones:
+            injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+                ped_armature,
+                custom_physbones,
+                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            )
+            print(
+                f"[PhysBones] Injected {injected_pb_count} Miltina Maid bones into Trevor armature ({len(physbone_chain_records)} chains)",
+                flush=True,
+            )
+        bpy.data.objects.remove(vrc_armature)
+    for extra_hair_arm in custom_hair_armatures:
+        if extra_hair_arm.name in bpy.data.objects:
+            bpy.data.objects.remove(extra_hair_arm)
+
     # 9. Retarget vertex groups onto valid GTA V bones
     print(i18n.translate("trevor.build.retargeting_bones"))
     gtav_valid_bone_names = {bone_item.name for bone_item in ped_armature.data.bones}
+    skirt_meshes = {"Milltina_cloth_skirt", "Milltina_cloth_apron", "Milltina_cloth_tail_slit"}
+
+    def _add_anatomical_skirt_follow(weight_dict, v_co, skirt_w):
+        if skirt_w <= 1e-6:
+            return
+        vert_t = max(0.0, min(1.0, (0.05 - v_co.z) / 0.14))
+        thigh_cap = vert_t * 0.45
+        thigh_w = skirt_w * thigh_cap
+        pelvis_w = skirt_w - thigh_w
+        if pelvis_w > 1e-6:
+            weight_dict["SKEL_Pelvis"] = weight_dict.get("SKEL_Pelvis", 0.0) + pelvis_w
+        lr_mix = max(0.0, min(1.0, (v_co.x + 0.035) / 0.070))
+        if thigh_w * lr_mix > 1e-6:
+            weight_dict["SKEL_L_Thigh"] = weight_dict.get("SKEL_L_Thigh", 0.0) + thigh_w * lr_mix
+        if thigh_w * (1.0 - lr_mix) > 1e-6:
+            weight_dict["SKEL_R_Thigh"] = weight_dict.get("SKEL_R_Thigh", 0.0) + thigh_w * (1.0 - lr_mix)
 
     for cloth_obj in meshes_to_keep:
         if cloth_obj in custom_hair_meshes:
@@ -736,22 +852,52 @@ def build_trevor_miltina_avatar(cli_args=None):
             )
             continue
 
+        is_skirt_mesh = cloth_obj.name in skirt_meshes
+        group_names = {vgroup.index: vgroup.name for vgroup in cloth_obj.vertex_groups}
+        group_targets = {}
+        for vgroup in cloth_obj.vertex_groups:
+            tgt = resolve_target_bone(
+                vgroup.name,
+                cloth_obj.name,
+                bone_mapping_ci=pb_resolution.get("bone_mapping_ci"),
+            )
+            if tgt not in gtav_valid_bone_names:
+                tgt = "SKEL_Pelvis"
+            group_targets[vgroup.index] = tgt
+
         vert_weights = {vert_idx: {} for vert_idx in range(len(cloth_obj.data.vertices))}
-        for vert_group in cloth_obj.vertex_groups:
-            target_bone_name = resolve_target_bone(vert_group.name)
-            if target_bone_name not in gtav_valid_bone_names:
-                target_bone_name = "SKEL_Pelvis"
-            for vert_item in cloth_obj.data.vertices:
-                for group_elem in vert_item.groups:
-                    if group_elem.group == vert_group.index and group_elem.weight > 0.001:
-                        vert_weights[vert_item.index][target_bone_name] = (
-                            vert_weights[vert_item.index].get(target_bone_name, 0.0)
-                            + group_elem.weight
-                        )
+        for vert_item in cloth_obj.data.vertices:
+            w_map = vert_weights[vert_item.index]
+            for group_elem in vert_item.groups:
+                if group_elem.weight <= 0.001 or group_elem.group not in group_targets:
+                    continue
+                raw_name = group_names[group_elem.group]
+                low_raw = raw_name.strip().lower()
+                tgt_bone = group_targets[group_elem.group]
+                if is_skirt_mesh and low_raw.startswith("skirt7."):
+                    seg_num = int("".join(chr_item for chr_item in low_raw if chr_item.isdigit()) or "7") % 10
+                    tier = 0 if seg_num <= 3 else (1 if seg_num <= 5 else 2)
+                    pb_bl = f"PB_MT_SkirtBL_{tier}"
+                    pb_br = f"PB_MT_SkirtBR_{tier}"
+                    if pb_bl in gtav_valid_bone_names and pb_br in gtav_valid_bone_names:
+                        w_map[pb_bl] = w_map.get(pb_bl, 0.0) + group_elem.weight * 0.375
+                        w_map[pb_br] = w_map.get(pb_br, 0.0) + group_elem.weight * 0.375
+                        _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight * 0.25)
+                    else:
+                        _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight)
+                elif is_skirt_mesh and tgt_bone.startswith("PB_MT_Skirt"):
+                    w_map[tgt_bone] = w_map.get(tgt_bone, 0.0) + group_elem.weight * 0.75
+                    _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight * 0.25)
+                else:
+                    w_map[tgt_bone] = w_map.get(tgt_bone, 0.0) + group_elem.weight
 
         cloth_obj.vertex_groups.clear()
 
         for vert_idx, weight_dict in vert_weights.items():
+            if len(weight_dict) > 4:
+                weight_dict = dict(
+                    sorted(weight_dict.items(), key=lambda item: item[1], reverse=True)[:4]
+                )
             total_weight_sum = sum(weight_dict.values())
             if total_weight_sum > 0:
                 for target_bone_name, weight_val in weight_dict.items():
@@ -821,21 +967,6 @@ def build_trevor_miltina_avatar(cli_args=None):
             "trevor.build.consolidated_groups", count=len(unified_obj.vertex_groups)
         )
     )
-
-    # Relocate GTA V arm/hand/finger bones to match Miltina proportions
-    hand_bone_world_targets = {}
-    if vrc_armature:
-        hand_bone_world_targets = hand_skeleton_helper.extract_avatar_arm_hand_targets(
-            vrc_armature, uniform_scale, vertical_translation
-        )
-        relocated_arm_bones = hand_skeleton_helper.relocate_blender_armature_bones(
-            ped_armature, hand_bone_world_targets
-        )
-        print(i18n.translate("trevor.build.bones_relocated", count=relocated_arm_bones))
-        bpy.data.objects.remove(vrc_armature)
-    for extra_hair_arm in custom_hair_armatures:
-        if extra_hair_arm.name in bpy.data.objects:
-            bpy.data.objects.remove(extra_hair_arm)
 
     # 11. Configure ped_default.sps shader and assign textures
     atlas_img_path = str(trevor_cfg["atlas_png"])
@@ -1014,8 +1145,10 @@ def build_trevor_miltina_avatar(cli_args=None):
     ped_armature.drawable_properties.lod_dist_low = 9998.0
     ped_armature.drawable_properties.lod_dist_vlow = 9998.0
 
+    custom_pb_name_set = {pb_item["name"] for pb_item in custom_physbones} if custom_physbones else set()
     for bone_obj in ped_armature.data.bones:
-        set_recommended_bone_properties(bone_obj)
+        if bone_obj.name not in custom_pb_name_set:
+            set_recommended_bone_properties(bone_obj)
 
     convert_obj_to_model(unified_obj)
     unified_obj.parent = ped_armature
@@ -1073,7 +1206,10 @@ def build_trevor_miltina_avatar(cli_args=None):
         yft_output_path = Path(trevor_cfg["target_yft"])
         updated_yft_bones, total_yft_bones, max_yft_delta = (
             hand_skeleton_helper.patch_yft_skeleton(
-                skeleton_path, yft_output_path, hand_bone_world_targets
+                skeleton_path,
+                yft_output_path,
+                hand_bone_world_targets,
+                custom_child_bones=custom_physbones or None,
             )
         )
         print(
@@ -1084,6 +1220,33 @@ def build_trevor_miltina_avatar(cli_args=None):
                 total=total_yft_bones,
                 delta=max_yft_delta,
             )
+        )
+
+    if physbone_chain_records:
+        out_ini_path = Path(output_dir) / "GTAVPhysBones.ini"
+        physbone_helper.export_physbone_asi_ini(
+            out_ini_path,
+            physbone_chain_records,
+            target_ped_model=str(trevor_cfg.get("ped_name", "player_two")),
+        )
+        repo_root = project_paths.get_project_root()
+        sync_targets = [
+            repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "GTAVPhysBones.ini",
+            repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini",
+            repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package" / "GTAVPhysBones.ini",
+        ]
+        gtav_root = project_paths.get_gtav_root_dir()
+        if gtav_root.is_dir():
+            sync_targets.append(gtav_root / "GTAVPhysBones.ini")
+        physbone_helper.merge_physbone_asi_ini(
+            sync_targets[1],
+            physbone_chain_records,
+            own_prefixes=("PB_MT_",),
+            target_ped_model="all",
+            extra_sync_paths=sync_targets,
+        )
+        print(
+            f"[PhysBones] Exported & merged Trevor PhysBones INI ({len(physbone_chain_records)} chains)"
         )
 
     print(i18n.translate("trevor.build.done"))
@@ -1166,6 +1329,22 @@ def main() -> int:
         "--save-blendshapes-cfg",
         default=None,
         help=i18n.translate("blendshapes.cli_save_cfg"),
+    )
+    parser.add_argument(
+        "--physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_cfg"),
+    )
+    parser.add_argument(
+        "--physbones-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("physbones.cli_source"),
+    )
+    parser.add_argument(
+        "--save-physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_save_cfg"),
     )
     parser.add_argument(
         "--unity-scene",

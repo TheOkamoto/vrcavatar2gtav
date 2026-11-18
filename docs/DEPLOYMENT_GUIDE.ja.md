@@ -25,7 +25,7 @@ vrc2gtav/
 ├── EXECUTAR_GERENCIADOR.bat                         # ポルトガル語名のランチャーエイリアス
 ├── run_mod_manager.py                               # マスターオーケストレーター (対話メニュー + CLI)
 ├── vrc2gtav.cfg.example                             # バージョン管理された INI 設定テンプレート
-├── configs/                                         # アバター別ポータブルブレンドシェイプ設定 (*_blendshapes.cfg)
+├── configs/                                         # ブレンドシェイプ設定 (*_blendshapes.cfg) および PhysBones (*_physbones.cfg)
 ├── README.md / README.pt-BR.md / README.ja.md       # GitHub トップページ用 README (3か国語)
 ├── docs/                                            # 詳細な技術・導入ドキュメント
 │   ├── DEPLOYMENT_GUIDE.md                          # 英語技術ガイド
@@ -39,8 +39,9 @@ vrc2gtav/
 │   ├── repack_and_deploy_everything.py              # RPF7 再パック + TOC 修正 + mods/ 配置
 │   └── ...                                          # unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
 │
-├── scripts/                                         # ソースコード本体 (英語識別子 + i18n)
+├── scripts/                                         # ソースコード本体 (Python/C++ + i18n)
 │   ├── common_tools/                                # 共通ヘルパー・マネージャー・検証スイート
+│   ├── physbones_asi/                               # リアルタイム VRChat PhysBones ASI (GTAVPhysBones.asi / .ini)
 │   ├── Shinano_Casual_Franklin/                     # Franklin テクスチャ・Blender ビルド
 │   ├── Shinano_EternalReunion_Michael/              # Michael テクスチャ・Blender・デプロイ
 │   └── Miltina_Maid_Trevor/                         # Trevor テクスチャ・Blender・ステージング
@@ -72,6 +73,7 @@ vrc2gtav/
 6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `custom_hair` / `fbx_hair`（例: *ねこタイドボブヘア*）や任意の瞳・メイクパックが空欄または未配置でも、ベースアバター標準の髪 (`Hair_*` / `Shinano_hair.png`、`Milltina_hair_*` / 補正済み `Milltina_Hair.png`) と顔 (`Shinano_face.png`、`Milltina_Face.png`) へ安全にフォールバックします
 7. **Unity 抽出 & `.cfg` ブレンドシェイプ管理 (`blendshape_helper.py`):** ビルドスクリプト内の固定ブレンドシェイプ辞書を廃止しました。表情（`.anim`）・素体シュリンク・衣装・小物・ヘアの全ウェイトは `unity_scene`（`.unity` / `.prefab` / FBX チャンネル名）から自動抽出するか、UTF-8 プリセット（`configs/shinano_blendshapes.cfg`・`configs/shinano_er_blendshapes.cfg`・`configs/miltina_blendshapes.cfg`）から `blendshapes_source = auto | unity | cfg` および `--blendshapes-source` / `--blendshapes-cfg` / `--save-blendshapes-cfg` / `--export-blendshapes` で読み書きします
 8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `shinano_casual`・`shinano_er`・`miltina_maid` すべてで、任意の `.prefab`・`m_SourcePrefab` 継承 `PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`.fbx` + `.mat` を `--hair` (`auto | default | none | <パス>`)、`vrc2gtav.cfg` の `custom_hair`、または対話メニュー `[8]` で指定できます。`unity_hair_helper.py` が `.fbx.meta` マテリアル対応表・非表示パーツ除外・lilToon 色調/HSV (`_Color`, `_MainTexHSVG`) を UV タイル (`custom_hair_manifest.json`) へベイクし、`blender_hair_helper.py` が頭部フィット (`--hair-scale`, `--hair-offset`) と `SKEL_Head` ウェイト転送、元ケモ耳保持を自動実行します
+9. **3 主人公完全対応 VRChat PhysBones & 自動インポーター ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 多関節カスタムボーン `PB_*`（計 `81` チェーン・`186` カスタムボーン、各主人公 `62` ボーンを RAGE の `.ydd` 上限カスタム `<= 63`・合計 `<= 128` 内へ ELF ハッシュ衝突 `0` で配置）を Blender アーマチュアと `.yft` スケルトンへ注入し、`GTAVPhysBones.asi` と統合済み `GTAVPhysBones.ini` でリアルタイム物理演算します。マイケル (`configs/michael_neko_mimi_physbones.cfg`: `PB_Ear_*`/`PB_ER_*` 30 チェーン — 耳・ヘイロー・アホ毛・前/横/後髪・リボン・帽子・ネックレス・胸・バッグ・懐中時計・チェーン・臀部・4分割スカート)、フランクリン (`configs/shinano_casual_physbones.cfg`: `PB_SC_*` 24 チェーン — 狐耳・尻尾・`BeltA`/`BeltB`・リボン・全髪・Marshmallow PB 胸・臀部・6分割スカート)、トレバー (`configs/miltina_maid_physbones.cfg`: `PB_MT_*` 27 チェーン — `Twin1`/`Twin2` ツインテール＋リボン・前/横髪・牛耳・Marshmallow PB 胸・フリル・首/エプロンリボン・臀部・7分割スカート・尻尾) に対応し、`physbones_source = auto | unity | cfg`・`--physbones-source`・`--physbones-cfg`・`--save-physbones-cfg`・`--export-physbones`・`--overwrite-physbones-from-unity`・対話メニュー `[10]` から自動同期できます。
 
 ### 2.2 3か国語ローカライズ (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) により **英語 (`en`)**・**日本語 (`ja`)**・**ポルトガル語 (`pt`)** に完全対応しています:

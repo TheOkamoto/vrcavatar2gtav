@@ -107,6 +107,22 @@ def main() -> int:
         default=None,
         help=i18n.translate("blendshapes.cli_save_cfg"),
     )
+    parser.add_argument(
+        "--physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_cfg"),
+    )
+    parser.add_argument(
+        "--physbones-source",
+        choices=["auto", "unity", "cfg"],
+        default=None,
+        help=i18n.translate("physbones.cli_source"),
+    )
+    parser.add_argument(
+        "--save-physbones-cfg",
+        default=None,
+        help=i18n.translate("physbones.cli_save_cfg"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
@@ -138,6 +154,9 @@ def main() -> int:
         ("--blendshapes-cfg", parsed_args.blendshapes_cfg),
         ("--blendshapes-source", parsed_args.blendshapes_source),
         ("--save-blendshapes-cfg", parsed_args.save_blendshapes_cfg),
+        ("--physbones-cfg", parsed_args.physbones_cfg),
+        ("--physbones-source", parsed_args.physbones_source),
+        ("--save-physbones-cfg", parsed_args.save_physbones_cfg),
     ):
         if flag_val:
             extra_blender_args.extend([flag_name, str(flag_val)])

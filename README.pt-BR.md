@@ -102,6 +102,7 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 - **Configuração Externa (`vrc2gtav.cfg`)**: Copie [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) para `vrc2gtav.cfg` (ou crie via `--setup`) para definir os caminhos do GTA V Legacy, Blender, `rage-cli` e dos arquivos FBX/Unity sem editar o código-fonte.
 - **Escalas Corporais (`1.0` + Leitor de `.unity`)**: As proporções assumem `[1.0, 1.0, 1.0]` por padrão. Quando uma cena `.unity` é informada, os scripts leem a hierarquia de `Transform` do arquivo e aplicam as escalas customizadas automaticamente.
 - **Predefinições de Blendshapes (`Unity` e `configs/*_blendshapes.cfg`)**: Cada *blendshape* de rosto, encolhimento de corpo (*shrink*), roupa, acessório e cabelo é carregado via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) diretamente do seu projeto Unity (`.unity` + `.prefab` + `.anim`) ou de predefinições portáteis em [`configs/`](configs/) (`shinano_blendshapes.cfg`, `shinano_er_blendshapes.cfg`, `miltina_blendshapes.cfg`), controlados por `blendshapes_source = auto | unity | cfg` e `blendshapes_cfg`.
+- **Importador Automático de VRChat PhysBones e Marshmallow PB (`Unity` e `configs/*_physbones.cfg`)**: O módulo [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) importa componentes `VRCPhysBone` ativos (incluindo sobrescritas de `PrefabInstance` e predefinições `marshmallow_PB`), empacota dentro do limite de `<= 63` ossos customizados / `<= 128` totais do `.ydd` na RAGE (`0` colisões de hash ELF) e lê/grava arquivos portáteis `.cfg` (`michael_neko_mimi_physbones.cfg`: `30` cadeias / `62` ossos; `shinano_casual_physbones.cfg`: `24` cadeias / `62` ossos; `miltina_maid_physbones.cfg`: `27` cadeias / `62` ossos — `81` cadeias / `186` ossos customizados no total) via `physbones_source = auto | unity | cfg`, `physbones_cfg` e opção `[10]` do menu interativo.
 - **Cabelo Customizado Universal e Fallbacks**:
   - **Qualquer Avatar Preset**: Suporta `custom_hair = auto | default | none | <caminho .prefab ou .fbx>` (junto de `hair_mat`, `hair_tex`, `hair_scale`, `hair_offset`) no `vrc2gtav.cfg`, opção `[8]` do menu interativo ou flags `--hair` na CLI em `shinano_casual`, `shinano_er` e `miltina_maid`. O módulo [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) resolve cadeias de `PrefabVariant`, estruturas *Modular Avatar*, mapas de materiais `.fbx.meta` e cores/HSV lilToon em `custom_hair_manifest.json`, enquanto [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py) ajusta o encaixe no crânio, remapeia UVs e preserva orelhas animais base.
   - **Shinano**: Usa `custom_hair` / *Neko Tied Bob Hair* quando disponível; caso contrário, retorna automaticamente ao cabelo padrão (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim` e texturas base de olhos.
@@ -124,6 +125,8 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | `python run_mod_manager.py --character michael --hair "/caminho/Hair.prefab" --save-hair` | Porta qualquer cabelo customizado `.prefab` / `PrefabVariant` / `.fbx` para um protagonista (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
 | `python run_mod_manager.py --export-blendshapes` | Exporta blendshapes das cenas `.unity` para `configs/*_blendshapes.cfg` |
 | `python run_mod_manager.py --character all --blendshapes-source cfg` | Compila usando os presets `.cfg` de blendshapes em vez das cenas Unity |
+| `python run_mod_manager.py --export-physbones` | Importa VRCPhysBones + Marshmallow PB das cenas `.unity` para `configs/*_physbones.cfg` (`--overwrite-physbones-from-unity` sobrescreve edições) |
+| `python run_mod_manager.py --character all --physbones-source cfg` | Compila usando os presets `.cfg` de PhysBones em vez de extrair das cenas Unity |
 | `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas já compiladas em `mods/x64v.rpf` |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `7` suítes de código/config/i18n/intercambiabilidade/cabelo customizado (clone limpo) |
 | `python scripts/common_tools/test_mod_suite.py` | Executa todas as `10` suítes de ponta a ponta (requer build e deploy concluídos) |
@@ -134,13 +137,14 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 
 ```text
 vrcavatar2gtav/
-├── configs/                         # Predefinições portáteis de blendshapes (*_blendshapes.cfg)
+├── configs/                         # Predefinições de blendshapes (*_blendshapes.cfg) e PhysBones (*_physbones.cfg)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # Guia técnico completo (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Arquitetura, rigging, Sollumz, shaders e RPF7 (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # Guia técnico completo (JA)
 ├── scripts/
-│   ├── common_tools/                # First-run, leitores de .unity/cabelo/blendshapes, i18n, test_mod_suite.py
+│   ├── common_tools/                # First-run, leitores de .unity/cabelo/blendshapes/PhysBones, i18n, test_mod_suite.py
+│   ├── physbones_asi/               # Plugin ASI de PhysBones VRChat em tempo real (GTAVPhysBones.asi / .ini)
 │   ├── Shinano_Casual_Franklin/     # Scripts de build do Franklin (player_one)
 │   ├── Shinano_EternalReunion_Michael/ # Scripts de build do Michael (player_zero)
 │   └── Miltina_Maid_Trevor/         # Scripts de build do Trevor (player_two)

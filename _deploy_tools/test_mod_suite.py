@@ -210,6 +210,49 @@ def test_compiled_drawables_and_textures() -> bool:
             ),
         )
 
+    import configparser
+
+    gtav_root_dir = project_paths.get_gtav_root_dir()
+    physbones_asi_path = gtav_root_dir / "GTAVPhysBones.asi"
+    physbones_ini_path = gtav_root_dir / "GTAVPhysBones.ini"
+    asi_exists = physbones_asi_path.is_file()
+    ini_exists = physbones_ini_path.is_file()
+    ear_chains_count = 0
+    shinano_chains_count = 0
+    miltina_chains_count = 0
+    ini_total_chains = 0
+    if ini_exists:
+        ini_parser = configparser.ConfigParser()
+        ini_parser.read(str(physbones_ini_path), encoding="utf-8")
+        ini_total_chains = ini_parser.getint("General", "chain_count", fallback=0)
+        for section_name in ini_parser.sections():
+            if not section_name.startswith("Chain_"):
+                continue
+            chain_name = ini_parser.get(section_name, "name", fallback="")
+            if chain_name.startswith(("PB_Ear_", "PB_ER_")):
+                ear_chains_count += 1
+            elif chain_name.startswith("PB_SC_"):
+                shinano_chains_count += 1
+            elif chain_name.startswith("PB_MT_"):
+                miltina_chains_count += 1
+
+    physbones_runtime_ok = (
+        asi_exists
+        and ini_exists
+        and ini_total_chains == 81
+        and ear_chains_count == 30
+        and shinano_chains_count == 24
+        and miltina_chains_count == 27
+    )
+    all_assets_present &= print_status_result(
+        "GTAVPhysBones.asi / .ini",
+        physbones_runtime_ok,
+        (
+            f"asi={asi_exists}, chains={ini_total_chains} "
+            f"(Michael={ear_chains_count}, Franklin={shinano_chains_count}, Trevor={miltina_chains_count})"
+        ),
+    )
+
     return all_assets_present
 
 
@@ -601,7 +644,89 @@ def test_source_templates_and_dummies() -> bool:
         dummy_head_path.is_file() and dummy_eyes_path.is_file(),
         i18n.translate("tests.dummies_detail"),
     )
-    return template_ok and gitignore_check and dummies_ok
+
+    import physbone_helper
+
+    physbone_cfg_specs = (
+        ("michael_neko_mimi_physbones.cfg", 30),
+        ("shinano_casual_physbones.cfg", 24),
+        ("miltina_maid_physbones.cfg", 27),
+    )
+    configs_valid = True
+    loaded_configs_map = {}
+    for cfg_filename, expected_chains in physbone_cfg_specs:
+        cfg_file_path = PROJECT_ROOT_DIR / "configs" / cfg_filename
+        if not cfg_file_path.is_file():
+            configs_valid = False
+            continue
+        parsed_cfg = physbone_helper.load_physbone_config(cfg_file_path)
+        loaded_configs_map[cfg_filename] = parsed_cfg
+        if len(parsed_cfg.get("chains", {})) != expected_chains:
+            configs_valid = False
+
+    per_ped_bone_groups = (
+        tuple(physbone_helper.MICHAEL_ER_CUSTOM_BONES),
+        tuple(physbone_helper.SHINANO_CASUAL_CUSTOM_BONES),
+        tuple(physbone_helper.MILTINA_MAID_CUSTOM_BONES),
+    )
+    combined_pb_bones = (
+        per_ped_bone_groups[0] + per_ped_bone_groups[1] + per_ped_bone_groups[2]
+    )
+    computed_bone_tags = [
+        physbone_helper.compute_gtav_bone_tag(bone_name) for bone_name in combined_pb_bones
+    ]
+    parent_tag_values = set(physbone_helper.PARENT_BONE_TAGS.values())
+    tags_unique = (
+        all(
+            len(bone_group) <= physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED
+            for bone_group in per_ped_bone_groups
+        )
+        and len(combined_pb_bones) == 186
+        and len(set(computed_bone_tags)) == 186
+        and not (set(computed_bone_tags) & parent_tag_values)
+    )
+
+    simulator_step_ok = False
+    if configs_valid:
+        shinano_ear_cfg = loaded_configs_map["shinano_casual_physbones.cfg"]["chains"].get(
+            "ear.L", {}
+        )
+        miltina_twin_cfg = loaded_configs_map["miltina_maid_physbones.cfg"]["chains"].get(
+            "twintail1.L", {}
+        )
+        shinano_sim = physbone_helper.PhysBoneChainSimulator(
+            rest_local_positions=[(0.0, 0.0, 0.08), (0.0, 0.0, 0.08), (0.0, 0.0, 0.08)],
+            rest_local_rotations=[(0.0, 0.0, 0.0, 1.0)] * 3,
+            config=shinano_ear_cfg,
+        )
+        miltina_sim = physbone_helper.PhysBoneChainSimulator(
+            rest_local_positions=[(0.0, 0.0, -0.10), (0.0, 0.0, -0.10), (0.0, 0.0, -0.10)],
+            rest_local_rotations=[(0.0, 0.0, 0.0, 1.0)] * 3,
+            config=miltina_twin_cfg,
+        )
+        shinano_sim.reset((0.0, 0.0, 1.5), (0.0, 0.0, 0.0, 1.0))
+        miltina_sim.reset((0.0, 0.0, 1.5), (0.0, 0.0, 0.0, 1.0))
+        shinano_pos, shinano_rot = shinano_sim.step(
+            (0.20, 0.0, 1.5), (0.0, 0.0, 0.0, 1.0), 1.0 / 60.0
+        )
+        miltina_pos, miltina_rot = miltina_sim.step(
+            (0.20, 0.0, 1.5), (0.0, 0.0, 0.0, 1.0), 1.0 / 60.0
+        )
+        simulator_step_ok = (
+            len(shinano_pos) == 3
+            and len(miltina_pos) == 3
+            and len(shinano_rot[2]) == 4
+            and len(miltina_rot[2]) == 4
+            and abs(shinano_pos[2][0] - 0.20) > 1e-4
+            and abs(miltina_pos[2][0] - 0.20) > 1e-4
+        )
+
+    physbones_source_ok = print_status_result(
+        "PhysBone configs, bone tags & solver",
+        configs_valid and tags_unique and simulator_step_ok,
+        f"bones={len(combined_pb_bones)}, unique_tags={len(set(computed_bone_tags))}, solver={simulator_step_ok}",
+    )
+    return template_ok and gitignore_check and dummies_ok and physbones_source_ok
 
 
 def test_unity_scene_and_fallbacks() -> bool:
@@ -1059,6 +1184,266 @@ def test_unity_scene_and_fallbacks() -> bool:
             f"shinano_meshes={len(shinano_tracked)}, body_keys={len(shinano_tracked.get('Body', {}))}",
         )
 
+        import physbone_helper
+
+        pb_assets_root = temp_root / "SynthPBAssets"
+        pb_root = pb_assets_root / "marshmallow_PB"
+        pb_root.mkdir(parents=True, exist_ok=True)
+        marsh_asset = pb_root / "CustomMarshPreset.asset"
+        marsh_asset.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "_PhysBone_Pull: 0.08",
+                    "_PhysBone_Momentum: 0.55",
+                    "_PhysBone_Stiffness: 0.35",
+                    "_PhysBone_Gravity: 0.30",
+                    "_PhysBone_GravityFalloff: 0.25",
+                    "_PhysBone_Immobile: 0.45",
+                    "_PhysBone_Immobile_type: 1",
+                    "_PhysBone_Limit_Angle: 22",
+                    "_PhysBone_Collision_Radius: 5.0",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        marsh_asset_guid = "99999999000000001111111122222222"
+        (pb_root / "CustomMarshPreset.asset.meta").write_text(
+            f"fileFormatVersion: 2\nguid: {marsh_asset_guid}\n",
+            encoding="utf-8",
+        )
+        marsh_prefab = pb_root / "Marshmallow_PB.prefab"
+        marsh_prefab.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "--- !u!1 &50",
+                    "GameObject:",
+                    "  m_Name: Marshmallow_PB",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &51",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 50}",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!114 &52",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 50}",
+                    "  m_Enabled: 1",
+                    "  _marshmallowPBEnabled: 1",
+                    "  _index: 0",
+                    "  _PhysBone_index: 0",
+                    "  _PhysBone_Pull: 0.20",
+                    "  _PhysBone_Momentum: 0.40",
+                    "  _presets:",
+                    "  - {fileID: 11400000, guid: 00000000000000000000000000000000, type: 2}",
+                    "  _pbpresets:",
+                    "  - {fileID: 11400000, guid: 00000000000000000000000000000000, type: 2}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        marsh_prefab_guid = "aaaaaaaaaaaaaaaa22222222bbbbbbbb"
+        (pb_root / "Marshmallow_PB.prefab.meta").write_text(
+            f"fileFormatVersion: 2\nguid: {marsh_prefab_guid}\n",
+            encoding="utf-8",
+        )
+
+        pb_scene = pb_assets_root / "SynthPhysBones.unity"
+        pb_scene.write_text(
+            "\n".join(
+                [
+                    "%YAML 1.1",
+                    "%TAG !u! tag:unity3d.com,2011:",
+                    "--- !u!1 &1000",
+                    "GameObject:",
+                    "  m_Name: SynthPBAvatar",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1001",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1000}",
+                    "  m_Father: {fileID: 0}",
+                    "--- !u!1 &1010",
+                    "GameObject:",
+                    "  m_Name: Head",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1011",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1010}",
+                    "  m_Father: {fileID: 1001}",
+                    "--- !u!1 &1020",
+                    "GameObject:",
+                    "  m_Name: Ear_L",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1021",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1020}",
+                    "  m_Father: {fileID: 1011}",
+                    "--- !u!1 &1022",
+                    "GameObject:",
+                    "  m_Name: Ear_L_Tip",
+                    "  m_IsActive: 1",
+                    "--- !u!4 &1023",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1022}",
+                    "  m_Father: {fileID: 1021}",
+                    "--- !u!1 &1030",
+                    "GameObject:",
+                    "  m_Name: InactiveGimmick",
+                    "  m_IsActive: 0",
+                    "--- !u!4 &1031",
+                    "Transform:",
+                    "  m_GameObject: {fileID: 1030}",
+                    "  m_Father: {fileID: 1011}",
+                    "--- !u!114 &1100",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 1020}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 1021}",
+                    "  pull: 0.12",
+                    "  spring: 0.65",
+                    "  stiffness: 0.25",
+                    "  gravity: 0.05",
+                    "  gravityFalloff: 0.15",
+                    "  immobile: 0.35",
+                    "  maxAngleX: 48",
+                    "  radius: 0.03",
+                    "--- !u!114 &1101",
+                    "MonoBehaviour:",
+                    "  m_GameObject: {fileID: 1030}",
+                    "  m_Enabled: 1",
+                    f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}",
+                    "  rootTransform: {fileID: 1031}",
+                    "  pull: 0.99",
+                    "--- !u!1001 &2000",
+                    "PrefabInstance:",
+                    "  m_Modification:",
+                    "    m_TransformParent: {fileID: 1001}",
+                    "    m_Modifications:",
+                    f"    - target: {{fileID: 52, guid: {marsh_prefab_guid}, type: 3}}",
+                    "      propertyPath: _PhysBone_index",
+                    "      value: 0",
+                    f"    - target: {{fileID: 52, guid: {marsh_prefab_guid}, type: 3}}",
+                    "      propertyPath: _PhysBone_Collision_Radius",
+                    "      value: 5.0",
+                    f"    - target: {{fileID: 52, guid: {marsh_prefab_guid}, type: 3}}",
+                    "      propertyPath: _pbpresets.Array.data[0]",
+                    f"      objectReference: {{fileID: 11400000, guid: {marsh_asset_guid}, type: 2}}",
+                    f"  m_SourcePrefab: {{fileID: 100100000, guid: {marsh_prefab_guid}, type: 3}}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        extracted_pb = physbone_helper.extract_unity_scene_physbones(
+            pb_scene,
+            avatar_name="SynthPBAvatar",
+            unity_assets_root=pb_assets_root,
+            include_marshmallow_pb=True,
+        )
+        extracted_chain_roots = {
+            chain_rec.get("root_bone") for chain_rec in extracted_pb.get("chains", [])
+        }
+        marsh_breasts = extracted_pb.get("marshmallow_breasts", [])
+        ear_chain = next(
+            (item for item in extracted_pb.get("chains", []) if item.get("root_bone") == "Ear_L"),
+            {},
+        )
+        pb_extract_ok = (
+            extracted_pb.get("loaded", False)
+            and "Ear_L" in extracted_chain_roots
+            and "InactiveGimmick" not in extracted_chain_roots
+            and abs(float(ear_chain.get("pull", 0.0)) - 0.12) < 1e-4
+            and abs(float(ear_chain.get("spring", 0.0)) - 0.65) < 1e-4
+            and len(marsh_breasts) >= 2
+            and abs(float(marsh_breasts[0].get("pull", 0.0)) - 0.08) < 1e-4
+            and abs(float(marsh_breasts[0].get("radius", 0.0)) - 0.05) < 1e-4
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.physbones_unity_extract"),
+            pb_extract_ok,
+            f"chains={len(extracted_pb.get('chains', []))}, marsh={len(marsh_breasts)}",
+        )
+
+        excessive_spokes = []
+        for idx_num in range(45):
+            excessive_spokes.append(
+                {
+                    "chain_key": f"skirt_strip_{idx_num:02d}",
+                    "root_bone": f"SkirtRoot_{idx_num:02d}",
+                    "spoke_bones": [
+                        f"Skirt_{idx_num:02d}_0",
+                        f"Skirt_{idx_num:02d}_1",
+                        f"Skirt_{idx_num:02d}_2",
+                    ],
+                    "all_descendants": [
+                        f"Skirt_{idx_num:02d}_0",
+                        f"Skirt_{idx_num:02d}_1",
+                        f"Skirt_{idx_num:02d}_2",
+                    ],
+                    "parent_bone": "SKEL_Pelvis",
+                    "parent_bone_tag": physbone_helper.SKEL_PELVIS_TAG,
+                    "pull": 0.25,
+                    "spring": 0.55,
+                    "stiffness": 0.30,
+                    "gravity": 0.20,
+                }
+            )
+        packed_budget = physbone_helper.pack_physbone_chains_to_gtav_budget(
+            excessive_spokes,
+            gtav_prefix="PB_Tst",
+            max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+        )
+        packed_bones = list(packed_budget.get("custom_bones", []))
+        packed_tags = [
+            physbone_helper.compute_gtav_bone_tag(bone_item) for bone_item in packed_bones
+        ]
+        budget_pack_ok = (
+            0 < len(packed_bones) <= physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED
+            and len(packed_tags) == len(set(packed_tags))
+            and not (set(packed_tags) & set(physbone_helper.PARENT_BONE_TAGS.values()))
+            and len(packed_budget.get("chains", {})) >= 4
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.physbones_budget_pack"),
+            budget_pack_ok,
+            f"bones={len(packed_bones)}/{physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED}, chains={len(packed_budget.get('chains', {}))}",
+        )
+
+        pb_roundtrip_cfg = pb_root / "synth_physbones.cfg"
+        saved_pb_cfg = physbone_helper.save_physbone_config(
+            pb_roundtrip_cfg,
+            packed_budget["chains"],
+            metadata={"avatar": "SynthAvatar", "character": "franklin", "slot": "player_one"},
+            bone_mapping=packed_budget["bone_mapping"],
+        )
+        reloaded_pb_cfg = physbone_helper.load_physbone_config(saved_pb_cfg)
+        built_specs, built_parents, built_bones, _built_map_ci = (
+            physbone_helper.build_chain_specs_from_config(reloaded_pb_cfg)
+        )
+        resolved_pb_cfg = physbone_helper.resolve_character_physbones(
+            {
+                "avatar_id": "shinano_casual",
+                "physbones_source": "auto",
+                "physbones_cfg": str(saved_pb_cfg),
+                "unity_scene": "",
+                "protagonist": "franklin",
+                "ped_name": "player_one",
+            },
+        )
+        pb_roundtrip_ok = (
+            len(built_specs) == len(packed_budget["chains"])
+            and len(built_bones) == len(packed_bones)
+            and bool(built_parents)
+            and resolved_pb_cfg.get("source_used") == "cfg"
+            and len(resolved_pb_cfg.get("custom_bones", [])) == len(packed_bones)
+        )
+        suite_passed &= print_status_result(
+            i18n.translate("tests.physbones_cfg_roundtrip"),
+            pb_roundtrip_ok,
+            f"specs={len(built_specs)}, bones={len(built_bones)}, source={resolved_pb_cfg.get('source_used')}",
+        )
+
     return suite_passed
 
 
@@ -1179,6 +1564,14 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--target-character"),
         (scripts_root / "common_tools" / "apply_characters.py", "--avatar"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--save-assignment"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--export-physbones"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--physbones-source"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--physbones-source"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--physbones-source"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--physbones-source"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-source"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-source"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-source"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
