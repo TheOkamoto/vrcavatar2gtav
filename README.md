@@ -98,7 +98,7 @@ By default each protagonist starts with the preset below, and every VRChat avata
 - **[Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)** + **[RageOpenV](https://github.com/Chiheb-Bacha/RageOpenV)** installed in the GTA V game directory (required to load the `mods/` folder)
 - **[Blender 4.0.2](https://www.blender.org/)** with **[Sollumz v2.9.0](https://github.com/Sollumz/Sollumz)**
 - **`rage-cli` `0.28.1`** ([GitHub](https://github.com/VIRUXE/rage-cli)) for RPF7 repacking
-- **Python** environment to run [`run_mod_manager.py`](run_mod_manager.py) and validation scripts
+- **Python 3.10+** environment with dependencies installed from [`requirements.txt`](requirements.txt) (`numpy`, `Pillow`) to run [`run_mod_manager.py`](run_mod_manager.py) and validation scripts
 - Your legally obtained **BOOTH avatar/outfit files** (plus optional Unity project / `.unity` scene files)
 
 ---
@@ -111,12 +111,17 @@ By default each protagonist starts with the preset below, and every VRChat avata
    cd vrcavatar2gtav
    ```
 
-2. **Verify your clean clone** *(optional)*
+2. **Install Python dependencies (`numpy`, `Pillow`)** *(recommended inside a virtual environment)*
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Verify your clean clone** *(optional)*
    ```bash
    python scripts/common_tools/test_mod_suite.py --source-only
    ```
 
-3. **Run First-Run Setup**
+4. **Run First-Run Setup**
    Launch [`RUN_MANAGER.bat`](RUN_MANAGER.bat) (Windows) or run the CLI wizard directly:
    ```bash
    python run_mod_manager.py --setup
@@ -126,7 +131,7 @@ By default each protagonist starts with the preset below, and every VRChat avata
    python scripts/common_tools/setup_first_run.py --check-only
    ```
 
-4. **Build & Deploy All Protagonists**
+5. **Build & Deploy All Protagonists**
    ```bash
    python run_mod_manager.py --character all
    ```
@@ -191,6 +196,7 @@ vrcavatar2gtav/
 ├── 1_Franklin_Shinano_Casual/       # Output staging folder for player_one
 ├── 2_Michael_Shinano_EternalReunion/# Output staging folder for player_zero
 ├── 3_Trevor_Miltina_Maid/           # Output staging folder for player_two
+├── requirements.txt                 # Python 3.10+ dependencies (numpy, Pillow)
 ├── run_mod_manager.py               # Main CLI & interactive orchestrator
 ├── RUN_MANAGER.bat                  # Windows interactive menu (EN/JA/PT)
 ├── EXECUTAR_GERENCIADOR.bat         # Windows interactive menu launcher (PT-BR shortcut)

@@ -97,7 +97,7 @@
 - GTA V フォルダに **[Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)** + **[RageOpenV](https://github.com/Chiheb-Bacha/RageOpenV)** を導入済みであること（`mods/` フォルダ読み込みに必要）
 - **[Blender 4.0.2](https://www.blender.org/)** + **[Sollumz v2.9.0](https://github.com/Sollumz/Sollumz)**
 - RPF7 再梱包用の **`rage-cli` `0.28.1`** ([GitHub](https://github.com/VIRUXE/rage-cli))
-- [`run_mod_manager.py`](run_mod_manager.py) およびテストスイートを実行できる **Python** 環境
+- [`requirements.txt`](requirements.txt) のパッケージ（`numpy`、`Pillow`）を導入した **Python 3.10+** 環境（[`run_mod_manager.py`](run_mod_manager.py) およびテストスイート実行用）
 - 正当に入手したご自身の **BOOTH アバター／衣装ファイル**（カスタム調整を引き継ぐ場合は Unity プロジェクト / `.unity` ファイルも可）
 
 ---
@@ -110,12 +110,17 @@
    cd vrcavatar2gtav
    ```
 
-2. **クリーン環境チェック** *(任意)*
+2. **Python 依存パッケージ（`numpy`・`Pillow`）をインストール** *(仮想環境での利用を推奨)*
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **クリーン環境チェック** *(任意)*
    ```bash
    python scripts/common_tools/test_mod_suite.py --source-only
    ```
 
-3. **First-Run セットアップを実行**
+4. **First-Run セットアップを実行**
    Windows では [`RUN_MANAGER.bat`](RUN_MANAGER.bat) を起動するか、CLI から直接ウィザードを実行します：
    ```bash
    python run_mod_manager.py --setup
@@ -125,7 +130,7 @@
    python scripts/common_tools/setup_first_run.py --check-only
    ```
 
-4. **全キャラクターのビルドと配置を実行**
+5. **全キャラクターのビルドと配置を実行**
    ```bash
    python run_mod_manager.py --character all
    ```
@@ -190,6 +195,7 @@ vrcavatar2gtav/
 ├── 1_Franklin_Shinano_Casual/       # player_one 出力ステージングフォルダ
 ├── 2_Michael_Shinano_EternalReunion/# player_zero 出力ステージングフォルダ
 ├── 3_Trevor_Miltina_Maid/           # player_two 出力ステージングフォルダ
+├── requirements.txt                 # Python 3.10+ 依存パッケージ (numpy, Pillow)
 ├── run_mod_manager.py               # メイン CLI / 対話型オーケストレーター
 ├── RUN_MANAGER.bat                  # Windows 対話メニュー (EN/JA/PT)
 ├── EXECUTAR_GERENCIADOR.bat         # Windows 対話メニュー（PT-BR 向けショートカット）

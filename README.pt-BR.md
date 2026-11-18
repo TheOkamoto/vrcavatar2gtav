@@ -98,7 +98,7 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 - **[Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)** + **[RageOpenV](https://github.com/Chiheb-Bacha/RageOpenV)** instalados na pasta do GTA V (para carregar a pasta `mods/`)
 - **[Blender 4.0.2](https://www.blender.org/)** com **[Sollumz v2.9.0](https://github.com/Sollumz/Sollumz)**
 - **`rage-cli` `0.28.1`** ([GitHub](https://github.com/VIRUXE/rage-cli)) para reempacotamento RPF7
-- Ambiente **Python** para executar [`run_mod_manager.py`](run_mod_manager.py) e os scripts de validação
+- Ambiente **Python 3.10+** com as dependências de [`requirements.txt`](requirements.txt) (`numpy`, `Pillow`) instaladas para executar [`run_mod_manager.py`](run_mod_manager.py) e os scripts de validação
 - Seus **arquivos de avatar e roupas da BOOTH** legalmente adquiridos (além do projeto Unity / cena `.unity`, caso queira herdar customizações)
 
 ---
@@ -111,12 +111,17 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
    cd vrcavatar2gtav
    ```
 
-2. **Valide o repositório limpo** *(opcional)*
+2. **Instale as dependências Python (`numpy`, `Pillow`)** *(recomendado em um ambiente virtual)*
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Valide o repositório limpo** *(opcional)*
    ```bash
    python scripts/common_tools/test_mod_suite.py --source-only
    ```
 
-3. **Execute a configuração inicial (First-Run)**
+4. **Execute a configuração inicial (First-Run)**
    Abra [`EXECUTAR_GERENCIADOR.bat`](EXECUTAR_GERENCIADOR.bat) (ou [`RUN_MANAGER.bat`](RUN_MANAGER.bat)) no Windows, ou execute diretamente via CLI:
    ```bash
    python run_mod_manager.py --setup
@@ -126,7 +131,7 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
    python scripts/common_tools/setup_first_run.py --check-only
    ```
 
-4. **Construa e implante todos os protagonistas**
+5. **Construa e implante todos os protagonistas**
    ```bash
    python run_mod_manager.py --character all
    ```
@@ -191,6 +196,7 @@ vrcavatar2gtav/
 ├── 1_Franklin_Shinano_Casual/       # Saída intermediária para player_one
 ├── 2_Michael_Shinano_EternalReunion/# Saída intermediária para player_zero
 ├── 3_Trevor_Miltina_Maid/           # Saída intermediária para player_two
+├── requirements.txt                 # Dependências Python 3.10+ (numpy, Pillow)
 ├── run_mod_manager.py               # Orquestrador principal via CLI e menu interativo
 ├── RUN_MANAGER.bat                  # Atalho interativo no Windows (EN/JA/PT)
 ├── EXECUTAR_GERENCIADOR.bat         # Atalho interativo no Windows (PT-BR)
