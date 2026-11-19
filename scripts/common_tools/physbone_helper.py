@@ -5098,6 +5098,7 @@ def _load_ini_blink_profiles(ini_path: Path) -> List[Dict[str, object]]:
             loc_pos = parse_vec3_string(sec.get(prefix + "local_pos", "0, 0, 0"))
             loc_rot = _parse_quat_string(sec.get(prefix + "local_rot", "0, 0, 0, 1"))
             delta_pos = parse_vec3_string(sec.get(prefix + "delta_pos", "0, 0, 0"))
+            delta_rot = _parse_quat_string(sec.get(prefix + "delta_rot", "0, 0, 0, 1"))
             bones.append(
                 {
                     "name": sec.get(prefix + "name", ""),
@@ -5106,6 +5107,7 @@ def _load_ini_blink_profiles(ini_path: Path) -> List[Dict[str, object]]:
                     "local_pos": loc_pos,
                     "local_rot": loc_rot,
                     "delta_pos": delta_pos,
+                    "delta_rot": delta_rot,
                 }
             )
         profiles.append(
@@ -5114,7 +5116,7 @@ def _load_ini_blink_profiles(ini_path: Path) -> List[Dict[str, object]]:
                 "enabled": sec.getint("enabled", 1),
                 "min_interval": sec.getfloat("min_interval", 2.6),
                 "max_interval": sec.getfloat("max_interval", 6.0),
-                "blink_duration": sec.getfloat("blink_duration", 0.215),
+                "blink_duration": sec.getfloat("blink_duration", 0.25),
                 "double_blink_chance": sec.getfloat("double_blink_chance", 0.18),
                 "max_blink": sec.getfloat("max_blink", 1.0),
                 "bones": bones,
@@ -5292,20 +5294,22 @@ def export_physbone_asi_ini(
         lines.append(f"enabled = {int(blink_entry.get('enabled', 1))}")
         lines.append(f"min_interval = {float(blink_entry.get('min_interval', 2.6)):.6f}")
         lines.append(f"max_interval = {float(blink_entry.get('max_interval', 6.0)):.6f}")
-        lines.append(f"blink_duration = {float(blink_entry.get('blink_duration', 0.215)):.6f}")
+        lines.append(f"blink_duration = {float(blink_entry.get('blink_duration', 0.25)):.6f}")
         lines.append(f"double_blink_chance = {float(blink_entry.get('double_blink_chance', 0.18)):.6f}")
         lines.append(f"max_blink = {float(blink_entry.get('max_blink', 1.0)):.6f}")
         lines.append(f"bone_count = {len(blink_bones)}")
         for bone_idx, bone_entry in enumerate(blink_bones):
             loc_pos = bone_entry["local_pos"]
             loc_rot = bone_entry["local_rot"]
-            delta_pos = bone_entry["delta_pos"]
+            delta_pos = bone_entry.get("delta_pos", (0.0, 0.0, 0.0))
+            delta_rot = bone_entry.get("delta_rot", (0.0, 0.0, 0.0, 1.0))
             lines.append(f"bone_{bone_idx}_name = {bone_entry['name']}")
             lines.append(f"bone_{bone_idx}_tag = {int(bone_entry['tag'])}")
             lines.append(f"bone_{bone_idx}_parent_tag = {int(bone_entry.get('parent_tag', 0))}")
             lines.append(f"bone_{bone_idx}_local_pos = {loc_pos[0]:.7f}, {loc_pos[1]:.7f}, {loc_pos[2]:.7f}")
             lines.append(f"bone_{bone_idx}_local_rot = {loc_rot[0]:.7f}, {loc_rot[1]:.7f}, {loc_rot[2]:.7f}, {loc_rot[3]:.7f}")
             lines.append(f"bone_{bone_idx}_delta_pos = {delta_pos[0]:.7f}, {delta_pos[1]:.7f}, {delta_pos[2]:.7f}")
+            lines.append(f"bone_{bone_idx}_delta_rot = {delta_rot[0]:.7f}, {delta_rot[1]:.7f}, {delta_rot[2]:.7f}, {delta_rot[3]:.7f}")
 
     resolved_ini.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return resolved_ini

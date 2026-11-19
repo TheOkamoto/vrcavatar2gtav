@@ -326,6 +326,11 @@ def build_trevor_miltina_avatar(cli_args=None):
         trevor_cfg,
         avatar_id="miltina_maid",
     )
+    blink_anchors = (
+        eye_blink_helper.capture_eyelid_blink_anchors(ped_armature)
+        if eye_blink_mode != "off"
+        else {}
+    )
     valid_gtav_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
         valid_gtav_bones,
         enable_eye_blink=(eye_blink_mode != "off"),
@@ -873,8 +878,23 @@ def build_trevor_miltina_avatar(cli_args=None):
             bpy.data.objects.remove(extra_hair_arm)
 
     ped_model_name = str(trevor_cfg.get("ped_name", "player_two"))
+    custom_blink_bones = []
     blink_profiles_to_merge = []
     if blink_rig_data.get("enabled"):
+        custom_blink_bones = eye_blink_helper.build_blink_custom_bone_specs(
+            ped_armature,
+            blink_anchors=blink_anchors,
+            blink_rig_data=blink_rig_data,
+            world_scale=uniform_scale,
+            world_z_offset=vertical_translation,
+        )
+        if custom_blink_bones:
+            hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+                ped_armature,
+                custom_blink_bones,
+                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            )
+            valid_gtav_bones.update(item["name"] for item in custom_blink_bones)
         bpy.context.view_layer.update()
         trevor_blink_scale = (
             uniform_scale
@@ -889,6 +909,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             ped_armature,
             ped_model_name,
             scaled_blink_deltas,
+            delta_rotations_world=blink_rig_data.get("rot_quats_world"),
             enabled=True,
             max_blink=eye_blink_strength,
         )
@@ -1209,7 +1230,8 @@ def build_trevor_miltina_avatar(cli_args=None):
     ped_armature.drawable_properties.lod_dist_low = 9998.0
     ped_armature.drawable_properties.lod_dist_vlow = 9998.0
 
-    custom_pb_name_set = {pb_item["name"] for pb_item in custom_physbones} if custom_physbones else set()
+    all_custom_yft_bones = list(custom_physbones or ()) + list(custom_blink_bones)
+    custom_pb_name_set = {pb_item["name"] for pb_item in all_custom_yft_bones}
     for bone_obj in ped_armature.data.bones:
         if bone_obj.name not in custom_pb_name_set:
             set_recommended_bone_properties(bone_obj)
@@ -1276,7 +1298,7 @@ def build_trevor_miltina_avatar(cli_args=None):
                 skeleton_path,
                 yft_output_path,
                 hand_bone_world_targets,
-                custom_child_bones=custom_physbones or None,
+                custom_child_bones=all_custom_yft_bones or None,
             )
         )
         ped_damage_helper.validate_rpf7_resource_file(yft_output_path)

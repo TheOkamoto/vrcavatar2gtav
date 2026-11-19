@@ -118,6 +118,9 @@ def _load_apply_runtime_config(
         rpf_paths_cfg["streamedpeds_extracted"],
         rpf_paths_cfg["patchday4ng_models_extracted"],
     ]
+    patchday3ng_models_dir = rpf_paths_cfg.get("patchday3ng_models_extracted")
+    if patchday3ng_models_dir is not None:
+        staging_target_dirs.append(patchday3ng_models_dir)
     for optional_work_dir in (
         project_root_dir / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "patchday3_work" / "patchday3_extracted",
         project_root_dir / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "mppatches_work" / "mppatches_extracted",

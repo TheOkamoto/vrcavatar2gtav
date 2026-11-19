@@ -699,6 +699,11 @@ def build_shinano_er_for_gtav(cli_args):
         target_cfg,
         avatar_id="shinano_er",
     )
+    blink_anchors = (
+        eye_blink_helper.capture_eyelid_blink_anchors(ped_armature)
+        if eye_blink_mode != "off"
+        else {}
+    )
     valid_gtav_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
         valid_gtav_bones,
         enable_eye_blink=(eye_blink_mode != "off"),
@@ -1769,8 +1774,23 @@ def build_shinano_er_for_gtav(cli_args):
         )
 
     ped_model_name = str(char_profile["ped_name"])
+    custom_blink_bones = []
     blink_profiles_to_merge = []
     if blink_rig_data.get("enabled"):
+        custom_blink_bones = eye_blink_helper.build_blink_custom_bone_specs(
+            ped_armature,
+            blink_anchors=blink_anchors,
+            blink_rig_data=blink_rig_data,
+            world_scale=scale_factor,
+            world_z_offset=vertical_offset,
+        )
+        if custom_blink_bones:
+            hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+                ped_armature,
+                custom_blink_bones,
+                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            )
+            valid_gtav_bones.update(item["name"] for item in custom_blink_bones)
         bpy.context.view_layer.update()
         scaled_blink_deltas = eye_blink_helper.scale_eye_blink_deltas(
             blink_rig_data, scale_factor
@@ -1779,6 +1799,7 @@ def build_shinano_er_for_gtav(cli_args):
             ped_armature,
             ped_model_name,
             scaled_blink_deltas,
+            delta_rotations_world=blink_rig_data.get("rot_quats_world"),
             enabled=True,
             max_blink=eye_blink_strength,
         )
@@ -1936,7 +1957,8 @@ def build_shinano_er_for_gtav(cli_args):
     ped_armature.drawable_properties.lod_dist_low = 9998.0
     ped_armature.drawable_properties.lod_dist_vlow = 9998.0
 
-    custom_ear_name_set = {item["name"] for item in custom_ear_bones}
+    all_custom_yft_bones = list(custom_ear_bones) + list(custom_blink_bones)
+    custom_ear_name_set = {item["name"] for item in all_custom_yft_bones}
     for bone_obj in ped_armature.data.bones:
         if bone_obj.name not in custom_ear_name_set:
             set_recommended_bone_properties(bone_obj)
@@ -1981,7 +2003,7 @@ def build_shinano_er_for_gtav(cli_args):
         cli_args.skeleton_yft,
         yft_output_path,
         bone_world_targets,
-        custom_child_bones=custom_ear_bones or None,
+        custom_child_bones=all_custom_yft_bones or None,
     )
     ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
     print(

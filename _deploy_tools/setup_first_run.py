@@ -1116,48 +1116,96 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
     else:
         print(project_i18n.translate("setup.mppatches_ready", path=mppatches_models_dir))
 
-    # 7. Extract patchday4ng/dlc.rpf and patchday4ng.rpf when present in user install
-    vanilla_patchday4_dlc = (
-        gtav_root_dir / "update" / "x64" / "dlcpacks" / "patchday4ng" / "dlc.rpf"
-    )
-    if vanilla_patchday4_dlc.is_file():
-        patchday4_dlc_dir = rpf_paths_cfg["patchday4ng_dlc_extracted"]
-        inner_patchday4_rpf = patchday4_dlc_dir / rpf_paths_cfg["patchday4ng_rpf_relative"]
-        patchday4_models_dir = rpf_paths_cfg["patchday4ng_models_extracted"]
+    # 7. Extract patchday3ng and patchday4ng dlc.rpf / nested RPFs when present
+    staging_dir = project_paths.get_staging_dir()
+    for dlc_name in ("patchday3ng", "patchday4ng"):
+        vanilla_patchday_dlc = (
+            gtav_root_dir / "update" / "x64" / "dlcpacks" / dlc_name / "dlc.rpf"
+        )
+        if not vanilla_patchday_dlc.is_file():
+            print(
+                project_i18n.translate(
+                    "setup.patchday_optional_skipped", dlc=dlc_name
+                )
+            )
+            continue
 
-        if force_reextract or not inner_patchday4_rpf.is_file():
+        patchday_dlc_dir = rpf_paths_cfg.get(
+            f"{dlc_name}_dlc_extracted",
+            staging_dir / f"{dlc_name}_dlc_extracted",
+        )
+        rpf_rel_path = rpf_paths_cfg.get(
+            f"{dlc_name}_rpf_relative",
+            Path("x64") / "models" / "cdimages" / f"{dlc_name}.rpf",
+        )
+        inner_patchday_rpf = patchday_dlc_dir / rpf_rel_path
+        patchday_models_dir = rpf_paths_cfg.get(
+            f"{dlc_name}_models_extracted",
+            staging_dir / f"{dlc_name}_models_extracted",
+        )
+
+        # Skip redundant re-extraction when legacy Franklin patchday3_work is already populated
+        legacy_p3_dir = (
+            project_paths.get_project_root()
+            / "1_Franklin_Shinano_Casual"
+            / "5_rpf_package"
+            / "patchday3_work"
+        )
+        if (
+            not force_reextract
+            and dlc_name == "patchday3ng"
+            and (legacy_p3_dir / "patchday3ng_extracted").is_dir()
+            and (legacy_p3_dir / "patchday3_extracted").is_dir()
+            and not patchday_dlc_dir.exists()
+        ):
+            print(
+                project_i18n.translate(
+                    "setup.patchday_models_ready",
+                    dlc=dlc_name,
+                    path=legacy_p3_dir / "patchday3_extracted",
+                )
+            )
+            continue
+
+        if force_reextract or not inner_patchday_rpf.is_file():
             run_rage_extract(
-                vanilla_patchday4_dlc,
-                patchday4_dlc_dir,
+                vanilla_patchday_dlc,
+                patchday_dlc_dir,
                 gtav_root_dir,
-                description=project_i18n.translate("setup.desc_extract_patchday4_dlc"),
+                description=project_i18n.translate(
+                    "setup.desc_extract_patchday_dlc", dlc=dlc_name
+                ),
             )
         else:
             print(
                 project_i18n.translate(
-                    "setup.patchday4_dlc_ready", path=patchday4_dlc_dir
+                    "setup.patchday_dlc_ready",
+                    dlc=dlc_name,
+                    path=patchday_dlc_dir,
                 )
             )
 
         if (
             force_reextract
-            or not patchday4_models_dir.is_dir()
-            or not any(patchday4_models_dir.iterdir())
+            or not patchday_models_dir.is_dir()
+            or not any(patchday_models_dir.iterdir())
         ):
             run_rage_extract(
-                inner_patchday4_rpf,
-                patchday4_models_dir,
+                inner_patchday_rpf,
+                patchday_models_dir,
                 gtav_root_dir,
-                description=project_i18n.translate("setup.desc_extract_patchday4_rpf"),
+                description=project_i18n.translate(
+                    "setup.desc_extract_patchday_rpf", dlc=dlc_name
+                ),
             )
         else:
             print(
                 project_i18n.translate(
-                    "setup.patchday4_models_ready", path=patchday4_models_dir
+                    "setup.patchday_models_ready",
+                    dlc=dlc_name,
+                    path=patchday_models_dir,
                 )
             )
-    else:
-        print(project_i18n.translate("setup.patchday4_optional_skipped"))
 
     print(project_i18n.translate("setup.extraction_success"))
     return True

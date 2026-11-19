@@ -256,6 +256,7 @@ def test_compiled_drawables_and_textures() -> bool:
     ini_blink_count = 0
     blink_models_found = set()
     blink_max_by_model = {}
+    blink_rot_valid_by_model = {}
     if ini_exists:
         ini_parser = configparser.ConfigParser()
         ini_parser.read(str(physbones_ini_path), encoding="utf-8")
@@ -267,9 +268,16 @@ def test_compiled_drawables_and_textures() -> bool:
                 blink_enabled = ini_parser.getint(section_name, "enabled", fallback=0)
                 blink_bones = ini_parser.getint(section_name, "bone_count", fallback=0)
                 blink_max_val = ini_parser.getfloat(section_name, "max_blink", fallback=1.0)
+                has_non_identity_rot = False
+                for bone_idx in range(blink_bones):
+                    raw_drot = ini_parser.get(section_name, f"bone_{bone_idx}_delta_rot", fallback="")
+                    parts = [float(item.strip()) for item in raw_drot.split(",") if item.strip()]
+                    if len(parts) == 4 and (parts[0] ** 2 + parts[1] ** 2 + parts[2] ** 2) > 1e-4:
+                        has_non_identity_rot = True
                 if blink_enabled == 1 and blink_bones == 4 and blink_model:
                     blink_models_found.add(blink_model)
                     blink_max_by_model[blink_model] = blink_max_val
+                    blink_rot_valid_by_model[blink_model] = has_non_identity_rot
                 continue
             if not section_name.startswith("Chain_"):
                 continue
@@ -283,6 +291,7 @@ def test_compiled_drawables_and_textures() -> bool:
 
     blink_ydd_bones_ok = True
     for xml_rel_path in (
+        "1_Franklin_Shinano_Casual/4_exported_models/uppr_008_u.ydd.xml",
         "1_Franklin_Shinano_Casual/4_exported_models/uppr_000_u.ydd.xml",
         "2_Michael_Shinano_EternalReunion/4_exported_models/uppr_000_u.ydd.xml",
         "3_Trevor_Miltina_Maid/4_exported_models/uppr_000_u.ydd.xml",
@@ -291,8 +300,8 @@ def test_compiled_drawables_and_textures() -> bool:
         if xml_file.is_file():
             xml_text = xml_file.read_text(encoding="utf-8", errors="ignore")
             if (
-                "FACIAL_L_eyelidUpper" not in xml_text
-                or "FACIAL_R_eyelidUpper" not in xml_text
+                "PB_Blink_L" not in xml_text
+                or "PB_Blink_R" not in xml_text
             ):
                 blink_ydd_bones_ok = False
 
@@ -300,6 +309,11 @@ def test_compiled_drawables_and_textures() -> bool:
         abs(blink_max_by_model.get("player_zero", 1.0) - 0.5) < 0.02
         and abs(blink_max_by_model.get("player_one", 1.0) - 0.5) < 0.02
         and abs(blink_max_by_model.get("player_two", 1.0) - 0.6) < 0.02
+    )
+    blink_rot_modes_ok = (
+        blink_rot_valid_by_model.get("player_zero", False)
+        and blink_rot_valid_by_model.get("player_one", False)
+        and blink_rot_valid_by_model.get("player_two", False)
     )
     physbones_runtime_ok = (
         asi_exists
@@ -311,6 +325,7 @@ def test_compiled_drawables_and_textures() -> bool:
         and ini_blink_count >= 3
         and {"player_zero", "player_one", "player_two"}.issubset(blink_models_found)
         and blink_peaks_ok
+        and blink_rot_modes_ok
         and blink_ydd_bones_ok
     )
     all_assets_present &= print_status_result(
@@ -374,13 +389,34 @@ def test_deployed_rpf_encryption_headers() -> bool:
         rpf_paths_cfg["x64v_extracted"] / rpf_paths_cfg["streamedpedprops_rpf_relative"],
         rpf_paths_cfg["x64v_game_rpf"],
     ]
-    patchday4_inner = (
-        rpf_paths_cfg["patchday4ng_dlc_extracted"] / rpf_paths_cfg["patchday4ng_rpf_relative"]
-    )
-    if patchday4_inner.is_file():
-        repacked_archives.append(patchday4_inner)
-    if rpf_paths_cfg["patchday4ng_game_rpf"].is_file():
-        repacked_archives.append(rpf_paths_cfg["patchday4ng_game_rpf"])
+    for optional_rpf_path in (
+        rpf_paths_cfg.get("patchday3ng_game_rpf"),
+        (
+            rpf_paths_cfg["patchday3ng_dlc_extracted"]
+            / rpf_paths_cfg["patchday3ng_rpf_relative"]
+            if "patchday3ng_dlc_extracted" in rpf_paths_cfg
+            and "patchday3ng_rpf_relative" in rpf_paths_cfg
+            else None
+        ),
+        (
+            PROJECT_ROOT_DIR
+            / "1_Franklin_Shinano_Casual"
+            / "5_rpf_package"
+            / "patchday3_work"
+            / "patchday3ng_extracted"
+            / "x64"
+            / "models"
+            / "cdimages"
+            / "patchday3ng.rpf"
+        ),
+        (
+            rpf_paths_cfg["patchday4ng_dlc_extracted"]
+            / rpf_paths_cfg["patchday4ng_rpf_relative"]
+        ),
+        rpf_paths_cfg.get("patchday4ng_game_rpf"),
+    ):
+        if optional_rpf_path is not None and optional_rpf_path.is_file():
+            repacked_archives.append(optional_rpf_path)
 
     rpf7_bounds_ok = True
     max_observed_res = 0
@@ -1148,36 +1184,40 @@ def test_source_templates_and_dummies() -> bool:
         ini_file = Path(blink_tmp) / "GTAVPhysBones.ini"
         sample_blink_bones = [
             {
-                "name": "FACIAL_L_eyelidUpper",
-                "tag": 38849,
-                "parent_tag": 65068,
-                "local_pos": (0.0348, -0.0931, 0.7032),
+                "name": "PB_Blink_L",
+                "tag": 44255,
+                "parent_tag": 31086,
+                "local_pos": (0.0348, -0.0931, 0.0806),
                 "local_rot": (0.0, 0.0, 0.0, 1.0),
-                "delta_pos": (0.0, 0.005, -0.024),
+                "delta_pos": (0.0, 0.0, 0.0),
+                "delta_rot": (0.28, 0.0, 0.0, 0.960000),
             },
             {
-                "name": "FACIAL_L_eyelidUpperOuterSDK",
-                "tag": 44821,
-                "parent_tag": 38849,
-                "local_pos": (0.0063, -0.0137, 0.0036),
+                "name": "PB_Blink_LO",
+                "tag": 28167,
+                "parent_tag": 31086,
+                "local_pos": (0.0411, -0.0800, 0.0750),
                 "local_rot": (0.0, 0.0, 0.0, 1.0),
-                "delta_pos": (-0.010, -0.006, 0.008),
+                "delta_pos": (0.0, 0.0, 0.0),
+                "delta_rot": (0.22, 0.0, -0.15, 0.963900),
             },
             {
-                "name": "FACIAL_R_eyelidUpper",
-                "tag": 32276,
-                "parent_tag": 65068,
-                "local_pos": (-0.0319, -0.0931, 0.7032),
+                "name": "PB_Blink_R",
+                "tag": 44357,
+                "parent_tag": 31086,
+                "local_pos": (-0.0319, -0.0931, 0.0806),
                 "local_rot": (0.0, 0.0, 0.0, 1.0),
-                "delta_pos": (0.0, 0.005, -0.024),
+                "delta_pos": (0.0, 0.0, 0.0),
+                "delta_rot": (0.28, 0.0, 0.0, 0.960000),
             },
             {
-                "name": "FACIAL_R_eyelidUpperOuterSDK",
-                "tag": 45333,
-                "parent_tag": 32276,
-                "local_pos": (-0.0063, -0.0137, 0.0036),
+                "name": "PB_Blink_RO",
+                "tag": 29607,
+                "parent_tag": 31086,
+                "local_pos": (-0.0382, -0.0800, 0.0750),
                 "local_rot": (0.0, 0.0, 0.0, 1.0),
-                "delta_pos": (0.010, -0.006, 0.008),
+                "delta_pos": (0.0, 0.0, 0.0),
+                "delta_rot": (0.22, 0.0, 0.15, 0.963900),
             },
         ]
         pb_mod.merge_physbone_asi_ini(
@@ -1228,6 +1268,8 @@ def test_source_templates_and_dummies() -> bool:
             and after_disable[0]["model"] == "player_two"
             and abs(float(after_disable[0].get("max_blink", 0.0)) - 0.6) < 1e-4
             and len(after_disable[0]["bones"]) == 4
+            and abs(float(after_disable[0]["bones"][0]["delta_rot"][0]) - 0.28) < 1e-4
+            and abs(float(after_disable[0]["bones"][0]["delta_rot"][3]) - 0.96) < 1e-4
         )
 
     strength_resolution_ok = (
@@ -1257,22 +1299,39 @@ def test_source_templates_and_dummies() -> bool:
         + [
             (0.02, -0.09, 1.48),   # idx 12: mouth/smile vertex
             (0.03, -0.09, 1.585),  # idx 13: eyebrow vertex
+            (0.03, -0.089, 1.584), # idx 14: forehead skin behind eyebrow
         ]
     )
     eyelid_indices = set(range(12))
     blink_key_coords = []
+    brow_key_coords = []
     for v_idx, (bx_val, by_val, bz_val) in enumerate(base_coords):
         if v_idx in eyelid_indices:
             blink_key_coords.append(_MockVec3(bx_val, by_val - 0.003, bz_val - 0.018))
+        elif v_idx == 14:
+            blink_key_coords.append(_MockVec3(bx_val, by_val + 0.001, bz_val - 0.004))
         else:
             blink_key_coords.append(_MockVec3(bx_val, by_val, bz_val))
+        brow_z = bz_val + 0.003 if v_idx == 13 else bz_val
+        brow_key_coords.append(_MockVec3(bx_val, by_val, brow_z))
 
-    key_basis = types.SimpleNamespace(name="Basis", value=0.0, mute=False)
+    key_basis = types.SimpleNamespace(
+        name="Basis",
+        value=0.0,
+        mute=False,
+        data=[types.SimpleNamespace(co=_MockVec3(*xyz)) for xyz in base_coords],
+    )
     key_blink = types.SimpleNamespace(
         name="vrc.Blink",
         value=0.0,
         mute=False,
         data=[types.SimpleNamespace(co=vec_co) for vec_co in blink_key_coords],
+    )
+    key_brow = types.SimpleNamespace(
+        name="eyebrow_straight",
+        value=0.0,
+        mute=False,
+        data=[types.SimpleNamespace(co=vec_co) for vec_co in brow_key_coords],
     )
     key_pleasure = types.SimpleNamespace(name="eye_pleasure", value=0.75, mute=False)
     key_turi = types.SimpleNamespace(name="eyelid_turi1", value=0.65, mute=False)
@@ -1286,6 +1345,10 @@ def test_source_templates_and_dummies() -> bool:
                 z_out += 0.006 * key_smile.value
             elif v_idx == 13:
                 z_out -= 0.002 * key_turi.value
+            elif v_idx == 14:
+                if not key_blink.mute and key_blink.value > 0.0:
+                    z_out -= 0.004 * key_blink.value
+                    y_out += 0.001 * key_blink.value
             else:
                 z_out -= 0.002 * key_pleasure.value
                 z_out -= 0.001 * key_turi.value
@@ -1309,7 +1372,7 @@ def test_source_templates_and_dummies() -> bool:
         data=types.SimpleNamespace(
             vertices=[types.SimpleNamespace(co=_MockVec3(*xyz)) for xyz in base_coords],
             shape_keys=types.SimpleNamespace(
-                key_blocks=[key_basis, key_blink, key_pleasure, key_turi, key_smile]
+                key_blocks=[key_basis, key_blink, key_brow, key_pleasure, key_turi, key_smile]
             ),
         ),
         evaluated_get=_eval_fake_body,
@@ -1338,10 +1401,13 @@ def test_source_templates_and_dummies() -> bool:
         and abs(key_smile.value - 0.40) < 1e-6
         and (12 not in extracted_rig.get("weights_by_orig_vert", {}))
         and (13 not in extracted_rig.get("weights_by_orig_vert", {}))
+        and (14 not in extracted_rig.get("weights_by_orig_vert", {}))
         and all(
             idx in extracted_rig.get("weights_by_orig_vert", {})
             for idx in eyelid_indices
         )
+        and "PB_Blink_L" in extracted_rig.get("pivots_world", {})
+        and "PB_Blink_R" in extracted_rig.get("rot_quats_world", {})
     )
 
     eye_blink_ok = print_status_result(

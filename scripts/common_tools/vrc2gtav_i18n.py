@@ -853,6 +853,31 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "[情報] オプション DLC patchday4ng が gtav_root に見つからないためスキップします。",
         "pt": "[INFO] DLC opcional patchday4ng não encontrado em gtav_root; etapa ignorada.",
     },
+    "setup.desc_extract_patchday_dlc": {
+        "en": "Extracting update/x64/dlcpacks/{dlc}/dlc.rpf",
+        "ja": "update/x64/dlcpacks/{dlc}/dlc.rpf を展開中",
+        "pt": "Extraindo update/x64/dlcpacks/{dlc}/dlc.rpf",
+    },
+    "setup.patchday_dlc_ready": {
+        "en": "[OK] {dlc}_dlc_extracted already prepared: {path}",
+        "ja": "[OK] {dlc}_dlc_extracted は既に準備済みです: {path}",
+        "pt": "[OK] {dlc}_dlc_extracted já preparado: {path}",
+    },
+    "setup.desc_extract_patchday_rpf": {
+        "en": "Extracting {dlc}.rpf",
+        "ja": "{dlc}.rpf を展開中",
+        "pt": "Extraindo {dlc}.rpf",
+    },
+    "setup.patchday_models_ready": {
+        "en": "[OK] {dlc}_models_extracted already prepared: {path}",
+        "ja": "[OK] {dlc}_models_extracted は既に準備済みです: {path}",
+        "pt": "[OK] {dlc}_models_extracted já preparado: {path}",
+    },
+    "setup.patchday_optional_skipped": {
+        "en": "[INFO] Optional DLC {dlc} not found in gtav_root; skipping step.",
+        "ja": "[情報] オプション DLC {dlc} が gtav_root に見つからないためスキップします。",
+        "pt": "[INFO] DLC opcional {dlc} não encontrado em gtav_root; etapa ignorada.",
+    },
     "setup.extraction_success": {
         "en": "\n[SUCCESS] First-Run setup and vanilla extraction completed successfully!",
         "ja": "\n[成功] 初回セットアップとバニラファイルの抽出が正常に完了しました！",

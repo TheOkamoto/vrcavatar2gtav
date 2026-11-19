@@ -6,7 +6,7 @@ Repack and deploy all GTA V mod RPF archives with live progress bars:
   1. Repack mppatches.rpf and patch TOC (f_size=0, enc='OPEN')
   2. Repack mppatchesng_dlc.rpf and patch TOC (f_size=0, enc='OPEN')
   3. Deploy dlc.rpf -> <gtav_mods>/update/x64/dlcpacks/mppatchesng/dlc.rpf
-  4. Repack/Deploy patchday4ng (when present in staging)
+  4. Repack/Deploy patchday3ng & patchday4ng (when present in staging)
   5. Repack streamedpeds_players.rpf and patch TOC (f_size=0, enc='OPEN')
   6. Repack streamedpedprops.rpf and patch TOC (f_size=0, enc='OPEN')
   7. Repack x64v_modded.rpf and patch TOC (f_size=0, enc='OPEN')
@@ -40,26 +40,83 @@ except ImportError:
     from common_tools import vrc2gtav_paths as project_paths
 
 
+def _build_patchday_spec(
+    rpf_paths_cfg: Dict[str, Path],
+    staging_dir: Path,
+    project_root_dir: Path,
+    pack_name: str,
+) -> Dict[str, object]:
+    """Resolve staging/work directories and output RPF paths for a patchday DLC."""
+    dlc_extracted_dir = Path(
+        rpf_paths_cfg.get(
+            f"{pack_name}_dlc_extracted",
+            staging_dir / f"{pack_name}_dlc_extracted",
+        )
+    )
+    models_dir = Path(
+        rpf_paths_cfg.get(
+            f"{pack_name}_models_extracted",
+            staging_dir / f"{pack_name}_models_extracted",
+        )
+    )
+    if pack_name == "patchday3ng" and not (
+        dlc_extracted_dir.exists() and models_dir.exists()
+    ):
+        legacy_work_dir = (
+            project_root_dir
+            / "1_Franklin_Shinano_Casual"
+            / "5_rpf_package"
+            / "patchday3_work"
+        )
+        legacy_dlc_dir = legacy_work_dir / "patchday3ng_extracted"
+        legacy_models_dir = legacy_work_dir / "patchday3_extracted"
+        if legacy_dlc_dir.exists() and legacy_models_dir.exists():
+            dlc_extracted_dir = legacy_dlc_dir
+            models_dir = legacy_models_dir
+
+    rpf_relative_path = Path(
+        rpf_paths_cfg.get(
+            f"{pack_name}_rpf_relative",
+            Path("x64") / "models" / "cdimages" / f"{pack_name}.rpf",
+        )
+    )
+    dlc_rpf_file = Path(
+        rpf_paths_cfg.get(
+            f"{pack_name}_modded_rpf",
+            staging_dir / f"{pack_name}_dlc.rpf",
+        )
+    )
+    return {
+        "name": pack_name,
+        "dlc_extracted_dir": dlc_extracted_dir,
+        "inner_rpf": dlc_extracted_dir / rpf_relative_path,
+        "models_dir": models_dir,
+        "dlc_rpf_file": dlc_rpf_file,
+        "target_dlc_path": Path(rpf_paths_cfg[f"{pack_name}_game_rpf"]),
+    }
+
+
 def _load_repack_paths() -> Dict[str, object]:
     """Resolve all executable, staging, and target archive paths from vrc2gtav.cfg."""
     rpf_paths_cfg = project_paths.get_rpf_paths()
+    staging_dir = project_paths.get_staging_dir()
+    project_root_dir = project_paths.get_project_root()
     mppatchesng_extracted_dir = rpf_paths_cfg["mppatches_dlc_extracted"]
-    patchday4ng_extracted_dir = rpf_paths_cfg["patchday4ng_dlc_extracted"]
     x64v_extracted_dir = rpf_paths_cfg["x64v_extracted"]
+    patchday_specs = [
+        _build_patchday_spec(rpf_paths_cfg, staging_dir, project_root_dir, pack_name)
+        for pack_name in ("patchday3ng", "patchday4ng")
+    ]
     return {
         "rage_cli": project_paths.get_rage_cli(),
         "gtav_mods_dir": project_paths.get_gtav_mods_dir(),
-        "staging_dir": project_paths.get_staging_dir(),
+        "staging_dir": staging_dir,
         "mppatches_extracted_dir": rpf_paths_cfg["mppatches_extracted"],
         "mppatchesng_extracted_dir": mppatchesng_extracted_dir,
         "mppatches_rpf_file": mppatchesng_extracted_dir / rpf_paths_cfg["mppatches_rpf_relative"],
         "mppatchesng_dlc_rpf_file": rpf_paths_cfg["mppatches_modded_rpf"],
         "target_dlc_rpf_path": rpf_paths_cfg["mppatches_game_rpf"],
-        "patchday4ng_extracted_dir": patchday4ng_extracted_dir,
-        "patchday4ng_inner_rpf": patchday4ng_extracted_dir / rpf_paths_cfg["patchday4ng_rpf_relative"],
-        "patchday4ng_models_dir": rpf_paths_cfg["patchday4ng_models_extracted"],
-        "patchday4ng_dlc_rpf_file": rpf_paths_cfg["patchday4ng_modded_rpf"],
-        "target_patchday4ng_dlc_path": rpf_paths_cfg["patchday4ng_game_rpf"],
+        "patchday_specs": patchday_specs,
         "streamedpeds_extracted_dir": rpf_paths_cfg["streamedpeds_extracted"],
         "streamedpedprops_extracted_dir": rpf_paths_cfg["streamedpedprops_extracted"],
         "x64v_extracted_dir": x64v_extracted_dir,
@@ -570,11 +627,7 @@ def run_repack_and_deploy() -> None:
     mppatchesng_dlc_rpf_file = Path(paths_map["mppatchesng_dlc_rpf_file"])
     target_dlc_rpf_path = Path(paths_map["target_dlc_rpf_path"])
 
-    patchday4ng_extracted_dir = Path(paths_map["patchday4ng_extracted_dir"])
-    patchday4ng_inner_rpf = Path(paths_map["patchday4ng_inner_rpf"])
-    patchday4ng_models_dir = Path(paths_map["patchday4ng_models_dir"])
-    patchday4ng_dlc_rpf_file = Path(paths_map["patchday4ng_dlc_rpf_file"])
-    target_patchday4ng_dlc_path = Path(paths_map["target_patchday4ng_dlc_path"])
+    patchday_specs = list(paths_map["patchday_specs"])
 
     streamedpeds_extracted_dir = Path(paths_map["streamedpeds_extracted_dir"])
     streamedpedprops_extracted_dir = Path(paths_map["streamedpedprops_extracted_dir"])
@@ -593,14 +646,17 @@ def run_repack_and_deploy() -> None:
         print(project_i18n.translate("repack.staging_missing", path=staging_dir))
         sys.exit(1)
 
-    has_patchday4ng_staging = (
-        patchday4ng_extracted_dir.exists() and patchday4ng_models_dir.exists()
-    )
+    active_patchday_specs = [
+        pack_spec
+        for pack_spec in patchday_specs
+        if Path(pack_spec["dlc_extracted_dir"]).exists()
+        and Path(pack_spec["models_dir"]).exists()
+    ]
     has_streamedpedprops_staging = streamedpedprops_extracted_dir.is_dir()
 
     total_pipeline_stages = (
         7
-        + (3 if has_patchday4ng_staging else 0)
+        + (3 * len(active_patchday_specs))
         + (1 if has_streamedpedprops_staging else 0)
     )
     stage_tracker = PipelineProgressTracker(total_pipeline_stages)
@@ -634,33 +690,46 @@ def run_repack_and_deploy() -> None:
             mppatchesng_dlc_rpf_file, target_dlc_rpf_path, "dlc.rpf"
         )
 
-        # 3B. Repack and deploy patchday4ng when present in staging
-        if has_patchday4ng_staging:
-            stage_title = project_i18n.translate("repack.stage_repacking", name="patchday4ng.rpf")
+        # 3B. Repack and deploy patchday3ng / patchday4ng when present in staging
+        for pack_spec in active_patchday_specs:
+            pack_name = str(pack_spec["name"])
+            pack_dlc_dir = Path(pack_spec["dlc_extracted_dir"])
+            pack_inner_rpf = Path(pack_spec["inner_rpf"])
+            pack_models_dir = Path(pack_spec["models_dir"])
+            pack_dlc_rpf = Path(pack_spec["dlc_rpf_file"])
+            pack_target_dlc = Path(pack_spec["target_dlc_path"])
+
+            stage_title = project_i18n.translate(
+                "repack.stage_repacking", name=f"{pack_name}.rpf"
+            )
             stage_tracker.begin_stage(stage_title)
             repack_single_rpf_stage(
-                patchday4ng_inner_rpf,
-                patchday4ng_models_dir,
+                pack_inner_rpf,
+                pack_models_dir,
                 stage_title,
                 rage_cli_tool,
             )
 
-            stage_title = project_i18n.translate("repack.stage_repacking", name="patchday4ng dlc.rpf")
+            stage_title = project_i18n.translate(
+                "repack.stage_repacking", name=f"{pack_name} dlc.rpf"
+            )
             stage_tracker.begin_stage(stage_title)
             repack_single_rpf_stage(
-                patchday4ng_dlc_rpf_file,
-                patchday4ng_extracted_dir,
+                pack_dlc_rpf,
+                pack_dlc_dir,
                 stage_title,
                 rage_cli_tool,
             )
 
             stage_tracker.begin_stage(
-                project_i18n.translate("repack.stage_installing", name="patchday4ng/dlc.rpf")
+                project_i18n.translate(
+                    "repack.stage_installing", name=f"{pack_name}/dlc.rpf"
+                )
             )
             copy_file_with_progress(
-                patchday4ng_dlc_rpf_file,
-                target_patchday4ng_dlc_path,
-                "patchday4ng/dlc.rpf",
+                pack_dlc_rpf,
+                pack_target_dlc,
+                f"{pack_name}/dlc.rpf",
             )
 
         # 4. Repack streamedpeds_players.rpf
@@ -774,25 +843,29 @@ def run_repack_and_deploy() -> None:
             )
         )
 
-        is_patchday4_valid = True
-        if has_patchday4ng_staging and target_patchday4ng_dlc_path.is_file():
-            with open(target_patchday4ng_dlc_path, "rb") as pd4_file:
-                pd4_file.seek(12)
-                pd4_flag = pd4_file.read(4)
-            pd4_output = subprocess.run(
-                [rage_cli_tool, "list", "-d", str(target_patchday4ng_dlc_path)],
+        are_patchdays_valid = True
+        for pack_spec in active_patchday_specs:
+            pack_target_dlc = Path(pack_spec["target_dlc_path"])
+            if not pack_target_dlc.is_file():
+                continue
+            with open(pack_target_dlc, "rb") as pack_file_handle:
+                pack_file_handle.seek(12)
+                pack_flag = pack_file_handle.read(4)
+            pack_list_output = subprocess.run(
+                [rage_cli_tool, "list", "-d", str(pack_target_dlc)],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=120.0,
                 check=True,
             ).stdout
-            pd4_compressed = [
+            pack_compressed_entries = [
                 line_item
-                for line_item in pd4_output.splitlines()
+                for line_item in pack_list_output.splitlines()
                 if "Compressed:" in line_item and "Compressed: 0" not in line_item
             ]
-            is_patchday4_valid = (len(pd4_compressed) == 0 and pd4_flag == b"OPEN")
+            if len(pack_compressed_entries) != 0 or pack_flag != b"OPEN":
+                are_patchdays_valid = False
 
         is_dlc_valid = (
             len(dlc_compressed_entries) == 0 and dlc_encryption_flag == b"OPEN"
@@ -810,8 +883,11 @@ def run_repack_and_deploy() -> None:
         ]
         if has_streamedpedprops_staging:
             archives_to_audit.append(streamedpedprops_rpf_file)
-        if has_patchday4ng_staging and target_patchday4ng_dlc_path.is_file():
-            archives_to_audit.extend([target_patchday4ng_dlc_path, patchday4ng_inner_rpf])
+        for pack_spec in active_patchday_specs:
+            pack_target_dlc = Path(pack_spec["target_dlc_path"])
+            pack_inner_rpf = Path(pack_spec["inner_rpf"])
+            if pack_target_dlc.is_file():
+                archives_to_audit.extend([pack_target_dlc, pack_inner_rpf])
 
         for audit_archive in archives_to_audit:
             if audit_archive.is_file():
@@ -823,7 +899,7 @@ def run_repack_and_deploy() -> None:
                         flush=True,
                     )
 
-        if is_dlc_valid and is_x64v_valid and is_patchday4_valid and rpf_limit_checks_ok:
+        if is_dlc_valid and is_x64v_valid and are_patchdays_valid and rpf_limit_checks_ok:
             stage_tracker.finish_pipeline()
             print(project_i18n.translate("repack.verify_passed"))
         else:

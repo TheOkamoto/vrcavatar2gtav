@@ -5,13 +5,14 @@ eye_blink_helper.py
 Optional natural eye-blink rigging and GTAVPhysBones.ini profile extraction for
 converted VRChat avatars in GTA V.
 
-Uses the four native GTA V upper-eyelid facial bones already present in
-`player_zero.yft`, `player_one.yft`, and `player_two.yft` without consuming any
-of the 63 custom PhysBone bone slots:
-  - FACIAL_L_eyelidUpper        (tag 38849, parent FACIAL_facialRoot)
-  - FACIAL_L_eyelidUpperOuterSDK(tag 44821, parent FACIAL_L_eyelidUpper)
-  - FACIAL_R_eyelidUpper        (tag 32276, parent FACIAL_facialRoot)
-  - FACIAL_R_eyelidUpperOuterSDK(tag 45333, parent FACIAL_R_eyelidUpper)
+Uses four dedicated custom eyelid bones parented directly under `SKEL_Head`
+(tag `31086`) so vanilla GTA V `.ycd` facial animations and `crExpressions` never
+overwrite blink motion, while still stripping unskinned `YFT_ONLY_HAND_BONES` from
+the `.ydd` when needed to remain safely within RAGE's `<= 128` `.ydd` bone limit:
+  - `PB_Blink_L`  (tag `44255`, parent `SKEL_Head` `31086`)
+  - `PB_Blink_LO` (tag `28167`, parent `SKEL_Head` `31086`)
+  - `PB_Blink_R`  (tag `44357`, parent `SKEL_Head` `31086`)
+  - `PB_Blink_RO` (tag `29607`, parent `SKEL_Head` `31086`)
 
 Automatic safety checks inspect active facial blendshapes and measured rest-to-shut
 displacement so avatars with custom closed, winking, or smiling eye expressions
@@ -24,11 +25,25 @@ import math
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
+VANILLA_EYELID_BLINK_BONES: Tuple[str, ...] = (
+    "FACIAL_L_eyelidUpper",
+    "FACIAL_L_eyelidUpperOuterSDK",
+    "FACIAL_R_eyelidUpper",
+    "FACIAL_R_eyelidUpperOuterSDK",
+)
+
+VANILLA_BLINK_ANCHOR_MAP: Dict[str, str] = {
+    "PB_Blink_L": "FACIAL_L_eyelidUpper",
+    "PB_Blink_LO": "FACIAL_L_eyelidUpperOuterSDK",
+    "PB_Blink_R": "FACIAL_R_eyelidUpper",
+    "PB_Blink_RO": "FACIAL_R_eyelidUpperOuterSDK",
+}
+
 EYELID_BLINK_BONE_SPECS: Tuple[Tuple[str, int, str, int], ...] = (
-    ("FACIAL_L_eyelidUpper", 38849, "FACIAL_facialRoot", 65068),
-    ("FACIAL_L_eyelidUpperOuterSDK", 44821, "FACIAL_L_eyelidUpper", 38849),
-    ("FACIAL_R_eyelidUpper", 32276, "FACIAL_facialRoot", 65068),
-    ("FACIAL_R_eyelidUpperOuterSDK", 45333, "FACIAL_R_eyelidUpper", 32276),
+    ("PB_Blink_L", 44255, "SKEL_Head", 31086),
+    ("PB_Blink_LO", 28167, "SKEL_Head", 31086),
+    ("PB_Blink_R", 44357, "SKEL_Head", 31086),
+    ("PB_Blink_RO", 29607, "SKEL_Head", 31086),
 )
 
 EYELID_BLINK_BONES: Tuple[str, ...] = tuple(spec[0] for spec in EYELID_BLINK_BONE_SPECS)
@@ -288,15 +303,17 @@ def prepare_ydd_blink_bone_set(
     max_total_bones: int = 128,
 ) -> Tuple[Set[str], int]:
     """
-    Add GTA V native upper-eyelid bones to the `.ydd` valid bone whitelist when eye
-    blinking is enabled, pruning unskinned leaf hand helper bones (`PH_*`/`IK_*`) from
-    the `.ydd` export only if needed to stay within RAGE's 128-bone `.ydd` limit.
-    (`.yft` skeletons always retain all `PH_*`/`IK_*` bones independently.)
+    Ensure dedicated custom eyelid blink bones (`PB_Blink_*`) are included in the
+    `.ydd` valid bone whitelist when eye blinking is enabled, replacing vanilla
+    `FACIAL_*eyelidUpper*` slots and trimming unskinned `PH_*`/`IK_*` hand helper
+    bones from the `.ydd` export if needed to stay within RAGE's 128-bone limit.
     """
     valid_bones: Set[str] = set(base_valid_bones)
     if not enable_eye_blink:
         return valid_bones, 0
 
+    for vanilla_lid in VANILLA_EYELID_BLINK_BONES:
+        valid_bones.discard(vanilla_lid)
     valid_bones.update(EYELID_BLINK_BONES)
     stripped_count = 0
     if len(valid_bones) + int(custom_bone_count) > int(max_total_bones):
@@ -307,14 +324,230 @@ def prepare_ydd_blink_bone_set(
     return valid_bones, stripped_count
 
 
+def capture_eyelid_blink_anchors(ped_armature: Any) -> Dict[str, Tuple[float, float, float]]:
+    """
+    Snapshot world-space rest positions for `PB_Blink_*` from the unpruned GTA V
+    armature's native upper-eyelid bones (or SKEL_Head fallback offsets) before
+    removing unused vanilla eyelid bones from `.ydd` export.
+    """
+    if ped_armature is None:
+        return {}
+
+    arm_world = ped_armature.matrix_world
+    data_bones = ped_armature.data.bones
+    head_bone = data_bones.get("SKEL_Head")
+    head_world_pos = (
+        (arm_world @ head_bone.matrix_local).translation
+        if head_bone is not None
+        else arm_world.translation
+    )
+    fallback_offsets: Dict[str, Tuple[float, float, float]] = {
+        "PB_Blink_L": (0.033, -0.085, 0.035),
+        "PB_Blink_LO": (0.045, -0.075, 0.035),
+        "PB_Blink_R": (-0.033, -0.085, 0.035),
+        "PB_Blink_RO": (-0.045, -0.075, 0.035),
+    }
+
+    anchors: Dict[str, Tuple[float, float, float]] = {}
+    for blink_name, vanilla_name in VANILLA_BLINK_ANCHOR_MAP.items():
+        vanilla_bone = data_bones.get(vanilla_name)
+        if vanilla_bone is not None:
+            world_pt = (arm_world @ vanilla_bone.matrix_local).translation
+            anchors[blink_name] = (float(world_pt.x), float(world_pt.y), float(world_pt.z))
+        else:
+            off_xyz = fallback_offsets[blink_name]
+            anchors[blink_name] = (
+                float(head_world_pos.x) + off_xyz[0],
+                float(head_world_pos.y) + off_xyz[1],
+                float(head_world_pos.z) + off_xyz[2],
+            )
+    return anchors
+
+
+def build_blink_custom_bone_specs(
+    ped_armature: Any,
+    *,
+    blink_anchors: Optional[Mapping[str, Tuple[float, float, float]]] = None,
+    blink_rig_data: Optional[Mapping[str, Any]] = None,
+    world_scale: float = 1.0,
+    world_z_offset: float = 0.0,
+    world_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> List[Dict[str, object]]:
+    """
+    Build `custom_child_bones` descriptors for `PB_Blink_L/LO/R/RO` parented under
+    `SKEL_Head`, compatible with `inject_custom_bones_into_blender_armature` and
+    `patch_yft_skeleton`.
+
+    When `blink_rig_data` includes `pivots_world`, each blink bone is placed at its
+    fitted eyeball-pivot coordinate in GTA V world space so runtime blinking operates
+    via pure bone rotation (`Quat`) without per-frame translation deltas.
+    """
+    if ped_armature is None:
+        return []
+
+    import mathutils
+
+    pivots_world = (
+        dict(blink_rig_data.get("pivots_world") or {})
+        if blink_rig_data
+        else {}
+    )
+    resolved_anchors = (
+        dict(blink_anchors)
+        if blink_anchors
+        else capture_eyelid_blink_anchors(ped_armature)
+    )
+    off_x, off_y, off_z = (
+        float(world_offset[0]),
+        float(world_offset[1]),
+        float(world_offset[2]),
+    )
+    specs: List[Dict[str, object]] = []
+    for bone_name, bone_tag, parent_name, _ptag in EYELID_BLINK_BONE_SPECS:
+        if bone_name in pivots_world:
+            src_pt = pivots_world[bone_name]
+            anchor_xyz = (
+                (float(src_pt[0]) + off_x) * float(world_scale),
+                (float(src_pt[1]) + off_y) * float(world_scale),
+                (float(src_pt[2]) + off_z) * float(world_scale) + float(world_z_offset),
+            )
+        else:
+            anchor_xyz = resolved_anchors.get(bone_name)
+        if anchor_xyz is None:
+            continue
+        world_mat = mathutils.Matrix.Translation(mathutils.Vector(anchor_xyz))
+        specs.append(
+            {
+                "name": bone_name,
+                "parent_name": parent_name,
+                "tag": int(bone_tag),
+                "length": 0.02,
+                "world_matrix": world_mat,
+            }
+        )
+    return specs
+
+
 def _vec_dot(vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]) -> float:
     return vec_a[0] * vec_b[0] + vec_a[1] * vec_b[1] + vec_a[2] * vec_b[2]
+
+
+def _vec_add(
+    vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
+) -> Tuple[float, float, float]:
+    return (vec_a[0] + vec_b[0], vec_a[1] + vec_b[1], vec_a[2] + vec_b[2])
 
 
 def _vec_sub(
     vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
     return (vec_a[0] - vec_b[0], vec_a[1] - vec_b[1], vec_a[2] - vec_b[2])
+
+
+def _vec_scale(
+    vec_in: Tuple[float, float, float], scale_val: float
+) -> Tuple[float, float, float]:
+    return (vec_in[0] * scale_val, vec_in[1] * scale_val, vec_in[2] * scale_val)
+
+
+def _vec_cross(
+    vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
+) -> Tuple[float, float, float]:
+    return (
+        vec_a[1] * vec_b[2] - vec_a[2] * vec_b[1],
+        vec_a[2] * vec_b[0] - vec_a[0] * vec_b[2],
+        vec_a[0] * vec_b[1] - vec_a[1] * vec_b[0],
+    )
+
+
+def _vec_len(vec_in: Tuple[float, float, float]) -> float:
+    return math.sqrt(vec_in[0] * vec_in[0] + vec_in[1] * vec_in[1] + vec_in[2] * vec_in[2])
+
+
+def _vec_norm(vec_in: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    length_val = _vec_len(vec_in)
+    if length_val <= 1e-10:
+        return (1.0, 0.0, 0.0)
+    inv_len = 1.0 / length_val
+    return (vec_in[0] * inv_len, vec_in[1] * inv_len, vec_in[2] * inv_len)
+
+
+def _axis_angle_to_quat(
+    axis_vec: Tuple[float, float, float], angle_rad: float
+) -> Tuple[float, float, float, float]:
+    axis_unit = _vec_norm(axis_vec)
+    half_ang = 0.5 * float(angle_rad)
+    sin_half = math.sin(half_ang)
+    cos_half = math.cos(half_ang)
+    if cos_half < 0.0:
+        cos_half = -cos_half
+        sin_half = -sin_half
+    return (
+        axis_unit[0] * sin_half,
+        axis_unit[1] * sin_half,
+        axis_unit[2] * sin_half,
+        cos_half,
+    )
+
+
+def _quat_rotate_vec(
+    quat_xyzw: Tuple[float, float, float, float], vec_in: Tuple[float, float, float]
+) -> Tuple[float, float, float]:
+    quat_xyz = (quat_xyzw[0], quat_xyzw[1], quat_xyzw[2])
+    quat_w = quat_xyzw[3]
+    two_cross = _vec_scale(_vec_cross(quat_xyz, vec_in), 2.0)
+    cross_qt = _vec_cross(quat_xyz, two_cross)
+    return (
+        vec_in[0] + quat_w * two_cross[0] + cross_qt[0],
+        vec_in[1] + quat_w * two_cross[1] + cross_qt[1],
+        vec_in[2] + quat_w * two_cross[2] + cross_qt[2],
+    )
+
+
+def _fit_eyeball_pivot_rotation(
+    anchor_pt: Tuple[float, float, float],
+    delta_vec: Tuple[float, float, float],
+    min_depth: float,
+) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
+    """
+    Construct a posterior eyeball pivot point behind `anchor_pt` and an exact
+    unit quaternion (XYZW) whose rigid rotation around that pivot maps `anchor_pt`
+    to `anchor_pt + delta_vec`.
+    """
+    delta_len = _vec_len(delta_vec)
+    if delta_len <= 1e-6:
+        fallback_pivot = _vec_add(anchor_pt, (0.0, float(min_depth), 0.0))
+        return fallback_pivot, (0.0, 0.0, 0.0, 1.0)
+
+    delta_dir = _vec_scale(delta_vec, 1.0 / delta_len)
+    post_ref = (0.0, 1.0, 0.0)
+    proj_post = _vec_sub(post_ref, _vec_scale(delta_dir, _vec_dot(post_ref, delta_dir)))
+    if _vec_len(proj_post) < 1e-4:
+        alt_ref = (1.0, 0.0, 0.0)
+        proj_post = _vec_sub(alt_ref, _vec_scale(delta_dir, _vec_dot(alt_ref, delta_dir)))
+    if proj_post[2] < 0.0:
+        proj_post = (proj_post[0], proj_post[1], 0.0)
+    if _vec_len(proj_post) < 1e-4:
+        proj_post = (0.0, 1.0, 0.0)
+    back_dir = _vec_norm(proj_post)
+
+    pivot_depth = max(float(min_depth), delta_len * 1.6)
+    mid_pt = _vec_add(anchor_pt, _vec_scale(delta_vec, 0.5))
+    pivot_pt = _vec_add(mid_pt, _vec_scale(back_dir, pivot_depth))
+
+    vec_r0 = _vec_sub(anchor_pt, pivot_pt)
+    target_pt = _vec_add(anchor_pt, delta_vec)
+    vec_r1 = _vec_sub(target_pt, pivot_pt)
+    cross_r = _vec_cross(vec_r0, vec_r1)
+    sin_val = _vec_len(cross_r)
+    cos_val = _vec_dot(vec_r0, vec_r1)
+    if sin_val <= 1e-10:
+        return pivot_pt, (0.0, 0.0, 0.0, 1.0)
+
+    axis_vec = _vec_scale(cross_r, 1.0 / sin_val)
+    angle_rad = math.atan2(sin_val, cos_val)
+    quat_xyzw = _axis_angle_to_quat(axis_vec, angle_rad)
+    return pivot_pt, quat_xyzw
 
 
 def _clamp_zero_one(val: float) -> float:
@@ -383,6 +616,7 @@ def _fit_one_eye_side_weights(
     upper_bone_name: str,
     outer_bone_name: str,
     min_travel: float = 0.004,
+    side_brow_coords: Sequence[Tuple[float, float, float]] = (),
 ) -> Dict[str, Any]:
     """
     Compute per-vertex skin weights for one eye's `Upper` and `UpperOuterSDK` bones
@@ -441,6 +675,7 @@ def _fit_one_eye_side_weights(
         )
         peak_outer = side_deltas[outer_idx]
     else:
+        outer_idx = center_idx
         peak_outer = peak_center
 
     basis_center = (
@@ -454,13 +689,54 @@ def _fit_one_eye_side_weights(
         peak_outer[2] * 1.35,
     )
 
+    min_pivot_depth = max(0.022, max_disp * 1.6)
+    pivot_center, quat_center = _fit_eyeball_pivot_rotation(
+        side_coords[center_idx], basis_center, min_depth=min_pivot_depth
+    )
+    pivot_outer, quat_outer = _fit_eyeball_pivot_rotation(
+        side_coords[outer_idx], basis_outer, min_depth=min_pivot_depth
+    )
+
+    anchor_z = side_coords[center_idx][2]
+    global_min_brow_z = min(
+        (pt_co[2] for pt_co in side_brow_coords),
+        default=anchor_z + 0.20 * max_disp,
+    )
+
     weights_out: Dict[int, Dict[str, float]] = {}
     for vert_idx, dvec in side_deltas.items():
         if lengths[vert_idx] < 0.0004:
             continue
-        weight_c, weight_o = solve_nonneg_two_vector_weights(
-            dvec, basis_center, basis_outer
+        vert_coord = side_coords[vert_idx]
+        vx_val, _vy_val, vz_val = vert_coord
+        near_brow_zs = [
+            pt_co[2]
+            for pt_co in side_brow_coords
+            if abs(pt_co[0] - vx_val) <= 0.008
+        ]
+        local_brow_z = min(near_brow_zs) if near_brow_zs else global_min_brow_z
+        z_ceil = min(anchor_z + 0.20 * max_disp, local_brow_z - 0.0010)
+        z_start = min(anchor_z + 0.05 * max_disp, z_ceil - 0.0030)
+        if vz_val >= z_ceil:
+            continue
+        upper_fade = 1.0
+        if vz_val > z_start:
+            u_fade = (vz_val - z_start) / max(1e-6, z_ceil - z_start)
+            upper_fade = 1.0 - (u_fade * u_fade * (3.0 - 2.0 * u_fade))
+
+        rel_center = _vec_sub(vert_coord, pivot_center)
+        rot_disp_center = _vec_sub(
+            _quat_rotate_vec(quat_center, rel_center), rel_center
         )
+        rel_outer = _vec_sub(vert_coord, pivot_outer)
+        rot_disp_outer = _vec_sub(
+            _quat_rotate_vec(quat_outer, rel_outer), rel_outer
+        )
+        weight_c, weight_o = solve_nonneg_two_vector_weights(
+            dvec, rot_disp_center, rot_disp_outer
+        )
+        weight_c *= upper_fade
+        weight_o *= upper_fade
         bone_map: Dict[str, float] = {}
         if weight_c > 0.002:
             bone_map[upper_bone_name] = weight_c
@@ -476,6 +752,14 @@ def _fit_one_eye_side_weights(
         "deltas": {
             upper_bone_name: basis_center,
             outer_bone_name: basis_outer,
+        },
+        "pivots": {
+            upper_bone_name: pivot_center,
+            outer_bone_name: pivot_outer,
+        },
+        "quats": {
+            upper_bone_name: quat_center,
+            outer_bone_name: quat_outer,
         },
     }
 
@@ -501,6 +785,8 @@ def extract_body_eyelid_blink_rig_data(
         "shape_key": None,
         "weights_by_orig_vert": {},
         "delta_vectors_world": {},
+        "pivots_world": {},
+        "rot_quats_world": {},
         "max_disp_l": 0.0,
         "max_disp_r": 0.0,
     }
@@ -521,6 +807,25 @@ def extract_body_eyelid_blink_rig_data(
     if not key_blocks:
         result["reason"] = "empty_shape_keys"
         return result
+
+    basis_block = key_blocks[0]
+    brow_vert_indices: Set[int] = set()
+    for key_item in key_blocks[1:]:
+        key_lower = str(getattr(key_item, "name", "")).strip().lower()
+        if not any(tok in key_lower for tok in ("brow", "mayu", "まゆ", "眉")):
+            continue
+        key_data = getattr(key_item, "data", None)
+        basis_data = getattr(basis_block, "data", None)
+        if not key_data or not basis_data or len(key_data) != len(basis_data):
+            continue
+        for v_idx in range(len(basis_data)):
+            b_co = basis_data[v_idx].co
+            k_co = key_data[v_idx].co
+            dx_b = float(k_co.x) - float(b_co.x)
+            dy_b = float(k_co.y) - float(b_co.y)
+            dz_b = float(k_co.z) - float(b_co.z)
+            if (dx_b * dx_b + dy_b * dy_b + dz_b * dz_b) > 4.0e-8:
+                brow_vert_indices.add(v_idx)
 
     basis_positions = [
         (float(vert.co.x), float(vert.co.y), float(vert.co.z))
@@ -577,7 +882,7 @@ def extract_body_eyelid_blink_rig_data(
     right_coords: Dict[int, Tuple[float, float, float]] = {}
 
     for vert_idx, open_pt in enumerate(open_coords):
-        if vert_idx in excluded_set:
+        if vert_idx in excluded_set or vert_idx in brow_vert_indices:
             continue
         shut_pt = shut_coords[vert_idx]
         dvec = (
@@ -595,19 +900,32 @@ def extract_body_eyelid_blink_rig_data(
             right_deltas[vert_idx] = dvec
             right_coords[vert_idx] = open_pt
 
+    left_brow_coords = [
+        open_coords[v_idx]
+        for v_idx in brow_vert_indices
+        if v_idx < len(open_coords) and open_coords[v_idx][0] > 0.002
+    ]
+    right_brow_coords = [
+        open_coords[v_idx]
+        for v_idx in brow_vert_indices
+        if v_idx < len(open_coords) and open_coords[v_idx][0] < -0.002
+    ]
+
     left_fit = _fit_one_eye_side_weights(
         left_deltas,
         left_coords,
         side_sign=1.0,
-        upper_bone_name="FACIAL_L_eyelidUpper",
-        outer_bone_name="FACIAL_L_eyelidUpperOuterSDK",
+        upper_bone_name="PB_Blink_L",
+        outer_bone_name="PB_Blink_LO",
+        side_brow_coords=left_brow_coords,
     )
     right_fit = _fit_one_eye_side_weights(
         right_deltas,
         right_coords,
         side_sign=-1.0,
-        upper_bone_name="FACIAL_R_eyelidUpper",
-        outer_bone_name="FACIAL_R_eyelidUpperOuterSDK",
+        upper_bone_name="PB_Blink_R",
+        outer_bone_name="PB_Blink_RO",
+        side_brow_coords=right_brow_coords,
     )
     result["max_disp_l"] = float(left_fit["max_disp"])
     result["max_disp_r"] = float(right_fit["max_disp"])
@@ -637,10 +955,20 @@ def extract_body_eyelid_blink_rig_data(
     combined_deltas.update(left_fit["deltas"])
     combined_deltas.update(right_fit["deltas"])
 
+    combined_pivots: Dict[str, Tuple[float, float, float]] = {}
+    combined_pivots.update(left_fit.get("pivots") or {})
+    combined_pivots.update(right_fit.get("pivots") or {})
+
+    combined_quats: Dict[str, Tuple[float, float, float, float]] = {}
+    combined_quats.update(left_fit.get("quats") or {})
+    combined_quats.update(right_fit.get("quats") or {})
+
     result["enabled"] = True
     result["reason"] = "ok"
     result["weights_by_orig_vert"] = combined_weights
     result["delta_vectors_world"] = combined_deltas
+    result["pivots_world"] = combined_pivots
+    result["rot_quats_world"] = combined_quats
     return result
 
 
@@ -734,21 +1062,28 @@ def apply_eyelid_blink_weights_to_mesh(
 def build_blink_profile_for_ped(
     ped_armature: Any,
     ped_model_name: str,
-    delta_vectors_ydd: Optional[Mapping[str, Tuple[float, float, float]]],
+    delta_vectors_ydd: Optional[Mapping[str, Tuple[float, float, float]]] = None,
     *,
+    delta_rotations_world: Optional[
+        Mapping[str, Tuple[float, float, float, float]]
+    ] = None,
     enabled: bool = True,
     min_interval_sec: float = 2.6,
     max_interval_sec: float = 6.0,
-    blink_duration_sec: float = 0.215,
+    blink_duration_sec: float = 0.25,
     double_blink_chance: float = 0.18,
     max_blink: float = 1.0,
 ) -> Optional[Dict[str, object]]:
     """
     Build a runtime `[Blink_*]` profile for `GTAVPhysBones.ini` by expressing each
-    eyelid bone's YDD world displacement in its parent bone's rest local space.
+    eyelid bone's pure rotation (`delta_rot` in bone local space, keeping `local_pos`
+    fixed so GTA V's runtime skeleton pipeline matches PhysBone rotation chains) or
+    fallback YDD translation (`delta_pos`) relative to `SKEL_Head`.
     Returns None if required eyelid bones are absent from `ped_armature`.
     """
-    if ped_armature is None or not delta_vectors_ydd:
+    has_rot_map = bool(delta_rotations_world)
+    has_pos_map = bool(delta_vectors_ydd)
+    if ped_armature is None or (not has_rot_map and not has_pos_map):
         return None
 
     import mathutils
@@ -758,21 +1093,19 @@ def build_blink_profile_for_ped(
     for bone_name, _tag, parent_name, _ptag in EYELID_BLINK_BONE_SPECS:
         if bone_name not in pose_bones or parent_name not in pose_bones:
             return None
-        if bone_name not in delta_vectors_ydd:
+        in_rot = bool(delta_rotations_world and bone_name in delta_rotations_world)
+        in_pos = bool(delta_vectors_ydd and bone_name in delta_vectors_ydd)
+        if not in_rot and not in_pos:
             return None
 
     arm_world = ped_armature.matrix_world
     world_mats: Dict[str, Any] = {}
-    for bone_name in ("FACIAL_facialRoot",) + EYELID_BLINK_BONES:
+    parent_names = {spec_item[2] for spec_item in EYELID_BLINK_BONE_SPECS}
+    for bone_name in tuple(sorted(parent_names)) + EYELID_BLINK_BONES:
         pose_item = pose_bones.get(bone_name)
         if pose_item is None:
             return None
         world_mats[bone_name] = arm_world @ pose_item.matrix
-
-    upper_world_deltas = {
-        "FACIAL_L_eyelidUpper": mathutils.Vector(delta_vectors_ydd["FACIAL_L_eyelidUpper"]),
-        "FACIAL_R_eyelidUpper": mathutils.Vector(delta_vectors_ydd["FACIAL_R_eyelidUpper"]),
-    }
 
     bone_entries: List[Dict[str, object]] = []
     for bone_name, fallback_tag, parent_name, fallback_ptag in EYELID_BLINK_BONE_SPECS:
@@ -781,25 +1114,59 @@ def build_blink_profile_for_ped(
         local_mat = parent_world.inverted() @ cur_world
         loc_pos, loc_rot, _unused_scale = local_mat.decompose()
 
-        target_world_delta = mathutils.Vector(delta_vectors_ydd[bone_name])
-        if bone_name == "FACIAL_L_eyelidUpperOuterSDK":
-            net_world_delta = target_world_delta - upper_world_deltas["FACIAL_L_eyelidUpper"]
-        elif bone_name == "FACIAL_R_eyelidUpperOuterSDK":
-            net_world_delta = target_world_delta - upper_world_deltas["FACIAL_R_eyelidUpper"]
+        if delta_rotations_world and bone_name in delta_rotations_world:
+            raw_quat = delta_rotations_world[bone_name]
+            q_world_delta = mathutils.Quaternion(
+                (
+                    float(raw_quat[3]),
+                    float(raw_quat[0]),
+                    float(raw_quat[1]),
+                    float(raw_quat[2]),
+                )
+            ).normalized()
+            cur_rot = cur_world.to_quaternion().normalized()
+            q_delta_local = (
+                cur_rot.inverted() @ q_world_delta @ cur_rot
+            ).normalized()
+            if q_delta_local.w < 0.0:
+                q_delta_local.negate()
+            delta_rot_tuple = (
+                float(q_delta_local.x),
+                float(q_delta_local.y),
+                float(q_delta_local.z),
+                float(q_delta_local.w),
+            )
+            delta_local = mathutils.Vector((0.0, 0.0, 0.0))
         else:
-            net_world_delta = target_world_delta
+            target_world_delta = mathutils.Vector(
+                (delta_vectors_ydd or {})[bone_name]
+            )
+            if delta_vectors_ydd and parent_name in delta_vectors_ydd:
+                net_world_delta = target_world_delta - mathutils.Vector(
+                    delta_vectors_ydd[parent_name]
+                )
+            else:
+                net_world_delta = target_world_delta
 
-        parent_rot_inv = parent_world.to_3x3().inverted()
-        delta_local = parent_rot_inv @ net_world_delta
+            parent_rot_inv = parent_world.to_3x3().inverted()
+            delta_local = parent_rot_inv @ net_world_delta
+            delta_rot_tuple = (0.0, 0.0, 0.0, 1.0)
 
         bone_data = data_bones.get(bone_name)
         parent_data = data_bones.get(parent_name)
-        bone_tag = int(
-            getattr(getattr(bone_data, "bone_properties", None), "tag", 0) or fallback_tag
-        )
-        parent_tag = int(
-            getattr(getattr(parent_data, "bone_properties", None), "tag", 0) or fallback_ptag
-        )
+        bone_props = getattr(bone_data, "bone_properties", None)
+        if bone_props is not None and getattr(bone_props, "use_manual_tag", False):
+            raw_btag = int(getattr(bone_props, "manual_tag", 0) or 0)
+        else:
+            raw_btag = int(getattr(bone_props, "tag", 0) or 0)
+        bone_tag = raw_btag or fallback_tag
+
+        parent_props = getattr(parent_data, "bone_properties", None)
+        if parent_props is not None and getattr(parent_props, "use_manual_tag", False):
+            raw_ptag = int(getattr(parent_props, "manual_tag", 0) or 0)
+        else:
+            raw_ptag = int(getattr(parent_props, "tag", 0) or 0)
+        parent_tag = raw_ptag or fallback_ptag
 
         bone_entries.append(
             {
@@ -818,6 +1185,7 @@ def build_blink_profile_for_ped(
                     float(delta_local.y),
                     float(delta_local.z),
                 ),
+                "delta_rot": delta_rot_tuple,
             }
         )
 

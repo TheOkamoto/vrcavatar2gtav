@@ -286,6 +286,11 @@ eye_blink_strength = eye_blink_helper.resolve_eye_blink_strength(
     FRANKLIN_CFG,
     avatar_id="shinano_casual",
 )
+blink_anchors = (
+    eye_blink_helper.capture_eyelid_blink_anchors(franklin_armature)
+    if eye_blink_mode != "off"
+    else {}
+)
 target_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
     target_bones,
     enable_eye_blink=(eye_blink_mode != "off"),
@@ -1060,8 +1065,23 @@ if custom_physbones:
     print(f"[PhysBones] Injected {injected_pb_count} Shinano Casual bones into Franklin armature ({len(physbone_chain_records)} chains)", flush=True)
 
 ped_model_name = str(FRANKLIN_CFG.get("ped_name", "player_one"))
+custom_blink_bones = []
 blink_profiles_to_merge = []
 if blink_rig_data.get("enabled"):
+    custom_blink_bones = eye_blink_helper.build_blink_custom_bone_specs(
+        franklin_armature,
+        blink_anchors=blink_anchors,
+        blink_rig_data=blink_rig_data,
+        world_scale=scale_factor,
+        world_z_offset=z_offset,
+    )
+    if custom_blink_bones:
+        hand_skeleton_helper.inject_custom_bones_into_blender_armature(
+            franklin_armature,
+            custom_blink_bones,
+            bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+        )
+        target_bones.update(item["name"] for item in custom_blink_bones)
     bpy.context.view_layer.update()
     scaled_blink_deltas = eye_blink_helper.scale_eye_blink_deltas(
         blink_rig_data, scale_factor
@@ -1070,6 +1090,7 @@ if blink_rig_data.get("enabled"):
         franklin_armature,
         ped_model_name,
         scaled_blink_deltas,
+        delta_rotations_world=blink_rig_data.get("rot_quats_world"),
         enabled=True,
         max_blink=eye_blink_strength,
     )
@@ -1257,7 +1278,8 @@ franklin_armature.drawable_properties.lod_dist_med = 9998.0
 franklin_armature.drawable_properties.lod_dist_low = 9998.0
 franklin_armature.drawable_properties.lod_dist_vlow = 9998.0
 
-custom_pb_name_set = {pb_item["name"] for pb_item in custom_physbones} if custom_physbones else set()
+all_custom_yft_bones = list(custom_physbones or ()) + list(custom_blink_bones)
+custom_pb_name_set = {pb_item["name"] for pb_item in all_custom_yft_bones}
 for arm_bone in franklin_armature.data.bones:
     if arm_bone.name not in custom_pb_name_set:
         set_recommended_bone_properties(arm_bone)
@@ -1301,7 +1323,7 @@ updated_yft_bones, total_yft_bones, max_yft_delta = hand_skeleton_helper.patch_y
     skeleton_yft_path,
     yft_output_path,
     hand_bone_world_targets,
-    custom_child_bones=custom_physbones or None,
+    custom_child_bones=all_custom_yft_bones or None,
 )
 ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
 print(

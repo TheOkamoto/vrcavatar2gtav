@@ -63,7 +63,11 @@ mppatches_modded_rpf = ${directories:staging}/mppatchesng_dlc.rpf
 mppatches_game_rpf = ${directories:gtav_mods}/update/x64/dlcpacks/mppatchesng/dlc.rpf
 mppatches_rpf_relative = x64/models/cdimages/mppatches.rpf
 
+patchday3ng_models_extracted = ${directories:staging}/patchday3ng_models_extracted
+patchday3ng_dlc_extracted = ${directories:staging}/patchday3ng_dlc_extracted
+patchday3ng_modded_rpf = ${directories:staging}/patchday3ng_dlc.rpf
 patchday3ng_game_rpf = ${directories:gtav_mods}/update/x64/dlcpacks/patchday3ng/dlc.rpf
+patchday3ng_rpf_relative = x64/models/cdimages/patchday3ng.rpf
 
 patchday4ng_models_extracted = ${directories:staging}/patchday4ng_models_extracted
 patchday4ng_dlc_extracted = ${directories:staging}/patchday4ng_dlc_extracted

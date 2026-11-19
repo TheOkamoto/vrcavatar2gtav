@@ -300,6 +300,25 @@ Quat QuatNorm(Quat q) {
     return {q.x * inv, q.y * inv, q.z * inv, q.w * inv};
 }
 
+Quat QuatSlerpIdentity(Quat target, float t) {
+    if (t <= 1e-6f) {
+        return {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+    Quat n = QuatNorm(target);
+    if (n.w < 0.0f) {
+        n = {-n.x, -n.y, -n.z, -n.w};
+    }
+    if (n.w >= 0.999999f) {
+        return {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+    float clampedW = (n.w > 1.0f) ? 1.0f : (n.w < -1.0f ? -1.0f : n.w);
+    float halfAngle = std::acos(clampedW);
+    float sinHalf = std::sin(halfAngle);
+    float scaledHalf = halfAngle * t;
+    float scale = (sinHalf > 1e-6f) ? (std::sin(scaledHalf) / sinHalf) : t;
+    return QuatNorm({n.x * scale, n.y * scale, n.z * scale, std::cos(scaledHalf)});
+}
+
 Quat QuatFromTwoVectors(Vec3 from, Vec3 to) {
     Vec3 a = VecNorm(from);
     Vec3 b = VecNorm(to);
@@ -462,6 +481,7 @@ struct BlinkBoneNode {
     Vec3 localPos{};
     Quat localRot{0.0f, 0.0f, 0.0f, 1.0f};
     Vec3 deltaPos{};
+    Quat deltaRot{0.0f, 0.0f, 0.0f, 1.0f};
 };
 
 struct BlinkProfile {
@@ -470,7 +490,7 @@ struct BlinkProfile {
     bool enabled = true;
     float minInterval = 2.6f;
     float maxInterval = 6.0f;
-    float blinkDuration = 0.215f;
+    float blinkDuration = 0.25f;
     float doubleBlinkChance = 0.18f;
     float maxBlink = 1.0f;
     std::vector<BlinkBoneNode> bones;
@@ -497,6 +517,7 @@ struct PluginConfig {
 };
 
 PluginConfig g_cfg;
+int g_blinkDiagCount = 0;
 
 void WriteLog(const std::string& line) {
     if (g_baseDir.empty()) return;
@@ -638,6 +659,7 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
                         else if (subKey == "local_pos") bn.localPos = ParseVec3(val, {0.0f, 0.0f, 0.0f});
                         else if (subKey == "local_rot") bn.localRot = ParseQuat(val);
                         else if (subKey == "delta_pos") bn.deltaPos = ParseVec3(val, {0.0f, 0.0f, 0.0f});
+                        else if (subKey == "delta_rot") bn.deltaRot = QuatNorm(ParseQuat(val));
                     }
                 }
             }
@@ -814,9 +836,11 @@ bool SafeWriteSkeletonBatch(
     const Mat34V* localMatrices,
     const Mat34V* objectMatrices,
     const Quat* localQuats,
-    size_t count
+    size_t count,
+    bool writeBoneTrans = false
 ) {
     __try {
+        int boneTransOff = (skel.boneDataRotOff == 0) ? 0x10 : 0x00;
         for (size_t idx = 0; idx < count; ++idx) {
             int boneIdx = skelIndices[idx];
             if (boneIdx < 0 || static_cast<uint32_t>(boneIdx) >= skel.numBones) continue;
@@ -824,30 +848,17 @@ bool SafeWriteSkeletonBatch(
                 skel.defaultTransforms[boneIdx] = localMatrices[idx];
             }
             if (skel.boneDataArray && skel.boneDataRotOff >= 0) {
-                Quat* defRot = reinterpret_cast<Quat*>(
-                    skel.boneDataArray + static_cast<size_t>(boneIdx) * skel.boneDataStride + skel.boneDataRotOff);
+                uint8_t* boneEntry =
+                    skel.boneDataArray + static_cast<size_t>(boneIdx) * skel.boneDataStride;
+                Quat* defRot = reinterpret_cast<Quat*>(boneEntry + skel.boneDataRotOff);
                 *defRot = localQuats[idx];
+                if (writeBoneTrans) {
+                    Vec3* defTrans = reinterpret_cast<Vec3*>(boneEntry + boneTransOff);
+                    defTrans->x = localMatrices[idx].col3[0];
+                    defTrans->y = localMatrices[idx].col3[1];
+                    defTrans->z = localMatrices[idx].col3[2];
+                }
             }
-            skel.localMatrices[boneIdx] = localMatrices[idx];
-            skel.objectMatrices[boneIdx] = objectMatrices[idx];
-        }
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-bool SafeWriteLocalObjectBatch(
-    ResolvedSkeleton& skel,
-    const int* skelIndices,
-    const Mat34V* localMatrices,
-    const Mat34V* objectMatrices,
-    size_t count
-) {
-    __try {
-        for (size_t idx = 0; idx < count; ++idx) {
-            int boneIdx = skelIndices[idx];
-            if (boneIdx < 0 || static_cast<uint32_t>(boneIdx) >= skel.numBones) continue;
             skel.localMatrices[boneIdx] = localMatrices[idx];
             skel.objectMatrices[boneIdx] = objectMatrices[idx];
         }
@@ -884,6 +895,7 @@ bool SafeApplySyncSnapshot(const SyncSnapshot& snap) {
 
         Mat34V* defMats = reinterpret_cast<Mat34V*>(snap.defaultTransforms);
         uint8_t* boneArr = reinterpret_cast<uint8_t*>(snap.boneDataArray);
+        int boneTransOff = (snap.boneDataRotOff == 0) ? 0x10 : 0x00;
 
         for (int idx = 0; idx < snap.count; ++idx) {
             int boneIdx = snap.boneIdx[idx];
@@ -896,9 +908,15 @@ bool SafeApplySyncSnapshot(const SyncSnapshot& snap) {
                     defMats[boneIdx] = snap.localMat[idx];
                 }
                 if (boneArr && snap.boneDataRotOff >= 0) {
-                    Quat* defRot = reinterpret_cast<Quat*>(
-                        boneArr + static_cast<size_t>(boneIdx) * snap.boneDataStride + snap.boneDataRotOff);
+                    uint8_t* boneEntry = boneArr + static_cast<size_t>(boneIdx) * snap.boneDataStride;
+                    Quat* defRot = reinterpret_cast<Quat*>(boneEntry + snap.boneDataRotOff);
                     *defRot = snap.localQuat[idx];
+                    if (snap.writeDefault[idx] >= 2) {
+                        Vec3* defTrans = reinterpret_cast<Vec3*>(boneEntry + boneTransOff);
+                        defTrans->x = snap.localMat[idx].col3[0];
+                        defTrans->y = snap.localMat[idx].col3[1];
+                        defTrans->z = snap.localMat[idx].col3[2];
+                    }
                 }
             }
             locMats[boneIdx] = snap.localMat[idx];
@@ -1777,6 +1795,9 @@ void UpdatePedChainsAndBuildSync(
         int blinkParents[kMaxBlinkBonesPerProfile]{};
         Quat blinkQuats[kMaxBlinkBonesPerProfile]{};
         size_t blinkValid = 0;
+        bool anyPosDelta = false;
+        Mat34V firstPreLoc{};
+        bool hasFirstPreLoc = false;
 
         for (size_t idx = 0;
              idx < activeBlink->bones.size() && idx < static_cast<size_t>(kMaxBlinkBonesPerProfile);
@@ -1804,8 +1825,27 @@ void UpdatePedChainsAndBuildSync(
                 }
             }
 
-            Vec3 animatedPos = VecAdd(bn.localPos, VecScale(bn.deltaPos, blinkAmt));
-            Mat34V locMat = QuatTransToMat34(bn.localRot, animatedPos);
+            if (idx == 0) {
+                hasFirstPreLoc = SafeReadMat34(
+                    reinterpret_cast<uint64_t>(slot.skel.localMatrices) +
+                        static_cast<uint64_t>(bn.skelIndex) * sizeof(Mat34V),
+                    firstPreLoc);
+            }
+
+            Vec3 animatedPos = bn.localPos;
+            if (VecLen(bn.deltaPos) > 1e-6f) {
+                animatedPos = VecAdd(bn.localPos, VecScale(bn.deltaPos, blinkAmt));
+                anyPosDelta = true;
+            }
+            Quat animatedRot = bn.localRot;
+            float deltaRotVecSq = bn.deltaRot.x * bn.deltaRot.x +
+                                  bn.deltaRot.y * bn.deltaRot.y +
+                                  bn.deltaRot.z * bn.deltaRot.z;
+            if (deltaRotVecSq > 1e-9f || std::fabs(bn.deltaRot.w) < 0.999999f) {
+                Quat rotOffset = QuatSlerpIdentity(bn.deltaRot, blinkAmt);
+                animatedRot = QuatMul(bn.localRot, rotOffset);
+            }
+            Mat34V locMat = QuatTransToMat34(animatedRot, animatedPos);
             Mat34V objMat = MulMat34(parentObjMtx, locMat);
             if (!IsValidMat34(locMat) || !IsValidMat34(objMat)) continue;
 
@@ -1813,19 +1853,44 @@ void UpdatePedChainsAndBuildSync(
             blinkParents[blinkValid] = bn.parentSkelIndex;
             blinkLocalMats[blinkValid] = locMat;
             blinkObjMats[blinkValid] = objMat;
-            blinkQuats[blinkValid] = bn.localRot;
+            blinkQuats[blinkValid] = animatedRot;
             blinkValid++;
         }
 
         if (blinkValid > 0) {
-            SafeWriteLocalObjectBatch(slot.skel, blinkIndices, blinkLocalMats, blinkObjMats, blinkValid);
+            SafeWriteSkeletonBatch(
+                slot.skel,
+                blinkIndices,
+                blinkLocalMats,
+                blinkObjMats,
+                blinkQuats,
+                blinkValid,
+                anyPosDelta);
             for (size_t idx = 0; idx < blinkValid && outSnap.count < kMaxSyncNodes; ++idx) {
                 outSnap.boneIdx[outSnap.count] = blinkIndices[idx];
                 outSnap.parentBoneIdx[outSnap.count] = blinkParents[idx];
-                outSnap.writeDefault[outSnap.count] = 0;
+                outSnap.writeDefault[outSnap.count] = anyPosDelta ? 2 : 1;
                 outSnap.localMat[outSnap.count] = blinkLocalMats[idx];
                 outSnap.localQuat[outSnap.count] = blinkQuats[idx];
                 outSnap.count++;
+            }
+
+            if (blinkAmt > 0.10f && g_blinkDiagCount < 3) {
+                ++g_blinkDiagCount;
+                std::ostringstream bOss;
+                bOss << "[Blink] Active ped=0x" << std::hex << reinterpret_cast<uintptr_t>(slot.pedAddr)
+                     << " model=0x" << slot.modelHash << std::dec
+                     << " amt=" << blinkAmt
+                     << " max=" << activeBlink->maxBlink
+                     << " valid=" << blinkValid
+                     << " b0=" << blinkIndices[0] << "(p=" << blinkParents[0] << ")"
+                     << " mode=" << (anyPosDelta ? "pos" : "rot");
+                if (hasFirstPreLoc) {
+                    Quat preRot = Mat34ToQuat(firstPreLoc);
+                    bOss << " preRot=(" << preRot.x << "," << preRot.y << "," << preRot.z << "," << preRot.w << ")";
+                }
+                bOss << " writtenRot=(" << blinkQuats[0].x << "," << blinkQuats[0].y << "," << blinkQuats[0].z << "," << blinkQuats[0].w << ")";
+                WriteLog(bOss.str());
             }
         }
     }
@@ -1892,6 +1957,18 @@ bool ResolveChainBoneIndices(
                 resolved = CallGetEntityBoneIndexByName(ped, bn.name.c_str());
             }
             int resolvedParent = CallGetPedBoneIndex(ped, bn.parentTag);
+            if (resolvedParent < 0) {
+                if (bn.parentTag == 65068) {
+                    resolvedParent = CallGetEntityBoneIndexByName(ped, "FACIAL_facialRoot");
+                } else {
+                    for (const BlinkBoneNode& candidate : bp.bones) {
+                        if (candidate.tag == bn.parentTag && !candidate.name.empty()) {
+                            resolvedParent = CallGetEntityBoneIndexByName(ped, candidate.name.c_str());
+                            break;
+                        }
+                    }
+                }
+            }
             if (resolved != bn.skelIndex || resolvedParent != bn.parentSkelIndex) {
                 changed = true;
                 bn.skelIndex = resolved;
@@ -1935,6 +2012,17 @@ void LogBoneIndexChange(const TrackedPedSlot& slot) {
         oss << "]";
     }
     oss << " (active=" << activeCount << "/" << slot.chains.size() << ")";
+    const BlinkProfile* bp = FindMatchingBlinkProfile(slot.blinkProfiles, slot.modelHash);
+    if (bp != nullptr) {
+        oss << " | Blink(" << bp->model << ",max=" << bp->maxBlink << ") nodes=[";
+        for (size_t i = 0; i < bp->bones.size(); ++i) {
+            if (i > 0) oss << ",";
+            oss << bp->bones[i].skelIndex << "(p=" << bp->bones[i].parentSkelIndex << ")";
+        }
+        oss << "]";
+    } else {
+        oss << " | Blink=none(profiles=" << slot.blinkProfiles.size() << ")";
+    }
     WriteLog(oss.str());
 }
 
@@ -2054,6 +2142,17 @@ void LogSkeletonResolution(const TrackedPedSlot& slot, bool isReResolve) {
         oss << "]";
     }
     oss << " (active=" << activeCount << "/" << slot.chains.size() << ")";
+    const BlinkProfile* bp = FindMatchingBlinkProfile(slot.blinkProfiles, slot.modelHash);
+    if (bp != nullptr) {
+        oss << " | Blink(" << bp->model << ",max=" << bp->maxBlink << ") nodes=[";
+        for (size_t i = 0; i < bp->bones.size(); ++i) {
+            if (i > 0) oss << ",";
+            oss << bp->bones[i].skelIndex << "(p=" << bp->bones[i].parentSkelIndex << ")";
+        }
+        oss << "]";
+    } else {
+        oss << " | Blink=none(profiles=" << slot.blinkProfiles.size() << ")";
+    }
     WriteLog(oss.str());
 }
 
@@ -2064,18 +2163,26 @@ void ScriptMain() {
         return;
     }
 
+    FILETIME lastIniWriteTime{};
+    WIN32_FILE_ATTRIBUTE_DATA iniAttr{};
+    if (GetFileAttributesExA(iniPath.c_str(), GetFileExInfoStandard, &iniAttr)) {
+        lastIniWriteTime = iniAttr.ftLastWriteTime;
+    }
+
     {
         std::ostringstream initOss;
         initOss << "[INIT] GTAVPhysBones loaded ini=" << iniPath
                 << " target=" << g_cfg.targetPedModel
                 << " hash=0x" << std::hex << g_cfg.targetModelHash
                 << std::dec << " chains=" << g_cfg.chains.size()
+                << " blinks=" << g_cfg.blinkProfiles.size()
                 << " velScale=" << g_cfg.velocityScale
                 << " worldScan=" << (g_shv.worldGetAllPeds ? 1 : 0);
         WriteLog(initOss.str());
     }
 
     std::vector<TrackedPedSlot> slots(kMaxTrackedPeds);
+    int iniPollCounter = 0;
 
     LARGE_INTEGER freq{}, lastTime{}, curTime{};
     QueryPerformanceFrequency(&freq);
@@ -2083,6 +2190,29 @@ void ScriptMain() {
 
     while (true) {
         g_shv.scriptWait(0);
+        if (++iniPollCounter >= 30) {
+            iniPollCounter = 0;
+            WIN32_FILE_ATTRIBUTE_DATA curAttr{};
+            if (GetFileAttributesExA(iniPath.c_str(), GetFileExInfoStandard, &curAttr) &&
+                (curAttr.ftLastWriteTime.dwLowDateTime != lastIniWriteTime.dwLowDateTime ||
+                 curAttr.ftLastWriteTime.dwHighDateTime != lastIniWriteTime.dwHighDateTime)) {
+                PluginConfig nextCfg;
+                if (LoadIniConfig(iniPath, nextCfg) && nextCfg.enabled) {
+                    lastIniWriteTime = curAttr.ftLastWriteTime;
+                    ClearSyncSnapshot();
+                    g_cfg = std::move(nextCfg);
+                    g_blinkDiagCount = 0;
+                    for (auto& slot : slots) {
+                        slot = TrackedPedSlot{};
+                    }
+                    std::ostringstream relOss;
+                    relOss << "[INIT] Hot-reloaded ini=" << iniPath
+                           << " chains=" << g_cfg.chains.size()
+                           << " blinks=" << g_cfg.blinkProfiles.size();
+                    WriteLog(relOss.str());
+                }
+            }
+        }
         QueryPerformanceCounter(&curTime);
         float dt = static_cast<float>(curTime.QuadPart - lastTime.QuadPart) / static_cast<float>(freq.QuadPart);
         lastTime = curTime;
