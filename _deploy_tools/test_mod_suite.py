@@ -255,6 +255,7 @@ def test_compiled_drawables_and_textures() -> bool:
     ini_total_chains = 0
     ini_blink_count = 0
     blink_models_found = set()
+    blink_max_by_model = {}
     if ini_exists:
         ini_parser = configparser.ConfigParser()
         ini_parser.read(str(physbones_ini_path), encoding="utf-8")
@@ -265,8 +266,10 @@ def test_compiled_drawables_and_textures() -> bool:
                 blink_model = ini_parser.get(section_name, "model", fallback="").strip().lower()
                 blink_enabled = ini_parser.getint(section_name, "enabled", fallback=0)
                 blink_bones = ini_parser.getint(section_name, "bone_count", fallback=0)
+                blink_max_val = ini_parser.getfloat(section_name, "max_blink", fallback=1.0)
                 if blink_enabled == 1 and blink_bones == 4 and blink_model:
                     blink_models_found.add(blink_model)
+                    blink_max_by_model[blink_model] = blink_max_val
                 continue
             if not section_name.startswith("Chain_"):
                 continue
@@ -293,6 +296,11 @@ def test_compiled_drawables_and_textures() -> bool:
             ):
                 blink_ydd_bones_ok = False
 
+    blink_peaks_ok = (
+        abs(blink_max_by_model.get("player_zero", 1.0) - 0.5) < 0.02
+        and abs(blink_max_by_model.get("player_one", 1.0) - 0.5) < 0.02
+        and abs(blink_max_by_model.get("player_two", 1.0) - 0.6) < 0.02
+    )
     physbones_runtime_ok = (
         asi_exists
         and ini_exists
@@ -302,6 +310,7 @@ def test_compiled_drawables_and_textures() -> bool:
         and miltina_chains_count == 25
         and ini_blink_count >= 3
         and {"player_zero", "player_one", "player_two"}.issubset(blink_models_found)
+        and blink_peaks_ok
         and blink_ydd_bones_ok
     )
     all_assets_present &= print_status_result(
@@ -310,7 +319,10 @@ def test_compiled_drawables_and_textures() -> bool:
         (
             f"asi={asi_exists}, chains={ini_total_chains} "
             f"(Michael={ear_chains_count}, Franklin={shinano_chains_count}, Trevor={miltina_chains_count}), "
-            f"blinks={ini_blink_count} {sorted(blink_models_found)}"
+            f"blinks={ini_blink_count} {sorted(blink_models_found)} "
+            f"max=({blink_max_by_model.get('player_zero', -1.0):.2f}/"
+            f"{blink_max_by_model.get('player_one', -1.0):.2f}/"
+            f"{blink_max_by_model.get('player_two', -1.0):.2f})"
         ),
     )
 
@@ -1172,15 +1184,29 @@ def test_source_templates_and_dummies() -> bool:
             ini_file,
             [],
             target_ped_model="all",
-            blink_profiles=[{"model": "player_zero", "enabled": 1, "bones": sample_blink_bones}],
+            blink_profiles=[
+                {
+                    "model": "player_zero",
+                    "enabled": 1,
+                    "max_blink": 0.5,
+                    "bones": sample_blink_bones,
+                }
+            ],
             own_blink_models=("player_zero",),
         )
         pb_mod.merge_physbone_asi_ini(
             ini_file,
             [],
             target_ped_model="all",
-            blink_profiles=[{"model": "player_one", "enabled": 1, "bones": sample_blink_bones}],
-            own_blink_models=("player_one",),
+            blink_profiles=[
+                {
+                    "model": "player_two",
+                    "enabled": 1,
+                    "max_blink": 0.6,
+                    "bones": sample_blink_bones,
+                }
+            ],
+            own_blink_models=("player_two",),
         )
         both_profiles = pb_mod._load_ini_blink_profiles(ini_file)
         pb_mod.merge_physbone_asi_ini(
@@ -1193,11 +1219,130 @@ def test_source_templates_and_dummies() -> bool:
         after_disable = pb_mod._load_ini_blink_profiles(ini_file)
         ini_roundtrip_ok = (
             len(both_profiles) == 2
-            and {item["model"] for item in both_profiles} == {"player_zero", "player_one"}
+            and {item["model"] for item in both_profiles} == {"player_zero", "player_two"}
+            and any(
+                item["model"] == "player_zero" and abs(float(item.get("max_blink", 0.0)) - 0.5) < 1e-4
+                for item in both_profiles
+            )
             and len(after_disable) == 1
-            and after_disable[0]["model"] == "player_one"
+            and after_disable[0]["model"] == "player_two"
+            and abs(float(after_disable[0].get("max_blink", 0.0)) - 0.6) < 1e-4
             and len(after_disable[0]["bones"]) == 4
         )
+
+    strength_resolution_ok = (
+        abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="shinano_casual") - 0.5) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="shinano_er") - 0.5) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="miltina_maid") - 0.6) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, {"eye_blink_strength": "0.55"}, avatar_id="shinano_casual") - 0.55) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(0.45, {"eye_blink_strength": "0.55"}, avatar_id="miltina_maid") - 0.45) < 1e-5
+    )
+
+    class _IdentityMat4:
+        def copy(self):
+            return self
+
+        def __matmul__(self, coord_vec):
+            return coord_vec
+
+    class _MockVec3:
+        def __init__(self, x_val: float, y_val: float, z_val: float):
+            self.x = x_val
+            self.y = y_val
+            self.z = z_val
+
+    base_coords = (
+        [(0.025 + 0.002 * step_idx, -0.09, 1.56) for step_idx in range(6)]
+        + [(-0.025 - 0.002 * step_idx, -0.09, 1.56) for step_idx in range(6)]
+        + [
+            (0.02, -0.09, 1.48),   # idx 12: mouth/smile vertex
+            (0.03, -0.09, 1.585),  # idx 13: eyebrow vertex
+        ]
+    )
+    eyelid_indices = set(range(12))
+    blink_key_coords = []
+    for v_idx, (bx_val, by_val, bz_val) in enumerate(base_coords):
+        if v_idx in eyelid_indices:
+            blink_key_coords.append(_MockVec3(bx_val, by_val - 0.003, bz_val - 0.018))
+        else:
+            blink_key_coords.append(_MockVec3(bx_val, by_val, bz_val))
+
+    key_basis = types.SimpleNamespace(name="Basis", value=0.0, mute=False)
+    key_blink = types.SimpleNamespace(
+        name="vrc.Blink",
+        value=0.0,
+        mute=False,
+        data=[types.SimpleNamespace(co=vec_co) for vec_co in blink_key_coords],
+    )
+    key_pleasure = types.SimpleNamespace(name="eye_pleasure", value=0.75, mute=False)
+    key_turi = types.SimpleNamespace(name="eyelid_turi1", value=0.65, mute=False)
+    key_smile = types.SimpleNamespace(name="mouth_smile", value=0.40, mute=False)
+
+    def _eval_fake_coords():
+        coords_out = []
+        for v_idx, (bx_val, by_val, bz_val) in enumerate(base_coords):
+            x_out, y_out, z_out = bx_val, by_val, bz_val
+            if v_idx == 12:
+                z_out += 0.006 * key_smile.value
+            elif v_idx == 13:
+                z_out -= 0.002 * key_turi.value
+            else:
+                z_out -= 0.002 * key_pleasure.value
+                z_out -= 0.001 * key_turi.value
+            if not key_blink.mute and key_blink.value > 0.0 and v_idx in eyelid_indices:
+                z_out -= 0.018 * key_blink.value
+                y_out -= 0.003 * key_blink.value
+            coords_out.append(_MockVec3(x_out, y_out, z_out))
+        return coords_out
+
+    def _eval_fake_body(_deps):
+        eval_mesh = types.SimpleNamespace(
+            vertices=[types.SimpleNamespace(co=vec_co) for vec_co in _eval_fake_coords()]
+        )
+        return types.SimpleNamespace(
+            matrix_world=_IdentityMat4(),
+            to_mesh=lambda: eval_mesh,
+            to_mesh_clear=lambda: None,
+        )
+
+    fake_body_obj = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            vertices=[types.SimpleNamespace(co=_MockVec3(*xyz)) for xyz in base_coords],
+            shape_keys=types.SimpleNamespace(
+                key_blocks=[key_basis, key_blink, key_pleasure, key_turi, key_smile]
+            ),
+        ),
+        evaluated_get=_eval_fake_body,
+    )
+    fake_bpy_mod = types.SimpleNamespace(
+        context=types.SimpleNamespace(
+            evaluated_depsgraph_get=lambda: None,
+            view_layer=types.SimpleNamespace(update=lambda: None),
+        )
+    )
+    extracted_rig = eye_blink_helper.extract_body_eyelid_blink_rig_data(
+        fake_bpy_mod,
+        fake_body_obj,
+        eye_blink_mode="auto",
+        shape_weights={
+            "eye_pleasure": 0.75,
+            "eyelid_turi1": 0.65,
+            "mouth_smile": 0.40,
+        },
+    )
+    other_blendshapes_untouched_ok = (
+        extracted_rig.get("enabled") is True
+        and abs(key_blink.value - 0.0) < 1e-6
+        and abs(key_pleasure.value - 0.75) < 1e-6
+        and abs(key_turi.value - 0.65) < 1e-6
+        and abs(key_smile.value - 0.40) < 1e-6
+        and (12 not in extracted_rig.get("weights_by_orig_vert", {}))
+        and (13 not in extracted_rig.get("weights_by_orig_vert", {}))
+        and all(
+            idx in extracted_rig.get("weights_by_orig_vert", {})
+            for idx in eyelid_indices
+        )
+    )
 
     eye_blink_ok = print_status_result(
         i18n.translate("tests.eye_blink_rigging"),
@@ -1207,8 +1352,13 @@ def test_source_templates_and_dummies() -> bool:
         and (conflict_closed is not None)
         and (conflict_blink is not None)
         and bone_budget_ok
-        and ini_roundtrip_ok,
-        f"key='vrc.blink ', bone_budget=127/128, ini_merge={ini_roundtrip_ok}",
+        and ini_roundtrip_ok
+        and strength_resolution_ok
+        and other_blendshapes_untouched_ok,
+        (
+            f"key='vrc.blink ', bone_budget=127/128, ini_merge={ini_roundtrip_ok}, "
+            f"strength_presets={strength_resolution_ok}, other_shapes_isolated={other_blendshapes_untouched_ok}"
+        ),
     )
 
     return (
@@ -2734,6 +2884,14 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink"),
         (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink"),
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--eye-blink-strength"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--eye-blink-strength"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--eye-blink-strength"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--eye-blink-strength"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--eye-blink-strength"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink-strength"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink-strength"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink-strength"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")

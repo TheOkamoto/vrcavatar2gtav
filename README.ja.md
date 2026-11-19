@@ -171,7 +171,7 @@
 | `python run_mod_manager.py --export-physbones` | `.unity` シーンから標準 VRCPhysBone を `configs/*_physbones.cfg` へ自動同期（`--physbones-marshmallow` で Marshmallow PB 含める、`--overwrite-physbones-from-unity` で上書き） |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Unity シーンではなく `.cfg` プリセットの PhysBone 設定を使ってビルド（`--physbones-marshmallow` で Marshmallow PB 有効化可能） |
 | `python run_mod_manager.py --character all --blood-decals` | GTA V の出血・傷デカール有効でビルド（既定；`--no-blood-decals` で従来の `ped_default.sps` に切替可能） |
-| `python run_mod_manager.py --character all --eye-blink` | 自然なまばたき有効でビルド（既定 `auto` は閉じ目カスタム表情を自動回避；`--no-eye-blink` で完全無効化） |
+| `python run_mod_manager.py --character all --eye-blink` | 自然なまばたき有効でビルド（既定 `auto` は閉じ目カスタム表情を自動回避・既定ピーク `max_blink = 0.50` しなの / `0.60` ミルティナ・他ブレンドシェイプ非干渉；`--eye-blink-strength` 調整 / `--no-eye-blink` で無効化） |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド済みフォルダから `mods/x64v.rpf` へ再梱包・配置 |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | ソース・設定・i18n・First-Run・Modular Avatar の `8` スイートを実行（クローン直後対応） |
 | `python scripts/common_tools/test_mod_suite.py` | 全 `11` スイートの統合検証を実行（ビルド・配置済み環境が必要） |

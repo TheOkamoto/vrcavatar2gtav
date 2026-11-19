@@ -5116,6 +5116,7 @@ def _load_ini_blink_profiles(ini_path: Path) -> List[Dict[str, object]]:
                 "max_interval": sec.getfloat("max_interval", 6.0),
                 "blink_duration": sec.getfloat("blink_duration", 0.215),
                 "double_blink_chance": sec.getfloat("double_blink_chance", 0.18),
+                "max_blink": sec.getfloat("max_blink", 1.0),
                 "bones": bones,
             }
         )
@@ -5293,6 +5294,7 @@ def export_physbone_asi_ini(
         lines.append(f"max_interval = {float(blink_entry.get('max_interval', 6.0)):.6f}")
         lines.append(f"blink_duration = {float(blink_entry.get('blink_duration', 0.215)):.6f}")
         lines.append(f"double_blink_chance = {float(blink_entry.get('double_blink_chance', 0.18)):.6f}")
+        lines.append(f"max_blink = {float(blink_entry.get('max_blink', 1.0)):.6f}")
         lines.append(f"bone_count = {len(blink_bones)}")
         for bone_idx, bone_entry in enumerate(blink_bones):
             loc_pos = bone_entry["local_pos"]

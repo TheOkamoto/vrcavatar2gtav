@@ -172,7 +172,7 @@ By default each protagonist starts with the preset below, and every VRChat avata
 | `python run_mod_manager.py --export-physbones` | Auto-import standard VRChat PhysBones presets from `.unity` scenes into `configs/*_physbones.cfg` (`--physbones-marshmallow` includes Marshmallow PB; `--overwrite-physbones-from-unity` overwrites edits) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Build using portable `.cfg` PhysBone presets instead of live `.unity` scenes (add `--physbones-marshmallow` to enable Marshmallow PB breasts) |
 | `python run_mod_manager.py --character all --blood-decals` | Build with GTA V blood/wound decals enabled (default; pass `--no-blood-decals` for clean `ped_default.sps` renders) |
-| `python run_mod_manager.py --character all --eye-blink` | Build with natural eye blinking enabled (default `auto` skips closed-eye custom expressions; pass `--no-eye-blink` to disable completely) |
+| `python run_mod_manager.py --character all --eye-blink` | Build with natural eye blinking enabled (default `auto` skips closed-eye custom expressions; preset peak `max_blink = 0.50` for Shinano / `0.60` for Miltina without affecting any other facial blendshape; override via `--eye-blink-strength`, disable via `--no-eye-blink`) |
 | `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character folders to `mods/x64v.rpf` |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `8` source/config/i18n/First-Run/Modular-Avatar suites (clean clone safe) |
 | `python scripts/common_tools/test_mod_suite.py` | Run all `11` end-to-end validation suites (requires built & deployed assets) |

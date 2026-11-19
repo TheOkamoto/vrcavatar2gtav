@@ -88,6 +88,12 @@ def parse_franklin_cli_args():
         default=None,
         help=project_i18n.translate("eye_blink.cli_opt"),
     )
+    arg_parser.add_argument(
+        "--eye-blink-strength",
+        type=float,
+        default=None,
+        help=project_i18n.translate("eye_blink.strength_cli_opt"),
+    )
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
     arg_parser.add_argument("--face-anim", default=None)
@@ -274,6 +280,11 @@ target_bones.add("FACIAL_jaw")
 target_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
 eye_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
     getattr(CLI_ARGS, "eye_blink", None), FRANKLIN_CFG
+)
+eye_blink_strength = eye_blink_helper.resolve_eye_blink_strength(
+    getattr(CLI_ARGS, "eye_blink_strength", None),
+    FRANKLIN_CFG,
+    avatar_id="shinano_casual",
 )
 target_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
     target_bones,
@@ -1060,6 +1071,7 @@ if blink_rig_data.get("enabled"):
         ped_model_name,
         scaled_blink_deltas,
         enabled=True,
+        max_blink=eye_blink_strength,
     )
     if blink_prof is not None:
         blink_profiles_to_merge.append(blink_prof)
@@ -1333,6 +1345,7 @@ if physbone_chain_records or blink_profiles_to_merge or eye_blink_mode == "off":
             "eye_blink.profile_exported",
             model=ped_model_name,
             enabled=1 if blink_profiles_to_merge else 0,
+            max_blink=eye_blink_strength,
         )
     )
 print(project_i18n.translate("franklin.build_done"))

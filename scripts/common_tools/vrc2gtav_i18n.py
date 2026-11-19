@@ -3460,6 +3460,11 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "オプションの自然なまばたきを有効化 (GTA V ネイティブまぶたボーン + GTAVPhysBones.ini 使用・閉じ目表情とは自動競合回避)",
         "pt": "Habilitar piscar natural opcional via bones nativos de pálpebra do GTA V e GTAVPhysBones.ini (pula expressões de olho fechado)",
     },
+    "eye_blink.strength_cli_opt": {
+        "en": "Optional peak blink closing factor (`max_blink`, e.g. 0.50 Shinano / 0.60 Miltina) without altering any other facial blendshape",
+        "ja": "まばたきの最大閉じ具合 (`max_blink`、例: しなの 0.50 / ミルティナ 0.60・他の顔ブレンドシェイプは一切変更しません)",
+        "pt": "Fator máximo opcional do piscar (`max_blink`, ex.: 0.50 Shinano / 0.60 Miltina) sem afetar nenhum outro blendshape facial",
+    },
     "eye_blink.applied": {
         "en": "[OK] Natural eye blink rigged: shape_key='{key}', eyelid_verts={verts}, travel=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",
         "ja": "[OK] 自然なまばたき設定完了: shape_key='{key}', まぶた頂点={verts}, 可動量=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",
@@ -3471,9 +3476,9 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "pt": "[INFO] Piscar natural dos olhos desativado/ignorado ({reason})",
     },
     "eye_blink.profile_exported": {
-        "en": "[PhysBones] Exported eye blink profile for '{model}' into GTAVPhysBones.ini (enabled={enabled})",
-        "ja": "[PhysBones] '{model}' のまばたきプロファイルを GTAVPhysBones.ini へ書き出し (enabled={enabled})",
-        "pt": "[PhysBones] Perfil de piscar natural de '{model}' salvo no GTAVPhysBones.ini (enabled={enabled})",
+        "en": "[PhysBones] Exported eye blink profile for '{model}' into GTAVPhysBones.ini (enabled={enabled}, max_blink={max_blink:.2f})",
+        "ja": "[PhysBones] '{model}' のまばたきプロファイルを GTAVPhysBones.ini へ書き出し (enabled={enabled}, max_blink={max_blink:.2f})",
+        "pt": "[PhysBones] Perfil de piscar natural de '{model}' salvo no GTAVPhysBones.ini (enabled={enabled}, max_blink={max_blink:.2f})",
     },
     "eye_blink.ydd_bones_trimmed": {
         "en": "[EyeBlink] Added 4 eyelid bones and trimmed {stripped} unskinned YFT-only hand leaf bone(s) from .ydd (total bones <= 128)",

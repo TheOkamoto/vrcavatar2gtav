@@ -120,6 +120,74 @@ def parse_eye_blink_mode(raw_value: Any, default: str = "auto") -> str:
     return default
 
 
+DEFAULT_BLINK_STRENGTH_BY_AVATAR: Dict[str, float] = {
+    "shinano_casual": 0.50,
+    "shinano_er": 0.50,
+    "miltina_maid": 0.60,
+}
+
+
+def parse_eye_blink_strength(raw_value: Any, default: float = 1.0) -> float:
+    """Normalize max blink strength into [0.0, 1.5], falling back cleanly on 'auto'/None."""
+    if raw_value is None or isinstance(raw_value, bool):
+        return float(default)
+    cleaned = str(raw_value).strip().lower()
+    if cleaned in ("", "auto", "default"):
+        return float(default)
+    try:
+        parsed_val = float(cleaned)
+    except ValueError:
+        return float(default)
+    if not math.isfinite(parsed_val):
+        return float(default)
+    return max(0.0, min(1.5, parsed_val))
+
+
+def resolve_eye_blink_strength(
+    cli_strength: Optional[float],
+    char_cfg: Optional[Mapping[str, Any]] = None,
+    *,
+    avatar_id: str = "",
+    default: float = 1.0,
+) -> float:
+    """
+    Resolve effective peak blink factor (`max_blink`) from CLI override, config
+    (`eye_blink_strength`), or built-in avatar preset (0.50 Shinano, 0.60 Miltina)
+    without modifying any other facial blendshape weights.
+    """
+    if cli_strength is not None:
+        return parse_eye_blink_strength(cli_strength, default=default)
+    if char_cfg:
+        raw_cfg_strength = char_cfg.get("eye_blink_strength")
+        if raw_cfg_strength is not None and str(raw_cfg_strength).strip().lower() not in (
+            "",
+            "auto",
+            "default",
+        ):
+            return parse_eye_blink_strength(raw_cfg_strength, default=default)
+
+    candidates = [avatar_id]
+    if char_cfg:
+        candidates.extend(
+            [
+                str(char_cfg.get("avatar_id") or ""),
+                str(char_cfg.get("avatar") or ""),
+                str(char_cfg.get("unity_avatar_name") or ""),
+            ]
+        )
+    for raw_cand in candidates:
+        norm_cand = str(raw_cand or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if not norm_cand:
+            continue
+        if norm_cand in DEFAULT_BLINK_STRENGTH_BY_AVATAR:
+            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR[norm_cand])
+        if "miltina" in norm_cand or "milltina" in norm_cand:
+            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["miltina_maid"])
+        if "shinano" in norm_cand:
+            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["shinano_casual"])
+    return float(default)
+
+
 def resolve_effective_eye_blink_mode(
     cli_eye_blink: Optional[bool],
     char_cfg: Optional[Mapping[str, Any]] = None,
@@ -673,6 +741,7 @@ def build_blink_profile_for_ped(
     max_interval_sec: float = 6.0,
     blink_duration_sec: float = 0.215,
     double_blink_chance: float = 0.18,
+    max_blink: float = 1.0,
 ) -> Optional[Dict[str, object]]:
     """
     Build a runtime `[Blink_*]` profile for `GTAVPhysBones.ini` by expressing each
@@ -752,6 +821,7 @@ def build_blink_profile_for_ped(
             }
         )
 
+    clamped_max_blink = parse_eye_blink_strength(max_blink, default=1.0)
     return {
         "model": str(ped_model_name or "all").strip().lower(),
         "enabled": 1 if enabled else 0,
@@ -759,5 +829,6 @@ def build_blink_profile_for_ped(
         "max_interval": float(max_interval_sec),
         "blink_duration": float(blink_duration_sec),
         "double_blink_chance": float(double_blink_chance),
+        "max_blink": clamped_max_blink,
         "bones": bone_entries,
     }

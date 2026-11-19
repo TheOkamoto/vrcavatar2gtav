@@ -143,6 +143,12 @@ def main() -> int:
         default=None,
         help=i18n.translate("eye_blink.cli_opt"),
     )
+    parser.add_argument(
+        "--eye-blink-strength",
+        type=float,
+        default=None,
+        help=i18n.translate("eye_blink.strength_cli_opt"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
@@ -217,6 +223,10 @@ def main() -> int:
         extra_blender_args.append("--eye-blink")
     elif parsed_args.eye_blink is False:
         extra_blender_args.append("--no-eye-blink")
+    if parsed_args.eye_blink_strength is not None:
+        extra_blender_args.extend(
+            ["--eye-blink-strength", str(parsed_args.eye_blink_strength)]
+        )
 
     blender_cmd, blender_env = project_paths.build_blender_command(
         blender_script,

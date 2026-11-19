@@ -1276,6 +1276,12 @@ def main() -> None:
         help=project_i18n.translate("eye_blink.cli_opt"),
     )
     argument_parser.add_argument(
+        "--eye-blink-strength",
+        type=float,
+        default=None,
+        help=project_i18n.translate("eye_blink.strength_cli_opt"),
+    )
+    argument_parser.add_argument(
         "--avatar-zip",
         default=None,
         help="Path to avatar .zip or .unitypackage archive",
@@ -1498,6 +1504,10 @@ def main() -> None:
             universal_argv.append("--eye-blink")
         elif parsed_arguments.eye_blink is False:
             universal_argv.append("--no-eye-blink")
+        if parsed_arguments.eye_blink_strength is not None:
+            universal_argv.extend(
+                ["--eye-blink-strength", str(parsed_arguments.eye_blink_strength)]
+            )
         if not parsed_arguments.non_interactive:
             universal_argv.append("--interactive")
         if parsed_arguments.skip_blender:
@@ -1631,6 +1641,10 @@ def main() -> None:
             extra_blender_args.append("--eye-blink")
         elif parsed_arguments.eye_blink is False:
             extra_blender_args.append("--no-eye-blink")
+        if parsed_arguments.eye_blink_strength is not None:
+            extra_blender_args.extend(
+                ["--eye-blink-strength", str(parsed_arguments.eye_blink_strength)]
+            )
         blender_status = execute_blender_build(
             selected_characters_list,
             extra_blender_args=extra_blender_args,

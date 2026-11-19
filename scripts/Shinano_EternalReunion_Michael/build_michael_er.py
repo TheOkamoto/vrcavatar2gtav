@@ -694,6 +694,11 @@ def build_shinano_er_for_gtav(cli_args):
     eye_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
         getattr(cli_args, "eye_blink", None), target_cfg
     )
+    eye_blink_strength = eye_blink_helper.resolve_eye_blink_strength(
+        getattr(cli_args, "eye_blink_strength", None),
+        target_cfg,
+        avatar_id="shinano_er",
+    )
     valid_gtav_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
         valid_gtav_bones,
         enable_eye_blink=(eye_blink_mode != "off"),
@@ -1775,6 +1780,7 @@ def build_shinano_er_for_gtav(cli_args):
             ped_model_name,
             scaled_blink_deltas,
             enabled=True,
+            max_blink=eye_blink_strength,
         )
         if blink_prof is not None:
             blink_profiles_to_merge.append(blink_prof)
@@ -2020,6 +2026,7 @@ def build_shinano_er_for_gtav(cli_args):
                 "eye_blink.profile_exported",
                 model=ped_model_name,
                 enabled=1 if blink_profiles_to_merge else 0,
+                max_blink=eye_blink_strength,
             )
         )
 
@@ -2174,6 +2181,12 @@ def parse_blender_cli_args():
         action=argparse.BooleanOptionalAction,
         default=None,
         help=i18n.translate("eye_blink.cli_opt"),
+    )
+    argument_parser.add_argument(
+        "--eye-blink-strength",
+        type=float,
+        default=None,
+        help=i18n.translate("eye_blink.strength_cli_opt"),
     )
     argument_parser.add_argument(
         "--texture-dir",

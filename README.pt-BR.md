@@ -172,7 +172,7 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | `python run_mod_manager.py --export-physbones` | Importa VRCPhysBones padrão das cenas `.unity` para `configs/*_physbones.cfg` (`--physbones-marshmallow` inclui Marshmallow PB; `--overwrite-physbones-from-unity` sobrescreve edições) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Compila usando os presets `.cfg` de PhysBones em vez de extrair das cenas Unity (adicione `--physbones-marshmallow` para ativar Marshmallow PB) |
 | `python run_mod_manager.py --character all --blood-decals` | Compila com decals de sangue/ferimentos do GTA V habilitados (padrão; use `--no-blood-decals` para retornar a `ped_default.sps`) |
-| `python run_mod_manager.py --character all --eye-blink` | Compila com piscar natural dos olhos ativado (`auto` pula expressões de olho fechado; use `--no-eye-blink` para desativar totalmente) |
+| `python run_mod_manager.py --character all --eye-blink` | Compila com piscar natural ativado (`auto` pula expressões de olho fechado; pico padrão `max_blink = 0.50` na Shinano e `0.60` na Miltina sem afetar outros blendshapes da face; ajuste via `--eye-blink-strength` ou desative com `--no-eye-blink`) |
 | `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas já compiladas em `mods/x64v.rpf` |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `8` suítes de código/config/i18n/First-Run/Modular-Avatar (clone limpo) |
 | `python scripts/common_tools/test_mod_suite.py` | Executa todas as `11` suítes de ponta a ponta (requer build e deploy concluídos) |

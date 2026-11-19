@@ -472,6 +472,7 @@ struct BlinkProfile {
     float maxInterval = 6.0f;
     float blinkDuration = 0.215f;
     float doubleBlinkChance = 0.18f;
+    float maxBlink = 1.0f;
     std::vector<BlinkBoneNode> bones;
 };
 
@@ -618,6 +619,7 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
             else if (key == "max_interval") bp.maxInterval = static_cast<float>(std::atof(val.c_str()));
             else if (key == "blink_duration") bp.blinkDuration = static_cast<float>(std::atof(val.c_str()));
             else if (key == "double_blink_chance") bp.doubleBlinkChance = static_cast<float>(std::atof(val.c_str()));
+            else if (key == "max_blink") bp.maxBlink = static_cast<float>(std::atof(val.c_str()));
             else if (key == "bone_count") {
                 int count = std::atoi(val.c_str());
                 if (count > 0 && count <= kMaxBlinkBonesPerProfile) bp.bones.resize(count);
@@ -658,6 +660,8 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
         if (bp.minInterval < 0.4f) bp.minInterval = 0.4f;
         if (bp.maxInterval < bp.minInterval) bp.maxInterval = bp.minInterval + 0.5f;
         if (bp.blinkDuration < 0.08f) bp.blinkDuration = 0.08f;
+        if (bp.maxBlink < 0.0f) bp.maxBlink = 0.0f;
+        if (bp.maxBlink > 1.5f) bp.maxBlink = 1.5f;
     }
     return !outCfg.chains.empty() || !outCfg.blinkProfiles.empty();
 }
@@ -1674,7 +1678,7 @@ float UpdatePedBlinkAmount(TrackedPedSlot& slot, const BlinkProfile& bp, float d
             }
             return 0.0f;
         }
-        return EvaluateNaturalBlinkCurve(st.blinkElapsed, bp.blinkDuration);
+        return EvaluateNaturalBlinkCurve(st.blinkElapsed, bp.blinkDuration) * bp.maxBlink;
     }
 
     st.waitTimer += blinkDt;
