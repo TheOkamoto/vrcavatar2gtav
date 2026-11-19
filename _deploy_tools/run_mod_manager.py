@@ -1021,6 +1021,16 @@ def run_interactive_menu() -> None:
         prompt_apply_and_deploy, default_yes=True
     )
 
+    extra_interactive_blender_args: List[str] = []
+    if should_build_blender:
+        prompt_eye_blink = input(
+            project_i18n.translate("manager.prompt_eye_blink")
+        ).strip()
+        if project_i18n.is_affirmative_answer(prompt_eye_blink, default_yes=True):
+            extra_interactive_blender_args.append("--eye-blink")
+        else:
+            extra_interactive_blender_args.append("--no-eye-blink")
+
     # Execute the selected pipeline stages
     if should_build_textures:
         textures_success = execute_texture_generation(selected_characters_list)
@@ -1029,7 +1039,10 @@ def run_interactive_menu() -> None:
             sys.exit(1)
 
     if should_build_blender:
-        blender_success = execute_blender_build(selected_characters_list)
+        blender_success = execute_blender_build(
+            selected_characters_list,
+            extra_blender_args=extra_interactive_blender_args or None,
+        )
         if not blender_success:
             print(project_i18n.translate("manager.abort_blender"))
             sys.exit(1)
@@ -1257,6 +1270,12 @@ def main() -> None:
         help=project_i18n.translate("ped_damage.cli_blood_decals"),
     )
     argument_parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("eye_blink.cli_opt"),
+    )
+    argument_parser.add_argument(
         "--avatar-zip",
         default=None,
         help="Path to avatar .zip or .unitypackage archive",
@@ -1475,6 +1494,10 @@ def main() -> None:
             universal_argv.append("--blood-decals")
         elif parsed_arguments.blood_decals is False:
             universal_argv.append("--no-blood-decals")
+        if parsed_arguments.eye_blink is True:
+            universal_argv.append("--eye-blink")
+        elif parsed_arguments.eye_blink is False:
+            universal_argv.append("--no-eye-blink")
         if not parsed_arguments.non_interactive:
             universal_argv.append("--interactive")
         if parsed_arguments.skip_blender:
@@ -1604,6 +1627,10 @@ def main() -> None:
             extra_blender_args.append("--blood-decals")
         elif parsed_arguments.blood_decals is False:
             extra_blender_args.append("--no-blood-decals")
+        if parsed_arguments.eye_blink is True:
+            extra_blender_args.append("--eye-blink")
+        elif parsed_arguments.eye_blink is False:
+            extra_blender_args.append("--no-eye-blink")
         blender_status = execute_blender_build(
             selected_characters_list,
             extra_blender_args=extra_blender_args,

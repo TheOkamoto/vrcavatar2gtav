@@ -3455,4 +3455,39 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "RPF7 16 MiB (`0xFFFFFF`) リソース上限 & 4 GiB セクタオフセット保護",
         "pt": "Proteções contra limite RPF7 de 16 MiB (`0xFFFFFF`) e offset de 4 GiB",
     },
+    "eye_blink.cli_opt": {
+        "en": "Enable optional natural eye blinking via native GTA V eyelid bones & GTAVPhysBones.ini (auto skips conflicting closed-eye expressions)",
+        "ja": "オプションの自然なまばたきを有効化 (GTA V ネイティブまぶたボーン + GTAVPhysBones.ini 使用・閉じ目表情とは自動競合回避)",
+        "pt": "Habilitar piscar natural opcional via bones nativos de pálpebra do GTA V e GTAVPhysBones.ini (pula expressões de olho fechado)",
+    },
+    "eye_blink.applied": {
+        "en": "[OK] Natural eye blink rigged: shape_key='{key}', eyelid_verts={verts}, travel=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",
+        "ja": "[OK] 自然なまばたき設定完了: shape_key='{key}', まぶた頂点={verts}, 可動量=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",
+        "pt": "[OK] Piscar natural configurado: shape_key='{key}', vértices={verts}, deslocamento=(E:{left_mm:.1f}mm, D:{right_mm:.1f}mm)",
+    },
+    "eye_blink.skipped": {
+        "en": "[INFO] Natural eye blink disabled/skipped ({reason})",
+        "ja": "[INFO] 自然なまばたきを無効化/スキップ ({reason})",
+        "pt": "[INFO] Piscar natural dos olhos desativado/ignorado ({reason})",
+    },
+    "eye_blink.profile_exported": {
+        "en": "[PhysBones] Exported eye blink profile for '{model}' into GTAVPhysBones.ini (enabled={enabled})",
+        "ja": "[PhysBones] '{model}' のまばたきプロファイルを GTAVPhysBones.ini へ書き出し (enabled={enabled})",
+        "pt": "[PhysBones] Perfil de piscar natural de '{model}' salvo no GTAVPhysBones.ini (enabled={enabled})",
+    },
+    "eye_blink.ydd_bones_trimmed": {
+        "en": "[EyeBlink] Added 4 eyelid bones and trimmed {stripped} unskinned YFT-only hand leaf bone(s) from .ydd (total bones <= 128)",
+        "ja": "[EyeBlink] まぶたボーン4本を追加し、.ydd のみ未スキニング手補助ボーン {stripped} 本を整理 (.ydd 上限 <= 128)",
+        "pt": "[EyeBlink] Adicionados 4 bones de pálpebra e removidos {stripped} bones auxiliares de mão apenas-YFT do .ydd (limite <= 128)",
+    },
+    "manager.prompt_eye_blink": {
+        "en": "  [?] Enable natural eye blinking? (may glitch if custom closed-eye expression is active) [Y/n]: ",
+        "ja": "  [?] 自然なまばたきを有効にしますか? (閉じ目系カスタム表情では不具合の原因になる場合があります) [Y/n]: ",
+        "pt": "  [?] Ativar piscar natural dos olhos? (pode bugar se houver expressão customizada de olho fechado) [Y/n]: ",
+    },
+    "tests.eye_blink_rigging": {
+        "en": "Optional natural eye blinking, closed-eye expression conflict guard & GTAVPhysBones.ini blink merge",
+        "ja": "オプションの自然なまばたき、カスタム表情競合ガード & GTAVPhysBones.ini 統合テスト",
+        "pt": "Piscar natural opcional, proteção contra expressões customizadas e GTAVPhysBones.ini",
+    },
 }

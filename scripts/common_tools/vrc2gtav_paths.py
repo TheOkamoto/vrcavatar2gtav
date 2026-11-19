@@ -873,6 +873,7 @@ _NON_PATH_OPTION_KEYS = frozenset(
         "blendshapes_source",
         "physbones_source",
         "physbones_marshmallow",
+        "eye_blink",
         "hair_scale",
         "hair_offset",
         "target_z_min",
@@ -889,7 +890,7 @@ _HAIR_OVERRIDE_OPTION_KEYS = frozenset(
     {"custom_hair", "fbx_hair", "hair_mat", "hair_tex", "hair_scale", "hair_offset"}
 )
 _PHYSBONE_OVERRIDE_OPTION_KEYS = frozenset(
-    {"physbones_source", "physbones_marshmallow"}
+    {"physbones_source", "physbones_marshmallow", "eye_blink"}
 )
 _HAIR_MODE_KEYWORDS = frozenset({"auto", "default", "none"})
 

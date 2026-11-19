@@ -34,12 +34,14 @@ constexpr int kMaxTrackedPeds = 8;
 constexpr int kMaxWorldPedsScan = 256;
 constexpr int kRescanCooldownFrames = 30;
 constexpr int kSkelHeadTag = 31086;
+constexpr int kMaxBlinkBonesPerProfile = 8;
 
 // ScriptHookV native hashes (verified present in ScriptHookV.dll)
 constexpr uint64_t kNativePlayerPedId = 0xD80958FC74E988A6ULL;
 constexpr uint64_t kNativeGetEntityModel = 0x9F47B058362C84B5ULL;
 constexpr uint64_t kNativeGetEntityCoords = 0x3FEF770D40960D5AULL;
 constexpr uint64_t kNativeDoesEntityExist = 0x7239B21A38F536BAULL;
+constexpr uint64_t kNativeIsEntityDead = 0x5F9532F3B5CC2551ULL;
 constexpr uint64_t kNativeGetPedBoneIndex = 0x3F428D08BE5AAE31ULL;
 constexpr uint64_t kNativeGetPedBoneCoords = 0x17C07FC640E86B4EULL;
 constexpr uint64_t kNativeGetEntityBoneIndexByName = 0xFB71170B7E76ACBAULL;
@@ -176,6 +178,14 @@ int CallPlayerPedId() {
 bool CallDoesEntityExist(int entity) {
     g_shv.nativeInit(kNativeDoesEntityExist);
     g_shv.nativePush64(PackArg(entity));
+    uint64_t* res = g_shv.nativeCall();
+    return res && (static_cast<int>(res[0]) != 0);
+}
+
+bool CallIsEntityDead(int entity) {
+    g_shv.nativeInit(kNativeIsEntityDead);
+    g_shv.nativePush64(PackArg(entity));
+    g_shv.nativePush64(PackArg(0));
     uint64_t* res = g_shv.nativeCall();
     return res && (static_cast<int>(res[0]) != 0);
 }
@@ -443,6 +453,38 @@ struct PhysBoneChain {
     std::vector<float> segLengths;
 };
 
+struct BlinkBoneNode {
+    std::string name;
+    int tag = 0;
+    int parentTag = 0;
+    int skelIndex = -1;
+    int parentSkelIndex = -1;
+    Vec3 localPos{};
+    Quat localRot{0.0f, 0.0f, 0.0f, 1.0f};
+    Vec3 deltaPos{};
+};
+
+struct BlinkProfile {
+    std::string model = "all";
+    uint32_t modelHash = 0;
+    bool enabled = true;
+    float minInterval = 2.6f;
+    float maxInterval = 6.0f;
+    float blinkDuration = 0.215f;
+    float doubleBlinkChance = 0.18f;
+    std::vector<BlinkBoneNode> bones;
+};
+
+struct BlinkRuntimeState {
+    bool initialized = false;
+    bool blinking = false;
+    bool doubleBlinkPending = false;
+    float waitTimer = 0.0f;
+    float nextDelay = 2.2f;
+    float blinkElapsed = 0.0f;
+    uint32_t rngState = 0x9E3779B9U;
+};
+
 struct PluginConfig {
     bool enabled = true;
     std::string targetPedModel = "player_zero";
@@ -450,6 +492,7 @@ struct PluginConfig {
     float velocityScale = 2.5f;
     float maxDeltaTime = 0.05f;
     std::vector<PhysBoneChain> chains;
+    std::vector<BlinkProfile> blinkProfiles;
 };
 
 PluginConfig g_cfg;
@@ -500,6 +543,7 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
     std::string line;
     std::string currentSection;
     int activeChainIdx = -1;
+    int activeBlinkIdx = -1;
 
     while (std::getline(file, line)) {
         std::string trimmed = Trim(line);
@@ -509,8 +553,14 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
             if (currentSection.rfind("Chain_", 0) == 0) {
                 outCfg.chains.emplace_back();
                 activeChainIdx = static_cast<int>(outCfg.chains.size()) - 1;
+                activeBlinkIdx = -1;
+            } else if (currentSection.rfind("Blink_", 0) == 0) {
+                outCfg.blinkProfiles.emplace_back();
+                activeBlinkIdx = static_cast<int>(outCfg.blinkProfiles.size()) - 1;
+                activeChainIdx = -1;
             } else {
                 activeChainIdx = -1;
+                activeBlinkIdx = -1;
             }
             continue;
         }
@@ -560,6 +610,35 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
                     }
                 }
             }
+        } else if (activeBlinkIdx >= 0) {
+            BlinkProfile& bp = outCfg.blinkProfiles[activeBlinkIdx];
+            if (key == "model") bp.model = val;
+            else if (key == "enabled") bp.enabled = (std::atoi(val.c_str()) != 0);
+            else if (key == "min_interval") bp.minInterval = static_cast<float>(std::atof(val.c_str()));
+            else if (key == "max_interval") bp.maxInterval = static_cast<float>(std::atof(val.c_str()));
+            else if (key == "blink_duration") bp.blinkDuration = static_cast<float>(std::atof(val.c_str()));
+            else if (key == "double_blink_chance") bp.doubleBlinkChance = static_cast<float>(std::atof(val.c_str()));
+            else if (key == "bone_count") {
+                int count = std::atoi(val.c_str());
+                if (count > 0 && count <= kMaxBlinkBonesPerProfile) bp.bones.resize(count);
+            }
+            else if (key.rfind("bone_", 0) == 0) {
+                size_t under = key.find('_', 5);
+                if (under != std::string::npos) {
+                    int bIdx = std::atoi(key.substr(5, under - 5).c_str());
+                    std::string subKey = key.substr(under + 1);
+                    if (bIdx >= 0 && bIdx < kMaxBlinkBonesPerProfile) {
+                        if (bIdx >= static_cast<int>(bp.bones.size())) bp.bones.resize(bIdx + 1);
+                        BlinkBoneNode& bn = bp.bones[bIdx];
+                        if (subKey == "name") bn.name = val;
+                        else if (subKey == "tag") bn.tag = std::atoi(val.c_str());
+                        else if (subKey == "parent_tag") bn.parentTag = std::atoi(val.c_str());
+                        else if (subKey == "local_pos") bn.localPos = ParseVec3(val, {0.0f, 0.0f, 0.0f});
+                        else if (subKey == "local_rot") bn.localRot = ParseQuat(val);
+                        else if (subKey == "delta_pos") bn.deltaPos = ParseVec3(val, {0.0f, 0.0f, 0.0f});
+                    }
+                }
+            }
         }
     }
 
@@ -574,7 +653,13 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
         ch.worldPos.assign(nodeCount, {0.0f, 0.0f, 0.0f});
         ch.prevWorldPos.assign(nodeCount, {0.0f, 0.0f, 0.0f});
     }
-    return !outCfg.chains.empty();
+    for (BlinkProfile& bp : outCfg.blinkProfiles) {
+        bp.modelHash = (bp.model.empty() || bp.model == "all") ? 0U : JoaatLower(bp.model);
+        if (bp.minInterval < 0.4f) bp.minInterval = 0.4f;
+        if (bp.maxInterval < bp.minInterval) bp.maxInterval = bp.minInterval + 0.5f;
+        if (bp.blinkDuration < 0.08f) bp.blinkDuration = 0.08f;
+    }
+    return !outCfg.chains.empty() || !outCfg.blinkProfiles.empty();
 }
 
 struct ProbeRefBone {
@@ -619,6 +704,7 @@ struct SyncSnapshot {
     int count = 0;
     int boneIdx[kMaxSyncNodes]{};
     int parentBoneIdx[kMaxSyncNodes]{};
+    uint8_t writeDefault[kMaxSyncNodes]{};
     Mat34V localMat[kMaxSyncNodes]{};
     Quat localQuat[kMaxSyncNodes]{};
 };
@@ -639,6 +725,8 @@ struct TrackedPedSlot {
     ProbeRefBone refA{};
     ProbeRefBone refB{};
     std::vector<PhysBoneChain> chains;
+    std::vector<BlinkProfile> blinkProfiles;
+    BlinkRuntimeState blinkState{};
     uint8_t* lastLoggedCrSkeleton = nullptr;
     uint32_t lastLoggedNumBones = 0;
     bool loggedFailure = false;
@@ -745,6 +833,26 @@ bool SafeWriteSkeletonBatch(
     }
 }
 
+bool SafeWriteLocalObjectBatch(
+    ResolvedSkeleton& skel,
+    const int* skelIndices,
+    const Mat34V* localMatrices,
+    const Mat34V* objectMatrices,
+    size_t count
+) {
+    __try {
+        for (size_t idx = 0; idx < count; ++idx) {
+            int boneIdx = skelIndices[idx];
+            if (boneIdx < 0 || static_cast<uint32_t>(boneIdx) >= skel.numBones) continue;
+            skel.localMatrices[boneIdx] = localMatrices[idx];
+            skel.objectMatrices[boneIdx] = objectMatrices[idx];
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool SafeApplySyncSnapshot(const SyncSnapshot& snap) {
     if (!snap.active || snap.count <= 0) return false;
     __try {
@@ -779,13 +887,15 @@ bool SafeApplySyncSnapshot(const SyncSnapshot& snap) {
             if (boneIdx < 0 || static_cast<uint32_t>(boneIdx) >= snap.numBones) continue;
             if (parentIdx < 0 || static_cast<uint32_t>(parentIdx) >= snap.numBones) continue;
 
-            if (defMats) {
-                defMats[boneIdx] = snap.localMat[idx];
-            }
-            if (boneArr && snap.boneDataRotOff >= 0) {
-                Quat* defRot = reinterpret_cast<Quat*>(
-                    boneArr + static_cast<size_t>(boneIdx) * snap.boneDataStride + snap.boneDataRotOff);
-                *defRot = snap.localQuat[idx];
+            if (snap.writeDefault[idx]) {
+                if (defMats) {
+                    defMats[boneIdx] = snap.localMat[idx];
+                }
+                if (boneArr && snap.boneDataRotOff >= 0) {
+                    Quat* defRot = reinterpret_cast<Quat*>(
+                        boneArr + static_cast<size_t>(boneIdx) * snap.boneDataStride + snap.boneDataRotOff);
+                    *defRot = snap.localQuat[idx];
+                }
             }
             locMats[boneIdx] = snap.localMat[idx];
             objMats[boneIdx] = MulMat34(objMats[parentIdx], snap.localMat[idx]);
@@ -1481,6 +1591,101 @@ void ComputeChainMatrices(
     outCount = n;
 }
 
+float NextBlinkRand01(BlinkRuntimeState& st) {
+    uint32_t s = st.rngState ? st.rngState : 0x9E3779B9U;
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    st.rngState = s;
+    return static_cast<float>(s & 0x00FFFFFFU) / static_cast<float>(0x01000000U);
+}
+
+float EvaluateNaturalBlinkCurve(float elapsed, float duration) {
+    if (duration <= 0.01f) return 0.0f;
+    float u = elapsed / duration;
+    if (u <= 0.0f || u >= 1.0f) return 0.0f;
+    constexpr float kCloseEnd = 0.28f;
+    constexpr float kHoldEnd = 0.40f;
+    if (u < kCloseEnd) {
+        float c = u / kCloseEnd;
+        return c * c * (3.0f - 2.0f * c);
+    }
+    if (u < kHoldEnd) {
+        return 1.0f;
+    }
+    float s = (u - kHoldEnd) / (1.0f - kHoldEnd);
+    float e = s * (2.0f - s);
+    float amt = 1.0f - (e * e * (3.0f - 2.0f * e));
+    return (amt < 0.0f) ? 0.0f : ((amt > 1.0f) ? 1.0f : amt);
+}
+
+const BlinkProfile* FindMatchingBlinkProfile(
+    const std::vector<BlinkProfile>& profiles,
+    uint32_t modelHash
+) {
+    const BlinkProfile* fallback = nullptr;
+    for (const BlinkProfile& bp : profiles) {
+        if (!bp.enabled || bp.bones.empty()) continue;
+        if (bp.modelHash != 0U && bp.modelHash == modelHash) {
+            return &bp;
+        }
+        if ((bp.model.empty() || bp.model == "all") && !fallback) {
+            fallback = &bp;
+        }
+    }
+    return fallback;
+}
+
+float UpdatePedBlinkAmount(TrackedPedSlot& slot, const BlinkProfile& bp, float deltaTime) {
+    BlinkRuntimeState& st = slot.blinkState;
+    if (!st.initialized) {
+        uint64_t ptrVal = reinterpret_cast<uintptr_t>(slot.pedAddr);
+        st.rngState = static_cast<uint32_t>((ptrVal >> 3) ^ slot.modelHash ^ 0xA5A55A5AU);
+        if (st.rngState == 0U) st.rngState = 0x9E3779B9U;
+        st.nextDelay = 0.5f + NextBlinkRand01(st) * 2.5f;
+        st.waitTimer = 0.0f;
+        st.blinking = false;
+        st.doubleBlinkPending = false;
+        st.blinkElapsed = 0.0f;
+        st.initialized = true;
+    }
+
+    if (CallIsEntityDead(slot.pedHandle)) {
+        st.blinking = false;
+        st.doubleBlinkPending = false;
+        st.blinkElapsed = 0.0f;
+        return 0.0f;
+    }
+
+    float blinkDt = (deltaTime < 0.0f) ? 0.0f : ((deltaTime > g_cfg.maxDeltaTime) ? g_cfg.maxDeltaTime : deltaTime);
+    if (st.blinking) {
+        st.blinkElapsed += blinkDt;
+        if (st.blinkElapsed >= bp.blinkDuration) {
+            st.blinking = false;
+            st.blinkElapsed = 0.0f;
+            st.waitTimer = 0.0f;
+            if (!st.doubleBlinkPending && NextBlinkRand01(st) < bp.doubleBlinkChance) {
+                st.doubleBlinkPending = true;
+                st.nextDelay = 0.11f + NextBlinkRand01(st) * 0.06f;
+            } else {
+                st.doubleBlinkPending = false;
+                float uMix = 0.5f * (NextBlinkRand01(st) + NextBlinkRand01(st));
+                st.nextDelay = bp.minInterval + uMix * (bp.maxInterval - bp.minInterval);
+            }
+            return 0.0f;
+        }
+        return EvaluateNaturalBlinkCurve(st.blinkElapsed, bp.blinkDuration);
+    }
+
+    st.waitTimer += blinkDt;
+    if (st.waitTimer >= st.nextDelay) {
+        st.blinking = true;
+        st.blinkElapsed = 0.0f;
+        st.waitTimer = 0.0f;
+    }
+    return 0.0f;
+}
+
 void UpdatePedChainsAndBuildSync(
     TrackedPedSlot& slot,
     const Mat34V& entityWorldMtx,
@@ -1552,9 +1757,72 @@ void UpdatePedChainsAndBuildSync(
             if (bIdx < 0 || pIdx < 0) continue;
             outSnap.boneIdx[outSnap.count] = bIdx;
             outSnap.parentBoneIdx[outSnap.count] = pIdx;
+            outSnap.writeDefault[outSnap.count] = 1;
             outSnap.localMat[outSnap.count] = localMats[idx];
             outSnap.localQuat[outSnap.count] = localQuats[idx];
             outSnap.count++;
+        }
+    }
+
+    const BlinkProfile* activeBlink = FindMatchingBlinkProfile(slot.blinkProfiles, slot.modelHash);
+    if (activeBlink != nullptr) {
+        float blinkAmt = UpdatePedBlinkAmount(slot, *activeBlink, deltaTime);
+        Mat34V blinkLocalMats[kMaxBlinkBonesPerProfile]{};
+        Mat34V blinkObjMats[kMaxBlinkBonesPerProfile]{};
+        int blinkIndices[kMaxBlinkBonesPerProfile]{};
+        int blinkParents[kMaxBlinkBonesPerProfile]{};
+        Quat blinkQuats[kMaxBlinkBonesPerProfile]{};
+        size_t blinkValid = 0;
+
+        for (size_t idx = 0;
+             idx < activeBlink->bones.size() && idx < static_cast<size_t>(kMaxBlinkBonesPerProfile);
+             ++idx) {
+            const BlinkBoneNode& bn = activeBlink->bones[idx];
+            if (bn.skelIndex < 0 || static_cast<uint32_t>(bn.skelIndex) >= slot.skel.numBones) continue;
+            if (bn.parentSkelIndex < 0 || static_cast<uint32_t>(bn.parentSkelIndex) >= slot.skel.numBones) continue;
+
+            Mat34V parentObjMtx{};
+            bool foundPrev = false;
+            for (size_t prev = 0; prev < blinkValid; ++prev) {
+                if (blinkIndices[prev] == bn.parentSkelIndex) {
+                    parentObjMtx = blinkObjMats[prev];
+                    foundPrev = true;
+                    break;
+                }
+            }
+            if (!foundPrev) {
+                if (!SafeReadMat34(
+                        reinterpret_cast<uint64_t>(slot.skel.objectMatrices) +
+                            static_cast<uint64_t>(bn.parentSkelIndex) * sizeof(Mat34V),
+                        parentObjMtx) ||
+                    !IsValidMat34(parentObjMtx)) {
+                    continue;
+                }
+            }
+
+            Vec3 animatedPos = VecAdd(bn.localPos, VecScale(bn.deltaPos, blinkAmt));
+            Mat34V locMat = QuatTransToMat34(bn.localRot, animatedPos);
+            Mat34V objMat = MulMat34(parentObjMtx, locMat);
+            if (!IsValidMat34(locMat) || !IsValidMat34(objMat)) continue;
+
+            blinkIndices[blinkValid] = bn.skelIndex;
+            blinkParents[blinkValid] = bn.parentSkelIndex;
+            blinkLocalMats[blinkValid] = locMat;
+            blinkObjMats[blinkValid] = objMat;
+            blinkQuats[blinkValid] = bn.localRot;
+            blinkValid++;
+        }
+
+        if (blinkValid > 0) {
+            SafeWriteLocalObjectBatch(slot.skel, blinkIndices, blinkLocalMats, blinkObjMats, blinkValid);
+            for (size_t idx = 0; idx < blinkValid && outSnap.count < kMaxSyncNodes; ++idx) {
+                outSnap.boneIdx[outSnap.count] = blinkIndices[idx];
+                outSnap.parentBoneIdx[outSnap.count] = blinkParents[idx];
+                outSnap.writeDefault[outSnap.count] = 0;
+                outSnap.localMat[outSnap.count] = blinkLocalMats[idx];
+                outSnap.localQuat[outSnap.count] = blinkQuats[idx];
+                outSnap.count++;
+            }
         }
     }
 
@@ -1576,6 +1844,7 @@ void ClearSyncSnapshot() {
 bool ResolveChainBoneIndices(
     int ped,
     std::vector<PhysBoneChain>& chains,
+    std::vector<BlinkProfile>& blinkProfiles,
     ProbeRefBone& outRefA,
     ProbeRefBone& outRefB
 ) {
@@ -1608,6 +1877,21 @@ bool ResolveChainBoneIndices(
                     rootRefs.push_back(candidate);
                 }
                 allResolvedRefs.push_back(candidate);
+            }
+        }
+    }
+
+    for (BlinkProfile& bp : blinkProfiles) {
+        for (BlinkBoneNode& bn : bp.bones) {
+            int resolved = CallGetPedBoneIndex(ped, bn.tag);
+            if (resolved < 0 && !bn.name.empty()) {
+                resolved = CallGetEntityBoneIndexByName(ped, bn.name.c_str());
+            }
+            int resolvedParent = CallGetPedBoneIndex(ped, bn.parentTag);
+            if (resolved != bn.skelIndex || resolvedParent != bn.parentSkelIndex) {
+                changed = true;
+                bn.skelIndex = resolved;
+                bn.parentSkelIndex = resolvedParent;
             }
         }
     }
@@ -1650,9 +1934,9 @@ void LogBoneIndexChange(const TrackedPedSlot& slot) {
     WriteLog(oss.str());
 }
 
-bool HasCustomChainBones(int ped, bool& outHasHead) {
+bool HasCustomChainBones(int ped, uint32_t pedModelHash, bool& outHasHead) {
     outHasHead = false;
-    if (g_cfg.chains.empty()) return false;
+    if (g_cfg.chains.empty() && g_cfg.blinkProfiles.empty()) return false;
     if (CallGetPedBoneIndex(ped, kSkelHeadTag) < 0) return false;
     outHasHead = true;
     for (const auto& ch : g_cfg.chains) {
@@ -1668,6 +1952,13 @@ bool HasCustomChainBones(int ped, bool& outHasHead) {
             }
         }
     }
+    const BlinkProfile* bp = FindMatchingBlinkProfile(g_cfg.blinkProfiles, pedModelHash);
+    if (bp != nullptr && (bp->modelHash == pedModelHash || bp->model == "all")) {
+        const BlinkBoneNode& bn = bp->bones[0];
+        if (bn.tag != 0 && CallGetPedBoneIndex(ped, bn.tag) >= 0) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1681,7 +1972,7 @@ bool IsEligiblePhysBonePed(int ped, bool bypassNegCache, int scanTick, uint32_t&
         }
     }
     bool hasHead = false;
-    bool eligible = HasCustomChainBones(ped, hasHead);
+    bool eligible = HasCustomChainBones(ped, outModelHash, hasHead);
     if (outModelHash != 0) {
         if (eligible) {
             s_negModelCooldownTick.erase(outModelHash);
@@ -1857,6 +2148,7 @@ void ScriptMain() {
             slot.pedAddr = candAddrs[c];
             slot.modelHash = candModels[c];
             slot.chains = g_cfg.chains;
+            slot.blinkProfiles = g_cfg.blinkProfiles;
             matchedSlotIdx[c] = targetIdx;
         }
 
@@ -1877,7 +2169,7 @@ void ScriptMain() {
             if (!slot.occupied || !slot.seenThisFrame) continue;
 
             if (slot.hasSkel) {
-                if (ResolveChainBoneIndices(slot.pedHandle, slot.chains, slot.refA, slot.refB)) {
+                if (ResolveChainBoneIndices(slot.pedHandle, slot.chains, slot.blinkProfiles, slot.refA, slot.refB)) {
                     LogBoneIndexChange(slot);
                     slot.hasSkel = false;
                     slot.skel = ResolvedSkeleton{};
@@ -1893,7 +2185,7 @@ void ScriptMain() {
 
             if (!slot.hasSkel) {
                 int headIdx = CallGetPedBoneIndex(slot.pedHandle, kSkelHeadTag);
-                ResolveChainBoneIndices(slot.pedHandle, slot.chains, slot.refA, slot.refB);
+                ResolveChainBoneIndices(slot.pedHandle, slot.chains, slot.blinkProfiles, slot.refA, slot.refB);
                 bool allowHeavy = (slot.heavyScanCooldown <= 0);
                 if (!TryResolvePedSkeleton(slot.pedHandle, headIdx, slot.refA, slot.refB, allowHeavy, slot.skel)) {
                     if (allowHeavy) {

@@ -29,6 +29,7 @@ for _tools_dir in (_REPO_ROOT / "scripts" / "common_tools", _REPO_ROOT / "_deplo
 
 import blender_hair_helper
 import blendshape_helper
+import eye_blink_helper
 import hand_skeleton_helper
 import ped_damage_helper
 import physbone_helper
@@ -317,6 +318,16 @@ def build_trevor_miltina_avatar(cli_args=None):
             for sub_idx in range(3):
                 valid_gtav_bones.add(f"SKEL_{side_code}_Finger{finger_idx}{sub_idx}")
     valid_gtav_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
+    eye_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
+        getattr(cli_args, "eye_blink", None), trevor_cfg
+    )
+    valid_gtav_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
+        valid_gtav_bones,
+        enable_eye_blink=(eye_blink_mode != "off"),
+        custom_bone_count=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+    )
+    if stripped_hand_leaves > 0:
+        print(i18n.translate("eye_blink.ydd_bones_trimmed", stripped=stripped_hand_leaves))
 
     bpy.context.view_layer.objects.active = ped_armature
     bpy.ops.object.mode_set(mode="EDIT")
@@ -476,6 +487,7 @@ def build_trevor_miltina_avatar(cli_args=None):
 
     # 4. Bake facial expression & lip-sync jaw weights on Body
     face_obj = bpy.data.objects.get("Body")
+    blink_rig_data = {"enabled": False, "reason": "no_body_shape_keys"}
     if face_obj and face_obj.data.shape_keys:
         shape_key_aa = face_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
         basis_key = face_obj.data.shape_keys.key_blocks.get("Basis")
@@ -485,6 +497,7 @@ def build_trevor_miltina_avatar(cli_args=None):
         head_vgroup = face_obj.vertex_groups.new(name="SKEL_Head")
 
         mapped_count = 0
+        jaw_excl_indices = set()
         if shape_key_aa and basis_key:
             for vertex_item in face_obj.data.vertices:
                 delta_z_offset = (
@@ -495,6 +508,7 @@ def build_trevor_miltina_avatar(cli_args=None):
                     jaw_weight = min(0.35, max(0.0, (abs(delta_z_offset) / 0.0075) * 0.35))
                     jaw_vgroup.add([vertex_item.index], jaw_weight, "REPLACE")
                     head_vgroup.add([vertex_item.index], max(0.0, 1.0 - jaw_weight), "REPLACE")
+                    jaw_excl_indices.add(vertex_item.index)
                     mapped_count += 1
                 else:
                     head_vgroup.add([vertex_item.index], 1.0, "REPLACE")
@@ -507,11 +521,43 @@ def build_trevor_miltina_avatar(cli_args=None):
             reset_unlisted=True,
             allow_lr_symmetry=True,
         )
+        bpy.context.view_layer.update()
+
+        blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
+            bpy,
+            face_obj,
+            eye_blink_mode=eye_blink_mode,
+            shape_weights=resolved_mesh_weights.get("Body", {}),
+            exclude_vert_indices=jaw_excl_indices,
+        )
+        if blink_rig_data.get("enabled"):
+            eye_blink_helper.apply_eyelid_blink_weights_to_mesh(
+                face_obj,
+                blink_rig_data["weights_by_orig_vert"],
+            )
+            print(
+                i18n.translate(
+                    "eye_blink.applied",
+                    key=blink_rig_data["shape_key"],
+                    verts=len(blink_rig_data["weights_by_orig_vert"]),
+                    left_mm=blink_rig_data["max_disp_l"] * 1000.0,
+                    right_mm=blink_rig_data["max_disp_r"] * 1000.0,
+                )
+            )
+        else:
+            print(
+                i18n.translate(
+                    "eye_blink.skipped",
+                    reason=blink_rig_data.get("reason", "disabled"),
+                )
+            )
 
         bpy.context.view_layer.objects.active = face_obj
         face_obj.select_set(True)
         bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
         print(i18n.translate("trevor.build.face_baked"))
+    else:
+        print(i18n.translate("eye_blink.skipped", reason=blink_rig_data["reason"]))
 
     if face_obj:
         alpha_indices = [
@@ -820,6 +866,28 @@ def build_trevor_miltina_avatar(cli_args=None):
     for extra_hair_arm in custom_hair_armatures:
         if extra_hair_arm.name in bpy.data.objects:
             bpy.data.objects.remove(extra_hair_arm)
+
+    ped_model_name = str(trevor_cfg.get("ped_name", "player_two"))
+    blink_profiles_to_merge = []
+    if blink_rig_data.get("enabled"):
+        bpy.context.view_layer.update()
+        trevor_blink_scale = (
+            uniform_scale
+            * (float(armature_override_scale[2]) if armature_override_scale else 1.0)
+            * unity_scene_helper.get_uniform_scale(unity_config, ("Head",), default_scale=1.0)
+            * unity_scene_helper.get_uniform_scale(unity_config, ("Neck",), default_scale=1.0)
+        )
+        scaled_blink_deltas = eye_blink_helper.scale_eye_blink_deltas(
+            blink_rig_data, trevor_blink_scale
+        )
+        blink_prof = eye_blink_helper.build_blink_profile_for_ped(
+            ped_armature,
+            ped_model_name,
+            scaled_blink_deltas,
+            enabled=True,
+        )
+        if blink_prof is not None:
+            blink_profiles_to_merge.append(blink_prof)
 
     # 9. Retarget vertex groups onto valid GTA V bones
     print(i18n.translate("trevor.build.retargeting_bones"))
@@ -1216,12 +1284,13 @@ def build_trevor_miltina_avatar(cli_args=None):
             )
         )
 
-    if physbone_chain_records:
+    if physbone_chain_records or blink_profiles_to_merge or eye_blink_mode == "off":
         out_ini_path = Path(output_dir) / "GTAVPhysBones.ini"
         physbone_helper.export_physbone_asi_ini(
             out_ini_path,
             physbone_chain_records,
-            target_ped_model=str(trevor_cfg.get("ped_name", "player_two")),
+            target_ped_model=ped_model_name,
+            blink_profiles=blink_profiles_to_merge,
         )
         repo_root = project_paths.get_project_root()
         sync_targets = [
@@ -1238,9 +1307,18 @@ def build_trevor_miltina_avatar(cli_args=None):
             own_prefixes=("PB_MT_",),
             target_ped_model="all",
             extra_sync_paths=sync_targets,
+            blink_profiles=blink_profiles_to_merge,
+            own_blink_models=(ped_model_name,),
         )
         print(
             f"[PhysBones] Exported & merged Trevor PhysBones INI ({len(physbone_chain_records)} chains)"
+        )
+        print(
+            i18n.translate(
+                "eye_blink.profile_exported",
+                model=ped_model_name,
+                enabled=1 if blink_profiles_to_merge else 0,
+            )
         )
 
     print(i18n.translate("trevor.build.done"))
@@ -1351,6 +1429,12 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=i18n.translate("ped_damage.cli_blood_decals"),
+    )
+    parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=i18n.translate("eye_blink.cli_opt"),
     )
     parser.add_argument(
         "--unity-scene",

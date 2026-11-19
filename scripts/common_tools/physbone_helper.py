@@ -5007,6 +5007,18 @@ def build_avatar_physbone_chains(
     return custom_bones, chain_records
 
 
+def _parse_quat_string(raw_val: str) -> Tuple[float, float, float, float]:
+    """Parse a comma-separated quaternion string (X, Y, Z, W)."""
+    rot_parts = [
+        float(val_str.strip())
+        for val_str in str(raw_val).split(",")
+        if val_str.strip()
+    ]
+    if len(rot_parts) >= 4:
+        return (rot_parts[0], rot_parts[1], rot_parts[2], rot_parts[3])
+    return (0.0, 0.0, 0.0, 1.0)
+
+
 def _load_ini_chain_records(ini_path: Path) -> List[Dict[str, object]]:
     """Parse existing [Chain_*] sections from GTAVPhysBones.ini into record dicts."""
     if not ini_path.is_file():
@@ -5026,8 +5038,7 @@ def _load_ini_chain_records(ini_path: Path) -> List[Dict[str, object]]:
         for idx in range(bone_count):
             prefix = f"bone_{idx}_"
             loc_pos = parse_vec3_string(sec.get(prefix + "local_pos", "0, 0, 0"))
-            rot_parts = [float(val_str.strip()) for val_str in sec.get(prefix + "local_rot", "0,0,0,1").split(",") if val_str.strip()]
-            loc_rot = tuple(rot_parts[:4]) if len(rot_parts) >= 4 else (0.0, 0.0, 0.0, 1.0)
+            loc_rot = _parse_quat_string(sec.get(prefix + "local_rot", "0, 0, 0, 1"))
             lim_axis = parse_vec3_string(sec.get(prefix + "limit_axis", "0, 1, 0"), (0.0, 1.0, 0.0))
             bones.append(
                 {
@@ -5062,16 +5073,68 @@ def _load_ini_chain_records(ini_path: Path) -> List[Dict[str, object]]:
     return records
 
 
+def _load_ini_blink_profiles(ini_path: Path) -> List[Dict[str, object]]:
+    """Parse existing [Blink_*] sections from GTAVPhysBones.ini into profile dicts."""
+    if not ini_path.is_file():
+        return []
+    parser = ConfigParser()
+    parser.optionxform = str
+    with ini_path.open("r", encoding="utf-8", errors="replace") as handle:
+        parser.read_file(handle)
+
+    profiles: List[Dict[str, object]] = []
+    blink_secs = [sec_item for sec_item in parser.sections() if sec_item.startswith("Blink_")]
+    blink_secs.sort(
+        key=lambda sec_item: int(sec_item.split("_", 1)[1])
+        if sec_item.split("_", 1)[1].isdigit()
+        else 0
+    )
+    for sec_name in blink_secs:
+        sec = parser[sec_name]
+        bone_count = sec.getint("bone_count", 0)
+        bones: List[Dict[str, object]] = []
+        for idx in range(bone_count):
+            prefix = f"bone_{idx}_"
+            loc_pos = parse_vec3_string(sec.get(prefix + "local_pos", "0, 0, 0"))
+            loc_rot = _parse_quat_string(sec.get(prefix + "local_rot", "0, 0, 0, 1"))
+            delta_pos = parse_vec3_string(sec.get(prefix + "delta_pos", "0, 0, 0"))
+            bones.append(
+                {
+                    "name": sec.get(prefix + "name", ""),
+                    "tag": sec.getint(prefix + "tag", 0),
+                    "parent_tag": sec.getint(prefix + "parent_tag", 0),
+                    "local_pos": loc_pos,
+                    "local_rot": loc_rot,
+                    "delta_pos": delta_pos,
+                }
+            )
+        profiles.append(
+            {
+                "model": sec.get("model", "all").strip().lower(),
+                "enabled": sec.getint("enabled", 1),
+                "min_interval": sec.getfloat("min_interval", 2.6),
+                "max_interval": sec.getfloat("max_interval", 6.0),
+                "blink_duration": sec.getfloat("blink_duration", 0.215),
+                "double_blink_chance": sec.getfloat("double_blink_chance", 0.18),
+                "bones": bones,
+            }
+        )
+    return profiles
+
+
 def merge_physbone_asi_ini(
     ini_path: str | Path,
     chain_records: Sequence[Dict[str, object]],
     own_prefixes: Sequence[str] = (),
     target_ped_model: str = "all",
     extra_sync_paths: Sequence[str | Path] = (),
+    blink_profiles: Optional[Sequence[Dict[str, object]]] = None,
+    own_blink_models: Sequence[str] = (),
 ) -> Path:
     """
-    Merge new chain_records into ini_path, replacing chains matching own_prefixes
-    or record names while preserving other protagonists' chains, then sync copies.
+    Merge new chain_records (and optional blink_profiles) into ini_path, replacing
+    chains/blink profiles belonging to the current ped while preserving other
+    protagonists' entries, then sync copies across all target paths.
     """
     resolved_ini = Path(ini_path)
     existing = _load_ini_chain_records(resolved_ini)
@@ -5093,13 +5156,49 @@ def merge_physbone_asi_ini(
         merged.append(rec)
     merged.extend(chain_records)
 
-    export_physbone_asi_ini(resolved_ini, merged, target_ped_model=target_ped_model)
+    existing_blinks = _load_ini_blink_profiles(resolved_ini)
+    if not existing_blinks:
+        for alt_path in extra_sync_paths:
+            alt_blinks = _load_ini_blink_profiles(Path(alt_path))
+            if alt_blinks:
+                existing_blinks = alt_blinks
+                break
+
+    merged_blinks: List[Dict[str, object]] = []
+    if blink_profiles is None and not own_blink_models:
+        merged_blinks = list(existing_blinks)
+    else:
+        replaced_models = {str(model_name).strip().lower() for model_name in own_blink_models if str(model_name).strip()}
+        if blink_profiles:
+            for prof_item in blink_profiles:
+                model_key = str(prof_item.get("model", "")).strip().lower()
+                if model_key:
+                    replaced_models.add(model_key)
+        for prof_item in existing_blinks:
+            model_key = str(prof_item.get("model", "")).strip().lower()
+            if model_key in replaced_models:
+                continue
+            merged_blinks.append(prof_item)
+        if blink_profiles:
+            merged_blinks.extend(blink_profiles)
+
+    export_physbone_asi_ini(
+        resolved_ini,
+        merged,
+        target_ped_model=target_ped_model,
+        blink_profiles=merged_blinks,
+    )
     for sync_target in extra_sync_paths:
         sync_path = Path(sync_target)
         if sync_path.resolve() == resolved_ini.resolve():
             continue
         if sync_path.parent.is_dir():
-            export_physbone_asi_ini(sync_path, merged, target_ped_model=target_ped_model)
+            export_physbone_asi_ini(
+                sync_path,
+                merged,
+                target_ped_model=target_ped_model,
+                blink_profiles=merged_blinks,
+            )
     return resolved_ini
 
 
@@ -5107,9 +5206,11 @@ def export_physbone_asi_ini(
     ini_path: str | Path,
     chain_records: Sequence[Dict[str, object]],
     target_ped_model: str = "player_zero",
+    blink_profiles: Sequence[Dict[str, object]] = (),
 ) -> Path:
     """
-    Export runtime chain parameters and baked GTA V rest transforms to GTAVPhysBones.ini.
+    Export runtime chain parameters, optional eye-blink profiles, and baked GTA V
+    rest transforms to GTAVPhysBones.ini.
 
     Each entry in `chain_records` contains:
       - `name`: string identifier (`PB_Ear_L`, `PB_SC_Tail`, `PB_MT_Twin_L`, ...)
@@ -5131,6 +5232,7 @@ def export_physbone_asi_ini(
         "velocity_scale = 2.5",
         "max_delta_time = 0.05",
         f"chain_count = {len(chain_records)}",
+        f"blink_count = {len(blink_profiles)}",
     ]
 
     for chain_idx, record in enumerate(chain_records):
@@ -5181,6 +5283,27 @@ def export_physbone_asi_ini(
             lines.append(f"bone_{bone_idx}_limit_axis = {lim_axis[0]:.7f}, {lim_axis[1]:.7f}, {lim_axis[2]:.7f}")
             if bone_idx < len(seg_lengths):
                 cum_len += seg_lengths[bone_idx]
+
+    for blink_idx, blink_entry in enumerate(blink_profiles):
+        blink_bones = blink_entry.get("bones") or ()
+        lines.extend(["", f"[Blink_{blink_idx}]"])
+        lines.append(f"model = {blink_entry.get('model', 'all')}")
+        lines.append(f"enabled = {int(blink_entry.get('enabled', 1))}")
+        lines.append(f"min_interval = {float(blink_entry.get('min_interval', 2.6)):.6f}")
+        lines.append(f"max_interval = {float(blink_entry.get('max_interval', 6.0)):.6f}")
+        lines.append(f"blink_duration = {float(blink_entry.get('blink_duration', 0.215)):.6f}")
+        lines.append(f"double_blink_chance = {float(blink_entry.get('double_blink_chance', 0.18)):.6f}")
+        lines.append(f"bone_count = {len(blink_bones)}")
+        for bone_idx, bone_entry in enumerate(blink_bones):
+            loc_pos = bone_entry["local_pos"]
+            loc_rot = bone_entry["local_rot"]
+            delta_pos = bone_entry["delta_pos"]
+            lines.append(f"bone_{bone_idx}_name = {bone_entry['name']}")
+            lines.append(f"bone_{bone_idx}_tag = {int(bone_entry['tag'])}")
+            lines.append(f"bone_{bone_idx}_parent_tag = {int(bone_entry.get('parent_tag', 0))}")
+            lines.append(f"bone_{bone_idx}_local_pos = {loc_pos[0]:.7f}, {loc_pos[1]:.7f}, {loc_pos[2]:.7f}")
+            lines.append(f"bone_{bone_idx}_local_rot = {loc_rot[0]:.7f}, {loc_rot[1]:.7f}, {loc_rot[2]:.7f}, {loc_rot[3]:.7f}")
+            lines.append(f"bone_{bone_idx}_delta_pos = {delta_pos[0]:.7f}, {delta_pos[1]:.7f}, {delta_pos[2]:.7f}")
 
     resolved_ini.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return resolved_ini

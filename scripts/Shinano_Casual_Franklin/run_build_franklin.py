@@ -127,6 +127,12 @@ def main() -> int:
         default=None,
         help=project_i18n.translate("ped_damage.cli_blood_decals"),
     )
+    arg_parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("eye_blink.cli_opt"),
+    )
     parsed_args = arg_parser.parse_args()
     active_lang = project_i18n.set_active_language(parsed_args.lang)
     os.environ[project_i18n.LANG_ENV_VAR] = active_lang
@@ -177,6 +183,10 @@ def main() -> int:
         extra_blender_args.append("--blood-decals")
     elif parsed_args.blood_decals is False:
         extra_blender_args.append("--no-blood-decals")
+    if parsed_args.eye_blink is True:
+        extra_blender_args.append("--eye-blink")
+    elif parsed_args.eye_blink is False:
+        extra_blender_args.append("--no-eye-blink")
 
     blender_command, blender_env = project_paths.build_blender_command(
         blender_script,

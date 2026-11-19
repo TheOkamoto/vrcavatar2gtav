@@ -30,6 +30,7 @@ for _tools_candidate in (
 
 import blender_hair_helper
 import blendshape_helper
+import eye_blink_helper
 import hand_skeleton_helper
 import ped_damage_helper
 import physbone_helper
@@ -80,6 +81,12 @@ def parse_franklin_cli_args():
         action=argparse.BooleanOptionalAction,
         default=True,
         help=project_i18n.translate("ped_damage.cli_blood_decals"),
+    )
+    arg_parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=project_i18n.translate("eye_blink.cli_opt"),
     )
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
@@ -265,6 +272,16 @@ for side_label in ("L", "R"):
 target_bones.add("FACIAL_facialRoot")
 target_bones.add("FACIAL_jaw")
 target_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
+eye_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
+    getattr(CLI_ARGS, "eye_blink", None), FRANKLIN_CFG
+)
+target_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
+    target_bones,
+    enable_eye_blink=(eye_blink_mode != "off"),
+    custom_bone_count=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+)
+if stripped_hand_leaves > 0:
+    print(project_i18n.translate("eye_blink.ydd_bones_trimmed", stripped=stripped_hand_leaves))
 
 bpy.context.view_layer.objects.active = franklin_armature
 bpy.ops.object.mode_set(mode="EDIT")
@@ -493,6 +510,31 @@ if orig_body_obj and orig_body_obj.data.shape_keys:
                 "franklin.jaw_weights_mapped", count=len(body_jaw_weights)
             )
         )
+
+blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
+    bpy,
+    orig_body_obj,
+    eye_blink_mode=eye_blink_mode,
+    shape_weights=resolved_mesh_weights.get("Body", {}),
+    exclude_vert_indices=body_jaw_weights.keys(),
+)
+if blink_rig_data.get("enabled"):
+    print(
+        project_i18n.translate(
+            "eye_blink.applied",
+            key=blink_rig_data["shape_key"],
+            verts=len(blink_rig_data["weights_by_orig_vert"]),
+            left_mm=blink_rig_data["max_disp_l"] * 1000.0,
+            right_mm=blink_rig_data["max_disp_r"] * 1000.0,
+        )
+    )
+else:
+    print(
+        project_i18n.translate(
+            "eye_blink.skipped",
+            reason=blink_rig_data.get("reason", "disabled"),
+        )
+    )
 
 include_mesh_names = [
     "Body",
@@ -948,6 +990,13 @@ for mesh_name in include_mesh_names:
                 head_vgroup.add([new_vert_idx], max(0.0, 1.0 - jaw_weight), "REPLACE")
         print(project_i18n.translate("franklin.jaw_weights_applied"))
 
+    if mesh_name == "Body" and blink_rig_data.get("enabled"):
+        eye_blink_helper.apply_eyelid_blink_weights_to_mesh(
+            new_obj,
+            blink_rig_data["weights_by_orig_vert"],
+            kept_orig_vert_indices=kept_orig_vert_indices,
+        )
+
     processed_objs.append(new_obj)
 
 # Relocate arm, hand, and 30 finger bones on Franklin's GTA V armature to match Shinano
@@ -998,6 +1047,22 @@ if custom_physbones:
     )
     target_bones.update(pb_item["name"] for pb_item in custom_physbones)
     print(f"[PhysBones] Injected {injected_pb_count} Shinano Casual bones into Franklin armature ({len(physbone_chain_records)} chains)", flush=True)
+
+ped_model_name = str(FRANKLIN_CFG.get("ped_name", "player_one"))
+blink_profiles_to_merge = []
+if blink_rig_data.get("enabled"):
+    bpy.context.view_layer.update()
+    scaled_blink_deltas = eye_blink_helper.scale_eye_blink_deltas(
+        blink_rig_data, scale_factor
+    )
+    blink_prof = eye_blink_helper.build_blink_profile_for_ped(
+        franklin_armature,
+        ped_model_name,
+        scaled_blink_deltas,
+        enabled=True,
+    )
+    if blink_prof is not None:
+        blink_profiles_to_merge.append(blink_prof)
 
 # Remove temporary source meshes and armatures
 for temp_obj in [shinano_armature] + custom_hair_armatures + [
@@ -1236,12 +1301,13 @@ print(
         max_delta=max_yft_delta,
     )
 )
-if physbone_chain_records:
+if physbone_chain_records or blink_profiles_to_merge or eye_blink_mode == "off":
     out_ini_path = Path(exported_dir) / "GTAVPhysBones.ini"
     physbone_helper.export_physbone_asi_ini(
         out_ini_path,
         physbone_chain_records,
-        target_ped_model=str(FRANKLIN_CFG.get("ped_name", "player_one")),
+        target_ped_model=ped_model_name,
+        blink_profiles=blink_profiles_to_merge,
     )
     repo_root = project_paths.get_project_root()
     sync_targets = [
@@ -1258,6 +1324,15 @@ if physbone_chain_records:
         own_prefixes=("PB_SC_",),
         target_ped_model="all",
         extra_sync_paths=sync_targets,
+        blink_profiles=blink_profiles_to_merge,
+        own_blink_models=(ped_model_name,),
     )
     print(f"[PhysBones] Exported & merged Franklin PhysBones INI ({len(physbone_chain_records)} chains)")
+    print(
+        project_i18n.translate(
+            "eye_blink.profile_exported",
+            model=ped_model_name,
+            enabled=1 if blink_profiles_to_merge else 0,
+        )
+    )
 print(project_i18n.translate("franklin.build_done"))

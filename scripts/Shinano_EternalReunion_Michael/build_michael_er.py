@@ -44,6 +44,7 @@ for _tools_candidate in (
 
 import blender_hair_helper
 import blendshape_helper
+import eye_blink_helper
 import hand_skeleton_helper
 import mathutils
 import ped_damage_helper
@@ -690,6 +691,16 @@ def build_shinano_er_for_gtav(cli_args):
             for sub_idx in range(3):
                 valid_gtav_bones.add(f"SKEL_{side_code}_Finger{finger_idx}{sub_idx}")
     valid_gtav_bones.update(hand_skeleton_helper.EXTRA_ARM_HELPER_BONES)
+    eye_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
+        getattr(cli_args, "eye_blink", None), target_cfg
+    )
+    valid_gtav_bones, stripped_hand_leaves = eye_blink_helper.prepare_ydd_blink_bone_set(
+        valid_gtav_bones,
+        enable_eye_blink=(eye_blink_mode != "off"),
+        custom_bone_count=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+    )
+    if stripped_hand_leaves > 0:
+        print(i18n.translate("eye_blink.ydd_bones_trimmed", stripped=stripped_hand_leaves))
     valid_gtav_bones.update(physbone_helper.NEKO_MIMI_CUSTOM_BONES)
     valid_gtav_bones.update(physbone_helper.MICHAEL_ER_CUSTOM_BONES)
 
@@ -1223,6 +1234,31 @@ def build_shinano_er_for_gtav(cli_args):
                 )
             )
 
+    blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
+        bpy,
+        orig_body_obj,
+        eye_blink_mode=eye_blink_mode,
+        shape_weights=resolved_mesh_weights.get("Body", {}),
+        exclude_vert_indices=body_jaw_weights.keys(),
+    )
+    if blink_rig_data.get("enabled"):
+        print(
+            i18n.translate(
+                "eye_blink.applied",
+                key=blink_rig_data["shape_key"],
+                verts=len(blink_rig_data["weights_by_orig_vert"]),
+                left_mm=blink_rig_data["max_disp_l"] * 1000.0,
+                right_mm=blink_rig_data["max_disp_r"] * 1000.0,
+            )
+        )
+    else:
+        print(
+            i18n.translate(
+                "eye_blink.skipped",
+                reason=blink_rig_data.get("reason", "disabled"),
+            )
+        )
+
     neko_hair_mesh_names = {
         "Bangs",
         "Top Back",
@@ -1573,6 +1609,13 @@ def build_shinano_er_for_gtav(cli_args):
                     head_vgroup.add([new_vert_idx], max(0.0, 1.0 - jaw_weight), "REPLACE")
             print(i18n.translate("michael.build.jaw_head_applied"))
 
+        if mesh_name == "Body" and blink_rig_data.get("enabled"):
+            eye_blink_helper.apply_eyelid_blink_weights_to_mesh(
+                proc_obj,
+                blink_rig_data["weights_by_orig_vert"],
+                kept_orig_vert_indices=kept_orig_vert_indices,
+            )
+
         processed_objects.append(proc_obj)
 
     if arm_base is None:
@@ -1719,6 +1762,22 @@ def build_shinano_er_for_gtav(cli_args):
             f"[PhysBones] Injected {injected_pb_count} Eternal Reunion bones into Blender armature ({len(physbone_chain_records)} chains)",
             flush=True,
         )
+
+    ped_model_name = str(char_profile["ped_name"])
+    blink_profiles_to_merge = []
+    if blink_rig_data.get("enabled"):
+        bpy.context.view_layer.update()
+        scaled_blink_deltas = eye_blink_helper.scale_eye_blink_deltas(
+            blink_rig_data, scale_factor
+        )
+        blink_prof = eye_blink_helper.build_blink_profile_for_ped(
+            ped_armature,
+            ped_model_name,
+            scaled_blink_deltas,
+            enabled=True,
+        )
+        if blink_prof is not None:
+            blink_profiles_to_merge.append(blink_prof)
 
     # 8. Remove source armatures and raw meshes
     for old_obj in list(bpy.data.objects):
@@ -1928,12 +1987,13 @@ def build_shinano_er_for_gtav(cli_args):
             delta=max_yft_delta,
         )
     )
-    if physbone_chain_records:
+    if physbone_chain_records or blink_profiles_to_merge or eye_blink_mode == "off":
         out_ini_path = os.path.join(output_dir, "GTAVPhysBones.ini")
         physbone_helper.export_physbone_asi_ini(
             out_ini_path,
             physbone_chain_records,
-            target_ped_model=char_profile["ped_name"],
+            target_ped_model=ped_model_name,
+            blink_profiles=blink_profiles_to_merge,
         )
         print(f"[PhysBones] Exported runtime INI: {out_ini_path}")
         repo_root = project_paths.get_project_root()
@@ -1951,8 +2011,17 @@ def build_shinano_er_for_gtav(cli_args):
             own_prefixes=("PB_Ear_", "PB_ER_"),
             target_ped_model="all",
             extra_sync_paths=sync_targets,
+            blink_profiles=blink_profiles_to_merge,
+            own_blink_models=(ped_model_name,),
         )
         print(f"[PhysBones] Merged & synced global INI: {sync_targets[1]}")
+        print(
+            i18n.translate(
+                "eye_blink.profile_exported",
+                model=ped_model_name,
+                enabled=1 if blink_profiles_to_merge else 0,
+            )
+        )
 
 
 def extract_custom_blender_args():
@@ -2099,6 +2168,12 @@ def parse_blender_cli_args():
         action=argparse.BooleanOptionalAction,
         default=True,
         help=i18n.translate("ped_damage.cli_blood_decals"),
+    )
+    argument_parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=i18n.translate("eye_blink.cli_opt"),
     )
     argument_parser.add_argument(
         "--texture-dir",

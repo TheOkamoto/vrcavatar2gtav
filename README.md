@@ -76,6 +76,7 @@ Instead of manual bone tweaking and brittle one-off edits, the pipeline coordina
 - **Unit `1.0` Defaults + `.unity` Scale Extraction**: Defaults body scales cleanly to `1.0` out of the box, while automatically reading and extracting custom hierarchy scales when a `.unity` scene file is provided.
 - **Universal Custom Unity Hair & PhysBones Porting**: Resolves arbitrary `.prefab` / `PrefabVariant` / `.fbx` hairs, `VRCPhysBone` chains (`79` standard chains, optional `--physbones-marshmallow`), and full protagonist interchangeability (`[7]`, `--avatar`).
 - **GTA V Blood & Wound Decals (`ped.sps` + 6-Zone `UVMap 1`)**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) enables native GTA V gunshot wounds, slashes, and blood overlays across torso/skirt, head, arms, and legs (`--blood-decals`, enabled by default) while excluding tails and long back hair.
+- **Optional Natural Eye Blinking (`GTAVPhysBones.asi`)**: [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) drives natural asymmetrical eyelid blinking (`2.6–6.0s` random intervals, occasional double-blinks, paused when dead) via the four native GTA V `FACIAL_*_eyelidUpper*` bones without consuming any of the 63 PhysBone slots. Automatically skips avatars with custom closed/smiling/winking eye blendshapes (`eye_blink = auto`), and can be toggled anytime via `--eye-blink` / `--no-eye-blink`, the interactive manager prompt, `vrc2gtav.cfg` (`eye_blink = auto | true | false`), or `[Blink_*] enabled = 0` in `GTAVPhysBones.ini`.
 - **Automated Verification**: Includes both a fast source-only check (`8` suites, works on a fresh GitHub clone) and a full post-build/deploy validation suite (`11` suites).
 
 ---
@@ -171,6 +172,7 @@ By default each protagonist starts with the preset below, and every VRChat avata
 | `python run_mod_manager.py --export-physbones` | Auto-import standard VRChat PhysBones presets from `.unity` scenes into `configs/*_physbones.cfg` (`--physbones-marshmallow` includes Marshmallow PB; `--overwrite-physbones-from-unity` overwrites edits) |
 | `python run_mod_manager.py --character all --physbones-source cfg` | Build using portable `.cfg` PhysBone presets instead of live `.unity` scenes (add `--physbones-marshmallow` to enable Marshmallow PB breasts) |
 | `python run_mod_manager.py --character all --blood-decals` | Build with GTA V blood/wound decals enabled (default; pass `--no-blood-decals` for clean `ped_default.sps` renders) |
+| `python run_mod_manager.py --character all --eye-blink` | Build with natural eye blinking enabled (default `auto` skips closed-eye custom expressions; pass `--no-eye-blink` to disable completely) |
 | `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character folders to `mods/x64v.rpf` |
 | `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `8` source/config/i18n/First-Run/Modular-Avatar suites (clean clone safe) |
 | `python scripts/common_tools/test_mod_suite.py` | Run all `11` end-to-end validation suites (requires built & deployed assets) |

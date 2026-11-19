@@ -30,6 +30,7 @@ import error_handler_helper as err_helper
 import avatar_archive_helper
 import modular_avatar_helper
 import blendshape_helper
+import eye_blink_helper
 import ped_damage_helper
 import physbone_helper
 import vrc2gtav_paths as project_paths
@@ -157,6 +158,7 @@ def prepare_universal_avatar_job(
     import_body: Optional[bool] = None,
     physbones_marshmallow: bool = False,
     blood_decals: bool = True,
+    eye_blink: Optional[bool] = None,
     out_dir: Optional[str] = None,
     interactive: bool = False,
     auto_download_blender: bool = False,
@@ -387,6 +389,21 @@ def prepare_universal_avatar_job(
             verbose=verbose,
         )
 
+    resolved_blink_mode = eye_blink_helper.resolve_effective_eye_blink_mode(
+        eye_blink, char_cfg, default="auto"
+    )
+    body_bs_weights = (bs_result.get("mesh_weights") or {}).get("Body") or {}
+    blink_conflict = (
+        eye_blink_helper.detect_custom_eye_expression_conflict(body_bs_weights)
+        if resolved_blink_mode == "auto"
+        else None
+    )
+    if blink_conflict:
+        active_logger.info(
+            f"Natural eye blink auto-disabled due to custom eye expression ({blink_conflict})",
+            always=True,
+        )
+
     manifest_data = {
         "avatar_name": chosen_avatar_name,
         "target_character": chosen_target_char,
@@ -411,6 +428,8 @@ def prepare_universal_avatar_job(
         "physbones_marshmallow": bool(physbones_marshmallow),
         "blood_decals": bool(blood_decals),
         "blood_decals_shader": ped_damage_helper.resolve_ped_shader_filename(bool(blood_decals)),
+        "eye_blink": resolved_blink_mode,
+        "eye_blink_conflict": blink_conflict or "",
         "out_dir": str(work_out_dir),
         "blender_exe": str(resolved_blender) if resolved_blender else "",
     }
@@ -595,6 +614,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=True,
         help="Enable GTA V ped blood/wound decals (ped.sps + 6-zone UVMap 1)",
     )
+    parser.add_argument(
+        "--eye-blink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable optional natural eye blinking via native eyelid bones (default: auto)",
+    )
     parser.add_argument("--out-dir", help="Output working directory")
     parser.add_argument("--blender-exe", help="Explicit path to Blender 4.0.2 executable")
     parser.add_argument(
@@ -642,6 +667,7 @@ def main(argv_list: Optional[Sequence[str]] = None) -> int:
             import_body=args.import_body_blendshapes,
             physbones_marshmallow=bool(args.physbones_marshmallow),
             blood_decals=bool(getattr(args, "blood_decals", True)),
+            eye_blink=getattr(args, "eye_blink", None),
             out_dir=args.out_dir,
             interactive=bool(args.interactive) and not bool(args.non_interactive),
             auto_download_blender=bool(args.auto_download_blender),

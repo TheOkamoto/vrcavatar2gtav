@@ -253,11 +253,21 @@ def test_compiled_drawables_and_textures() -> bool:
     shinano_chains_count = 0
     miltina_chains_count = 0
     ini_total_chains = 0
+    ini_blink_count = 0
+    blink_models_found = set()
     if ini_exists:
         ini_parser = configparser.ConfigParser()
         ini_parser.read(str(physbones_ini_path), encoding="utf-8")
         ini_total_chains = ini_parser.getint("General", "chain_count", fallback=0)
+        ini_blink_count = ini_parser.getint("General", "blink_count", fallback=0)
         for section_name in ini_parser.sections():
+            if section_name.startswith("Blink_"):
+                blink_model = ini_parser.get(section_name, "model", fallback="").strip().lower()
+                blink_enabled = ini_parser.getint(section_name, "enabled", fallback=0)
+                blink_bones = ini_parser.getint(section_name, "bone_count", fallback=0)
+                if blink_enabled == 1 and blink_bones == 4 and blink_model:
+                    blink_models_found.add(blink_model)
+                continue
             if not section_name.startswith("Chain_"):
                 continue
             chain_name = ini_parser.get(section_name, "name", fallback="")
@@ -268,6 +278,21 @@ def test_compiled_drawables_and_textures() -> bool:
             elif chain_name.startswith("PB_MT_"):
                 miltina_chains_count += 1
 
+    blink_ydd_bones_ok = True
+    for xml_rel_path in (
+        "1_Franklin_Shinano_Casual/4_exported_models/uppr_000_u.ydd.xml",
+        "2_Michael_Shinano_EternalReunion/4_exported_models/uppr_000_u.ydd.xml",
+        "3_Trevor_Miltina_Maid/4_exported_models/uppr_000_u.ydd.xml",
+    ):
+        xml_file = PROJECT_ROOT_DIR / xml_rel_path
+        if xml_file.is_file():
+            xml_text = xml_file.read_text(encoding="utf-8", errors="ignore")
+            if (
+                "FACIAL_L_eyelidUpper" not in xml_text
+                or "FACIAL_R_eyelidUpper" not in xml_text
+            ):
+                blink_ydd_bones_ok = False
+
     physbones_runtime_ok = (
         asi_exists
         and ini_exists
@@ -275,13 +300,17 @@ def test_compiled_drawables_and_textures() -> bool:
         and ear_chains_count == 30
         and shinano_chains_count == 24
         and miltina_chains_count == 25
+        and ini_blink_count >= 3
+        and {"player_zero", "player_one", "player_two"}.issubset(blink_models_found)
+        and blink_ydd_bones_ok
     )
     all_assets_present &= print_status_result(
         "GTAVPhysBones.asi / .ini",
         physbones_runtime_ok,
         (
             f"asi={asi_exists}, chains={ini_total_chains} "
-            f"(Michael={ear_chains_count}, Franklin={shinano_chains_count}, Trevor={miltina_chains_count})"
+            f"(Michael={ear_chains_count}, Franklin={shinano_chains_count}, Trevor={miltina_chains_count}), "
+            f"blinks={ini_blink_count} {sorted(blink_models_found)}"
         ),
     )
 
@@ -585,6 +614,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "setup_first_run.py", root_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
+        (common_dir / "eye_blink_helper.py", deploy_dir / "eye_blink_helper.py"),
         (common_dir / "physbone_helper.py", deploy_dir / "physbone_helper.py"),
         (common_dir / "ped_damage_helper.py", deploy_dir / "ped_damage_helper.py"),
         (common_dir / "unity_scene_helper.py", deploy_dir / "unity_scene_helper.py"),
@@ -1033,6 +1063,154 @@ def test_source_templates_and_dummies() -> bool:
             "16 MiB resource & 4 GiB offset guards verified",
         )
 
+    import eye_blink_helper
+    import physbone_helper as pb_mod
+    import types
+
+    qp_center = eye_blink_helper.solve_nonneg_two_vector_weights(
+        (0.0, 0.0, -0.02),
+        (0.0, 0.0, -0.025),
+        (-0.01, 0.0, -0.01),
+    )
+    qp_blend = eye_blink_helper.solve_nonneg_two_vector_weights(
+        (-0.005, 0.0, -0.0175),
+        (0.0, 0.0, -0.025),
+        (-0.01, 0.0, -0.01),
+    )
+    qp_simplex_ok = (
+        qp_center[0] >= 0.79
+        and qp_center[1] <= 0.01
+        and qp_blend[0] >= 0.0
+        and qp_blend[1] >= 0.0
+        and (qp_blend[0] + qp_blend[1]) <= 1.0001
+        and abs(qp_blend[0] - 0.5) < 0.05
+        and abs(qp_blend[1] - 0.5) < 0.05
+    )
+
+    dummy_keys = [
+        types.SimpleNamespace(name="Basis"),
+        types.SimpleNamespace(name="vrc.blink "),
+        types.SimpleNamespace(name="eye_pleasure"),
+    ]
+    found_key = eye_blink_helper.find_blink_shape_key(dummy_keys)
+    conflict_safe_open = eye_blink_helper.detect_custom_eye_expression_conflict(
+        {"eye_pleasure_1": 0.75, "eye_zitome_1": 0.65, "eyelid_turi1": 0.65}
+    )
+    conflict_closed = eye_blink_helper.detect_custom_eye_expression_conflict(
+        {"eye_pleasure": 0.75, "eye_><": 1.0}
+    )
+    conflict_blink = eye_blink_helper.detect_custom_eye_expression_conflict(
+        {"vrc.Blink": 0.8}
+    )
+
+    base_bones_sample = [f"BONE_{idx:02d}" for idx in range(61)] + list(
+        eye_blink_helper.YFT_ONLY_HAND_BONES
+    )
+    bones_blink_on, trimmed_cnt = eye_blink_helper.prepare_ydd_blink_bone_set(
+        base_bones_sample,
+        enable_eye_blink=True,
+        custom_bone_count=62,
+    )
+    bones_blink_off, no_trim_cnt = eye_blink_helper.prepare_ydd_blink_bone_set(
+        base_bones_sample,
+        enable_eye_blink=False,
+        custom_bone_count=62,
+    )
+    bone_budget_ok = (
+        trimmed_cnt == 4
+        and (len(bones_blink_on) + 62) == 127
+        and all(
+            lid_name in bones_blink_on
+            for lid_name in eye_blink_helper.EYELID_BLINK_BONES
+        )
+        and no_trim_cnt == 0
+        and len(bones_blink_off) == 65
+        and all(
+            hand_leaf in bones_blink_off
+            for hand_leaf in eye_blink_helper.YFT_ONLY_HAND_BONES
+        )
+    )
+
+    ini_roundtrip_ok = False
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_blink_ini_") as blink_tmp:
+        ini_file = Path(blink_tmp) / "GTAVPhysBones.ini"
+        sample_blink_bones = [
+            {
+                "name": "FACIAL_L_eyelidUpper",
+                "tag": 38849,
+                "parent_tag": 65068,
+                "local_pos": (0.0348, -0.0931, 0.7032),
+                "local_rot": (0.0, 0.0, 0.0, 1.0),
+                "delta_pos": (0.0, 0.005, -0.024),
+            },
+            {
+                "name": "FACIAL_L_eyelidUpperOuterSDK",
+                "tag": 44821,
+                "parent_tag": 38849,
+                "local_pos": (0.0063, -0.0137, 0.0036),
+                "local_rot": (0.0, 0.0, 0.0, 1.0),
+                "delta_pos": (-0.010, -0.006, 0.008),
+            },
+            {
+                "name": "FACIAL_R_eyelidUpper",
+                "tag": 32276,
+                "parent_tag": 65068,
+                "local_pos": (-0.0319, -0.0931, 0.7032),
+                "local_rot": (0.0, 0.0, 0.0, 1.0),
+                "delta_pos": (0.0, 0.005, -0.024),
+            },
+            {
+                "name": "FACIAL_R_eyelidUpperOuterSDK",
+                "tag": 45333,
+                "parent_tag": 32276,
+                "local_pos": (-0.0063, -0.0137, 0.0036),
+                "local_rot": (0.0, 0.0, 0.0, 1.0),
+                "delta_pos": (0.010, -0.006, 0.008),
+            },
+        ]
+        pb_mod.merge_physbone_asi_ini(
+            ini_file,
+            [],
+            target_ped_model="all",
+            blink_profiles=[{"model": "player_zero", "enabled": 1, "bones": sample_blink_bones}],
+            own_blink_models=("player_zero",),
+        )
+        pb_mod.merge_physbone_asi_ini(
+            ini_file,
+            [],
+            target_ped_model="all",
+            blink_profiles=[{"model": "player_one", "enabled": 1, "bones": sample_blink_bones}],
+            own_blink_models=("player_one",),
+        )
+        both_profiles = pb_mod._load_ini_blink_profiles(ini_file)
+        pb_mod.merge_physbone_asi_ini(
+            ini_file,
+            [],
+            target_ped_model="all",
+            blink_profiles=[],
+            own_blink_models=("player_zero",),
+        )
+        after_disable = pb_mod._load_ini_blink_profiles(ini_file)
+        ini_roundtrip_ok = (
+            len(both_profiles) == 2
+            and {item["model"] for item in both_profiles} == {"player_zero", "player_one"}
+            and len(after_disable) == 1
+            and after_disable[0]["model"] == "player_one"
+            and len(after_disable[0]["bones"]) == 4
+        )
+
+    eye_blink_ok = print_status_result(
+        i18n.translate("tests.eye_blink_rigging"),
+        qp_simplex_ok
+        and (found_key is not None and found_key.name == "vrc.blink ")
+        and (conflict_safe_open is None)
+        and (conflict_closed is not None)
+        and (conflict_blink is not None)
+        and bone_budget_ok
+        and ini_roundtrip_ok,
+        f"key='vrc.blink ', bone_budget=127/128, ini_merge={ini_roundtrip_ok}",
+    )
+
     return (
         template_ok
         and gitignore_check
@@ -1040,6 +1218,7 @@ def test_source_templates_and_dummies() -> bool:
         and physbones_source_ok
         and damage_decals_ok
         and rpf7_guards_ok
+        and eye_blink_ok
     )
 
 
@@ -2547,6 +2726,14 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--blood-decals"),
         (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--blood-decals"),
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--blood-decals"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--eye-blink"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--eye-blink"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--eye-blink"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--eye-blink"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--eye-blink"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
