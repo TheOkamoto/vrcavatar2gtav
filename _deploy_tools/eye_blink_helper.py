@@ -343,6 +343,22 @@ def _fit_one_eye_side_weights(
     )
     peak_center = side_deltas[center_idx]
 
+    # Use the anterior lash margin's Y travel (35th percentile across strong downward
+    # movers) rather than a single deep upper-fold crease vertex so closed eyelashes stay
+    # proudly visible on the eye surface instead of tucking inside the cheek geometry.
+    strong_down = [
+        vert_idx
+        for vert_idx, dvec in side_deltas.items()
+        if dvec[2] < -max(0.004, max_disp * 0.35)
+    ]
+    if strong_down:
+        sorted_dys = sorted(side_deltas[idx][1] for idx in strong_down)
+        pct_idx = max(0, min(len(sorted_dys) - 1, int(len(sorted_dys) * 0.35)))
+        center_dy = min(peak_center[1], sorted_dys[pct_idx])
+    else:
+        center_dy = peak_center[1]
+    peak_center = (peak_center[0], center_dy, peak_center[2])
+
     # Pick outermost moving vertex with significant blink displacement for outer corner vector
     sig_threshold = max(0.0025, max_disp * 0.28)
     outer_candidates = [
