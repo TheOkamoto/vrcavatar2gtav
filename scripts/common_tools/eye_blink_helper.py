@@ -661,13 +661,21 @@ def _fit_one_eye_side_weights(
         center_dy = peak_center[1]
     peak_center = (peak_center[0], center_dy, peak_center[2])
 
-    # Pick outermost moving vertex with significant blink displacement for outer corner vector
+    # Pick outermost moving vertex with significant downward blink displacement for outer corner vector
     sig_threshold = max(0.0025, max_disp * 0.28)
     outer_candidates = [
         vert_idx
         for vert_idx, dlen in lengths.items()
-        if dlen >= sig_threshold and side_coords[vert_idx][0] * side_sign > 0.002
+        if dlen >= sig_threshold
+        and side_coords[vert_idx][0] * side_sign > 0.002
+        and side_deltas[vert_idx][2] < -sig_threshold * 0.35
     ]
+    if not outer_candidates:
+        outer_candidates = [
+            vert_idx
+            for vert_idx, dlen in lengths.items()
+            if dlen >= sig_threshold and side_coords[vert_idx][0] * side_sign > 0.002
+        ]
     if outer_candidates:
         outer_idx = max(
             outer_candidates,
@@ -698,9 +706,12 @@ def _fit_one_eye_side_weights(
     )
 
     anchor_z = side_coords[center_idx][2]
+    upper_brow_coords = [
+        pt_co for pt_co in side_brow_coords if pt_co[2] > (anchor_z + 0.004)
+    ]
     global_min_brow_z = min(
-        (pt_co[2] for pt_co in side_brow_coords),
-        default=anchor_z + 0.20 * max_disp,
+        (pt_co[2] for pt_co in upper_brow_coords),
+        default=anchor_z + 0.45 * max_disp,
     )
 
     weights_out: Dict[int, Dict[str, float]] = {}
@@ -711,12 +722,17 @@ def _fit_one_eye_side_weights(
         vx_val, _vy_val, vz_val = vert_coord
         near_brow_zs = [
             pt_co[2]
-            for pt_co in side_brow_coords
+            for pt_co in upper_brow_coords
             if abs(pt_co[0] - vx_val) <= 0.008
         ]
         local_brow_z = min(near_brow_zs) if near_brow_zs else global_min_brow_z
-        z_ceil = min(anchor_z + 0.20 * max_disp, local_brow_z - 0.0010)
-        z_start = min(anchor_z + 0.05 * max_disp, z_ceil - 0.0030)
+        default_ceil = (
+            local_brow_z - 0.0010
+            if (upper_brow_coords and dvec[2] < -0.004)
+            else min(anchor_z + 0.45 * max_disp, local_brow_z - 0.0010)
+        )
+        z_ceil = default_ceil
+        z_start = min(anchor_z + 0.08 * max_disp, z_ceil - 0.0030)
         if vz_val >= z_ceil:
             continue
         upper_fade = 1.0

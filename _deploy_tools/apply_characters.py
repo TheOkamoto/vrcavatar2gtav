@@ -30,10 +30,12 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 try:
+    import npc_registry_helper
     import ped_damage_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import npc_registry_helper
     from common_tools import ped_damage_helper
     from common_tools import vrc2gtav_i18n as project_i18n
     from common_tools import vrc2gtav_paths as project_paths
@@ -290,7 +292,19 @@ def apply_selected_characters(
         )
         return False
 
+    npc_registry = npc_registry_helper.load_npc_registry().get("npcs", {})
+
     for raw_character_key in characters_to_apply:
+        norm_npc_key = npc_registry_helper.normalize_ped_model_name(raw_character_key)
+        if raw_character_key not in character_registry and norm_npc_key in npc_registry:
+            npc_entry = npc_registry[norm_npc_key]
+            print(
+                f"[NPC] Patching registered NPC '{norm_npc_key}' ({npc_entry.get('avatar_name', 'avatar')})...",
+                flush=True,
+            )
+            npc_registry_helper.apply_npc_slot_replacement(norm_npc_key, npc_entry)
+            continue
+
         if raw_character_key in character_registry:
             character_key = raw_character_key
         else:
@@ -437,6 +451,17 @@ def main() -> None:
         ),
     )
     argument_parser.add_argument(
+        "--npc",
+        nargs="+",
+        default=None,
+        help="One or more registered GTA V NPC ped names (e.g. ig_lamardavis)",
+    )
+    argument_parser.add_argument(
+        "--all-npcs",
+        action="store_true",
+        help="Also apply all NPCs registered in configs/npc_registry.json",
+    )
+    argument_parser.add_argument(
         "--lang",
         choices=["auto", "en", "ja", "pt"],
         default="auto",
@@ -445,17 +470,31 @@ def main() -> None:
     parsed_arguments = argument_parser.parse_args()
     project_i18n.set_active_language(parsed_arguments.lang)
 
-    if parsed_arguments.character == "all":
+    if parsed_arguments.npc:
+        selected_protagonists = []
+        selected_characters_list = [
+            npc_registry_helper.normalize_ped_model_name(npc_name)
+            for npc_name in parsed_arguments.npc
+        ]
+    elif parsed_arguments.character == "all":
         selected_protagonists = list(project_paths.list_available_protagonists())
+        selected_characters_list = [
+            str(project_paths.get_protagonist_profile(prot_key)["ped_name"])
+            for prot_key in selected_protagonists
+        ]
     else:
         selected_protagonists = [
             project_paths.normalize_protagonist_key(parsed_arguments.character)
         ]
+        selected_characters_list = [
+            str(project_paths.get_protagonist_profile(prot_key)["ped_name"])
+            for prot_key in selected_protagonists
+        ]
 
-    selected_characters_list = [
-        str(project_paths.get_protagonist_profile(prot_key)["ped_name"])
-        for prot_key in selected_protagonists
-    ]
+    if parsed_arguments.all_npcs:
+        for reg_npc_name in sorted(npc_registry_helper.load_npc_registry().get("npcs", {}).keys()):
+            if reg_npc_name not in selected_characters_list:
+                selected_characters_list.append(reg_npc_name)
 
     avatar_overrides: Dict[str, str] = {}
     if parsed_arguments.avatar:

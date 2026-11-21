@@ -31,10 +31,18 @@ SKEL_SPINE3_TAG: int = 24818
 SKEL_PELVIS_TAG: int = 11816
 SKEL_L_THIGH_TAG: int = 58271
 SKEL_R_THIGH_TAG: int = 51826
+SKEL_L_CALF_TAG: int = 63931
+SKEL_R_CALF_TAG: int = 36864
+SKEL_L_FOOT_TAG: int = 14201
+SKEL_R_FOOT_TAG: int = 52301
 SKEL_L_CLAVICLE_TAG: int = 64729
 SKEL_R_CLAVICLE_TAG: int = 10706
 SKEL_L_UPPERARM_TAG: int = 45509
 SKEL_R_UPPERARM_TAG: int = 40269
+SKEL_L_FOREARM_TAG: int = 61163
+SKEL_R_FOREARM_TAG: int = 28252
+SKEL_L_HAND_TAG: int = 18905
+SKEL_R_HAND_TAG: int = 57005
 
 MAX_CUSTOM_PHYSBONES_PER_PED: int = 63
 
@@ -411,10 +419,18 @@ PARENT_BONE_TAGS: Dict[str, int] = {
     "SKEL_Pelvis": SKEL_PELVIS_TAG,
     "SKEL_L_Thigh": SKEL_L_THIGH_TAG,
     "SKEL_R_Thigh": SKEL_R_THIGH_TAG,
+    "SKEL_L_Calf": SKEL_L_CALF_TAG,
+    "SKEL_R_Calf": SKEL_R_CALF_TAG,
+    "SKEL_L_Foot": SKEL_L_FOOT_TAG,
+    "SKEL_R_Foot": SKEL_R_FOOT_TAG,
     "SKEL_L_Clavicle": SKEL_L_CLAVICLE_TAG,
     "SKEL_R_Clavicle": SKEL_R_CLAVICLE_TAG,
     "SKEL_L_UpperArm": SKEL_L_UPPERARM_TAG,
     "SKEL_R_UpperArm": SKEL_R_UPPERARM_TAG,
+    "SKEL_L_Forearm": SKEL_L_FOREARM_TAG,
+    "SKEL_R_Forearm": SKEL_R_FOREARM_TAG,
+    "SKEL_L_Hand": SKEL_L_HAND_TAG,
+    "SKEL_R_Hand": SKEL_R_HAND_TAG,
 }
 
 UNITY_ANCESTOR_TO_GTAV_PARENT: Dict[str, str] = {
@@ -435,16 +451,92 @@ UNITY_ANCESTOR_TO_GTAV_PARENT: Dict[str, str] = {
     "un_skirt": "SKEL_Pelvis",
     "upper_leg.l": "SKEL_L_Thigh",
     "upper_leg_l": "SKEL_L_Thigh",
+    "upperleg.l": "SKEL_L_Thigh",
+    "upperleg_l": "SKEL_L_Thigh",
+    "leftupperleg": "SKEL_L_Thigh",
+    "left_upper_leg": "SKEL_L_Thigh",
+    "thigh.l": "SKEL_L_Thigh",
+    "thigh_l": "SKEL_L_Thigh",
     "upper_leg.r": "SKEL_R_Thigh",
     "upper_leg_r": "SKEL_R_Thigh",
+    "upperleg.r": "SKEL_R_Thigh",
+    "upperleg_r": "SKEL_R_Thigh",
+    "rightupperleg": "SKEL_R_Thigh",
+    "right_upper_leg": "SKEL_R_Thigh",
+    "thigh.r": "SKEL_R_Thigh",
+    "thigh_r": "SKEL_R_Thigh",
+    "lower_leg.l": "SKEL_L_Calf",
+    "lower_leg_l": "SKEL_L_Calf",
+    "lowerleg.l": "SKEL_L_Calf",
+    "lowerleg_l": "SKEL_L_Calf",
+    "leftlowerleg": "SKEL_L_Calf",
+    "left_lower_leg": "SKEL_L_Calf",
+    "calf.l": "SKEL_L_Calf",
+    "calf_l": "SKEL_L_Calf",
+    "lower_leg.r": "SKEL_R_Calf",
+    "lower_leg_r": "SKEL_R_Calf",
+    "lowerleg.r": "SKEL_R_Calf",
+    "lowerleg_r": "SKEL_R_Calf",
+    "rightlowerleg": "SKEL_R_Calf",
+    "right_lower_leg": "SKEL_R_Calf",
+    "calf.r": "SKEL_R_Calf",
+    "calf_r": "SKEL_R_Calf",
+    "foot.l": "SKEL_L_Foot",
+    "foot_l": "SKEL_L_Foot",
+    "leftfoot": "SKEL_L_Foot",
+    "left_foot": "SKEL_L_Foot",
+    "toe.l": "SKEL_L_Foot",
+    "lefttoebase": "SKEL_L_Foot",
+    "foot.r": "SKEL_R_Foot",
+    "foot_r": "SKEL_R_Foot",
+    "rightfoot": "SKEL_R_Foot",
+    "right_foot": "SKEL_R_Foot",
+    "toe.r": "SKEL_R_Foot",
+    "righttoebase": "SKEL_R_Foot",
     "shoulder.l": "SKEL_L_Clavicle",
     "shoulder_l": "SKEL_L_Clavicle",
+    "leftshoulder": "SKEL_L_Clavicle",
+    "left_shoulder": "SKEL_L_Clavicle",
     "shoulder.r": "SKEL_R_Clavicle",
     "shoulder_r": "SKEL_R_Clavicle",
+    "rightshoulder": "SKEL_R_Clavicle",
+    "right_shoulder": "SKEL_R_Clavicle",
     "upper_arm.l": "SKEL_L_UpperArm",
     "upper_arm_l": "SKEL_L_UpperArm",
+    "upperarm.l": "SKEL_L_UpperArm",
+    "upperarm_l": "SKEL_L_UpperArm",
+    "leftupperarm": "SKEL_L_UpperArm",
+    "left_upper_arm": "SKEL_L_UpperArm",
     "upper_arm.r": "SKEL_R_UpperArm",
     "upper_arm_r": "SKEL_R_UpperArm",
+    "upperarm.r": "SKEL_R_UpperArm",
+    "upperarm_r": "SKEL_R_UpperArm",
+    "rightupperarm": "SKEL_R_UpperArm",
+    "right_upper_arm": "SKEL_R_UpperArm",
+    "lower_arm.l": "SKEL_L_Forearm",
+    "lower_arm_l": "SKEL_L_Forearm",
+    "lowerarm.l": "SKEL_L_Forearm",
+    "lowerarm_l": "SKEL_L_Forearm",
+    "leftlowerarm": "SKEL_L_Forearm",
+    "left_lower_arm": "SKEL_L_Forearm",
+    "forearm.l": "SKEL_L_Forearm",
+    "lower_arm.r": "SKEL_R_Forearm",
+    "lower_arm_r": "SKEL_R_Forearm",
+    "lowerarm.r": "SKEL_R_Forearm",
+    "lowerarm_r": "SKEL_R_Forearm",
+    "rightlowerarm": "SKEL_R_Forearm",
+    "right_lower_arm": "SKEL_R_Forearm",
+    "forearm.r": "SKEL_R_Forearm",
+    "hand.l": "SKEL_L_Hand",
+    "hand_l": "SKEL_L_Hand",
+    "lefthand": "SKEL_L_Hand",
+    "left_hand": "SKEL_L_Hand",
+    "wrist.l": "SKEL_L_Hand",
+    "hand.r": "SKEL_R_Hand",
+    "hand_r": "SKEL_R_Hand",
+    "righthand": "SKEL_R_Hand",
+    "right_hand": "SKEL_R_Hand",
+    "wrist.r": "SKEL_R_Hand",
 }
 
 
@@ -4031,6 +4123,24 @@ def pack_physbone_chains_to_gtav_budget(
         group_key = (f"{stem_tok}{side_suf}", rec_item["parent_bone"])
         grouped.setdefault(group_key, []).append(rec_item)
 
+    # Split unsided indexed ring spokes (e.g. Skirt_0 vs Skirt_8) so opposing panels do not merge
+    split_grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for (group_stem, parent_bone_name), rec_list in grouped.items():
+        if len(rec_list) >= 2 and not group_stem.endswith(("_L", "_R")):
+            root_names = [
+                str((item_rec.get("spoke_bones") or [item_rec["root_bone"]])[0]).strip()
+                for item_rec in rec_list
+            ]
+            has_zero_ring = any(
+                regex_module.search(r"[._]0$", root_nm) is not None for root_nm in root_names
+            )
+            if has_zero_ring and len(set(root_names)) == len(root_names):
+                for item_rec, root_nm in zip(rec_list, root_names):
+                    split_grouped[(root_nm, parent_bone_name)] = [item_rec]
+                continue
+        split_grouped[(group_stem, parent_bone_name)] = rec_list
+    grouped = split_grouped
+
     raw_entries: List[Dict[str, Any]] = []
     pair_lookup: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     for (group_stem, parent_bone_name), rec_list in grouped.items():
@@ -4100,36 +4210,62 @@ def pack_physbone_chains_to_gtav_budget(
             and cur_entry["parent_bone"] == nxt_entry["parent_bone"]
             and {cur_entry["side_tag"], nxt_entry["side_tag"]} == {"L", "R"}
         )
+        is_long_essential = (
+            cur_entry["score_info"]["essential"]
+            and int(cur_entry["pair_tier"]) <= 2
+            and int(cur_entry["pair_spoke_len"]) >= 5
+        )
+        preferred_slots = 3 if is_long_essential else 2
         if is_pair_unit and nxt_entry is not None:
-            pair_min_cost = 4
+            pair_min_cost = preferred_slots * 2
             if allocated_bones + pair_min_cost <= max_custom_bones:
+                cur_entry["seg_slots"] = preferred_slots
+                nxt_entry["seg_slots"] = preferred_slots
                 kept_units.append([cur_entry, nxt_entry])
                 allocated_bones += pair_min_cost
+            elif preferred_slots > 2 and allocated_bones + 4 <= max_custom_bones:
+                kept_units.append([cur_entry, nxt_entry])
+                allocated_bones += 4
             else:
                 discarded_entries.append((cur_entry, "rage_budget_pair_overflow"))
                 discarded_entries.append((nxt_entry, "rage_budget_pair_overflow"))
             cursor_idx += 2
         else:
-            single_min_cost = 2
+            single_min_cost = preferred_slots
             if allocated_bones + single_min_cost <= max_custom_bones and (
                 not discarded_entries or cur_entry["score_info"]["tier"] <= 5
             ):
+                cur_entry["seg_slots"] = preferred_slots
                 kept_units.append([cur_entry])
                 allocated_bones += single_min_cost
+            elif (
+                preferred_slots > 2
+                and allocated_bones + 2 <= max_custom_bones
+                and (not discarded_entries or cur_entry["score_info"]["tier"] <= 5)
+            ):
+                kept_units.append([cur_entry])
+                allocated_bones += 2
             else:
                 discarded_entries.append((cur_entry, "rage_budget_overflow"))
             cursor_idx += 1
 
-    # Pass 2: Upgrade highest-priority kept >=3-spoke chains from 2 -> 3 bones with leftover slack
+    # Pass 2: Upgrade long high-priority kept chains (up to 4 bones for >=5-spoke chains) with leftover slack
     slack_bones = max(0, int(max_custom_bones) - allocated_bones)
-    for unit_items in kept_units:
+    for max_tier_slots in (3, 4):
         if slack_bones <= 0:
             break
-        extra_needed = len(unit_items)
-        if slack_bones >= extra_needed and all(len(item_rec["rep_spokes"]) >= 3 for item_rec in unit_items):
-            for item_rec in unit_items:
-                item_rec["seg_slots"] = 3
-            slack_bones -= extra_needed
+        for unit_items in kept_units:
+            if slack_bones <= 0:
+                break
+            extra_needed = len(unit_items)
+            if slack_bones >= extra_needed and all(
+                int(item_rec["seg_slots"]) == max_tier_slots - 1
+                and len(item_rec["rep_spokes"]) >= (max_tier_slots if max_tier_slots <= 3 else 5)
+                for item_rec in unit_items
+            ):
+                for item_rec in unit_items:
+                    item_rec["seg_slots"] = max_tier_slots
+                slack_bones -= extra_needed
 
     kept_flat = [item_rec for unit_items in kept_units for item_rec in unit_items]
     used_tags: Set[int] = set(PARENT_BONE_TAGS.values())
@@ -4146,7 +4282,11 @@ def pack_physbone_chains_to_gtav_budget(
         target_slots = int(entry_rec["seg_slots"])
 
         if target_slots >= 3 and len(rep_spokes) >= 3:
-            sampled_src = [rep_spokes[0], rep_spokes[len(rep_spokes) // 2], rep_spokes[-1]]
+            sample_count = min(target_slots, len(rep_spokes))
+            sampled_src = [
+                rep_spokes[round(slot_pos * (len(rep_spokes) - 1) / (sample_count - 1))]
+                for slot_pos in range(sample_count)
+            ]
         elif len(rep_spokes) >= 2:
             sampled_src = [rep_spokes[0], rep_spokes[-1]]
         else:
@@ -5053,6 +5193,7 @@ def _load_ini_chain_records(ini_path: Path) -> List[Dict[str, object]]:
         records.append(
             {
                 "name": sec.get("name", sec_name),
+                "model": sec.get("model", "").strip(),
                 "parent_bone_tag": sec.getint("parent_bone_tag", SKEL_HEAD_TAG),
                 "config": {
                     "integration_type": sec.getint("integration_type", 0),
@@ -5133,6 +5274,7 @@ def merge_physbone_asi_ini(
     extra_sync_paths: Sequence[str | Path] = (),
     blink_profiles: Optional[Sequence[Dict[str, object]]] = None,
     own_blink_models: Sequence[str] = (),
+    own_chain_models: Sequence[str] = (),
 ) -> Path:
     """
     Merge new chain_records (and optional blink_profiles) into ini_path, replacing
@@ -5149,13 +5291,32 @@ def merge_physbone_asi_ini(
                 break
 
     new_names = {str(rec["name"]) for rec in chain_records}
+    replaced_chain_models = {
+        str(model_tok).strip().lower()
+        for model_tok in own_chain_models
+        if str(model_tok).strip()
+    }
+    if replaced_chain_models:
+        existing_pairs = {
+            (str(rec.get("name", "")), str(rec.get("model", "")).strip().lower())
+            for rec in chain_records
+        }
+    else:
+        existing_pairs = set()
     merged: List[Dict[str, object]] = []
     for rec in existing:
         rec_name = str(rec.get("name", ""))
-        if rec_name in new_names:
-            continue
-        if any(rec_name.startswith(pref) for pref in own_prefixes):
-            continue
+        rec_model = str(rec.get("model", "")).strip().lower()
+        if replaced_chain_models:
+            if rec_model in replaced_chain_models or (rec_name, rec_model) in existing_pairs:
+                continue
+            if (not rec_model) and any(rec_name.startswith(pref) for pref in own_prefixes):
+                continue
+        else:
+            if rec_name in new_names:
+                continue
+            if any(rec_name.startswith(pref) for pref in own_prefixes):
+                continue
         merged.append(rec)
     merged.extend(chain_records)
 
@@ -5243,6 +5404,11 @@ def export_physbone_asi_ini(
         bone_list = record["bones"]
         lines.extend(["", f"[Chain_{chain_idx}]"])
         lines.append(f"name = {record['name']}")
+        chain_model = str(record.get("model", "") or "").strip()
+        if not chain_model and target_ped_model and target_ped_model.lower() != "all":
+            chain_model = str(target_ped_model).strip()
+        if chain_model:
+            lines.append(f"model = {chain_model}")
         lines.append(f"parent_bone_tag = {int(record.get('parent_bone_tag', SKEL_HEAD_TAG))}")
         lines.append(f"bone_count = {len(bone_list)}")
         lines.append(f"integration_type = {int(cfg_data.get('integration_type', 0))}")

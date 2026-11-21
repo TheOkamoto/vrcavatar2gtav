@@ -31,10 +31,12 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 try:
+    import npc_registry_helper
     import ped_damage_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import npc_registry_helper
     from common_tools import ped_damage_helper
     from common_tools import vrc2gtav_i18n as project_i18n
     from common_tools import vrc2gtav_paths as project_paths
@@ -662,6 +664,22 @@ def run_repack_and_deploy() -> None:
     stage_tracker = PipelineProgressTracker(total_pipeline_stages)
 
     try:
+        # 0. Refresh registered NPC staging patches before shared archives (patchday3ng / x64v) repack
+        pre_npc_map = npc_registry_helper.load_npc_registry(
+            project_paths.get_project_root()
+        ).get("npcs", {})
+        for npc_ped_name, npc_entry in sorted(pre_npc_map.items()):
+            npc_info = npc_registry_helper.get_npc_staging_paths(
+                npc_ped_name, npc_entry["location"]
+            )
+            if (
+                Path(npc_info["package_dir"]).is_dir()
+                and Path(npc_info["inner_extracted_dir"]).is_dir()
+            ):
+                npc_registry_helper.apply_npc_slot_replacement(
+                    npc_ped_name, npc_entry, staging_info=npc_info
+                )
+
         # 1. Repack mppatches.rpf
         stage_title = project_i18n.translate("repack.stage_repacking", name="mppatches.rpf")
         stage_tracker.begin_stage(stage_title)
@@ -888,6 +906,18 @@ def run_repack_and_deploy() -> None:
             pack_inner_rpf = Path(pack_spec["inner_rpf"])
             if pack_target_dlc.is_file():
                 archives_to_audit.extend([pack_target_dlc, pack_inner_rpf])
+
+        npc_registry_map = npc_registry_helper.load_npc_registry(
+            project_paths.get_project_root()
+        ).get("npcs", {})
+        for npc_ped_name, npc_entry in sorted(npc_registry_map.items()):
+            print(f"[NPC Deploy] Repacking & deploying registered NPC '{npc_ped_name}'...", flush=True)
+            deployed_npc_rpfs = npc_registry_helper.repack_and_deploy_npc_entry(
+                npc_ped_name,
+                npc_entry,
+                skip_shared_archives=True,
+            )
+            archives_to_audit.extend(deployed_npc_rpfs)
 
         for audit_archive in archives_to_audit:
             if audit_archive.is_file():

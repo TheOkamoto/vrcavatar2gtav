@@ -318,7 +318,7 @@ def test_compiled_drawables_and_textures() -> bool:
     physbones_runtime_ok = (
         asi_exists
         and ini_exists
-        and ini_total_chains == 79
+        and ini_total_chains >= 79
         and ear_chains_count == 30
         and shinano_chains_count == 24
         and miltina_chains_count == 25
@@ -659,6 +659,9 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "avatar_archive_helper.py", deploy_dir / "avatar_archive_helper.py"),
         (common_dir / "modular_avatar_helper.py", deploy_dir / "modular_avatar_helper.py"),
         (common_dir / "build_universal_avatar.py", deploy_dir / "build_universal_avatar.py"),
+        (common_dir / "npc_registry_helper.py", deploy_dir / "npc_registry_helper.py"),
+        (common_dir / "universal_atlas_builder.py", deploy_dir / "universal_atlas_builder.py"),
+        (common_dir / "universal_gtav_builder.py", deploy_dir / "universal_gtav_builder.py"),
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),
         (common_dir / "setup_first_run.py", root_dir / "setup_first_run.py"),
         (common_dir / "hand_skeleton_helper.py", deploy_dir / "hand_skeleton_helper.py"),
@@ -3783,6 +3786,154 @@ MonoBehaviour:
     return suite_passed
 
 
+def test_universal_npc_pipeline() -> bool:
+    """Validate universal NPC registry, atlas tiling, PhysBone separation & curved blink fit."""
+    print(f"\n--- {i18n.translate('tests.suite_npc')} ---")
+    import configparser
+    import npc_registry_helper
+    import physbone_helper
+    import universal_atlas_builder
+    import eye_blink_helper
+
+    suite_passed = True
+
+    with tempfile.TemporaryDirectory() as tmp_root_str:
+        tmp_root = Path(tmp_root_str)
+
+        # 1. Registry round-trip and archive path splitter (streamed + componentpeds)
+        reg_file_check = npc_registry_helper.load_npc_registry(tmp_root)
+        suite_passed &= print_status_result(
+            "Empty NPC registry default load",
+            isinstance(reg_file_check.get("npcs"), dict) and len(reg_file_check["npcs"]) == 0,
+            str(tmp_root),
+        )
+        reg_sample = {
+            "npcs": {
+                "ig_lamardavis": {"ped_name": "ig_lamardavis", "avatar_name": "Karin"},
+                "a_f_y_beach_01": {"ped_name": "a_f_y_beach_01", "avatar_name": "BeachKarin"},
+            }
+        }
+        npc_registry_helper.save_npc_registry(reg_sample, tmp_root)
+        reloaded_reg = npc_registry_helper.load_npc_registry(tmp_root)
+        split_streamed = npc_registry_helper._split_archive_hit(
+            "/gtav/x64e.rpf:x64e.rpf/models/cdimages/streamedpeds_ig.rpf/ig_lamardavis/uppr_000_u.ydd"
+        )
+        split_comp = npc_registry_helper._split_archive_hit(
+            "/gtav/x64v.rpf:x64v.rpf/models/cdimages/componentpeds_a_f_y.rpf/a_f_y_beach_01.ydd"
+        )
+        suite_passed &= print_status_result(
+            "NPC registry save/reload & RPF archive hit parsing",
+            (
+                reloaded_reg["npcs"]["ig_lamardavis"]["avatar_name"] == "Karin"
+                and split_streamed[1] == "models/cdimages/streamedpeds_ig.rpf"
+                and split_streamed[2] == "ig_lamardavis/uppr_000_u.ydd"
+                and split_comp[1] == "models/cdimages/componentpeds_a_f_y.rpf"
+                and split_comp[2] == "a_f_y_beach_01.ydd"
+            ),
+            i18n.translate("tests.npc_pipeline_detail"),
+        )
+
+        # 2. PhysBone un-sided Skirt_0 vs Skirt_8 separation, wrist/ankle parents, & model INI scoping
+        chain_a = physbone_helper._normalize_gtav_chain_name("Skirt_0")
+        chain_b = physbone_helper._normalize_gtav_chain_name("Skirt_8")
+        parent_hand, _tag_hand = physbone_helper.resolve_parent_bone_from_unity_chain(
+            ["LeftHand", "LeftLowerArm"]
+        )
+        parent_shoe, _tag_shoe = physbone_helper.resolve_parent_bone_from_unity_chain(
+            ["RightFoot", "RightLowerLeg"]
+        )
+
+        ini_path = tmp_root / "GTAVPhysBones.ini"
+        lamar_chain = {
+            "name": "PB_Auto_Tail",
+            "model": "ig_lamardavis",
+            "parent_bone_tag": 11816,
+            "config": {
+                "pull": 0.05,
+                "spring": 0.80,
+                "stiffness": 0.10,
+                "gravity": 0.0,
+                "gravity_falloff": 0.0,
+                "immobile": 0.40,
+                "limit_type": 1,
+                "max_angle_x": 55.0,
+                "max_angle_z": 45.0,
+                "integration_type": 1,
+                "is_animated": 0,
+            },
+            "bones": [
+                {"name": "PB_Auto_Tail_0", "tag": 12001, "max_angle": 55.0, "local_pos": (0.0, 0.0, 0.0), "local_rot": (0.0, 0.0, 0.0, 1.0), "limit_axis_local": (0.0, -1.0, 0.0)},
+                {"name": "PB_Auto_Tail_1", "tag": 12002, "max_angle": 55.0, "local_pos": (0.0, -0.1, 0.0), "local_rot": (0.0, 0.0, 0.0, 1.0), "limit_axis_local": (0.0, -1.0, 0.0)},
+            ],
+        }
+        franklin_chain = dict(lamar_chain, name="PB_SC_Ear_L", model="player_one")
+        physbone_helper.export_physbone_asi_ini(ini_path, [franklin_chain], target_ped_model="all")
+        physbone_helper.merge_physbone_asi_ini(
+            ini_path,
+            [lamar_chain],
+            own_prefixes=(),
+            target_ped_model="all",
+            own_chain_models=("ig_lamardavis",),
+        )
+        cfg_ini = configparser.ConfigParser()
+        cfg_ini.read(ini_path, encoding="utf-8")
+        models_found = {cfg_ini[sec].get("model") for sec in cfg_ini.sections() if sec.startswith("Chain_")}
+        suite_passed &= print_status_result(
+            "PhysBone ring separation, limb parents & model-scoped INI merge",
+            (
+                chain_a != chain_b
+                and parent_hand == "SKEL_L_Hand"
+                and parent_shoe == "SKEL_R_Foot"
+                and models_found == {"player_one", "ig_lamardavis"}
+            ),
+            f"rings={chain_a}/{chain_b} models={sorted(models_found)}",
+        )
+
+        # 3. Eye blink curved lash fit ignoring below-eye stray brow micro-deltas
+        fit_res = eye_blink_helper._fit_one_eye_side_weights(
+            side_deltas={
+                10: (0.0, 0.004, -0.030),
+                11: (-0.004, 0.003, -0.025),
+            },
+            side_coords={
+                10: (0.045, -0.050, 1.114),
+                11: (0.060, -0.044, 1.121),
+            },
+            side_sign=1.0,
+            upper_bone_name="PB_Blink_L",
+            outer_bone_name="PB_Blink_LO",
+            side_brow_coords=[
+                (0.062, -0.048, 1.075),
+                (0.050, -0.052, 1.135),
+            ],
+        )
+        suite_passed &= print_status_result(
+            "Eye blink curved upper-lash weight fit with below-eye brow filter",
+            bool(fit_res.get("ok")) and (10 in fit_res["weights"]) and (11 in fit_res["weights"]),
+            f"weighted_ids={sorted(fit_res['weights'].keys())}",
+        )
+
+        # 4. Universal atlas alpha overlay filter & tile manifest structure
+        mat_dir = tmp_root / "Assets" / "Karin"
+        mat_dir.mkdir(parents=True, exist_ok=True)
+        tex_img_path = mat_dir / "Diff.png"
+        from PIL import Image
+        Image.new("RGBA", (64, 64), (240, 200, 210, 255)).save(tex_img_path)
+        alpha_mat = mat_dir / "Karin_Alpha.mat"
+        alpha_mat.write_text("m_Name: Karin_Alpha\n", encoding="utf-8")
+        hair_mat = mat_dir / "Karin_Hair_Transparent.mat"
+        hair_mat.write_text("m_Name: Karin_Hair_Transparent\n", encoding="utf-8")
+        parsed_alpha = universal_atlas_builder.parse_unity_material_file(alpha_mat, {})
+        parsed_hair_trans = universal_atlas_builder.parse_unity_material_file(hair_mat, {})
+        suite_passed &= print_status_result(
+            "Universal atlas material filter keeps hair transparency & strips body alpha",
+            bool(parsed_alpha["is_body_alpha_overlay"]) and not bool(parsed_hair_trans["is_body_alpha_overlay"]),
+            f"alpha={parsed_alpha['is_body_alpha_overlay']} hair={parsed_hair_trans['is_body_alpha_overlay']}",
+        )
+
+    return suite_passed
+
+
 def run_source_only_validation_suite() -> bool:
     """Run source-only checks (syntax, templates, i18n, quality, mirrors, First-Run/MA)."""
     separator_banner = "=" * 70
@@ -3797,6 +3948,7 @@ def run_source_only_validation_suite() -> bool:
         (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
+        (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -3822,6 +3974,7 @@ def run_full_validation_suite() -> bool:
         (i18n.translate("tests.suite_interchangeability"), test_avatar_interchangeability()),
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
+        (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

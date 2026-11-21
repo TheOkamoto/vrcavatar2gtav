@@ -583,6 +583,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=list(VALID_TARGET_CHARACTERS),
         help="GTA V protagonist slot (michael, franklin, trevor)",
     )
+    parser.add_argument(
+        "--target-ped",
+        help="Any GTA V NPC ped model (e.g. ig_lamardavis, cs_lamardavis, a_f_y_beach_01)",
+    )
+    parser.add_argument(
+        "--deploy-npc",
+        action="store_true",
+        help="Patch RPF slots and deploy into GTAV/mods when --target-ped is used",
+    )
+    parser.add_argument(
+        "--force-reextract",
+        action="store_true",
+        help="Re-extract NPC RPF staging even when cached files already exist",
+    )
     parser.add_argument("--interactive", action="store_true", help="Prompt paginated avatar menu & options")
     parser.add_argument("--non-interactive", action="store_true", help="Disable all stdin prompts and auto-select defaults")
     parser.add_argument(
@@ -670,6 +684,30 @@ def main(argv_list: Optional[Sequence[str]] = None) -> int:
             if not args.manifest:
                 raise err_helper.BlenderBuildError("--manifest is required with --in-blender")
             return _run_in_blender_bake(args.manifest, args.ma_plan_json)
+
+        if getattr(args, "target_ped", None):
+            import universal_gtav_builder
+
+            src_spec = (
+                args.unity_scene
+                or args.avatar_zip
+                or args.unity_project
+            )
+            if not src_spec:
+                raise ValueError(
+                    "--avatar-zip, --unity-project, or --unity-scene is required with --target-ped"
+                )
+            universal_gtav_builder.build_and_deploy_npc_from_source(
+                source_spec=str(src_spec),
+                target_ped=str(args.target_ped),
+                avatar_name=str(args.avatar_name or ""),
+                deploy=bool(getattr(args, "deploy_npc", False)) and not bool(args.prepare_only),
+                force_reextract=bool(getattr(args, "force_reextract", False)),
+                blood_decals=bool(getattr(args, "blood_decals", True)),
+                eye_blink=getattr(args, "eye_blink", None),
+                eye_blink_strength=getattr(args, "eye_blink_strength", None),
+            )
+            return 0
 
         prep_res = prepare_universal_avatar_job(
             avatar_zip=args.avatar_zip,

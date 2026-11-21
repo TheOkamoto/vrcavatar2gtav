@@ -1,5 +1,5 @@
 # 導入・技術ガイド: GTA V Legacy 用 VRChat アバター変換
-## 3D 変換・リギング・指 30 本・リップシンク・2K テクスチャ・First-Run・3 主人公への展開
+## 3D 変換・リギング・指 30 本・リップシンク・2K テクスチャ・First-Run・主人公および汎用 NPC への展開
 
 **言語 / Language / Idioma:** [Technical Guide (EN)](DEPLOYMENT_GUIDE.md) | [Guia Técnico (PT-BR)](DEPLOYMENT_GUIDE.pt-BR.md) | **技術ガイド (日本語)** | [README (EN)](../README.md) | [README (PT-BR)](../README.pt-BR.md) | [README (日本語)](../README.ja.md)
 
@@ -25,7 +25,8 @@ vrc2gtav/
 ├── EXECUTAR_GERENCIADOR.bat                         # ポルトガル語名のランチャーエイリアス
 ├── run_mod_manager.py                               # マスターオーケストレーター (対話メニュー + CLI)
 ├── vrc2gtav.cfg.example                             # バージョン管理された INI 設定テンプレート
-├── configs/                                         # ブレンドシェイプ設定 (*_blendshapes.cfg) および PhysBones (*_physbones.cfg)
+├── configs/                                         # ブレンドシェイプ設定 (*_blendshapes.cfg)・PhysBones (*_physbones.cfg)・ローカル npc_registry.json (.gitignore)
+├── npcs/                                            # 汎用 NPC / 街中歩行者のローカル作業フォルダ・出力 (.gitignore)
 ├── README.md / README.pt-BR.md / README.ja.md       # GitHub トップページ用 README (3か国語)
 ├── docs/                                            # 詳細な技術・導入ドキュメント
 │   ├── DEPLOYMENT_GUIDE.md                          # 英語技術ガイド
@@ -52,7 +53,7 @@ vrc2gtav/
 ```
 
 ### 著作権分離と `.gitignore` ルール
-著作権保護された GTA V のゲーム本体ファイルやローカルレンダー画像は Git 管理に含まれません。`staging/`、`renders/`、`backups/`、`vrc2gtav.cfg`、および `.yft`、`.ytd`、`.dds`、`.ydd.xml`、`.backup_*`、コンパイル済み `.ydd` は除外され、**First-Run** 時にユーザー自身の正規環境からローカルで生成されます。
+著作権保護された GTA V のゲーム本体ファイル、BOOTH アセット、ローカルレンダー画像は Git 管理に含まれません。`staging/`、`renders/`、`backups/`、`imported_unity_projects/`、`npcs/`、`vrc2gtav.cfg`、`configs/npc_registry.json`、`3_Trevor_Miltina_Maid/3_textures_gtav/custom_hair_manifest.json`、`1_Franklin_Shinano_Casual/5_rpf_package/`、`3_Trevor_Miltina_Maid/5_rpf_package/`、および `.zip`、`.unitypackage`、`.yft`、`.ytd`、`.dds`、`.ydd.xml`、`.backup_*`、コンパイル済み `.ydd` は除外され、**First-Run** や NPC 変換時にユーザー自身の正規環境からローカルで生成されます。
 
 `_deploy_tools/` に同梱されている `.ydd` は技術用の空ダミー 2 点のみです:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — 629 バイトの非表示ボディダミー。
@@ -73,7 +74,7 @@ vrc2gtav/
 6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `custom_hair` / `fbx_hair`（例: *ねこタイドボブヘア*）や任意の瞳・メイクパックが空欄または未配置でも、ベースアバター標準の髪 (`Hair_*` / `Shinano_hair.png`、`Milltina_hair_*` / 補正済み `Milltina_Hair.png`) と顔 (`Shinano_face.png`、`Milltina_Face.png`) へ安全にフォールバックします
 7. **Unity 抽出 & `.cfg` ブレンドシェイプ管理 (`blendshape_helper.py`):** ビルドスクリプト内の固定ブレンドシェイプ辞書を廃止しました。表情（`.anim`）・素体シュリンク・衣装・小物・ヘアの全ウェイトは `unity_scene`（`.unity` / `.prefab` / FBX チャンネル名）から自動抽出するか、UTF-8 プリセット（`configs/shinano_blendshapes.cfg`・`configs/shinano_er_blendshapes.cfg`・`configs/miltina_blendshapes.cfg`）から `blendshapes_source = auto | unity | cfg` および `--blendshapes-source` / `--blendshapes-cfg` / `--save-blendshapes-cfg` / `--export-blendshapes` で読み書きします
 8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `shinano_casual`・`shinano_er`・`miltina_maid` すべてで、任意の `.prefab`・`m_SourcePrefab` 継承 `PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`.fbx` + `.mat` を `--hair` (`auto | default | none | <パス>`)、`vrc2gtav.cfg` の `custom_hair`、または対話メニュー `[8]` で指定できます。`unity_hair_helper.py` が `.fbx.meta` マテリアル対応表・非表示パーツ除外・lilToon 色調/HSV (`_Color`, `_MainTexHSVG`) を UV タイル (`custom_hair_manifest.json`) へベイクし、`blender_hair_helper.py` が頭部フィット (`--hair-scale`, `--hair-offset`) と `SKEL_Head` ウェイト転送、元ケモ耳保持を自動実行します
-9. **3 主人公標準 VRChat PhysBones・自動インポーター & 優先度パッカー ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 標準構成では多関節カスタムボーン `PB_*`（計 `79` チェーン・`182` カスタムボーンを RAGE の `.ydd` 上限カスタム `<= 63`・合計 `<= 128` 内へ ELF ハッシュ衝突 `0` で配置）を Blender アーマチュアと `.yft` スケルトンへ注入し、`GTAVPhysBones.asi` と `GTAVPhysBones.ini` でリアルタイム物理演算します（マイケル `30` チェーン / `62` ボーン、フランクリン `24` チェーン / `62` ボーン、トレバー `25` チェーン / `58` ボーン — **すべて RAGE 上限内のため破棄 0**）。`Marshmallow PB` の胸プリセットは既定で無効化されており（`physbones_marshmallow = false`）、必要な場合のみ `--physbones-marshmallow` または `physbones_marshmallow = true` で有効化できます（計 `81` チェーン / `186` ボーン）。`MAX_CUSTOM_PHYSBONES_PER_PED = 63` を超えるカスタムアバターでは、`PHYSBONE_PRIORITY_TIERS` により Tier 1〜3 の必須部位（耳・主要髪/ツインテール・尻尾・翼・スカート・コート・スカーフ・袖・主要胸部）および `.L/.R` 対称ペアを優先維持し、Tier 5〜7 の非必須小物（`keychain`・`bag`・`pouch`・`plush`・`badge`・`hairpin`・`earring`・`cheek`・`belt`）を除外して元の剛体親ボーン (`SKEL_Head`・`SKEL_Pelvis` 等) へ安全に固定バインドします。さらにインポート時には `extract_unity_scene_physbones` と `prune_orphaned_physbone_chains` が**旧衣装の孤立 PhysBone**（無効化・`EditorOnly`・`m_RemovedGameObjects`/`m_RemovedComponents`・Modular Avatar 非表示・FBX ウェイトゼロの削除済み衣装メッシュや参照切れ/非アクティブな `rootTransform`）を自動で検出・除外します。`physbones_source = auto | unity | cfg`・`--physbones-source`・`--physbones-marshmallow`・`--physbones-cfg`・`--save-physbones-cfg`・`--export-physbones`・`--overwrite-physbones-from-unity`・対話メニュー `[10]` から自動同期できます。
+9. **マルチ Ped 対応 VRChat PhysBones・自動インポーター & 優先度パッカー ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 標準構成では多関節カスタムボーン `PB_*`（主人公計 `79` チェーン・`182` カスタムボーンを Ped あたり RAGE の `.ydd` 上限カスタム `<= 63`・合計 `<= 128` 内へ ELF ハッシュ衝突 `0` で配置）を Blender アーマチュアと `.yft` スケルトンへ注入し、`GTAVPhysBones.asi` と `GTAVPhysBones.ini` で**最大 32 Ped 同時追跡 (`kMaxTrackedPeds = 32`)** のもとリアルタイム物理演算します。各 `[Chain_*]` と `[Blink_*]` は `model = <ped_name>` / `modelHash` でモデルごとに分離されるため主人公と NPC が競合せず、`ComputeChainMatrices` は VRChat `Advanced` (`integrationType == 1`) の親ボーン基準 `stiffness` を適用します（マイケル `30` チェーン / `62` ボーン、フランクリン `24` チェーン / `62` ボーン、トレバー `25` チェーン / `58` ボーン — **すべて RAGE 上限内のため破棄 0**）。`Marshmallow PB` の胸プリセットは既定で無効化されており（`physbones_marshmallow = false`）、必要な場合のみ `--physbones-marshmallow` または `physbones_marshmallow = true` で有効化できます（計 `81` チェーン / `186` ボーン）。`MAX_CUSTOM_PHYSBONES_PER_PED = 63` を超えるカスタムアバターでは、`PHYSBONE_PRIORITY_TIERS` により Tier 1〜3 の必須部位（耳・主要髪/ツインテール・尻尾・翼・スカート・コート・スカーフ・袖・主要胸部）および `.L/.R` 対称ペアを優先維持し、Tier 5〜7 の非必須小物（`keychain`・`bag`・`pouch`・`plush`・`badge`・`hairpin`・`earring`・`cheek`・`belt`）を除外して元の剛体親ボーン (`SKEL_Head`・`SKEL_Pelvis` 等) へ安全に固定バインドします。さらにインポート時には `extract_unity_scene_physbones` と `prune_orphaned_physbone_chains` が**旧衣装の孤立 PhysBone**（無効化・`EditorOnly`・`m_RemovedGameObjects`/`m_RemovedComponents`・Modular Avatar 非表示・FBX ウェイトゼロの削除済み衣装メッシュや参照切れ/非アクティブな `rootTransform`）を自動で検出・除外します。`physbones_source = auto | unity | cfg`・`--physbones-source`・`--physbones-marshmallow`・`--physbones-cfg`・`--save-physbones-cfg`・`--export-physbones`・`--overwrite-physbones-from-unity`・対話メニュー `[10]` から自動同期できます。
 
 ### 2.2 3か国語ローカライズ (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) により **英語 (`en`)**・**日本語 (`ja`)**・**ポルトガル語 (`pt`)** に完全対応しています:
@@ -130,7 +131,8 @@ $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 ## 5. テクスチャ & `.ytd` 辞書 (2K 規格・JOAAT 順)
 
 ### 5.1 2K (2048×2048) アトラスと DXT5 圧縮
-- すべてのアトラス生成スクリプト ([`generate_franklin_atlas.py`](../scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py)、[`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py)、[`generate_miltina_atlas.py`](../scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py)) は **2048×2048** テクスチャを出力し、`rage` 経由でミップマップ付き **DXT5 (BC3)** に変換します。
+- 各主人公用アトラス生成 ([`generate_franklin_atlas.py`](../scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py)、[`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py)、[`generate_miltina_atlas.py`](../scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py)) および汎用 NPC・カスタムアバター生成 ([`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py)) は **2048×2048** テクスチャを出力し、`rage` 経由でミップマップ付き **DXT5 (BC3)** に変換します。
+- [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py) は `.zip` / `.unitypackage` / Unity プロジェクトから `.mat` / lilToon 設定を直接解析し、髪の透過を保持したまま不要な素体アルファオーバーレイを自動除外します。
 - Michael (*Eternal Reunion*) は UN1〜UN3 衣装に加え懐中時計用 UN4、金属パーツ、バックル、レンズを **4×2 アトラス** へ統合します。
 - コンパイル済みメッシュは `ped.sps` に `DiffuseSampler`・`BumpSampler`・`SpecSampler` を接続し、[`scripts/common_tools/ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py) が `peddamage.xml` (`CPedDamageCylinderInfoSet::HUMAN`) 準拠の 6 ゾーン円筒 `UVMap 1` (`TexCoord1`) と標準頂点カラー (`Color 1 = #FF8000FF`, `Color 2 = #00000000`) を生成して GTA V の出血・傷デカールを有効化します（`--blood-decals` 既定有効、`--no-blood-decals` で `ped_default.sps` へ切替可）。高密度アバターで `TexCoord1` + `Tangent` 追加により RPF7 の 24bit 上限 `16 MiB` (`0xFFFFFF`) を超える場合は、`enforce_ped_rpf7_poly_budget` が顔・素体を保護したまま高ポリ小物のみを自動削減します。
 
@@ -139,20 +141,21 @@ RAGE Engine は Jenkins One-at-a-Time (**JOAAT**) ハッシュで `.ytd` 内の�
 
 ---
 
-## 6. 配置戦略: ユニバーサルスロット置換とダミーメッシュ
+## 6. 配置戦略: 主人公・ストーリー/カットシーン NPC・街中歩行者
 
-GTA V の主人公服装は複数スロット (`uppr`, `lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) と顔プロップ (`p_eyes_*`) に分かれています。`uppr_000` だけを置換するとミッション中や着替え時に元の男性主人公の腕・頭・サングラスが貫通します。
+GTA V の Ped 構成は `streamed` マルチスロット型（主人公、`ig_*` ストーリー NPC、`cs_*` カットシーン NPC）と `componentpeds` パック型（`a_f_*`、`a_m_*` などの街中歩行者）、さらに顔・頭プロップ (`*_p` / `p_*.ydd`) に分かれています。`uppr_000` だけを置換するとミッション中や着替え時に元の腕・服・帽子・サングラスが貫通します。
 
 ### 解決方法:
-1. **`uppr` スロットに全身モデルを配置:** [`scripts/common_tools/apply_characters.py`](../scripts/common_tools/apply_characters.py) がコンパイル済み全身 `.ydd`・`.ytd`・`.yft` を対象 `uppr` スロットへ展開します。
+1. **`uppr` スロットに全身モデルを配置 (主人公):** [`scripts/common_tools/apply_characters.py`](../scripts/common_tools/apply_characters.py) がコンパイル済み全身 `.ydd`・`.ytd`・`.yft` を対象 `uppr` スロットへ展開します。
 2. **ボディ用ダミー ([`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd)):** その他のパーツスロット (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) を 629 バイトの空ダミーで置き換えます。
-3. **眼鏡抑制ダミー ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** `streamedpedprops.rpf` / `x64v_modded.rpf` 内の全 35 個の `p_eyes_*.ydd` を空のリジッドダミーで上書きし、バニラ眼鏡がキャラクターの目に突き刺さるのを防ぎます。
+3. **眼鏡・プロップ抑制ダミー ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** `streamedpedprops.rpf` / `x64v_modded.rpf` 内の全 35 個の `p_eyes_*.ydd` や NPC の `*_p` プロップ (`ig_lamardavis_p` / `cs_lamardavis_p`) を空のリジッドダミーで上書きし、バニラ眼鏡や帽子がキャラクターを貫通するのを防ぎます。
+4. **汎用 NPC & カットシーン処理 ([`npc_registry_helper.py`](../scripts/common_tools/npc_registry_helper.py)・[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)):** 対象 Ped が `streamed` (`x64e.rpf`/`x64v.rpf` の `ig_lamardavis`、`x64g.rpf`/`x64v.rpf` の `cs_lamardavis`、`patchday*`) か `componentpeds` (`x64e.rpf` 内 `peds.rpf` の `a_f_m_beach_01` など) かを自動判定し、NPC 固有の顎ボーン (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`) へのウェイト再マップや `.001` 対 `" 1"` 接尾辞解決（未割当頂点 `0`）、`componentpeds` 用 `.ymt` ダミー属性維持、`configs/npc_registry.json` + `npcs/<ped_name>/` 管理を自動で実行します。
 
 ---
 
 ## 7. RPF7 再パックと `ERR_GEN_ZLIB_2` の防止
 
-[`scripts/common_tools/repack_and_deploy_everything.py`](../scripts/common_tools/repack_and_deploy_everything.py) は進捗バー付きで `mppatches.rpf`、`mppatchesng_dlc.rpf`、`streamedpeds_players.rpf`、`streamedpedprops.rpf`、`x64v_modded.rpf` を再パックし、次の 2 つの必須バイナリパッチを適用します:
+[`scripts/common_tools/repack_and_deploy_everything.py`](../scripts/common_tools/repack_and_deploy_everything.py) は進捗バー付きで主人公用アーカイブ (`mppatches.rpf`、`mppatchesng_dlc.rpf`、`streamedpeds_players.rpf`、`streamedpedprops.rpf`、`x64v_modded.rpf`) および登録済み NPC / 歩行者アーカイブ (`x64e.rpf`、`x64g.rpf`、`x64v.rpf`、`patchday3ng`/`patchday4ng`) を `GTA5.exe` を一切改変しない `--keys` 読み取り専用抽出で再パックし、次の必須バイナリパッチを適用します:
 
 1. **`b'OPEN'` ヘッダーフラグ (Offset 12):** `b'7FPR'` マジック検証後、オフセット 12 を `b'OPEN'` に書き換えて非暗号化カスタム RPF を RAGE が読み込めるようにします。
 2. **TOC `f_size` ゼロ化 (1 エントリ 16 バイト):** 非圧縮のネストされたバイナリエントリに 0 以外の圧縮サイズ値が残るとゲーム実行時に **`ERR_GEN_ZLIB_2`** が発生するため、TOC を走査して該当エントリの圧縮サイズバイトをゼロクリアします。
@@ -163,15 +166,17 @@ GTA V の主人公服装は複数スロット (`uppr`, `lowr`, `feet`, `head`, `
 ## 8. パイプライン実行 (First-Run・マネージャー・検証)
 
 ### 8.1 First-Run・`.zip`/Unity 読込 & Blender 4.0.2 自動取得
-VRChat SDK とアバターだけが入った新規 Unity プロジェクトや配布 `.zip`（例: `Shinano.zip`）から直接環境構築できます:
+クリーンな GitHub クローン、単体アバター `.zip` / `.unitypackage` / `.prefab`、または VRChat SDK + アバターが入った Unity プロジェクト（例: `Shinano.zip`、`Karin.zip`）から直接環境構築できます:
 
 ```bash
 python scripts/common_tools/setup_first_run.py --avatar-zip "/path/to/Shinano_ver1.02.zip" --download-blender --verbose
 # または既存 Unity プロジェクトを指定して実行:
 python run_mod_manager.py --setup --unity-project "/path/to/UnityProject" --download-blender
+# あるいはアバター .zip / .unitypackage から任意の GTA V NPC・歩行者を直接ビルド＆導入:
+python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Karin.zip"
 ```
 
-主な機能 ([`setup_first_run.py`](../scripts/common_tools/setup_first_run.py)・[`avatar_archive_helper.py`](../scripts/common_tools/avatar_archive_helper.py)・[`modular_avatar_helper.py`](../scripts/common_tools/modular_avatar_helper.py)・[`build_universal_avatar.py`](../scripts/common_tools/build_universal_avatar.py)):
+主な機能 ([`setup_first_run.py`](../scripts/common_tools/setup_first_run.py)・[`avatar_archive_helper.py`](../scripts/common_tools/avatar_archive_helper.py)・[`modular_avatar_helper.py`](../scripts/common_tools/modular_avatar_helper.py)・[`npc_registry_helper.py`](../scripts/common_tools/npc_registry_helper.py)・[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)・[`build_universal_avatar.py`](../scripts/common_tools/build_universal_avatar.py)):
 1. **Blender `4.0.2` + `Sollumz` 自動導入**: バージョンとアドオンを検査し、不足時はポータブル版を `tools/` へ安全に取得・展開します。
 2. **`.zip` / `.unitypackage` 安全展開**: Zip-Slip 対策済みで `imported_unity_projects/` へ展開し、`.meta` GUID を保持します。
 3. **10 件ページング＋`Next` アバター選択メニュー**: シーンの `SceneRoots`・`PrefabInstance` を解析し、1ページ10件ずつ `[N] Next` / `[P] Prev` で選択できます。
@@ -203,6 +208,11 @@ python run_mod_manager.py --character michael --hair "/path/to/CustomHair.prefab
 # 対話メニュー [8] から custom_hair・hair_scale・hair_offset を対話形式で設定することも可能です。
 
 # テクスチャ/Blender をスキップし配置・RPF 再パックのみ実行:
+# .zip / .unitypackage / Unity から任意の NPC・街中歩行者をビルド＆配置 (対話メニュー [11] も利用可):
+python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Karin.zip"
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Karin.zip" --target-ped cs_lamardavis --deploy-npc
+python run_mod_manager.py --all-npcs
+
 python run_mod_manager.py --deploy-only
 
 # 環境および依存ツールのみ確認:
@@ -213,10 +223,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) はソース規約とビルド済み出力の双方を検証します:
 
 ```bash
-# フルスイート (11項目: First-Run・ビルド・導入済み環境向け):
+# フルスイート (12項目: First-Run・ビルド・導入済み環境向け):
 python scripts/common_tools/test_mod_suite.py --lang ja
 
-# ソースのみ検証 (8項目: クローン直後・First-Run 前の環境でも実行可能):
+# ソースのみ検証 (9項目: クローン直後・First-Run 前の環境でも実行可能):
 python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ```
 

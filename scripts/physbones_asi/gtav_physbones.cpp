@@ -30,7 +30,7 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr int kMaxBonesPerChain = 16;
 constexpr int kMaxSyncNodes = 256;
-constexpr int kMaxTrackedPeds = 8;
+constexpr int kMaxTrackedPeds = 32;
 constexpr int kMaxWorldPedsScan = 256;
 constexpr int kRescanCooldownFrames = 30;
 constexpr int kSkelHeadTag = 31086;
@@ -446,6 +446,8 @@ struct BoneNodeCfg {
 
 struct PhysBoneChain {
     std::string name;
+    std::string model;
+    uint32_t modelHash = 0U;
     int parentBoneTag = kSkelHeadTag;
     int parentSkelIndex = -1;
     int integrationType = 0;
@@ -599,6 +601,7 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
         } else if (activeChainIdx >= 0) {
             PhysBoneChain& ch = outCfg.chains[activeChainIdx];
             if (key == "name") ch.name = val;
+            else if (key == "model") ch.model = val;
             else if (key == "parent_bone_tag") ch.parentBoneTag = std::atoi(val.c_str());
             else if (key == "bone_count") {
                 int count = std::atoi(val.c_str());
@@ -668,6 +671,7 @@ bool LoadIniConfig(const std::string& iniPath, PluginConfig& outCfg) {
 
     outCfg.targetModelHash = JoaatLower(outCfg.targetPedModel);
     for (PhysBoneChain& ch : outCfg.chains) {
+        ch.modelHash = (ch.model.empty() || ch.model == "all") ? 0U : JoaatLower(ch.model);
         size_t nodeCount = ch.bones.size();
         ch.segLengths.assign(nodeCount > 1 ? nodeCount - 1 : 0, 0.03f);
         for (size_t idx = 0; idx + 1 < nodeCount; ++idx) {
@@ -1574,6 +1578,14 @@ void ComputeChainMatrices(
         Quat restNodeRot = QuatNorm(QuatMul(expParentRot, chain.bones[idx].localRot));
         Vec3 restSegDir = VecNorm(QuatRotateVec(restNodeRot, chain.bones[idx + 1].localPos));
 
+        // VRChat Advanced PhysBones (integrationType == 1): stiffness resists bending away from parent-relative rest pose
+        if (chain.integrationType == 1 && chain.stiffness > 0.001f) {
+            float dtClamped = (deltaTime < 1e-4f) ? 1e-4f : (deltaTime > g_cfg.maxDeltaTime ? g_cfg.maxDeltaTime : deltaTime);
+            float stiffClamped = (chain.stiffness < 0.0f) ? 0.0f : (chain.stiffness > 1.0f ? 1.0f : chain.stiffness);
+            float stiffFactor = 1.0f - std::pow(1.0f - stiffClamped * 0.35f, dtClamped * 60.0f);
+            curDir = VecNorm(VecAdd(VecScale(curDir, 1.0f - stiffFactor), VecScale(restSegDir, stiffFactor)));
+        }
+
         if (chain.limitType > 0) {
             Vec3 limRef = VecNorm(QuatRotateVec(restNodeRot, chain.bones[idx].limitAxisLocal));
             float cosAng = VecDot(curDir, limRef);
@@ -2032,6 +2044,7 @@ bool HasCustomChainBones(int ped, uint32_t pedModelHash, bool& outHasHead) {
     if (CallGetPedBoneIndex(ped, kSkelHeadTag) < 0) return false;
     outHasHead = true;
     for (const auto& ch : g_cfg.chains) {
+        if (ch.modelHash != 0U && ch.modelHash != pedModelHash) continue;
         if (ch.bones.empty()) continue;
         int rootTag = ch.bones[0].tag;
         if (rootTag != 0) {
@@ -2281,7 +2294,12 @@ void ScriptMain() {
             slot.pedHandle = candHandles[c];
             slot.pedAddr = candAddrs[c];
             slot.modelHash = candModels[c];
-            slot.chains = g_cfg.chains;
+            slot.chains.clear();
+            for (const PhysBoneChain& cfgChain : g_cfg.chains) {
+                if (cfgChain.modelHash == 0U || cfgChain.modelHash == slot.modelHash) {
+                    slot.chains.push_back(cfgChain);
+                }
+            }
             slot.blinkProfiles = g_cfg.blinkProfiles;
             matchedSlotIdx[c] = targetIdx;
         }

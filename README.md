@@ -2,7 +2,7 @@
 
 # `vrcavatar2gtav`
 
-**Automated pipeline for converting VRChat Unity/FBX avatars into GTA V Legacy player ped replacements**
+**Automated pipeline for converting VRChat Unity/FBX avatars into GTA V Legacy protagonists, story/cutscene NPCs, and street pedestrians**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Game: GTA V Legacy](https://img.shields.io/badge/Game-GTA%20V%20Legacy-2ea44f.svg)](docs/DEPLOYMENT_GUIDE.md)
@@ -21,7 +21,7 @@
 > [!IMPORTANT]
 > **Copyright & Asset Redistribution Notice**
 >
-> This repository contains **zero** copyrighted BOOTH avatar/outfit models, Unity packages, or Rockstar Games / GTA V binary files. Every character model, texture, `.fbx`, `.unity`, `.ydd`, `.ytd`, `.yft`, `.ymt`, and `.rpf` asset stays excluded via [`.gitignore`](.gitignore).
+> This repository contains **zero** copyrighted BOOTH avatar/outfit models, Unity packages, or Rockstar Games / GTA V binary files. Every character model, texture, `.fbx`, `.unity`, `.ydd`, `.ytd`, `.yft`, `.ymt`, `.rpf`, generated NPC workspace (`npcs/`), and machine-local config (`vrc2gtav.cfg`, `configs/npc_registry.json`) stays excluded via [`.gitignore`](.gitignore).
 >
 > You must supply your own legally obtained BOOTH assets and legally owned **GTA V Legacy** installation, then run the interactive **First-Run** setup wizard to inspect your paths and extract/configure the environment.
 
@@ -29,7 +29,7 @@
 
 ## Overview
 
-`vrcavatar2gtav` automates converting rigged **VRChat (Unity / FBX)** anime avatars into playable **GTA V Legacy** ped replacements for **Michael De Santa (`player_zero`)**, **Franklin Clinton (`player_one`)**, and **Trevor Philips (`player_two`)**.
+`vrcavatar2gtav` automates converting rigged **VRChat (Unity / FBX)** anime avatars into playable **GTA V Legacy** ped replacements for **Michael De Santa (`player_zero`)**, **Franklin Clinton (`player_one`)**, and **Trevor Philips (`player_two`)**, as well as any **GTA V story/cutscene NPC or street pedestrian** (`ig_*`, `cs_*`, `a_f_*`, `a_m_*`, etc., directly from `.zip` / `.unitypackage` / `.prefab`).
 
 Instead of manual bone tweaking and brittle one-off edits, the pipeline coordinates **Blender 4.0.2**, **Sollumz v2.9.0**, and **`rage-cli` 0.28.1** end-to-end — handling skeleton remapping, hand/finger grip alignment, lip-sync morph weights, texture/material calibration, clean `1.0` default scaling (with optional `.unity` scene transform extraction), universal slot packing, and safe RPF7 deployment (`mods/x64v.rpf`).
 
@@ -74,10 +74,11 @@ Instead of manual bone tweaking and brittle one-off edits, the pipeline coordina
 - **Dedicated Error Handling & `--verbose` Timestamped Logs**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) provides typed stage exceptions, atomic file writes, child-process timeout guards, concise default output, and `--verbose` timestamped log files under `logs/`.
 - **Trilingual Support (`en` / `ja` / `pt`)**: Automatic OS locale detection with explicit `--lang` CLI override across managers, setup tools, and automated test suites.
 - **Unit `1.0` Defaults + `.unity` Scale Extraction**: Defaults body scales cleanly to `1.0` out of the box, while automatically reading and extracting custom hierarchy scales when a `.unity` scene file is provided.
-- **Universal Custom Unity Hair & PhysBones Porting**: Resolves arbitrary `.prefab` / `PrefabVariant` / `.fbx` hairs, `VRCPhysBone` chains (`79` standard chains, optional `--physbones-marshmallow`), and full protagonist interchangeability (`[7]`, `--avatar`).
+- **Universal Custom Unity Hair & PhysBones Porting**: Resolves arbitrary `.prefab` / `PrefabVariant` / `.fbx` hairs, `VRCPhysBone` chains (`79` standard protagonist chains + unlimited per-NPC chains, VRChat `Advanced` `integrationType == 1` parent-relative `stiffness`, optional `--physbones-marshmallow`), and full protagonist interchangeability (`[7]`, `--avatar`).
+- **Universal GTA V NPC & Street Pedestrian Pipeline**: [`scripts/common_tools/npc_registry_helper.py`](scripts/common_tools/npc_registry_helper.py), [`scripts/common_tools/universal_atlas_builder.py`](scripts/common_tools/universal_atlas_builder.py), and [`scripts/common_tools/universal_gtav_builder.py`](scripts/common_tools/universal_gtav_builder.py) port any `.zip` / `.unitypackage` / `.prefab` / Unity avatar directly onto any GTA V story/cutscene NPC (`streamed`, e.g., `ig_lamardavis`, `cs_lamardavis`) or street pedestrian (`componentpeds`, e.g., `a_f_m_beach_01`) via menu `[11]` or `--npc` / `--all-npcs` / `--target-ped`. Includes automatic height & A-Pose fitting, native NPC jaw bone detection (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), `.001` vs `" 1"` bone suffix resolution (`0` ungrouped vertices), `.ymt` dummy prop cleanup (`*_p` / `p_*.ydd`), read-only `--keys` extraction, and `GTAVPhysBones.asi` tracking up to **32 simultaneous peds (`kMaxTrackedPeds = 32`)** with per-`model` / `modelHash` chain scoping.
 - **GTA V Blood & Wound Decals (`ped.sps` + 6-Zone `UVMap 1`)**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) enables native GTA V gunshot wounds, slashes, and blood overlays across torso/skirt, head, arms, and legs (`--blood-decals`, enabled by default) while excluding tails and long back hair.
-- **Optional Natural Eye Blinking (`GTAVPhysBones.asi`)**: [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) drives natural asymmetrical eyelid blinking (`2.6–6.0s` random intervals, occasional double-blinks, paused when dead) via the four native GTA V `FACIAL_*_eyelidUpper*` bones without consuming any of the 63 PhysBone slots. Automatically skips avatars with custom closed/smiling/winking eye blendshapes (`eye_blink = auto`), and can be toggled anytime via `--eye-blink` / `--no-eye-blink`, the interactive manager prompt, `vrc2gtav.cfg` (`eye_blink = auto | true | false`), or `[Blink_*] enabled = 0` in `GTAVPhysBones.ini`.
-- **Automated Verification**: Includes both a fast source-only check (`8` suites, works on a fresh GitHub clone) and a full post-build/deploy validation suite (`11` suites).
+- **Optional Natural Eye Blinking (`GTAVPhysBones.asi`)**: [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) drives smooth asymmetrical eyelid blinking (`2.6–6.0s` random intervals, occasional double-blinks, paused when dead, with curved-lash downward filtering and eyebrow ceiling exclusion so eyebrows never vanish or spike) via the four native GTA V `FACIAL_*_eyelidUpper*` bones without consuming any of the 63 PhysBone slots. Automatically skips avatars with custom closed/smiling/winking eye blendshapes (`eye_blink = auto`), and can be toggled anytime via `--eye-blink` / `--no-eye-blink`, the interactive manager prompt, `vrc2gtav.cfg` (`eye_blink = auto | true | false`), or `[Blink_*] enabled = 0` in `GTAVPhysBones.ini`.
+- **Automated Verification**: Includes both a fast source-only check (`9` suites including universal NPC & i18n/AST checks, works on a fresh GitHub clone) and a full post-build/deploy validation suite (`12` suites).
 
 ---
 
@@ -173,9 +174,12 @@ By default each protagonist starts with the preset below, and every VRChat avata
 | `python run_mod_manager.py --character all --physbones-source cfg` | Build using portable `.cfg` PhysBone presets instead of live `.unity` scenes (add `--physbones-marshmallow` to enable Marshmallow PB breasts) |
 | `python run_mod_manager.py --character all --blood-decals` | Build with GTA V blood/wound decals enabled (default; pass `--no-blood-decals` for clean `ped_default.sps` renders) |
 | `python run_mod_manager.py --character all --eye-blink` | Build with natural eye blinking enabled (default `auto` skips closed-eye custom expressions; preset peak `max_blink = 0.50` for Shinano / `0.60` for Miltina without affecting any other facial blendshape; override via `--eye-blink-strength`, disable via `--no-eye-blink`) |
-| `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character folders to `mods/x64v.rpf` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `8` source/config/i18n/First-Run/Modular-Avatar suites (clean clone safe) |
-| `python scripts/common_tools/test_mod_suite.py` | Run all `11` end-to-end validation suites (requires built & deployed assets) |
+| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/Karin.zip"` | Build & deploy any GTA V NPC or street pedestrian (`streamed` / `componentpeds`) directly from an avatar `.zip` / `.unitypackage` / Unity project (also available via menu `[11]`) |
+| `python run_mod_manager.py --all-npcs` | Re-apply and redeploy all registered custom NPCs in `configs/npc_registry.json` alongside protagonists |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Karin.zip" --target-ped cs_lamardavis --deploy-npc` | Convert an avatar `.zip`/`.prefab`/`.unitypackage` directly to any target GTA V ped model (including `cs_*` cutscene NPCs) and deploy |
+| `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character & registered NPC folders to `mods/` |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Run the `9` source/config/i18n/First-Run/Modular-Avatar/NPC suites (clean clone safe) |
+| `python scripts/common_tools/test_mod_suite.py` | Run all `12` end-to-end validation suites (requires built & deployed assets) |
 
 ---
 
@@ -183,13 +187,14 @@ By default each protagonist starts with the preset below, and every VRChat avata
 
 ```text
 vrcavatar2gtav/
-├── configs/                         # Blendshape presets (*_blendshapes.cfg) & PhysBones (*_physbones.cfg)
+├── configs/                         # Blendshape presets (*_blendshapes.cfg), PhysBones (*_physbones.cfg), & local npc_registry.json (gitignored)
+├── npcs/                            # Local custom NPC & street ped workspaces / compiled models (gitignored)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # Full architecture, rigging, Sollumz, shader & RPF7 guide (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Full technical guide (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # Full technical guide (JA)
 ├── scripts/
-│   ├── common_tools/                # First-run, .unity/hair/blendshape/PhysBones helpers, i18n, test_mod_suite.py
+│   ├── common_tools/                # First-run, .unity/hair/blendshape/PhysBones/NPC helpers, i18n, test_mod_suite.py
 │   ├── physbones_asi/               # Real-time VRChat PhysBones ASI plugin (GTAVPhysBones.asi / .ini)
 │   ├── Shinano_Casual_Franklin/     # Franklin (player_one) build scripts
 │   ├── Shinano_EternalReunion_Michael/ # Michael (player_zero) build scripts

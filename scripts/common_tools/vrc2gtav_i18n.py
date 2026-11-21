@@ -3520,4 +3520,54 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ja": "オプションの自然なまばたき、カスタム表情競合ガード & GTAVPhysBones.ini 統合テスト",
         "pt": "Piscar natural opcional, proteção contra expressões customizadas e GTAVPhysBones.ini",
     },
+    "manager.menu_opt_11": {
+        "en": "  [11] Convert & Replace Any GTA V NPC (streamed / pedestrian + VRChat PhysBones)",
+        "ja": "  [11] 任意の GTA V NPC を変換・置換 (固有NPC / 街中歩行者 + VRChat PhysBones)",
+        "pt": "  [11] Converter & Substituir Qualquer NPC do GTA V (pedestre / secundário + PhysBones)",
+    },
+    "manager.npc_header": {
+        "en": "Universal GTA V NPC Converter (VRChat -> Street Ped / Story NPC)",
+        "ja": "汎用 GTA V NPC コンバーター (VRChat -> 歩行者 / サブNPC)",
+        "pt": "Conversor Universal de NPCs do GTA V (VRChat -> Pedestre / Secundário)",
+    },
+    "manager.npc_prompt_ped": {
+        "en": "  Target GTA V NPC model (e.g. ig_lamardavis, cs_lamardavis, a_f_y_beach_01): ",
+        "ja": "  対象の GTA V NPC モデル名 (例: ig_lamardavis, cs_lamardavis, a_f_y_beach_01): ",
+        "pt": "  Nome do modelo NPC alvo no GTA V (ex.: ig_lamardavis, cs_lamardavis, a_f_y_beach_01): ",
+    },
+    "manager.npc_prompt_source": {
+        "en": "  Avatar source path (.zip, .unitypackage, .prefab/.unity, or Unity folder): ",
+        "ja": "  アバターのソースパス (.zip, .unitypackage, .prefab/.unity, または Unity フォルダ): ",
+        "pt": "  Caminho do avatar (.zip, .unitypackage, .prefab/.unity ou pasta Unity): ",
+    },
+    "manager.npc_prompt_avatar": {
+        "en": "  Optional avatar/prefab name (blank = auto-detect): ",
+        "ja": "  任意のアバター/Prefab名 (空欄 = 自動検出): ",
+        "pt": "  Nome opcional do avatar/prefab (vazio = detecção automática): ",
+    },
+    "manager.npc_prompt_deploy": {
+        "en": "  Deploy patched RPF archives & GTAVPhysBones.ini directly into GTA V/mods? [Y/n]: ",
+        "ja": "  パッチ済み RPF と GTAVPhysBones.ini を GTA V/mods へ直接導入しますか? [Y/n]: ",
+        "pt": "  Instalar arquivos RPF e GTAVPhysBones.ini diretamente no GTA V/mods? [Y/n]: ",
+    },
+    "manager.npc_cli_help": {
+        "en": "Target GTA V NPC model name (e.g. ig_lamardavis or a_f_y_beach_01)",
+        "ja": "置換対象の GTA V NPC モデル名 (例: ig_lamardavis, a_f_y_beach_01)",
+        "pt": "Nome do modelo NPC alvo do GTA V (ex.: ig_lamardavis ou a_f_y_beach_01)",
+    },
+    "manager.cli_all_npcs": {
+        "en": "Include all NPCs registered in configs/npc_registry.json during slot patching/repack",
+        "ja": "スロット置換・再パック時に configs/npc_registry.json の全登録済み NPC を含める",
+        "pt": "Incluir todos os NPCs registrados em configs/npc_registry.json ao aplicar/empacotar",
+    },
+    "tests.suite_npc": {
+        "en": "Universal NPC discovery, atlas packing, VRChat PhysBones & multi-model INI",
+        "ja": "汎用 NPC 検出・アトラス生成・VRChat PhysBones & 複数モデル対応 INI テスト",
+        "pt": "Pipeline universal de NPCs, atlas, PhysBones VRChat e INI multi-modelo",
+    },
+    "tests.npc_pipeline_detail": {
+        "en": "streamed + componentpeds layout, un-sided rings, curved lash blink & model-scoped INI",
+        "ja": "streamed / componentpeds 構造、スカート個別追従、まばたき範囲、モデル別 INI",
+        "pt": "layout streamed/componentpeds, saia separada, piscar suave e INI por modelo",
+    },
 }

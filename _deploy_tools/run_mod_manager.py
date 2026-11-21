@@ -875,6 +875,38 @@ def run_interactive_physbone_sync() -> bool:
     )
 
 
+def run_interactive_npc_builder() -> bool:
+    """Interactive prompt to convert any Unity/VRChat avatar onto any GTA V NPC."""
+    import universal_gtav_builder
+
+    print_section_header(project_i18n.translate("manager.npc_header"))
+    ped_raw = input(project_i18n.translate("manager.npc_prompt_ped")).strip()
+    if not ped_raw:
+        return False
+    source_raw = (
+        input(project_i18n.translate("manager.npc_prompt_source"))
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
+    if not source_raw:
+        return False
+    avatar_raw = input(project_i18n.translate("manager.npc_prompt_avatar")).strip()
+    deploy_answer = input(project_i18n.translate("manager.npc_prompt_deploy")).strip()
+    should_deploy = project_i18n.is_affirmative_answer(deploy_answer, default_yes=True)
+    blink_answer = input(project_i18n.translate("manager.prompt_eye_blink")).strip()
+    enable_blink = project_i18n.is_affirmative_answer(blink_answer, default_yes=True)
+
+    universal_gtav_builder.build_and_deploy_npc_from_source(
+        source_spec=source_raw,
+        target_ped=ped_raw,
+        avatar_name=avatar_raw,
+        deploy=should_deploy,
+        eye_blink=enable_blink,
+    )
+    return True
+
+
 def run_interactive_menu() -> None:
     """Display the interactive menu and orchestrate selected pipeline stages."""
     if setup_first_run.is_first_run_needed():
@@ -925,6 +957,7 @@ def run_interactive_menu() -> None:
         print(project_i18n.translate("manager.menu_opt_8"))
         print(project_i18n.translate("manager.menu_opt_9"))
         print(project_i18n.translate("manager.menu_opt_10"))
+        print(project_i18n.translate("manager.menu_opt_11"))
         print(project_i18n.translate("manager.menu_opt_0"))
         print(f"{'-' * 70}")
 
@@ -935,6 +968,15 @@ def run_interactive_menu() -> None:
         if user_menu_choice == "0":
             print(project_i18n.translate("manager.cancelled"))
             sys.exit(0)
+
+        if user_menu_choice == "11":
+            if not project_paths.has_project_config_file():
+                print(project_i18n.translate("manager.missing_cfg_option6"))
+                sys.exit(1)
+            load_runtime_context(force_reload=True)
+            context_dirty = False
+            run_interactive_npc_builder()
+            continue
 
         if user_menu_choice == "10":
             if not project_paths.has_project_config_file():
@@ -1073,6 +1115,16 @@ def main() -> None:
         choices=["michael", "franklin", "trevor", "all"],
         default=None,
         help=project_i18n.translate("manager.cli_character"),
+    )
+    argument_parser.add_argument(
+        "--npc",
+        default=None,
+        help=project_i18n.translate("manager.npc_cli_help"),
+    )
+    argument_parser.add_argument(
+        "--all-npcs",
+        action="store_true",
+        help=project_i18n.translate("manager.cli_all_npcs"),
     )
     argument_parser.add_argument(
         "--avatar",
@@ -1466,6 +1518,47 @@ def main() -> None:
         ):
             sys.exit(0)
 
+    if parsed_arguments.npc:
+        import npc_registry_helper
+        import universal_gtav_builder
+
+        norm_npc = npc_registry_helper.normalize_ped_model_name(parsed_arguments.npc)
+        npc_source = (
+            parsed_arguments.unity_scene
+            or parsed_arguments.avatar_zip
+            or parsed_arguments.unity_project
+        )
+        if npc_source:
+            universal_gtav_builder.build_and_deploy_npc_from_source(
+                source_spec=str(npc_source),
+                target_ped=norm_npc,
+                avatar_name=str(parsed_arguments.unity_avatar_name or ""),
+                deploy=not bool(parsed_arguments.skip_deploy),
+                force_reextract=bool(parsed_arguments.force_setup),
+                blood_decals=True if parsed_arguments.blood_decals is None else bool(parsed_arguments.blood_decals),
+                eye_blink=parsed_arguments.eye_blink,
+                eye_blink_strength=parsed_arguments.eye_blink_strength,
+            )
+            print_section_header(project_i18n.translate("manager.cli_automated_done"))
+            sys.exit(0)
+        else:
+            load_runtime_context(force_reload=True, avatar_overrides=avatar_overrides)
+            apply_script_path = Path(APPLY_CHARACTERS_SCRIPT_PATH)
+            if not apply_script_path.exists():
+                apply_script_path = PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "apply_characters.py"
+            npc_apply_ok = execute_subcommand(
+                [PYTHON_EXECUTABLE, str(apply_script_path), "--npc", norm_npc],
+                f"Applying NPC '{norm_npc}'",
+            )
+            if not npc_apply_ok:
+                sys.exit(1)
+            if not parsed_arguments.skip_deploy:
+                repack_ok = execute_rpf_repack_and_deploy()
+                if not repack_ok:
+                    sys.exit(1)
+            print_section_header(project_i18n.translate("manager.cli_automated_done"))
+            sys.exit(0)
+
     if parsed_arguments.avatar_zip or parsed_arguments.unity_project:
         import build_universal_avatar
         target_slot = (
@@ -1524,6 +1617,7 @@ def main() -> None:
     # Interactive mode when no character/action flags were specified
     if (
         parsed_arguments.character is None
+        and parsed_arguments.npc is None
         and not parsed_arguments.deploy_only
         and not parsed_arguments.check_env
     ):
@@ -1656,6 +1750,14 @@ def main() -> None:
         patch_status = execute_character_slot_patching(selected_characters_list)
         if not patch_status:
             sys.exit(1)
+        if parsed_arguments.all_npcs:
+            apply_script_path = Path(APPLY_CHARACTERS_SCRIPT_PATH)
+            if not apply_script_path.exists():
+                apply_script_path = PROJECT_ROOT_DIRECTORY / "_deploy_tools" / "apply_characters.py"
+            execute_subcommand(
+                [PYTHON_EXECUTABLE, str(apply_script_path), "--all-npcs"],
+                "Patching registered NPCs",
+            )
 
         repack_status = execute_rpf_repack_and_deploy()
         if not repack_status:

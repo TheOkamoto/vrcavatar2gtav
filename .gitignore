@@ -48,19 +48,24 @@ renders/
 !_deploy_tools/head_000_r.ydd
 !_deploy_tools/p_eyes_dummy.ydd
 
-# Machine-local path configuration (generated from vrc2gtav.cfg.example)
+# Machine-local path configuration and dynamic registries
 vrc2gtav.cfg
+configs/npc_registry.json
 
 # Local backups, downloads, logs, tools, and runtime-generated outputs
 backups/
 logs/
 tools/
 imported_unity_projects/
+npcs/
 *.zip
 *.unitypackage
 1_Franklin_Shinano_Casual/3_textures_gtav/textures/
 1_Franklin_Shinano_Casual/4_exported_models/
+1_Franklin_Shinano_Casual/5_rpf_package/
 2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas/
 2_Michael_Shinano_EternalReunion/4_exported_models/
 3_Trevor_Miltina_Maid/3_textures_gtav/*.png
+3_Trevor_Miltina_Maid/3_textures_gtav/custom_hair_manifest.json
 3_Trevor_Miltina_Maid/4_exported_models/
+3_Trevor_Miltina_Maid/5_rpf_package/
