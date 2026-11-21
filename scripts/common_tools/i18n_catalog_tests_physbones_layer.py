@@ -114,19 +114,19 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "{character}: pasta ausente",
     },
     "tests.no_glasses": {
-        "en": "{character}: no p_eyes_*.ydd found",
-        "ja": "{character}: p_eyes_*.ydd なし",
-        "pt": "{character}: nenhum p_eyes_*.ydd encontrado",
+        "en": "{character}: no p_*.ydd found",
+        "ja": "{character}: p_*.ydd なし",
+        "pt": "{character}: nenhum p_*.ydd encontrado",
     },
     "tests.glasses_label": {
-        "en": "Glasses dummies in staging (streamedpedprops)",
-        "ja": "ステージング内メガネダミー (streamedpedprops)",
-        "pt": "Dummies de óculos em staging (streamedpedprops)",
+        "en": "Head/eye/ear prop dummies (streamedpedprops)",
+        "ja": "頭・眼鏡・耳プロップダミー (streamedpedprops)",
+        "pt": "Dummies de props cabeça/óculos/orelha (streamedpedprops)",
     },
     "tests.glasses_ok": {
-        "en": "{count}/35 p_eyes_*.ydd identical to p_eyes_dummy.ydd",
-        "ja": "{count}/35 個の p_eyes_*.ydd が p_eyes_dummy.ydd と一致",
-        "pt": "{count}/35 p_eyes_*.ydd idênticos a p_eyes_dummy.ydd",
+        "en": "{count}/119 p_*.ydd identical to p_eyes_dummy.ydd",
+        "ja": "{count}/119 個の p_*.ydd が p_eyes_dummy.ydd と一致",
+        "pt": "{count}/119 p_*.ydd idênticos a p_eyes_dummy.ydd",
     },
     "tests.mismatches": {
         "en": "Mismatches: {items}",

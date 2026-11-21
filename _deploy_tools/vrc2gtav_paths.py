@@ -1470,15 +1470,34 @@ def ensure_character_skeleton_yft(character_section: str) -> Path:
     )
 
 
+def _resolve_props_backup_directory(
+    props_dir_path: Path,
+    backup_directory: Optional[Union[str, Path]],
+) -> Optional[Path]:
+    """Resolve optional vanilla backup directory for staged protagonist props."""
+    if backup_directory is not None:
+        return Path(backup_directory)
+    try:
+        rpf_paths_cfg = get_rpf_paths()
+        extracted_root = rpf_paths_cfg["streamedpedprops_extracted"].resolve()
+        backup_root = rpf_paths_cfg.get("streamedpedprops_backup_p_eyes")
+        if backup_root is not None and props_dir_path.resolve().parent == extracted_root:
+            return backup_root / props_dir_path.name
+    except Exception:
+        return None
+    return None
+
+
 def patch_character_glasses_props(
     target_props_directory: Union[str, Path],
     prop_dummy_path: Union[str, Path],
     character_label: str = "",
+    backup_directory: Optional[Union[str, Path]] = None,
 ) -> Dict[str, int]:
     """
-    Replace all eyewear drawables (p_eyes_*.ydd) inside a protagonist props
-    folder with the empty rigid prop dummy (p_eyes_dummy.ydd), leaving .ytd and
-    all other accessories untouched.
+    Replace all wearable prop drawables (p_head_*, p_eyes_*, p_ears_* `.ydd`)
+    inside a protagonist props folder with the rigid prop dummy (`p_eyes_dummy.ydd`),
+    backing up non-dummy vanilla `.ydd` files once and leaving `.ytd` untouched.
     """
     props_dir_path = Path(target_props_directory)
     dummy_file_path = Path(prop_dummy_path)
@@ -1489,17 +1508,26 @@ def patch_character_glasses_props(
 
     if not props_dir_path.is_dir():
         print(translate("paths.props_dir_missing", path=props_dir_path))
-        return {"replaced_glasses": 0, "untouched": 0}
+        return {"replaced_glasses": 0, "replaced_props": 0, "untouched": 0}
 
-    replaced_glasses = 0
+    dummy_bytes = dummy_file_path.read_bytes()
+    resolved_backup_dir = _resolve_props_backup_directory(
+        props_dir_path, backup_directory
+    )
+    replaced_props = 0
     untouched_props = 0
     for entry_path in sorted(props_dir_path.iterdir()):
         if not entry_path.is_file():
             continue
         lowercase_name = entry_path.name.lower()
-        if lowercase_name.startswith("p_eyes_") and lowercase_name.endswith(".ydd"):
+        if lowercase_name.startswith("p_") and lowercase_name.endswith(".ydd"):
+            if resolved_backup_dir is not None and entry_path.read_bytes() != dummy_bytes:
+                backup_target = resolved_backup_dir / entry_path.name
+                if not backup_target.exists():
+                    resolved_backup_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(entry_path, backup_target)
             shutil.copyfile(dummy_file_path, entry_path)
-            replaced_glasses += 1
+            replaced_props += 1
         else:
             untouched_props += 1
 
@@ -1510,11 +1538,15 @@ def patch_character_glasses_props(
         translate(
             "paths.props_replaced_line",
             size_bytes=dummy_size_bytes,
-            count=replaced_glasses,
+            count=replaced_props,
         )
     )
     print(translate("paths.props_untouched_line", count=untouched_props))
-    return {"replaced_glasses": replaced_glasses, "untouched": untouched_props}
+    return {
+        "replaced_glasses": replaced_props,
+        "replaced_props": replaced_props,
+        "untouched": untouched_props,
+    }
 
 
 def print_summary() -> None:

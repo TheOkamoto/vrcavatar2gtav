@@ -134,9 +134,9 @@ CORE_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "  [AVISO] Diretório de props não encontrado: {path}",
     },
     "paths.props_replaced_line": {
-        "en": "      Glasses dummies (p_eyes_*.ydd, {size_bytes} B): {count}",
-        "ja": "      眼鏡ダミー置換 (p_eyes_*.ydd, {size_bytes} B): {count}",
-        "pt": "      Dummies de óculos (p_eyes_*.ydd, {size_bytes} B): {count}",
+        "en": "      Prop dummies (p_*.ydd, {size_bytes} B):     {count}",
+        "ja": "      プロップダミー置換 (p_*.ydd, {size_bytes} B): {count}",
+        "pt": "      Dummies de props (p_*.ydd, {size_bytes} B):  {count}",
     },
     "paths.props_untouched_line": {
         "en": "      Other props/textures untouched:         {count}",

@@ -1165,6 +1165,37 @@ def test_universal_npc_pipeline() -> bool:
             f"alpha={parsed_alpha['is_body_alpha_overlay']} hair={parsed_hair_trans['is_body_alpha_overlay']}",
         )
 
+        # 5. Protagonist wearable prop patch replaces p_head/p_eyes/p_ears & backs up vanilla
+        dummy_prop_path = project_paths.get_prop_dummy_ydd_path()
+        sample_props_dir = tmp_root / "player_one_p"
+        sample_backup_dir = tmp_root / "backup_props"
+        sample_props_dir.mkdir(parents=True, exist_ok=True)
+        (sample_props_dir / "p_head_000.ydd").write_bytes(b"VANILLA_HAT")
+        (sample_props_dir / "p_eyes_000.ydd").write_bytes(b"VANILLA_GLASSES")
+        (sample_props_dir / "p_ears_000.ydd").write_bytes(b"VANILLA_EAR")
+        (sample_props_dir / "p_head_diff_000_a.ytd").write_bytes(b"KEEP_YTD")
+        prop_patch_res = project_paths.patch_character_glasses_props(
+            sample_props_dir,
+            dummy_prop_path,
+            "player_one_p",
+            backup_directory=sample_backup_dir,
+        )
+        dummy_bytes = dummy_prop_path.read_bytes()
+        props_all_patched = (
+            prop_patch_res["replaced_props"] == 3
+            and prop_patch_res["untouched"] == 1
+            and (sample_props_dir / "p_head_000.ydd").read_bytes() == dummy_bytes
+            and (sample_props_dir / "p_eyes_000.ydd").read_bytes() == dummy_bytes
+            and (sample_props_dir / "p_ears_000.ydd").read_bytes() == dummy_bytes
+            and (sample_props_dir / "p_head_diff_000_a.ytd").read_bytes() == b"KEEP_YTD"
+            and (sample_backup_dir / "p_head_000.ydd").read_bytes() == b"VANILLA_HAT"
+        )
+        suite_passed &= print_status_result(
+            "Protagonist prop patch dummies head/eyes/ears & preserves vanilla backup",
+            props_all_patched,
+            f"replaced={prop_patch_res['replaced_props']} untouched={prop_patch_res['untouched']}",
+        )
+
     return suite_passed
 
 

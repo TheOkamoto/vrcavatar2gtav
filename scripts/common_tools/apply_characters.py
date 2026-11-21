@@ -12,9 +12,9 @@ Replaces every torso drawable (uppr_*.ydd) with the full waifu model, every
 diffuse texture dictionary (uppr_diff_*.ytd) with the matching 2K atlas, and
 all remaining vanilla body parts (head, hair, beard, legs, feet, hands,
 accessories) with invisible dummy meshes (629-byte head_000_r.ydd), eliminating
-clipping and vanilla overlap. Also replaces all protagonist eyewear props
-(p_eyes_*.ydd inside streamedpedprops.rpf) with the rigid prop dummy
-(515-byte p_eyes_dummy.ydd).
+clipping and vanilla overlap. Also replaces all protagonist head, eyewear, and
+ear wearable props (p_*.ydd inside streamedpedprops.rpf) with the rigid prop
+dummy (515-byte p_eyes_dummy.ydd).
 """
 
 import argparse

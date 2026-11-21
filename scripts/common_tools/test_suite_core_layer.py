@@ -480,7 +480,7 @@ def test_deployed_rpf_encryption_headers() -> bool:
                     i18n.translate("tests.missing_folder", character=character_section)
                 )
                 continue
-            glasses_files = sorted(character_props_dir.glob("p_eyes_*.ydd"))
+            glasses_files = sorted(character_props_dir.glob("p_*.ydd"))
             if not glasses_files:
                 mismatched_glasses.append(
                     i18n.translate("tests.no_glasses", character=character_section)
@@ -495,7 +495,7 @@ def test_deployed_rpf_encryption_headers() -> bool:
 
         all_rpfs_valid &= print_status_result(
             i18n.translate("tests.glasses_label"),
-            len(mismatched_glasses) == 0 and total_glasses_checked == 35,
+            len(mismatched_glasses) == 0 and total_glasses_checked == 119,
             i18n.translate("tests.glasses_ok", count=total_glasses_checked)
             if not mismatched_glasses
             else i18n.translate("tests.mismatches", items=mismatched_glasses[:5]),

@@ -35,7 +35,7 @@ vrc2gtav/
 │
 ├── _deploy_tools/                                   # Runtime mirror & empty dummy drawables
 │   ├── head_000_r.ydd                               # 629-byte invisible dummy body mesh
-│   ├── p_eyes_dummy.ydd                             # Invisible rigid prop dummy (p_eyes_* slots)
+│   ├── p_eyes_dummy.ydd                             # Invisible rigid prop dummy (p_*.ydd slots)
 │   ├── setup_first_run.py                           # First-Run wizard (config + RPF extraction)
 │   ├── repack_and_deploy_everything.py              # RPF7 repacker + TOC patcher + installer
 │   └── ...                                          # Mirrors of unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
@@ -57,7 +57,7 @@ No copyrighted GTA V game files, BOOTH assets, or local render screenshots are t
 
 The only `.ydd` files stored under `_deploy_tools/` are the two minimal scratch-built dummy meshes:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — 629-byte empty invisible body dummy.
-- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — empty rigid prop dummy used to suppress vanilla sunglasses/glasses (`p_eyes_*`).
+- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — empty rigid prop dummy used to suppress vanilla hats, eyewear, and ear props (`p_*.ydd`).
 
 ---
 
@@ -148,7 +148,7 @@ GTA V ped components vary between `streamed` multi-slot characters (protagonists
 ### How Universal Replacement Solves This:
 1. **Full Avatar in `uppr` (Protagonists):** [`scripts/common_tools/apply_characters.py`](../scripts/common_tools/apply_characters.py) replicates the compiled full-body `.ydd`, `.ytd`, and `.yft` across all target `uppr` slots in staging.
 2. **Body Dummy ([`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd)):** every remaining humanoid slot (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) is replaced with the 629-byte invisible dummy drawable.
-3. **Glasses / Eye Prop Dummy ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** all 35 `p_eyes_*.ydd` prop entries in `streamedpedprops.rpf` / `x64v_modded.rpf` (as well as NPC `*_p` prop entries like `ig_lamardavis_p` / `cs_lamardavis_p`) are replaced with empty rigid prop dummies so vanilla glasses/headgear never poke through character eyes.
+3. **Hat / Eyewear / Prop Dummy ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** all 119 protagonist wearable prop entries (`p_head_*.ydd`, `p_eyes_*.ydd`, `p_ears_*.ydd`) in `streamedpedprops.rpf` / `x64v_modded.rpf` (as well as NPC `*_p` prop entries like `ig_lamardavis_p` / `cs_lamardavis_p`) are backed up cleanly and replaced with empty rigid prop dummies so vanilla caps, hats, headsets, and glasses never poke through characters during missions or cutscenes.
 4. **Universal NPC & Cutscene Packing ([`npc_registry_helper.py`](../scripts/common_tools/npc_registry_helper.py), [`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)):** automatically resolves whether any target ped belongs to `streamed` (`ig_lamardavis` in `x64e.rpf`/`x64v.rpf`, `cs_lamardavis` in `x64g.rpf`/`x64v.rpf`, `patchday*`) or packed `componentpeds` (`peds.rpf` inside `x64e.rpf`, e.g., `a_f_m_beach_01`), remaps native NPC jaw bones (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), matches `.001` vs `" 1"` bone suffixes cleanly with `0` ungrouped vertices, preserves `.ymt` dummy attributes for `componentpeds`, and registers builds in `configs/npc_registry.json` + `npcs/<ped_name>/`.
 
 ---

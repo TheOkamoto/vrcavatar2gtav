@@ -35,7 +35,7 @@ vrc2gtav/
 │
 ├── _deploy_tools/                                   # 実行時ミラー & 軽量ダミーメッシュ
 │   ├── head_000_r.ydd                               # 非表示ボディ用ダミーメッシュ (629 バイト)
-│   ├── p_eyes_dummy.ydd                             # 眼鏡抑制用リジッドダミー (p_eyes_* スロット)
+│   ├── p_eyes_dummy.ydd                             # プロップ抑制用リジッドダミー (p_*.ydd スロット)
 │   ├── setup_first_run.py                           # 初回セットアップウィザード (.cfg 生成 + RPF 展開)
 │   ├── repack_and_deploy_everything.py              # RPF7 再パック + TOC 修正 + mods/ 配置
 │   └── ...                                          # unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
@@ -57,7 +57,7 @@ vrc2gtav/
 
 `_deploy_tools/` に同梱されている `.ydd` は技術用の空ダミー 2 点のみです:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — 629 バイトの非表示ボディダミー。
-- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — バニラのサングラス/眼鏡 (`p_eyes_*`) を非表示にするリジッドダミー。
+- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — バニラの帽子・サングラス・耳プロップ (`p_*.ydd`) を非表示にするリジッドダミー。
 
 ---
 
@@ -148,7 +148,7 @@ GTA V の Ped 構成は `streamed` マルチスロット型（主人公、`ig_*`
 ### 解決方法:
 1. **`uppr` スロットに全身モデルを配置 (主人公):** [`scripts/common_tools/apply_characters.py`](../scripts/common_tools/apply_characters.py) がコンパイル済み全身 `.ydd`・`.ytd`・`.yft` を対象 `uppr` スロットへ展開します。
 2. **ボディ用ダミー ([`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd)):** その他のパーツスロット (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) を 629 バイトの空ダミーで置き換えます。
-3. **眼鏡・プロップ抑制ダミー ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** `streamedpedprops.rpf` / `x64v_modded.rpf` 内の全 35 個の `p_eyes_*.ydd` や NPC の `*_p` プロップ (`ig_lamardavis_p` / `cs_lamardavis_p`) を空のリジッドダミーで上書きし、バニラ眼鏡や帽子がキャラクターを貫通するのを防ぎます。
+3. **帽子・眼鏡・プロップ抑制ダミー ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** `streamedpedprops.rpf` / `x64v_modded.rpf` 内の全 119 個の主人公用プロップ (`p_head_*.ydd`・`p_eyes_*.ydd`・`p_ears_*.ydd`) や NPC の `*_p` プロップ (`ig_lamardavis_p` / `cs_lamardavis_p`) を自動バックアップ後に空のリジッドダミーで上書きし、ミッション中やカットシーンでバニラの帽子・キャップ・眼鏡・アクセサリーがキャラクターを貫通するのを防ぎます。
 4. **汎用 NPC & カットシーン処理 ([`npc_registry_helper.py`](../scripts/common_tools/npc_registry_helper.py)・[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)):** 対象 Ped が `streamed` (`x64e.rpf`/`x64v.rpf` の `ig_lamardavis`、`x64g.rpf`/`x64v.rpf` の `cs_lamardavis`、`patchday*`) か `componentpeds` (`x64e.rpf` 内 `peds.rpf` の `a_f_m_beach_01` など) かを自動判定し、NPC 固有の顎ボーン (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`) へのウェイト再マップや `.001` 対 `" 1"` 接尾辞解決（未割当頂点 `0`）、`componentpeds` 用 `.ymt` ダミー属性維持、`configs/npc_registry.json` + `npcs/<ped_name>/` 管理を自動で実行します。
 
 ---

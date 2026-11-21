@@ -35,7 +35,7 @@ vrc2gtav/
 │
 ├── _deploy_tools/                                   # Espelho operacional e dummies leves
 │   ├── head_000_r.ydd                               # Malha dummy invisível de 629 bytes (slots de corpo)
-│   ├── p_eyes_dummy.ydd                             # Malha prop dummy rígida invisível (slots p_eyes_*)
+│   ├── p_eyes_dummy.ydd                             # Malha prop dummy rígida invisível (slots p_*.ydd)
 │   ├── setup_first_run.py                           # Assistente First-Run (configuração + extração RPF)
 │   ├── repack_and_deploy_everything.py              # Empacotador RPF7 + correção de TOC + instalação
 │   └── ...                                          # Espelhos de unity_scene_helper, texture_calibration_helper, hand_skeleton_helper, i18n, paths, apply_*
@@ -57,7 +57,7 @@ Nenhum arquivo original do GTA V, asset BOOTH ou renderização local é enviado
 
 Os únicos arquivos `.ydd` versionados em `_deploy_tools/` são os dois dummies mínimos criados do zero:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — malha dummy de corpo invisível (629 bytes).
-- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — malha dummy rígida invisível para ocultar óculos nativos (`p_eyes_*`).
+- [`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd) — malha dummy rígida invisível para ocultar chapéus, óculos e acessórios nativos (`p_*.ydd`).
 
 ---
 
@@ -148,7 +148,7 @@ Os componentes de peds no GTA V variam entre personagens `streamed` multi-slot (
 ### Solução Adotada no Mod:
 1. **Avatar completo no slot `uppr` (Protagonistas):** o `.ydd`, o `.ytd` e o `.yft` compilados são replicados por [`scripts/common_tools/apply_characters.py`](../scripts/common_tools/apply_characters.py) em todos os slots `uppr` relevantes de cada protagonista no staging.
 2. **Dummy de corpo ([`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd)):** todos os demais slots humanos (`lowr`, `feet`, `head`, `hair`, `berd`, `hand`, `teef`, `accs`, `task`, `jbib`) são preenchidos com a malha invisível de 629 bytes.
-3. **Dummy de óculos/props ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** os 35 slots de óculos (`p_eyes_*.ydd`) nos arquivos de props (bem como props `*_p` de NPCs como `ig_lamardavis_p` / `cs_lamardavis_p`) são substituídos pelo prop dummy rígido e vazio para impedir que óculos ou chapéus nativos atravessem a personagem.
+3. **Dummy de chapéus/óculos/props ([`_deploy_tools/p_eyes_dummy.ydd`](../_deploy_tools/p_eyes_dummy.ydd)):** todos os 119 slots de props de cabeça, óculos e orelha dos protagonistas (`p_head_*.ydd`, `p_eyes_*.ydd`, `p_ears_*.ydd`) nos arquivos de props (bem como props `*_p` de NPCs como `ig_lamardavis_p` / `cs_lamardavis_p`) são substituídos pelo prop dummy rígido e vazio (após backup automático dos originais) para impedir que bonés, chapéus, fones ou óculos nativos atravessem a personagem em missões ou cutscenes.
 4. **Pipeline Universal de NPCs e Cutscenes ([`npc_registry_helper.py`](../scripts/common_tools/npc_registry_helper.py), [`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)):** detecta automaticamente se o ped alvo pertence a `streamed` (`ig_lamardavis` em `x64e.rpf`/`x64v.rpf`, `cs_lamardavis` em `x64g.rpf`/`x64v.rpf`, `patchday*`) ou `componentpeds` empacotado (`peds.rpf` dentro de `x64e.rpf`, ex.: `a_f_m_beach_01`), remapeia ossos nativos de mandíbula (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), casa sufixos `.001` vs `" 1"` sem deixar vértices sem grupo (`0`), preserva atributos dummy de `.ymt` para `componentpeds` e registra tudo em `configs/npc_registry.json` + `npcs/<ped_name>/`.
 
 ---
