@@ -19,6 +19,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -1082,13 +1083,200 @@ def enforce_ped_rpf7_poly_budget(
     }
 
 
+def decode_rsc7_page_layout(flags_value: int) -> Dict[str, Any]:
+    """
+    Decode GTA V RSC7 `system_flags` or `graphics_flags` into exact ordered
+    virtual/physical page ranges `[page_start, page_end)`.
+    """
+    bucket_specs = (
+        ("ss4", 4, 1, 256),
+        ("ss3", 5, 2, 128),
+        ("ss2", 7, 4, 64),
+        ("ss1", 11, 6, 32),
+        ("s0", 17, 7, 16),
+        ("s1", 24, 1, 8),
+        ("s2", 25, 1, 4),
+        ("s3", 26, 1, 2),
+        ("s4", 27, 1, 1),
+    )
+    base_shift = int(flags_value) & 0xF
+    base_unit = 0x200 << base_shift
+    top_nibble = (int(flags_value) >> 28) & 0xF
+    pages_list: List[Dict[str, Any]] = []
+    bucket_counts: List[int] = []
+    bucket_sizes: List[int] = []
+    cursor_offset = 0
+
+    for bucket_idx, (bucket_name, bit_shift, bit_width, unit_mul) in enumerate(bucket_specs):
+        bucket_mask = (1 << bit_width) - 1
+        bucket_count = (int(flags_value) >> bit_shift) & bucket_mask
+        page_bytes = base_unit * unit_mul
+        bucket_counts.append(bucket_count)
+        bucket_sizes.append(page_bytes)
+        for _copy_idx in range(bucket_count):
+            pages_list.append(
+                {
+                    "start": cursor_offset,
+                    "end": cursor_offset + page_bytes,
+                    "size": page_bytes,
+                    "bucket_name": bucket_name,
+                    "bucket_index": bucket_idx,
+                }
+            )
+            cursor_offset += page_bytes
+
+    return {
+        "top_nibble": top_nibble,
+        "base_shift": base_shift,
+        "base_unit": base_unit,
+        "bucket_specs": bucket_specs,
+        "bucket_counts": bucket_counts,
+        "bucket_sizes": bucket_sizes,
+        "pages": pages_list,
+        "total_bytes": cursor_offset,
+    }
+
+
+def encode_rsc7_page_flags(
+    top_nibble: int,
+    base_shift: int,
+    bucket_counts: Sequence[int],
+) -> int:
+    """Re-encode RSC7 page bucket counts into a 32-bit `system_flags` or `graphics_flags` word."""
+    bucket_specs = (
+        ("ss4", 4, 1, 256),
+        ("ss3", 5, 2, 128),
+        ("ss2", 7, 4, 64),
+        ("ss1", 11, 6, 32),
+        ("s0", 17, 7, 16),
+        ("s1", 24, 1, 8),
+        ("s2", 25, 1, 4),
+        ("s3", 26, 1, 2),
+        ("s4", 27, 1, 1),
+    )
+    if len(bucket_counts) != len(bucket_specs):
+        raise ValueError(
+            f"Expected {len(bucket_specs)} RSC7 page buckets, got {len(bucket_counts)}"
+        )
+    packed_flags = ((int(top_nibble) & 0xF) << 28) | (int(base_shift) & 0xF)
+    for count_val, (bucket_name, bit_shift, bit_width, _unit_mul) in zip(
+        bucket_counts, bucket_specs
+    ):
+        bucket_mask = (1 << bit_width) - 1
+        if int(count_val) < 0 or int(count_val) > bucket_mask:
+            raise ValueError(
+                f"RSC7 bucket '{bucket_name}' count {count_val} exceeds max {bucket_mask}"
+            )
+        packed_flags |= (int(count_val) & bucket_mask) << bit_shift
+    return packed_flags
+
+
+def validate_yft_rsc7_page_bounds(
+    yft_file_path: Union[str, Path],
+) -> Dict[str, Any]:
+    """
+    Validate `.yft` RSC7 virtual page sizes, `crSkeletonData` array containment,
+    and `fragType::m_SharedMatrixSet` (`+0xA8`) capacity against `fragType + 0x130`
+    so runtime resource placement never overflows adjacent heap allocations.
+    """
+    target_path = Path(yft_file_path)
+    raw_container = target_path.read_bytes()
+    if len(raw_container) < 16:
+        raise ValueError(f"Invalid .yft resource (<16 bytes): {target_path}")
+    magic_bytes, rsc_version, sys_flags, gfx_flags = struct.unpack(
+        "<4sIII", raw_container[:16]
+    )
+    if magic_bytes != b"RSC7":
+        raise ValueError(f"Invalid RSC7 magic in '{target_path.name}': {magic_bytes!r}")
+
+    raw_bytes = zlib.decompress(raw_container[16:], -15)
+    sys_layout = decode_rsc7_page_layout(sys_flags)
+    gfx_layout = decode_rsc7_page_layout(gfx_flags)
+    expected_raw_bytes = int(sys_layout["total_bytes"]) + int(gfx_layout["total_bytes"])
+    if len(raw_bytes) != expected_raw_bytes:
+        raise ValueError(
+            f"RSC7 page size mismatch in '{target_path.name}': flags describe "
+            f"{expected_raw_bytes} bytes, decompressed payload has {len(raw_bytes)} bytes"
+        )
+
+    sys_pages = sys_layout["pages"]
+
+    def _find_containing_page(offset_val: int, label_text: str) -> Dict[str, Any]:
+        for page_item in sys_pages:
+            if page_item["start"] <= offset_val < page_item["end"]:
+                return page_item
+        raise ValueError(
+            f"Offset 0x{offset_val:x} for {label_text} in '{target_path.name}' "
+            f"does not fall inside any RSC7 virtual page"
+        )
+
+    if len(raw_bytes) >= 0x140:
+        common_drawable_ptr = struct.unpack_from("<Q", raw_bytes, 0x30)[0]
+        if (common_drawable_ptr >> 28) & 0xF == 5:
+            common_drawable_off = common_drawable_ptr & 0x0FFFFFFF
+            skel_data_ptr = struct.unpack_from("<Q", raw_bytes, common_drawable_off + 0x18)[0]
+            if (skel_data_ptr >> 28) & 0xF == 5:
+                skel_data_off = skel_data_ptr & 0x0FFFFFFF
+                skel_bone_count = struct.unpack_from("<H", raw_bytes, skel_data_off + 0x5E)[0]
+                bones_ptr = struct.unpack_from("<Q", raw_bytes, skel_data_off + 0x20)[0]
+                inv_ptr = struct.unpack_from("<Q", raw_bytes, skel_data_off + 0x28)[0]
+                def_ptr = struct.unpack_from("<Q", raw_bytes, skel_data_off + 0x30)[0]
+                parent_idx_ptr = struct.unpack_from("<Q", raw_bytes, skel_data_off + 0x38)[0]
+                skeleton_arrays = (
+                    ("m_Bones", bones_ptr, skel_bone_count * 0x50),
+                    ("m_DefaultTransformsInverted", inv_ptr, skel_bone_count * 0x40),
+                    ("m_DefaultTransforms", def_ptr, skel_bone_count * 0x40),
+                    ("m_ParentIndices", parent_idx_ptr, skel_bone_count * 2),
+                )
+                for array_label, array_ptr, array_bytes in skeleton_arrays:
+                    if not array_ptr or array_bytes == 0:
+                        continue
+                    array_start = array_ptr & 0x0FFFFFFF
+                    array_end = array_start + array_bytes
+                    containing_page = _find_containing_page(array_start, array_label)
+                    if array_end > containing_page["end"]:
+                        raise ValueError(
+                            f"RSC7 virtual page overflow in '{target_path.name}': "
+                            f"{array_label} (0x{array_start:x}..0x{array_end:x}) exceeds "
+                            f"page end 0x{containing_page['end']:x}"
+                        )
+
+    frag_bone_count = struct.unpack_from("<Q", raw_bytes, 0x130)[0] if len(raw_bytes) >= 0x138 else 0
+    shared_matrix_ptr = struct.unpack_from("<Q", raw_bytes, 0xA8)[0] if len(raw_bytes) >= 0xB0 else 0
+    matrix_set_off = 0
+    required_matrix_end = 0
+    if shared_matrix_ptr != 0:
+        matrix_set_off = shared_matrix_ptr & 0x0FFFFFFF
+        required_matrix_end = matrix_set_off + 0x20 + frag_bone_count * 0x30
+        containing_page = _find_containing_page(matrix_set_off, "fragType::m_SharedMatrixSet")
+        if required_matrix_end > containing_page["end"]:
+            raise ValueError(
+                f"RSC7 grmMatrixSet heap overflow in '{target_path.name}': "
+                f"fragType+0xA8=0x{matrix_set_off:x} with {frag_bone_count} bones writes to "
+                f"0x{required_matrix_end:x} > virtual page end 0x{containing_page['end']:x} "
+                f"(+{required_matrix_end - containing_page['end']} bytes)"
+            )
+
+    return {
+        "ok": True,
+        "version": rsc_version,
+        "system_flags": sys_flags,
+        "graphics_flags": gfx_flags,
+        "raw_bytes_len": len(raw_bytes),
+        "frag_bone_count": frag_bone_count,
+        "shared_matrix_offset": matrix_set_off,
+        "required_matrix_end": required_matrix_end,
+    }
+
+
 def validate_rpf7_resource_file(
     file_path: Union[str, Path],
     max_bytes: int = RPF7_MAX_RESOURCE_BYTES,
 ) -> int:
     """
     Verify an RSC7 resource file (`.ydd`, `.ytd`, `.yft`, etc.) does not exceed
-    RPF7's 24-bit entry limit (`16,777,215` bytes / `0xFFFFFF`).
+    RPF7's 24-bit entry limit (`16,777,215` bytes / `0xFFFFFF`), and validate
+    `.yft` RSC7 virtual page bounds (`crSkeletonData` & `m_SharedMatrixSet`).
     """
     target_path = Path(file_path)
     if not target_path.is_file():
@@ -1100,6 +1288,10 @@ def validate_rpf7_resource_file(
             f"({file_bytes / (1024.0 * 1024.0):.2f} MiB) > {int(max_bytes):,} bytes (0xFFFFFF); "
             "packing this file would silently truncate TOC f_size and crash RAGE/GTA V."
         )
+    if target_path.suffix.lower() == ".yft" and file_bytes >= 16:
+        with open(target_path, "rb") as magic_handle:
+            if magic_handle.read(4) == b"RSC7":
+                validate_yft_rsc7_page_bounds(target_path)
     return file_bytes
 
 

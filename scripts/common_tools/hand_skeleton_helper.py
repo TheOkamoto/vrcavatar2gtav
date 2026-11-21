@@ -14,9 +14,11 @@ Ensures that:
      animation rotations.
 """
 
+import struct
 import sys
+import zlib
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple, Union
 
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -407,6 +409,147 @@ def _build_bone_local_matrix(bone_node, translation_vec) -> "mathutils.Matrix":
     return trans_matrix @ rot_matrix @ scale_matrix
 
 
+def ensure_yft_shared_matrix_set_capacity(
+    yft_file_path: Union[str, Path],
+) -> Dict[str, int]:
+    """
+    Ensure an NPC/fragment `.yft`'s `fragType::m_SharedMatrixSet` (`+0xA8`) and
+    its enclosing RSC7 virtual page have enough capacity for all
+    `fragType + 0x130` (`crSkeletonData::m_NumBones`) skinning matrices (`0x30`
+    bytes each). Prevents heap corruption / `ERR_SYS_INVALIDRESOURCE_5` when
+    custom PhysBone or blink bones increase the `.yft` skeleton bone count.
+    """
+    import ped_damage_helper
+
+    resolved_yft_path = Path(yft_file_path)
+    raw_container = resolved_yft_path.read_bytes()
+    if len(raw_container) < 16:
+        raise ValueError(f"Invalid .yft resource (<16 bytes): {resolved_yft_path}")
+
+    magic_bytes, rsc_version, sys_flags, gfx_flags = struct.unpack(
+        "<4sIII", raw_container[:16]
+    )
+    if magic_bytes != b"RSC7":
+        raise ValueError(
+            f"Invalid RSC7 magic in '{resolved_yft_path.name}': {magic_bytes!r}"
+        )
+
+    raw_bytes = bytearray(zlib.decompress(raw_container[16:], -15))
+    old_raw_bytes_len = len(raw_bytes)
+    sys_layout = ped_damage_helper.decode_rsc7_page_layout(sys_flags)
+    gfx_layout = ped_damage_helper.decode_rsc7_page_layout(gfx_flags)
+    if len(raw_bytes) != int(sys_layout["total_bytes"]) + int(gfx_layout["total_bytes"]):
+        raise ValueError(
+            f"RSC7 page sum mismatch in '{resolved_yft_path.name}': "
+            f"{sys_layout['total_bytes'] + gfx_layout['total_bytes']} != {len(raw_bytes)}"
+        )
+
+    frag_bone_count = struct.unpack_from("<Q", raw_bytes, 0x130)[0]
+    shared_matrix_ptr = struct.unpack_from("<Q", raw_bytes, 0xA8)[0]
+    if shared_matrix_ptr == 0:
+        return {
+            "shared_matrix_offset": 0,
+            "bone_count": int(frag_bone_count),
+            "expanded": 0,
+            "old_raw_bytes": old_raw_bytes_len,
+            "new_raw_bytes": old_raw_bytes_len,
+        }
+
+    matrix_set_off = int(shared_matrix_ptr) & 0x0FFFFFFF
+    required_end = matrix_set_off + 0x20 + int(frag_bone_count) * 0x30
+    sys_pages = sys_layout["pages"]
+    containing_idx = -1
+    for page_idx, page_item in enumerate(sys_pages):
+        if page_item["start"] <= matrix_set_off < page_item["end"]:
+            containing_idx = page_idx
+            break
+    if containing_idx < 0:
+        raise ValueError(
+            f"m_SharedMatrixSet offset 0x{matrix_set_off:x} outside RSC7 virtual pages "
+            f"in '{resolved_yft_path.name}'"
+        )
+
+    containing_page = sys_pages[containing_idx]
+    clamped_count = min(int(frag_bone_count), 255)
+    needs_rewrite = False
+    if raw_bytes[matrix_set_off + 0x10] < clamped_count:
+        raw_bytes[matrix_set_off + 0x10] = clamped_count
+        needs_rewrite = True
+    if raw_bytes[matrix_set_off + 0x11] < clamped_count:
+        raw_bytes[matrix_set_off + 0x11] = clamped_count
+        needs_rewrite = True
+
+    new_sys_flags = sys_flags
+    expanded_flag = 0
+    if required_end > containing_page["end"]:
+        if containing_idx != len(sys_pages) - 1:
+            raise ValueError(
+                f"Cannot expand non-trailing virtual page {containing_idx} "
+                f"(0x{containing_page['start']:x}..0x{containing_page['end']:x}) "
+                f"for m_SharedMatrixSet in '{resolved_yft_path.name}'"
+            )
+        needed_page_bytes = required_end - int(containing_page["start"])
+        old_bucket_idx = int(containing_page["bucket_index"])
+        bucket_counts = list(sys_layout["bucket_counts"])
+        bucket_sizes = list(sys_layout["bucket_sizes"])
+        bucket_specs = sys_layout["bucket_specs"]
+
+        if bucket_counts[old_bucket_idx] != 1:
+            raise ValueError(
+                f"Cannot resize trailing RSC7 page in '{resolved_yft_path.name}' "
+                f"without shifting sibling pages: bucket[{old_bucket_idx}] count={bucket_counts[old_bucket_idx]}"
+            )
+
+        target_bucket_idx = -1
+        for candidate_idx in range(old_bucket_idx - 1, -1, -1):
+            if any(bucket_counts[mid_idx] != 0 for mid_idx in range(candidate_idx + 1, old_bucket_idx)):
+                break
+            max_bucket_val = (1 << int(bucket_specs[candidate_idx][2])) - 1
+            if bucket_sizes[candidate_idx] >= needed_page_bytes and (
+                bucket_counts[candidate_idx] + 1 <= max_bucket_val
+            ):
+                target_bucket_idx = candidate_idx
+                break
+
+        if target_bucket_idx < 0:
+            raise ValueError(
+                f"No safe RSC7 trailing page bucket can fit {needed_page_bytes} bytes "
+                f"in '{resolved_yft_path.name}'"
+            )
+
+        bucket_counts[old_bucket_idx] -= 1
+        bucket_counts[target_bucket_idx] += 1
+        new_sys_flags = ped_damage_helper.encode_rsc7_page_flags(
+            sys_layout["top_nibble"],
+            sys_layout["base_shift"],
+            bucket_counts,
+        )
+        new_page_end = int(containing_page["start"]) + int(bucket_sizes[target_bucket_idx])
+        padding_bytes = new_page_end - int(containing_page["end"])
+        if int(gfx_layout["total_bytes"]) == 0:
+            raw_bytes.extend(b"\x00" * padding_bytes)
+        else:
+            sys_end = int(sys_layout["total_bytes"])
+            raw_bytes[sys_end:sys_end] = b"\x00" * padding_bytes
+        needs_rewrite = True
+        expanded_flag = 1
+
+    if needs_rewrite:
+        compressor_obj = zlib.compressobj(level=9, wbits=-15)
+        compressed_payload = compressor_obj.compress(bytes(raw_bytes)) + compressor_obj.flush()
+        header_bytes = struct.pack("<4sIII", magic_bytes, rsc_version, new_sys_flags, gfx_flags)
+        resolved_yft_path.write_bytes(header_bytes + compressed_payload)
+
+    ped_damage_helper.validate_yft_rsc7_page_bounds(resolved_yft_path)
+    return {
+        "shared_matrix_offset": matrix_set_off,
+        "bone_count": int(frag_bone_count),
+        "expanded": expanded_flag,
+        "old_raw_bytes": old_raw_bytes_len,
+        "new_raw_bytes": len(raw_bytes),
+    }
+
+
 def patch_yft_skeleton(
     source_yft_path: Path,
     output_yft_path: Path,
@@ -571,6 +714,7 @@ def patch_yft_skeleton(
 
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
     gen8_module.Fragment.export_rsc(fragment_asset, str(resolved_output))
+    ensure_yft_shared_matrix_set_capacity(resolved_output)
 
     # Round-trip validation after binary export
     verify_fragment = gen8_module.Fragment.import_rsc(str(resolved_output)).result
