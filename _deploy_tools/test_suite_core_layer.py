@@ -701,11 +701,13 @@ def test_code_quality_and_mirror_sync() -> bool:
         i18n.translate("tests.ast_emoji_detail", count=total_python_files),
     )
 
-    cpp_dir = root_dir / "scripts" / "physbones_asi"
+    cpp_dirs = (root_dir / "scripts" / "physbones_asi", root_dir / "scripts" / "vtoon_asi")
     cpp_keywords = {"if", "do", "in", "or"}
     cpp_files_checked = 0
     cpp_quality_ok = True
-    if cpp_dir.is_dir():
+    for cpp_dir in cpp_dirs:
+        if not cpp_dir.is_dir():
+            continue
         for cpp_file in sorted(cpp_dir.iterdir()):
             if cpp_file.suffix not in {".cpp", ".hpp", ".h"}:
                 continue
@@ -724,6 +726,7 @@ def test_code_quality_and_mirror_sync() -> bool:
             stripped_cpp = regex_module.sub(r"/\*.*?\*/", " ", cpp_text, flags=regex_module.S)
             stripped_cpp = regex_module.sub(r"//.*?$", " ", stripped_cpp, flags=regex_module.M)
             stripped_cpp = regex_module.sub(r"^\s*#.*$", " ", stripped_cpp, flags=regex_module.M)
+            stripped_cpp = regex_module.sub(r'R"([A-Za-z0-9_]*)\(.*?\)\1"', " ", stripped_cpp, flags=regex_module.S)
             stripped_cpp = regex_module.sub(r"\"(?:\\.|[^\"\\])*\"|\x27(?:\\.|[^\x27\\])*\x27", " ", stripped_cpp)
             stripped_cpp = regex_module.sub(
                 r"\b0[xX][0-9A-Fa-f]+[uUlL]*\b|\b\d+(?:\.\d*)?(?:[eE][+-]?\d+)?[fFlLuU]*\b",
@@ -801,62 +804,24 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "unity_hair_helper.py", deploy_dir / "unity_hair_helper.py"),
         (common_dir / "blender_hair_helper.py", deploy_dir / "blender_hair_helper.py"),
         (common_dir / "blendshape_helper.py", deploy_dir / "blendshape_helper.py"),
-        (
-            common_dir / "texture_calibration_helper.py",
-            deploy_dir / "texture_calibration_helper.py",
-        ),
+        (common_dir / "texture_calibration_helper.py", deploy_dir / "texture_calibration_helper.py"),
+        (common_dir / "vtoon_profile_helper.py", deploy_dir / "vtoon_profile_helper.py"),
         (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
         (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
-        (
-            common_dir / "repack_and_deploy_everything.py",
-            deploy_dir / "repack_and_deploy_everything.py",
-        ),
+        (common_dir / "repack_and_deploy_everything.py", deploy_dir / "repack_and_deploy_everything.py"),
         (common_dir / "run_mod_manager.py", deploy_dir / "run_mod_manager.py"),
         (common_dir / "run_mod_manager.py", root_dir / "run_mod_manager.py"),
-        (
-            scripts_dir / "Shinano_Casual_Franklin" / "build_franklin_avatar.py",
-            franklin_dir / "2_blender" / "build_franklin_avatar.py",
-        ),
-        (
-            scripts_dir / "Shinano_Casual_Franklin" / "run_build_franklin.py",
-            franklin_dir / "2_blender" / "run_build.py",
-        ),
-        (
-            scripts_dir / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py",
-            franklin_dir / "3_textures_gtav" / "generate_franklin_atlas.py",
-        ),
-        (
-            scripts_dir / "Shinano_EternalReunion_Michael" / "build_michael_er.py",
-            michael_dir / "2_blender" / "build_michael_er.py",
-        ),
-        (
-            scripts_dir / "Shinano_EternalReunion_Michael" / "run_build_er.py",
-            michael_dir / "2_blender" / "run_build.py",
-        ),
-        (
-            scripts_dir / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py",
-            michael_dir / "3_textures_gtav" / "generate_er_atlas.py",
-        ),
-        (
-            scripts_dir / "Shinano_EternalReunion_Michael" / "deploy_michael_er.py",
-            michael_dir / "5_rpf_package" / "deploy_michael_er.py",
-        ),
-        (
-            scripts_dir / "Miltina_Maid_Trevor" / "build_trevor_miltina.py",
-            trevor_dir / "2_blender" / "build_trevor_miltina.py",
-        ),
-        (
-            scripts_dir / "Miltina_Maid_Trevor" / "run_pipeline.py",
-            trevor_dir / "2_blender" / "run_pipeline.py",
-        ),
-        (
-            scripts_dir / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py",
-            trevor_dir / "3_textures_gtav" / "generate_miltina_atlas.py",
-        ),
-        (
-            scripts_dir / "Miltina_Maid_Trevor" / "apply_miltina_to_trevor.py",
-            trevor_dir / "5_rpf_package" / "apply_miltina_to_trevor.py",
-        ),
+        (scripts_dir / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", franklin_dir / "2_blender" / "build_franklin_avatar.py"),
+        (scripts_dir / "Shinano_Casual_Franklin" / "run_build_franklin.py", franklin_dir / "2_blender" / "run_build.py"),
+        (scripts_dir / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py", franklin_dir / "3_textures_gtav" / "generate_franklin_atlas.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "build_michael_er.py", michael_dir / "2_blender" / "build_michael_er.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "run_build_er.py", michael_dir / "2_blender" / "run_build.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py", michael_dir / "3_textures_gtav" / "generate_er_atlas.py"),
+        (scripts_dir / "Shinano_EternalReunion_Michael" / "deploy_michael_er.py", michael_dir / "5_rpf_package" / "deploy_michael_er.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", trevor_dir / "2_blender" / "build_trevor_miltina.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "run_pipeline.py", trevor_dir / "2_blender" / "run_pipeline.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py", trevor_dir / "3_textures_gtav" / "generate_miltina_atlas.py"),
+        (scripts_dir / "Miltina_Maid_Trevor" / "apply_miltina_to_trevor.py", trevor_dir / "5_rpf_package" / "apply_miltina_to_trevor.py"),
     ]
 
     mirrors_in_sync = True

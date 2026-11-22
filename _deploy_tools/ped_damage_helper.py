@@ -26,6 +26,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 PED_DAMAGE_SHADER_NAME = "ped.sps"
 PED_NO_DAMAGE_SHADER_NAME = "ped_default.sps"
+PED_HAIR_CUTOUT_SHADER_NAME = "ped_hair_cutout_alpha.sps"
+PED_ALPHA_SHADER_NAME = "ped_alpha.sps"
 # Matches `ped_default.fxc` (`mov o2.xyzw, l(0, 0, 0.98, 1.0)`) so `ped.sps` does
 # not introduce mirror-like grazing specular or dark metallic tints on anime meshes.
 DEFAULT_ANIME_SPECULAR_FRESNEL = 0.98
@@ -221,6 +223,7 @@ def configure_ped_shader_material(
         ("DiffuseSampler", diffuse_image),
         ("BumpSampler", bump_image),
         ("SpecSampler", spec_image),
+        ("AnisoNoiseSpecSampler", spec_image),
     )
     for sampler_name, image_obj in sampler_images:
         if image_obj is None:
@@ -231,6 +234,19 @@ def configure_ped_shader_material(
             tex_props = getattr(tex_node, "texture_properties", None)
             if tex_props is not None:
                 tex_props.embedded = False
+
+    def _assign_shader_vec4(target_node: Any, vec_vals: Tuple[float, float, float, float]) -> None:
+        out_len = len(getattr(target_node, "outputs", ()))
+        if out_len >= 4 and hasattr(target_node, "set_vec4"):
+            target_node.set_vec4(vec_vals)
+        elif out_len == 3 and hasattr(target_node, "set_vec3"):
+            target_node.set_vec3((vec_vals[0], vec_vals[1], vec_vals[2]))
+        elif out_len == 2 and hasattr(target_node, "set_vec2"):
+            target_node.set_vec2((vec_vals[0], vec_vals[1]))
+        elif out_len >= 1 and hasattr(target_node, "set_float"):
+            target_node.set_float(vec_vals[0])
+        elif hasattr(target_node, "set_vec4") and out_len == 0:
+            target_node.set_vec4(vec_vals)
 
     for shader_node in node_tree.nodes:
         node_name = getattr(shader_node, "name", "")
@@ -245,32 +261,26 @@ def configure_ped_shader_material(
         elif node_name == "StubbleControl" and hasattr(shader_node, "set_vec2"):
             shader_node.set_vec2((float(stubble_control[0]), float(stubble_control[1])))
         elif node_name == "detailSettings":
-            if hasattr(shader_node, "set_vec3"):
-                shader_node.set_vec3(
-                    (
-                        float(detail_settings[0]),
-                        float(detail_settings[1]),
-                        float(detail_settings[2]),
-                    )
-                )
-            elif hasattr(shader_node, "set_vec4"):
-                shader_node.set_vec4(
-                    (
-                        float(detail_settings[0]),
-                        float(detail_settings[1]),
-                        float(detail_settings[2]),
-                        0.0,
-                    )
-                )
-        elif node_name == "umGlobalParams" and hasattr(shader_node, "set_vec4"):
-            shader_node.set_vec4(
+            _assign_shader_vec4(
+                shader_node,
+                (float(detail_settings[0]), float(detail_settings[1]), float(detail_settings[2]), 0.0),
+            )
+        elif node_name == "umGlobalParams":
+            _assign_shader_vec4(
+                shader_node,
                 (
                     float(um_global_params[0]),
                     float(um_global_params[1]),
                     float(um_global_params[2]),
                     float(um_global_params[3]),
-                )
+                ),
             )
+        elif node_name == "anisotropicSpecularIntensity":
+            _assign_shader_vec4(shader_node, (0.0, 0.0, 0.0, 0.0))
+        elif node_name == "anisotropicSpecularColour":
+            _assign_shader_vec4(shader_node, (0.0, 0.0, 0.0, 1.0))
+        elif node_name == "AnisotropicAlphaBias":
+            _assign_shader_vec4(shader_node, (0.0, 0.0, 0.0, 0.0))
     return shader_material
 
 
@@ -279,6 +289,7 @@ def create_ped_material(
     material_name: str,
     *,
     enable_blood_decals: bool = True,
+    shader_override: Optional[str] = None,
     diffuse_image: Any = None,
     bump_image: Any = None,
     spec_image: Any = None,
@@ -290,8 +301,8 @@ def create_ped_material(
     stubble_control: Tuple[float, float] = (0.0, 0.0),
     um_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
 ) -> Any:
-    """Instantiate and calibrate a Sollumz ped material with optional blood decal support."""
-    shader_filename = resolve_ped_shader_filename(enable_blood_decals)
+    """Instantiate and calibrate a Sollumz ped material with optional shader override."""
+    shader_filename = shader_override or resolve_ped_shader_filename(enable_blood_decals)
     shader_material = shader_creator(shader_filename)
     shader_material.name = material_name
     return configure_ped_shader_material(
@@ -306,6 +317,34 @@ def create_ped_material(
         detail_settings=detail_settings,
         stubble_control=stubble_control,
         um_global_params=um_global_params,
+    )
+
+
+def create_ped_hair_cutout_material(
+    shader_creator: Callable[[str], Any],
+    material_name: str,
+    **kwargs: Any,
+) -> Any:
+    """Instantiate a Sollumz `ped_hair_cutout_alpha.sps` cutout hair material."""
+    return create_ped_material(
+        shader_creator,
+        material_name,
+        shader_override=PED_HAIR_CUTOUT_SHADER_NAME,
+        **kwargs,
+    )
+
+
+def create_ped_alpha_material(
+    shader_creator: Callable[[str], Any],
+    material_name: str,
+    **kwargs: Any,
+) -> Any:
+    """Instantiate a Sollumz `ped_alpha.sps` translucent forward-alpha hair material."""
+    return create_ped_material(
+        shader_creator,
+        material_name,
+        shader_override=PED_ALPHA_SHADER_NAME,
+        **kwargs,
     )
 
 
@@ -929,6 +968,8 @@ def enforce_ped_rpf7_poly_budget(
         "pin",
         "glasses",
         "ribbon",
+        "neko",
+        "nail_ribbon",
     ),
     hair_cloth_keywords: Tuple[str, ...] = (
         "hair",
@@ -967,7 +1008,10 @@ def enforce_ped_rpf7_poly_budget(
         and getattr(obj, "type", None) == "MESH"
         and getattr(obj, "data", None) is not None
     ]
-    before_total = sum(len(obj.data.polygons) for obj in valid_meshes)
+    def _effective_poly_weight(obj_item: Any) -> int:
+        return 2 if bool(obj_item.get("vtoon_double_sided", False)) else 1
+
+    before_total = sum(len(obj.data.polygons) * _effective_poly_weight(obj) for obj in valid_meshes)
     if before_total <= effective_max_polys:
         return {
             "trimmed": [],
@@ -1017,7 +1061,7 @@ def enforce_ped_rpf7_poly_budget(
                 break
             old_cnt, new_cnt = _decimate_single_object(candidate, ratio_val)
             if new_cnt < old_cnt:
-                running_total -= old_cnt - new_cnt
+                running_total -= (old_cnt - new_cnt) * _effective_poly_weight(candidate)
                 trimmed_records.append((candidate.name, old_cnt, new_cnt))
                 trimmed_names.add(candidate.name)
                 print(

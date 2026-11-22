@@ -124,6 +124,11 @@ def parse_unity_material_file(
     emission_rgba = _color_prop("_EmissionColor", (0.0, 0.0, 0.0, 1.0))
     bump_scale = _float_prop("_BumpScale", 0.5)
     cutoff_val = _float_prop("_Cutoff", 0.5)
+    cull_mode = _float_prop("_Cull", 2.0)
+    shader_match = re.search(r"m_Shader:\s*\{[^}]*guid:\s*([0-9a-fA-F]{32})", mat_text)
+    shader_guid = shader_match.group(1).lower() if shader_match else ""
+    kw_match = re.search(r"m_ShaderKeywords:\s*(.*)$", mat_text, re.MULTILINE)
+    shader_keywords = kw_match.group(1) if kw_match else ""
     render_queue_match = re.search(r"m_CustomRenderQueue:\s*(-?\d+)", mat_text)
     render_queue = int(render_queue_match.group(1)) if render_queue_match else 2000
 
@@ -131,6 +136,32 @@ def parse_unity_material_file(
     # only when named as explicit alpha overlays and not hair transparency masks.
     low_name = mat_name.lower()
     is_body_alpha_overlay = ("alpha" in low_name and "hair" not in low_name)
+    trans_shader_guids = {
+        "3c79b10c7e0b2784aaa4c2f8dd17d55e",
+        "165365ab7100a044ca85fc8c33548a62",
+        "0c762f24b85918a49812fc5690619178",
+        "b269573b9937b8340b3e9e191a3ba5a8",
+        "7171688840c632447b22ec14e2bdef7e",
+        "6a77405f7dfdc1447af58854c7f43f39",
+        "9cf054060007d784394b8b0bb703e441",
+    }
+    if (
+        not is_body_alpha_overlay
+        and (
+            shader_guid in trans_shader_guids
+            or render_queue >= 2900
+            or "_ALPHABLEND_ON" in shader_keywords
+            or ("hair" in low_name and ("trans" in low_name or "alpha" in low_name or "bang" in low_name or "front" in low_name))
+        )
+    ):
+        alpha_mode = "transparent"
+    elif (
+        not is_body_alpha_overlay
+        and ("hair" in low_name or alpha_mask_tex or render_queue >= 2400 or "_ALPHATEST_ON" in shader_keywords)
+    ):
+        alpha_mode = "cutout"
+    else:
+        alpha_mode = "opaque"
 
     return {
         "name": mat_name,
@@ -139,10 +170,16 @@ def parse_unity_material_file(
         "bump_tex": bump_tex,
         "emission_tex": emission_tex,
         "alpha_mask_tex": alpha_mask_tex,
+        "alpha_mask_scale": _float_prop("_AlphaMaskScale", 1.0),
+        "alpha_mask_val": _float_prop("_AlphaMaskValue", 0.0),
         "color_rgba": list(color_rgba),
         "emission_rgba": list(emission_rgba),
         "bump_scale": bump_scale,
         "cutoff": cutoff_val,
+        "cull_mode": cull_mode,
+        "is_double_sided": cull_mode < 0.5,
+        "alpha_mode": alpha_mode,
+        "shader_guid": shader_guid,
         "render_queue": render_queue,
         "is_body_alpha_overlay": is_body_alpha_overlay,
     }
@@ -200,8 +237,12 @@ def _load_tinted_tile(
     color_rgba: Sequence[float],
     emission_tex: Optional[str] = None,
     emission_rgba: Sequence[float] = (0.0, 0.0, 0.0, 1.0),
+    alpha_mask_tex: Optional[str] = None,
+    alpha_mask_scale: float = 1.0,
+    alpha_mask_val: float = 0.0,
+    preserve_alpha: bool = False,
 ) -> Image.Image:
-    """Load a texture tile resized to `tile_size` and apply Unity `_Color` tint."""
+    """Load a texture tile resized to `tile_size`, applying `_Color` and optional `_AlphaMask`."""
     tile_img = (
         Image.open(tex_path)
         .convert("RGBA")
@@ -210,7 +251,20 @@ def _load_tinted_tile(
     arr_float = numpy_lib.array(tile_img, dtype=numpy_lib.float32)
     for chan_idx in range(3):
         arr_float[:, :, chan_idx] *= float(color_rgba[chan_idx])
-    arr_float[:, :, 3] = 255.0
+    if preserve_alpha:
+        color_alpha = max(0.0, min(1.0, float(color_rgba[3]) if len(color_rgba) >= 4 else 1.0))
+        arr_float[:, :, 3] *= color_alpha
+        if alpha_mask_tex and Path(alpha_mask_tex).is_file():
+            am_img = (
+                Image.open(alpha_mask_tex)
+                .convert("RGBA")
+                .resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+            )
+            am_r = numpy_lib.array(am_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
+            eff_mask = numpy_lib.clip(am_r * float(alpha_mask_scale) + float(alpha_mask_val), 0.0, 1.0)
+            arr_float[:, :, 3] *= eff_mask
+    else:
+        arr_float[:, :, 3] = 255.0
 
     if emission_tex and Path(emission_tex).is_file():
         em_mag = max(float(emission_rgba[0]), float(emission_rgba[1]), float(emission_rgba[2]))
@@ -239,6 +293,7 @@ def build_universal_avatar_atlas(
     extra_fbxs: Sequence[Path] = (),
     output_dir: Path,
     atlas_size: int = 2048,
+    vtoon_char_id: int = 4,
 ) -> Dict[str, Any]:
     """
     Build a combined 2048x2048 diffuse atlas, normal map, black spec map,
@@ -278,6 +333,14 @@ def build_universal_avatar_atlas(
                     "bump_scale": mat_info.get("bump_scale", 0.5),
                     "emission_tex": mat_info.get("emission_tex"),
                     "emission_rgba": mat_info.get("emission_rgba", [0.0, 0.0, 0.0, 1.0]),
+                    "alpha_mask_tex": mat_info.get("alpha_mask_tex"),
+                    "alpha_mask_scale": mat_info.get("alpha_mask_scale", 1.0),
+                    "alpha_mask_val": mat_info.get("alpha_mask_val", 0.0),
+                    "alpha_mode": mat_info.get("alpha_mode", "opaque"),
+                    "is_double_sided": mat_info.get("is_double_sided", False),
+                    "cull_mode": mat_info.get("cull_mode", 2.0),
+                    "cutoff": mat_info.get("cutoff", 0.5),
+                    "mat_path": mat_info.get("mat_path", ""),
                     "materials": [mat_name],
                 }
             )
@@ -336,13 +399,32 @@ def build_universal_avatar_atlas(
         paste_x = col_idx * tile_size
         paste_y = row_idx * tile_size
 
-        tile_img = _load_tinted_tile(
-            Path(entry_data["main_tex"]),
-            tile_size,
-            entry_data["color_rgba"],
-            emission_tex=entry_data.get("emission_tex"),
-            emission_rgba=entry_data.get("emission_rgba", (0.0, 0.0, 0.0, 1.0)),
-        )
+        entry_mat_path = entry_data.get("mat_path", "")
+        tile_img = None
+        if entry_mat_path and Path(entry_mat_path).is_file():
+            import unity_hair_bake_layer as hair_bake_layer
+
+            assets_anchor = project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir
+            baked_res = hair_bake_layer.bake_liltoon_mat_to_image(
+                entry_mat_path,
+                tile_size=(tile_size, tile_size),
+                preserve_alpha=(entry_data.get("alpha_mode", "opaque") != "opaque"),
+                unity_assets_root=assets_anchor,
+            )
+            if baked_res is not None:
+                tile_img = baked_res[0]
+        if tile_img is None:
+            tile_img = _load_tinted_tile(
+                Path(entry_data["main_tex"]),
+                tile_size,
+                entry_data["color_rgba"],
+                emission_tex=entry_data.get("emission_tex"),
+                emission_rgba=entry_data.get("emission_rgba", (0.0, 0.0, 0.0, 1.0)),
+                alpha_mask_tex=entry_data.get("alpha_mask_tex"),
+                alpha_mask_scale=float(entry_data.get("alpha_mask_scale", 1.0)),
+                alpha_mask_val=float(entry_data.get("alpha_mask_val", 0.0)),
+                preserve_alpha=(entry_data.get("alpha_mode", "opaque") != "opaque"),
+            )
         atlas_canvas.paste(tile_img, (paste_x, paste_y))
 
         bump_tex = entry_data.get("bump_tex")
@@ -375,6 +457,11 @@ def build_universal_avatar_atlas(
             "u_scale": uv_scale,
             "v_scale": uv_scale,
             "diffuse_src": entry_data["main_tex"],
+            "alpha_mode": entry_data.get("alpha_mode", "opaque"),
+            "is_double_sided": bool(entry_data.get("is_double_sided", False)),
+            "cull_mode": float(entry_data.get("cull_mode", 2.0)),
+            "cutoff": float(entry_data.get("cutoff", 0.5)),
+            "mat_path": entry_data.get("mat_path", ""),
         }
         tex_stem_low = Path(entry_data["main_tex"]).stem.lower()
         uv_regions_by_tex_stem[tex_stem_low] = region_spec
@@ -386,6 +473,79 @@ def build_universal_avatar_atlas(
     normal_png_path = textures_dir / f"{safe_prefix}_flat_normal.png"
     spec_png_path = textures_dir / f"{safe_prefix}_black_spec.png"
     ytd_path = output_dir / f"{safe_prefix}_atlas.ytd"
+
+    import vtoon_profile_helper
+
+    if vtoon_char_id >= 1:
+        atlas_canvas = vtoon_profile_helper.stamp_vtoon_watermark_block(atlas_canvas, vtoon_char_id)
+        # Generate VToon LUT, MatCap, and INI entry for universal avatars cleanly
+        lut_regions = []
+        slot_materials = {}
+        matcap_candidates = []
+        for reg_name, reg_data in uv_regions_by_mat.items():
+            low_mat = reg_name.lower()
+            if "hair" in low_mat and str(reg_data.get("alpha_mode")) == "transparent":
+                slot_id = vtoon_profile_helper.SLOT_HAIR_ALPHA
+                rim_mask, sh_mask = 0.85, 0.90
+            elif "hair" in low_mat:
+                slot_id = vtoon_profile_helper.SLOT_HAIR
+                rim_mask, sh_mask = 0.85, 0.95
+            elif "face" in low_mat or "head" in low_mat:
+                slot_id = vtoon_profile_helper.SLOT_FACE
+                rim_mask, sh_mask = 0.20, 0.88
+            elif "body" in low_mat or "skin" in low_mat:
+                slot_id = vtoon_profile_helper.SLOT_SKIN
+                rim_mask, sh_mask = 0.25, 0.90
+            else:
+                slot_id = vtoon_profile_helper.SLOT_CLOTH
+                rim_mask, sh_mask = 0.45, 0.95
+            lut_regions.append(
+                vtoon_profile_helper.blender_uv_rect_to_lut_rect(
+                    reg_data["u_offset"],
+                    reg_data["v_offset"],
+                    reg_data["u_scale"],
+                    reg_data["v_scale"],
+                    slot_id=slot_id,
+                    shadow_mask=sh_mask,
+                    rim_mask=rim_mask,
+                )
+            )
+            if slot_id not in slot_materials:
+                mat_p = reg_data.get("mat_path")
+                if mat_p:
+                    matcap_candidates.append(mat_p)
+                parsed_mat = vtoon_profile_helper.parse_liltoon_mat_file(
+                    mat_p,
+                    assets_root=project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir,
+                )
+                slot_materials[slot_id] = vtoon_profile_helper.build_vtoon_slot_from_mat(
+                    parsed_mat,
+                    slot_type=slot_id,
+                    albedo_color_already_baked=True,
+                )
+        pkg_dir = output_dir.parent / "5_rpf_package" if (output_dir.parent / "5_rpf_package").is_dir() else output_dir
+        repo_root = project_paths.get_project_root()
+        sync_targets = [
+            cand
+            for cand in (
+                project_paths.get_gtav_root_dir(),
+                repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package",
+                repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package",
+                repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package",
+            )
+            if cand is not None and cand.is_dir()
+        ]
+        vtoon_profile_helper.generate_character_vtoon_assets(
+            char_id=vtoon_char_id,
+            char_name=ped_name,
+            slug=safe_prefix,
+            package_dir=pkg_dir,
+            lut_regions=lut_regions,
+            slot_materials=slot_materials,
+            mat_paths_for_matcap=matcap_candidates,
+            assets_root=project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir,
+            sync_dirs=sync_targets,
+        )
 
     spec_img = Image.new("RGBA", (atlas_size, atlas_size), (0, 0, 0, 255))
     atlas_canvas.save(atlas_png_path, format="PNG")

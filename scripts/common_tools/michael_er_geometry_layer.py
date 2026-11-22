@@ -25,6 +25,7 @@ import eye_blink_helper
 import hand_skeleton_helper
 import physbone_helper
 import unity_scene_helper
+import blender_hair_helper
 import vrc2gtav_i18n as i18n
 
 try:
@@ -290,6 +291,8 @@ HEAD_ACCESSORY_MESH_NAMES = frozenset({
     "In Hair",
     "Ribbon",
     "Ears",
+    "Earring_L",
+    "Earring_R",
     "_Halo",
     "_Pin.Back",
     "_Pin.R",
@@ -452,8 +455,16 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=N
     if resolved_arm_or_finger is not None:
         return resolved_arm_or_finger
 
-    # Fallback for palm bones while excluding Pocket Watch hand pointers
     lower_name = source_bone_name.lower()
+    if mesh_name in ("Nail_Ribbon", "Nail_neko", "Nail_L", "Nail_R"):
+        if lower_name.startswith("bone"):
+            return "SKEL_R_Finger42"
+        if mesh_name == "Nail_L":
+            return "SKEL_L_Hand"
+        if mesh_name == "Nail_R":
+            return "SKEL_R_Hand"
+
+    # Fallback for palm bones while excluding Pocket Watch hand pointers
     if mesh_name != "Pocket Watch" and "hand" in lower_name:
         side_code = (
             "L"
@@ -788,6 +799,7 @@ def process_michael_er_mesh_inventory(
         neko_hair_rot_matrix = mathutils.Euler((-0.001953, 0.0, 0.0), "XYZ").to_matrix()
 
         eval_world_matrix = evaluated_obj.matrix_world
+        has_negative_det = eval_world_matrix.determinant() < 0.0
         for vert_item in baked_mesh.vertices:
             world_co = eval_world_matrix @ vert_item.co
             if is_beret_mesh:
@@ -802,6 +814,15 @@ def process_michael_er_mesh_inventory(
             vert_item.co.x = (world_co.x + offset_x) * scale_factor
             vert_item.co.y = (world_co.y + offset_y) * scale_factor
             vert_item.co.z = (world_co.z + offset_z) * scale_factor + vertical_offset
+
+        if has_negative_det:
+            # Flip winding cleanly for mirrored FBX parts such as Nail_L (det < 0)
+            bm_flip = bmesh.new()
+            bm_flip.from_mesh(baked_mesh)
+            bmesh.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
+            bm_flip.to_mesh(baked_mesh)
+            bm_flip.free()
+            baked_mesh.update()
 
         if (
             mesh_name == "Body"
@@ -833,6 +854,11 @@ def process_michael_er_mesh_inventory(
                 v_offset = atlas_row / 2.0
 
             clamp_v_flag = mesh_cfg.get("clamp_v", False)
+
+            if not proc_obj.data.uv_layers and mesh_name in ("Nail_neko", "Nail_Ribbon", "Nail_L", "Nail_R"):
+                new_uv = proc_obj.data.uv_layers.new(name="UVMap")
+                for loop_uv in new_uv.data:
+                    loop_uv.uv = (0.5, 0.5)
 
             if proc_obj.data.uv_layers:
                 uv_layer = proc_obj.data.uv_layers[0]
@@ -913,20 +939,32 @@ def process_michael_er_mesh_inventory(
                     dst_group.add([vert_idx], raw_weight / weight_sum, "ADD")
             else:
                 fallback_bone = (
-                    "SKEL_Head"
-                    if (
-                        mesh_cfg.get("is_custom_hair")
-                        or "head" in mesh_name.lower()
-                        or "hair" in mesh_name.lower()
-                        or "glasses" in mesh_name.lower()
-                        or "beret" in mesh_name.lower()
-                        or mesh_name in HEAD_ACCESSORY_MESH_NAMES
-                        or mesh_name == "Body"
-                    )
+                    "SKEL_R_Finger42"
+                    if mesh_name in ("Nail_Ribbon", "Nail_neko")
                     else (
-                        "SKEL_Spine2"
-                        if mesh_name in ("UN3_Bag", "UN1_Shirt", "UN1_ChestRibbon")
-                        else "SKEL_Pelvis"
+                        "SKEL_L_Hand"
+                        if mesh_name == "Nail_L"
+                        else (
+                            "SKEL_R_Hand"
+                            if mesh_name == "Nail_R"
+                            else (
+                                "SKEL_Head"
+                                if (
+                                    mesh_cfg.get("is_custom_hair")
+                                    or "head" in mesh_name.lower()
+                                    or "hair" in mesh_name.lower()
+                                    or "glasses" in mesh_name.lower()
+                                    or "beret" in mesh_name.lower()
+                                    or mesh_name in HEAD_ACCESSORY_MESH_NAMES
+                                    or mesh_name == "Body"
+                                )
+                                else (
+                                    "SKEL_Spine2"
+                                    if mesh_name in ("UN3_Bag", "UN1_Shirt", "UN1_ChestRibbon")
+                                    else "SKEL_Pelvis"
+                                )
+                            )
+                        )
                     )
                 )
                 dst_group = proc_obj.vertex_groups.get(fallback_bone)
@@ -955,9 +993,28 @@ def process_michael_er_mesh_inventory(
                 kept_orig_vert_indices=kept_orig_vert_indices,
             )
 
+        proc_obj["vtoon_bucket"] = str(mesh_cfg.get("vtoon_bucket", "ped"))
+        proc_obj["vtoon_double_sided"] = bool(mesh_cfg.get("double_sided"))
+
         processed_objects.append(proc_obj)
 
     return processed_objects, preserved_body_normals
+
+
+def apply_deferred_double_sided_backfaces(
+    processed_objects,
+    blender_hair_helper_mod,
+    normal_offset: float = 0.00035,
+) -> int:
+    """Duplicate flipped backfaces after decimation so shells never collapse unevenly."""
+    total_dup = 0
+    for proc_obj in processed_objects:
+        if bool(proc_obj.get("vtoon_double_sided", False)):
+            total_dup += blender_hair_helper_mod.duplicate_double_sided_backfaces(
+                proc_obj,
+                normal_offset=float(normal_offset),
+            )
+    return total_dup
 
 
 
@@ -1011,5 +1068,186 @@ def apply_michael_er_split_normals(
                             )
         joined_mesh_obj.data.normals_split_custom_set(split_normals)
         ydrexport.triangulate_mesh = lambda eval_mesh: eval_mesh
+
+
+def _compute_er_earlobe_anchors(bpy_mod, bmesh_mod, mathutils_mod, arm_base):
+    """Find evaluated Left/Right earlobe pierce anchors on Shinano's deformed Body mesh."""
+    head_bone = arm_base.pose.bones.get("Head") if arm_base else None
+    head_pos = (
+        (arm_base.matrix_world @ head_bone.head).copy()
+        if head_bone is not None
+        else mathutils_mod.Vector((0.0, 0.0128, 1.1283))
+    )
+    left_anchor = mathutils_mod.Vector((0.0600, -0.0082, head_pos.z + 0.0210))
+    right_anchor = mathutils_mod.Vector((-0.0600, -0.0082, head_pos.z + 0.0210))
+
+    body_obj = bpy_mod.data.objects.get("Body")
+    if body_obj is None:
+        return left_anchor, right_anchor
+
+    depsgraph_eval = bpy_mod.context.evaluated_depsgraph_get()
+    eval_body = body_obj.evaluated_get(depsgraph_eval)
+    world_pts = [eval_body.matrix_world @ vert.co for vert in eval_body.data.vertices]
+    # Target the outer human earlobe specifically (|x| >= 0.058 excludes jawline/cheek vertices)
+    left_cands = [
+        pt_vec
+        for pt_vec in world_pts
+        if 0.0580 <= pt_vec.x < 0.0750
+        and -0.0180 < pt_vec.y < 0.0100
+        and (head_pos.z + 0.0140) < pt_vec.z < (head_pos.z + 0.0360)
+    ]
+    right_cands = [
+        pt_vec
+        for pt_vec in world_pts
+        if -0.0750 < pt_vec.x <= -0.0580
+        and -0.0180 < pt_vec.y < 0.0100
+        and (head_pos.z + 0.0140) < pt_vec.z < (head_pos.z + 0.0360)
+    ]
+    if len(left_cands) >= 3:
+        low_left = sorted(left_cands, key=lambda pt_vec: pt_vec.z)[:4]
+        mean_lx = sum(pt_vec.x for pt_vec in low_left) / len(low_left)
+        mean_ly = sum(pt_vec.y for pt_vec in low_left) / len(low_left)
+        min_lz = min(pt_vec.z for pt_vec in low_left)
+        left_anchor = mathutils_mod.Vector((mean_lx, mean_ly, min_lz + 0.0008))
+    if len(right_cands) >= 3:
+        low_right = sorted(right_cands, key=lambda pt_vec: pt_vec.z)[:4]
+        mean_rx = sum(pt_vec.x for pt_vec in low_right) / len(low_right)
+        mean_ry = sum(pt_vec.y for pt_vec in low_right) / len(low_right)
+        min_rz = min(pt_vec.z for pt_vec in low_right)
+        right_anchor = mathutils_mod.Vector((mean_rx, mean_ry, min_rz + 0.0008))
+    return left_anchor, right_anchor
+
+
+def _stamp_earring_slot_uvs(ear_obj, mathutils_mod) -> None:
+    """Assign compact atlas palette UVs per Earring material slot inside [0.9375..0.96875, 0..0.0625]."""
+    mesh_data = ear_obj.data
+    if not mesh_data.uv_layers:
+        mesh_data.uv_layers.new(name="UVMap")
+    uv_layer = mesh_data.uv_layers[0].data
+    # Left half: bronze filigree; top-right: silver-pearl stud; bottom-right: sapphire chain
+    slot_boxes = {
+        0: (0.941, 0.008, 0.949, 0.054),
+        3: (0.941, 0.008, 0.949, 0.054),
+        2: (0.957, 0.036, 0.965, 0.058),
+        1: (0.957, 0.005, 0.965, 0.026),
+    }
+    for poly_item in mesh_data.polygons:
+        u0_val, v0_val, u1_val, v1_val = slot_boxes.get(
+            poly_item.material_index, (0.941, 0.008, 0.949, 0.054)
+        )
+        mid_u = 0.5 * (u0_val + u1_val)
+        mid_v = 0.5 * (v0_val + v1_val)
+        span_u = (u1_val - u0_val) * 0.35
+        span_v = (v1_val - v0_val) * 0.35
+        for loop_pos, loop_idx in enumerate(poly_item.loop_indices):
+            angle_offset = (loop_pos % 3) - 1
+            uv_layer[loop_idx].uv = (
+                mid_u + angle_offset * span_u * 0.25,
+                mid_v + angle_offset * span_v * 0.25,
+            )
+
+
+def import_and_place_er_earrings(
+    bpy_mod,
+    bmesh_mod,
+    mathutils_mod,
+    hair_fbx_path,
+    arm_base,
+    unity_config,
+    active_mesh_configs,
+):
+    """Import Earring.fbx (Left & Right) from Neko Tied Bob assets and mount on earlobes."""
+    earring_cands = []
+    if hair_fbx_path:
+        earring_cands.append(Path(str(hair_fbx_path)).parent / "Earring.fbx")
+    earring_cands.append(
+        Path(r"E:\waifuv4\Assets\Li-ne\Neko Tied Bob hair\_Fbx\Earring.fbx")
+    )
+    resolved_earring = next((cand for cand in earring_cands if cand.is_file()), None)
+    if resolved_earring is None:
+        print("[ER Earrings] Earring.fbx not found; skipping.")
+        return
+
+    pre_objs = set(bpy_mod.data.objects)
+    bpy_mod.ops.import_scene.fbx(filepath=str(resolved_earring))
+    new_objs = [obj for obj in bpy_mod.data.objects if obj not in pre_objs]
+    raw_ear_mesh = next((obj for obj in new_objs if obj.type == "MESH"), None)
+    extra_ear_objs = [obj for obj in new_objs if obj != raw_ear_mesh]
+    if raw_ear_mesh is None:
+        for rem_obj in extra_ear_objs:
+            bpy_mod.data.objects.remove(rem_obj)
+        return
+
+    neck_scale = unity_scene_helper.get_uniform_scale(unity_config, ("Neck",), default_scale=0.9)
+    ear_scale = 1.631313 * (float(neck_scale) if float(neck_scale) >= 1.0 else 0.96)
+
+    # Strip Armature modifier and FBX shape keys before editing vertices so Basis never snaps Earring_L back
+    raw_ear_world_mat = raw_ear_mesh.matrix_world.copy()
+    raw_ear_mesh.modifiers.clear()
+    if raw_ear_mesh.data.shape_keys is not None:
+        for key_block in reversed(list(raw_ear_mesh.data.shape_keys.key_blocks)):
+            raw_ear_mesh.shape_key_remove(key_block)
+
+    # Bake raw transform cleanly into vertices, center stud at top origin, slight outward yaw (+25 deg L)
+    raw_verts = [raw_ear_world_mat @ vert.co for vert in raw_ear_mesh.data.vertices]
+    stud_verts = [
+        raw_ear_world_mat @ raw_ear_mesh.data.vertices[vi_idx].co
+        for poly_item in raw_ear_mesh.data.polygons
+        if poly_item.material_index == 2
+        for vi_idx in poly_item.vertices
+    ]
+    anchor_src = stud_verts if stud_verts else raw_verts
+    stud_center = mathutils_mod.Vector(
+        (
+            sum(pt_vec.x for pt_vec in anchor_src) / len(anchor_src),
+            sum(pt_vec.y for pt_vec in anchor_src) / len(anchor_src),
+            sum(pt_vec.z for pt_vec in anchor_src) / len(anchor_src),
+        )
+    )
+    outward_yaw = mathutils_mod.Matrix.Rotation(math.radians(25.0), 3, "Z")
+
+    left_earlobe, right_earlobe = _compute_er_earlobe_anchors(
+        bpy_mod, bmesh_mod, mathutils_mod, arm_base
+    )
+
+    raw_ear_mesh.parent = None
+    raw_ear_mesh.matrix_world = mathutils_mod.Matrix.Identity(4)
+    raw_ear_mesh.vertex_groups.clear()
+    for extra_arm in extra_ear_objs:
+        bpy_mod.data.objects.remove(extra_arm)
+
+    for vert_idx, vert_item in enumerate(raw_ear_mesh.data.vertices):
+        rel_vec = outward_yaw @ ((raw_verts[vert_idx] - stud_center) * ear_scale)
+        vert_item.co = rel_vec + left_earlobe
+    raw_ear_mesh.data.update()
+    raw_ear_mesh.name = "Earring_L"
+    _stamp_earring_slot_uvs(raw_ear_mesh, mathutils_mod)
+
+    right_mesh_data = raw_ear_mesh.data.copy()
+    right_ear_obj = bpy_mod.data.objects.new("Earring_R", right_mesh_data)
+    bpy_mod.context.collection.objects.link(right_ear_obj)
+    for vert_idx, vert_item in enumerate(right_ear_obj.data.vertices):
+        rel_vec = outward_yaw @ ((raw_verts[vert_idx] - stud_center) * ear_scale)
+        vert_item.co = mathutils_mod.Vector((-rel_vec.x, rel_vec.y, rel_vec.z)) + right_earlobe
+    bm_flip = bmesh_mod.new()
+    bm_flip.from_mesh(right_ear_obj.data)
+    bmesh_mod.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
+    bm_flip.to_mesh(right_ear_obj.data)
+    bm_flip.free()
+    right_ear_obj.data.update()
+    _stamp_earring_slot_uvs(right_ear_obj, mathutils_mod)
+
+    for side_name in ("Earring_L", "Earring_R"):
+        active_mesh_configs[side_name] = {
+            "uv_prepacked": True,
+            "shrink_cull": False,
+            "vtoon_bucket": "ped",
+            "double_sided": False,
+        }
+    print(
+        f"[ER Earrings] Mounted Earring_L={tuple(round(val, 4) for val in left_earlobe)} "
+        f"Earring_R={tuple(round(val, 4) for val in right_earlobe)} scale={ear_scale:.4f}",
+        flush=True,
+    )
 
 

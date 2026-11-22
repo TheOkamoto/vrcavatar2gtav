@@ -14,6 +14,7 @@ Then compiles the GTA V .ytd texture dictionary via RAGE CLI in JOAAT order.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,9 +34,11 @@ for _tools_candidate in (
 
 import ped_damage_helper
 import texture_calibration_helper as calibration_helper
+import unity_hair_bake_layer
 import unity_hair_helper
 import vrc2gtav_i18n as i18n
 import vrc2gtav_paths as project_paths
+import vtoon_profile_helper
 
 
 def resolve_startup_language() -> None:
@@ -116,25 +119,46 @@ def generate_miltina_texture_atlas(
         else:
             print(i18n.translate("trevor.atlas.eye_fallback"))
 
-        body_image = Image.open(source_body_path).convert("RGBA")
-        costume_image = Image.open(source_costume_path).convert("RGBA")
+        dolosart_mat_dir = Path(trevor_cfg["tex_dolosart_dir"]).parent
+        assets_root_dir = dolosart_mat_dir.parent.parent
+        body_mat_file = dolosart_mat_dir / "Milltina_Body.mat"
 
         face_quadrant = raw_face_image.resize(
             (half_dimension, half_dimension), Image.Resampling.LANCZOS
         )
-        body_quadrant = body_image.resize(
-            (half_dimension, half_dimension), Image.Resampling.LANCZOS
+        # Apply warm lilToon face tint instead of gamma lift so skin stays natural peach
+        face_quadrant = calibration_helper.apply_shinano_skin_warmth(
+            face_quadrant, red_gain=0.98, green_gain=0.90, blue_gain=0.89
         )
+
+        baked_body_res = (
+            unity_hair_bake_layer.bake_liltoon_mat_to_image(
+                body_mat_file,
+                tile_size=(half_dimension, half_dimension),
+                preserve_alpha=False,
+                unity_assets_root=assets_root_dir,
+                apply_matcap2nd_mul=True,
+            )
+            if body_mat_file.is_file()
+            else None
+        )
+        if baked_body_res is not None:
+            body_quadrant = calibration_helper.apply_shinano_skin_warmth(
+                baked_body_res[0], red_gain=0.97, green_gain=0.91, blue_gain=0.91
+            )
+        else:
+            body_image = Image.open(source_body_path).convert("RGBA")
+            body_quadrant = calibration_helper.apply_shinano_skin_warmth(
+                body_image.resize((half_dimension, half_dimension), Image.Resampling.LANCZOS),
+                red_gain=0.97,
+                green_gain=0.88,
+                blue_gain=0.87,
+            )
+
+        costume_image = Image.open(source_costume_path).convert("RGBA")
         costume_quadrant = costume_image.resize(
             (half_dimension, half_dimension), Image.Resampling.LANCZOS
         )
-
-        # 1. Lift facial brightness to counter RAGE dark shading
-        face_pixel_array = numpy_lib.array(face_quadrant, dtype=numpy_lib.float32)
-        normalized_face_pixels = face_pixel_array[:, :, :3] / 255.0
-        lifted_face_pixels = numpy_lib.power(normalized_face_pixels, 0.80) * 1.15
-        face_pixel_array[:, :, :3] = numpy_lib.clip(lifted_face_pixels * 255.0, 0.0, 255.0)
-        face_quadrant = Image.fromarray(face_pixel_array.astype(numpy_lib.uint8))
 
         # 2. Calibrate hair (custom Unity hair via resolver, or Milltina_Hair default)
         hair_spec_input = (
@@ -183,14 +207,30 @@ def generate_miltina_texture_atlas(
                 print(i18n.translate("trevor.atlas.face_missing", path=trevor_cfg.get("tex_hair", "")))
                 return False
             print(i18n.translate("trevor.atlas.hair_fallback"))
-            dolosart_mat_dir = Path(trevor_cfg["tex_dolosart_dir"]).parent
-            hair_quadrant, hair_specular_quadrant, hair_normal_quadrant = (
-                calibration_helper.calibrate_miltina_default_hair(
-                    base_hair_path=default_hair_path,
-                    dolosart_mat_dir=dolosart_mat_dir,
-                    output_size=half_dimension,
+            hair_mat_default = dolosart_mat_dir / "Milltina_Hair.mat"
+            baked_hair_res = (
+                unity_hair_bake_layer.bake_liltoon_mat_to_image(
+                    hair_mat_default,
+                    tile_size=(half_dimension, half_dimension),
+                    preserve_alpha=True,
+                    unity_assets_root=assets_root_dir,
                 )
+                if hair_mat_default.is_file()
+                else None
             )
+            if baked_hair_res is not None:
+                hair_quadrant, hair_normal_quadrant, hair_specular_quadrant, _ = baked_hair_res
+                hair_quadrant = hair_quadrant.convert("RGBA")
+                hair_specular_quadrant = hair_specular_quadrant.convert("RGBA")
+                hair_normal_quadrant = hair_normal_quadrant.convert("RGBA")
+            else:
+                hair_quadrant, hair_specular_quadrant, hair_normal_quadrant = (
+                    calibration_helper.calibrate_miltina_default_hair(
+                        base_hair_path=default_hair_path,
+                        dolosart_mat_dir=dolosart_mat_dir,
+                        output_size=half_dimension,
+                    )
+                )
             unity_hair_helper.save_custom_hair_manifest(
                 output_directory, hair_spec, []
             )
@@ -208,6 +248,9 @@ def generate_miltina_texture_atlas(
             output_directory / Path(trevor_cfg["atlas_png"]).name
             if output_dir_override
             else Path(trevor_cfg["atlas_png"])
+        )
+        diffuse_atlas_image = vtoon_profile_helper.stamp_vtoon_watermark_block(
+            diffuse_atlas_image, char_id=3
         )
         diffuse_atlas_image.save(diffuse_output_path, "PNG")
         print(i18n.translate("trevor.atlas.saved_diffuse", path=diffuse_output_path))
@@ -298,11 +341,125 @@ def generate_miltina_texture_atlas(
             [diffuse_output_path, specular_output_path, normal_output_path],
         )
         print(i18n.translate("trevor.atlas.ytd_done", path=output_ytd_file))
+        _generate_miltina_vtoon_profile(
+            trevor_cfg=trevor_cfg,
+            dolosart_mat_dir=Path(trevor_cfg["tex_dolosart_dir"]).parent,
+            eye_spec_mask_raw=eye_spec_mask_raw,
+            output_directory=output_directory,
+            custom_output_mode=bool(output_dir_override),
+        )
         return True
 
     except Exception as runtime_error:
         print(i18n.translate("trevor.atlas.failed", error=runtime_error))
         return False
+
+
+def _generate_miltina_vtoon_profile(
+    *,
+    trevor_cfg: dict,
+    dolosart_mat_dir: Path,
+    eye_spec_mask_raw: object,
+    output_directory: Path,
+    custom_output_mode: bool,
+) -> None:
+    """Create UV LUT, MatCap, and synced INI entry for char_id=3 (Miltina Maid)."""
+    assets_root = dolosart_mat_dir.parent.parent
+    face_mat = dolosart_mat_dir / "Milltina_Face.mat"
+    body_mat = dolosart_mat_dir / "Milltina_Body.mat"
+    costume_mat = dolosart_mat_dir / "Milltina_Costume_Black.mat"
+    hair_mat = dolosart_mat_dir / "Milltina_Hair.mat"
+
+    slot_materials = {
+        vtoon_profile_helper.SLOT_CLOTH: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(costume_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_CLOTH,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_SKIN: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(body_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_SKIN,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_FACE: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(face_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_FACE,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_EYES: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(face_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_EYES,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_HAIR: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(hair_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_HAIR,
+            albedo_color_already_baked=True,
+        ),
+    }
+    lut_regions = [
+        {"u0": 0.00, "v0": 0.00, "u1": 0.50, "v1": 0.50, "slot_id": vtoon_profile_helper.SLOT_FACE, "shadow_mask": 0.88, "rim_mask": 0.15},
+        {"u0": 0.50, "v0": 0.00, "u1": 1.00, "v1": 0.50, "slot_id": vtoon_profile_helper.SLOT_SKIN, "shadow_mask": 0.90, "rim_mask": 0.28},
+        {"u0": 0.00, "v0": 0.50, "u1": 0.50, "v1": 1.00, "slot_id": vtoon_profile_helper.SLOT_CLOTH, "shadow_mask": 0.95, "rim_mask": 0.45},
+        {"u0": 0.50, "v0": 0.50, "u1": 1.00, "v1": 1.00, "slot_id": vtoon_profile_helper.SLOT_HAIR, "shadow_mask": 0.92, "rim_mask": 0.88},
+    ]
+
+    repo_root = project_paths.get_project_root()
+    pkg_dir = (
+        Path(trevor_cfg["character_dir"]) / "5_rpf_package"
+        if not custom_output_mode
+        else output_directory
+    )
+    sync_dirs = []
+    if not custom_output_mode:
+        for cand_dir in (
+            project_paths.get_gtav_root_dir(),
+            repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package",
+            repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package",
+        ):
+            if cand_dir and Path(cand_dir).is_dir():
+                sync_dirs.append(Path(cand_dir))
+
+    lut_path, _matcap = vtoon_profile_helper.generate_character_vtoon_assets(
+        char_id=3,
+        char_name="Miltina_Maid",
+        slug="miltina_trevor",
+        package_dir=pkg_dir,
+        lut_regions=lut_regions,
+        slot_materials=slot_materials,
+        mat_paths_for_matcap=[hair_mat],
+        assets_root=assets_root if assets_root.is_dir() else None,
+        sync_dirs=sync_dirs,
+    )
+
+    if eye_spec_mask_raw is not None and lut_path.is_file():
+        lut_img = Image.open(lut_path).convert("RGBA")
+        lut_w, lut_h = lut_img.size
+        face_w = lut_w // 2
+        face_h = lut_h // 2
+        mask_arr = (
+            numpy_lib.array(
+                Image.fromarray((eye_spec_mask_raw.astype(numpy_lib.uint8) * 255)).resize(
+                    (face_w, face_h), Image.Resampling.NEAREST
+                )
+            )
+            > 127
+        )
+        lut_arr = numpy_lib.array(lut_img)
+        eye_region = lut_arr[0:face_h, 0:face_w]
+        eye_region[mask_arr] = [
+            int(round((vtoon_profile_helper.SLOT_EYES / 15.0) * 255.0)),
+            85,
+            185,
+            78,
+        ]
+        lut_arr[0:face_h, 0:face_w] = eye_region
+        updated_lut = Image.fromarray(lut_arr, mode="RGBA")
+        updated_lut.save(lut_path)
+        for extra_dir in sync_dirs:
+            dst_lut = extra_dir / "vtoon_profiles" / lut_path.name
+            if dst_lut.parent.is_dir():
+                shutil.copy2(lut_path, dst_lut)
 
 
 def main() -> int:

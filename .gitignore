@@ -65,6 +65,10 @@ npcs/
 1_Franklin_Shinano_Casual/5_rpf_package/
 2_Michael_Shinano_EternalReunion/3_textures_gtav/textures_atlas/
 2_Michael_Shinano_EternalReunion/4_exported_models/
+2_Michael_Shinano_EternalReunion/5_rpf_package/vtoon_profiles/
+vtoon_profiles/
+vtoon_lut_*.png
+vtoon_matcap_*.png
 3_Trevor_Miltina_Maid/3_textures_gtav/*.png
 3_Trevor_Miltina_Maid/3_textures_gtav/custom_hair_manifest.json
 3_Trevor_Miltina_Maid/4_exported_models/

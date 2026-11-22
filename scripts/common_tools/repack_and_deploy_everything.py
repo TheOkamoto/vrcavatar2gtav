@@ -929,6 +929,8 @@ def run_repack_and_deploy() -> None:
                         flush=True,
                     )
 
+        _sync_vtoon_runtime_to_game(project_paths.get_project_root(), project_paths.get_gtav_root_dir())
+
         if is_dlc_valid and is_x64v_valid and are_patchdays_valid and rpf_limit_checks_ok:
             stage_tracker.finish_pipeline()
             print(project_i18n.translate("repack.verify_passed"))
@@ -939,6 +941,30 @@ def run_repack_and_deploy() -> None:
     except Exception as general_error:
         print(project_i18n.translate("repack.fatal_error", error=general_error))
         sys.exit(1)
+
+
+def _sync_vtoon_runtime_to_game(project_root: Path, gtav_root: Path) -> None:
+    """Copy GTAVVToon.asi, GTAVVToon.ini, and vtoon_profiles/ into GTA V root when present."""
+    if not gtav_root or not gtav_root.is_dir():
+        return
+    for pkg_name in (
+        "2_Michael_Shinano_EternalReunion",
+        "1_Franklin_Shinano_Casual",
+        "3_Trevor_Miltina_Maid",
+    ):
+        pkg_dir = project_root / pkg_name / "5_rpf_package"
+        if not pkg_dir.is_dir():
+            continue
+        asi_src = pkg_dir / "GTAVVToon.asi"
+        if asi_src.is_file():
+            shutil.copy2(asi_src, gtav_root / "GTAVVToon.asi")
+        ini_src = pkg_dir / "GTAVVToon.ini"
+        if ini_src.is_file():
+            shutil.copy2(ini_src, gtav_root / "GTAVVToon.ini")
+        prof_src = pkg_dir / "vtoon_profiles"
+        if prof_src.is_dir():
+            shutil.copytree(prof_src, gtav_root / "vtoon_profiles", dirs_exist_ok=True)
+        break
 
 
 def main() -> None:

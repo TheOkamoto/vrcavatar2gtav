@@ -74,8 +74,8 @@ def _find_relative_companion(root_candidates: List[Path], relative_subpath: str)
 
 def apply_shinano_vibrant_hair_tint(image_rgba_object: Image.Image) -> Image.Image:
     """
-    Transform Shinano hair albedo into the saturated sky-indigo palette matching
-    VRChat lilToon shading.
+    Transform monochrome/slate hair albedo into Shinano's calibrated sapphire-cobalt
+    palette (#2956b8 lit / ~#386fd4 albedo) matching Unity Blue.mat lilToon shading.
     """
     image_pixel_array = numpy_lib.array(image_rgba_object.convert("RGBA"), dtype=numpy_lib.float32)
     red_channel = image_pixel_array[:, :, 0]
@@ -88,10 +88,10 @@ def apply_shinano_vibrant_hair_tint(image_rgba_object: Image.Image) -> Image.Ima
     )
     normalized_luminance = numpy_lib.clip(weighted_luminance / 255.0, 0.0, 1.0)
 
-    transformed_red = numpy_lib.clip(normalized_luminance * 90.0, 0.0, 255.0)
-    transformed_green = numpy_lib.clip(normalized_luminance * 175.0 + 15.0, 0.0, 255.0)
+    transformed_red = numpy_lib.clip(normalized_luminance * 76.0, 0.0, 255.0)
+    transformed_green = numpy_lib.clip(normalized_luminance * 144.0 + 4.0, 0.0, 255.0)
     transformed_blue = numpy_lib.clip(
-        numpy_lib.power(normalized_luminance, 0.6) * 255.0 + 20.0, 0.0, 255.0
+        numpy_lib.power(normalized_luminance, 0.78) * 246.0 + 8.0, 0.0, 255.0
     )
 
     result_pixel_array = numpy_lib.stack(
@@ -103,11 +103,11 @@ def apply_shinano_vibrant_hair_tint(image_rgba_object: Image.Image) -> Image.Ima
 
 def apply_shinano_skin_warmth(
     image_rgba_object: Image.Image,
-    red_gain: float = 1.00,
-    green_gain: float = 0.94,
-    blue_gain: float = 0.93,
+    red_gain: float = 0.97,
+    green_gain: float = 0.87,
+    blue_gain: float = 0.85,
 ) -> Image.Image:
-    """Apply warm peach skin tint calibration matching Shinano lilToon materials."""
+    """Apply warm peach skin tint calibration matching Unity Lueur/lilToon skin tones."""
     skin_array = numpy_lib.array(image_rgba_object.convert("RGBA"), dtype=numpy_lib.float32)
     skin_array[:, :, 0] = numpy_lib.clip(skin_array[:, :, 0] * red_gain, 0.0, 255.0)
     skin_array[:, :, 1] = numpy_lib.clip(skin_array[:, :, 1] * green_gain, 0.0, 255.0)
@@ -141,7 +141,7 @@ def composite_shinano_face_with_fallback(
         .convert("RGBA")
         .resize((canvas_dimension, canvas_dimension), Image.Resampling.LANCZOS)
     )
-    composite_face = apply_shinano_skin_warmth(raw_face_image, 1.00, 0.94, 0.93)
+    composite_face = apply_shinano_skin_warmth(raw_face_image, 0.97, 0.87, 0.85)
     missing_optional_layers: List[str] = []
 
     resolved_makeup = resolve_existing_file(makeup_path)
@@ -423,6 +423,16 @@ def calibrate_miltina_default_hair(
     matcap_mask_path = _find_relative_companion(mat_roots, "Mask/Milltina_Hair_Matcap_Mask.png")
     matcap_tex_path = _find_relative_companion(mat_roots, "Matcap/Hair_matcap.png")
     rim_mask_path = _find_relative_companion(mat_roots, "Mask/Milltina_Hair_RimLight_Mask.png")
+    rim_alpha_mask_path = _find_relative_companion(mat_roots, "Mask/Milltina_Hair_RimLight_Alpha_Mask.png")
+
+    if rim_alpha_mask_path is not None:
+        alpha_mask_img = (
+            Image.open(rim_alpha_mask_path)
+            .convert("RGBA")
+            .resize((cell_dim, cell_dim), Image.Resampling.LANCZOS)
+        )
+        alpha_mask_r = numpy_lib.array(alpha_mask_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
+        hair_array[:, :, 3] = numpy_lib.clip(hair_array[:, :, 3] * alpha_mask_r, 0.0, 255.0)
 
     if matcap_mask_path is not None:
         matcap_mask = (

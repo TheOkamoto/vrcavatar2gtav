@@ -21,6 +21,7 @@ Technical Rules & Features:
 """
 
 import argparse
+import json
 import math
 import os
 import struct
@@ -60,9 +61,11 @@ from michael_er_geometry_layer import (
     CHARACTER_PROFILES,
     HEAD_ACCESSORY_MESH_NAMES,
     HUMAN_TO_GTAV_BONE_MAP,
+    apply_deferred_double_sided_backfaces,
     apply_michael_er_split_normals,
     compute_pocket_watch_align_matrix,
     compute_skirt_vertex_weights,
+    import_and_place_er_earrings,
     load_fbx_face_loop_normals,
     parse_fbx_binary_nodes,
     process_michael_er_mesh_inventory,
@@ -250,6 +253,39 @@ def build_shinano_er_for_gtav(cli_args):
     if arm_watch:
         imported_armatures.append(arm_watch)
 
+    # Import Sky Blue custom nails (NakoNail via Modular Avatar / manifest) BEFORE Neko Tied Bob hair
+    # so NakoNail's "Ribbon" does not collide with Neko Tied Bob's "Ribbon".
+    nails_fbx_path = ""
+    nails_manifest_file = Path(os.path.abspath(cli_args.texture_dir)) / "nails_manifest.json"
+    if nails_manifest_file.is_file():
+        try:
+            nails_fbx_path = str(json.loads(nails_manifest_file.read_text(encoding="utf-8")).get("fbx_path", ""))
+        except Exception:
+            nails_fbx_path = ""
+    if not nails_fbx_path or not os.path.isfile(nails_fbx_path):
+        unity_assets_cfg = Path(str(cli_args.shinano_fbx)).parent.parent.parent
+        fallback_nail_fbx = unity_assets_cfg / "Panda Shop" / "NakoNail" / "Fbx" / "Nail_Nako_Sinano.fbx"
+        if fallback_nail_fbx.is_file():
+            nails_fbx_path = str(fallback_nail_fbx)
+
+    arm_nails = None
+    has_nako_nails = False
+    if nails_fbx_path and os.path.isfile(nails_fbx_path):
+        pre_nail_objs = set(bpy.data.objects)
+        print(f"[NakoNail] Importing custom nails FBX: {nails_fbx_path}")
+        bpy.ops.import_scene.fbx(filepath=nails_fbx_path)
+        new_nail_objs = [obj for obj in bpy.data.objects if obj not in pre_nail_objs]
+        for nobj in new_nail_objs:
+            if nobj.type == "ARMATURE":
+                arm_nails = nobj
+                imported_armatures.append(nobj)
+            elif nobj.type == "MESH":
+                if nobj.name == "Ribbon":
+                    nobj.name = "Nail_Ribbon"
+                elif nobj.name == "neko":
+                    nobj.name = "Nail_neko"
+                has_nako_nails = True
+
     # Load optional Unity scene overrides (defaults strictly to 1.0 when blank/absent)
     target_cfg = getattr(cli_args, "target_cfg", None) or project_paths.get_character_paths(
         cli_args.target_character,
@@ -336,7 +372,7 @@ def build_shinano_er_for_gtav(cli_args):
     # because their align transforms explicitly apply target position/scale in vertex space.
     arm_angle_rad = -math.radians(abs(char_profile["arm_pose_degrees"]))
     armature_override_scale = unity_config.get("armature_scale", (1.0, 1.0, 1.0))
-    pose_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit) if arm_obj}
+    pose_scaled_armatures = {arm_obj for arm_obj in (arm_base, arm_outfit, arm_nails) if arm_obj}
     for arm_obj in imported_armatures:
         if arm_obj != arm_hair:
             arm_obj.scale = (
@@ -556,15 +592,72 @@ def build_shinano_er_for_gtav(cli_args):
     if is_calibrated_neko:
         active_mesh_configs.update(
             {
-                "Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Top Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Under Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Side Bangs": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "In Hair": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Ribbon": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Ears": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Bangs": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "alpha",
+                    "double_sided": True,
+                },
+                "Top Back": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
+                "Under Side": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
+                "Back": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
+                "Side Bangs": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "alpha",
+                    "double_sided": True,
+                },
+                "Side": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
+                "In Hair": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
+                "Ribbon": {
+                    "u_offset": 0.940,
+                    "v_offset": 0.065,
+                    "u_scale": 0.026,
+                    "v_scale": 0.056,
+                    "clamp_v": True,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "ped",
+                    "double_sided": True,
+                },
+                "Ears": {
+                    "atlas_col": 2,
+                    "atlas_row": 0,
+                    "shrink_cull": False,
+                    "vtoon_bucket": "cutout",
+                    "double_sided": True,
+                },
                 "_Pin.Back": {
                     "u_offset": 0.875,
                     "v_offset": 0.25,
@@ -664,10 +757,14 @@ def build_shinano_er_for_gtav(cli_args):
             custom_hair_objs, "SKEL_Head"
         )
         for hair_obj in custom_hair_objs:
+            low_hname = hair_obj.name.lower()
+            is_bang_alpha = any(tok in low_hname for tok in ("bang", "front", "alpha", "trans"))
             active_mesh_configs[hair_obj.name] = {
                 "uv_prepacked": True,
                 "is_custom_hair": True,
                 "shrink_cull": False,
+                "vtoon_bucket": "alpha" if is_bang_alpha else "cutout",
+                "double_sided": True,
             }
         print(
             i18n.translate("common.hair_aligned_summary", count=len(custom_hair_objs))
@@ -677,12 +774,34 @@ def build_shinano_er_for_gtav(cli_args):
     else:
         active_mesh_configs.update(
             {
-                "Hair_base": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Hair_bang": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Hair_back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Hair_side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
-                "Other_ear": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False},
+                "Hair_base": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False, "vtoon_bucket": "cutout", "double_sided": True},
+                "Hair_bang": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False, "vtoon_bucket": "alpha", "double_sided": True},
+                "Hair_back": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False, "vtoon_bucket": "cutout", "double_sided": True},
+                "Hair_side": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False, "vtoon_bucket": "alpha", "double_sided": True},
+                "Other_ear": {"atlas_col": 2, "atlas_row": 0, "shrink_cull": False, "vtoon_bucket": "cutout", "double_sided": True},
             }
+        )
+
+    if has_nako_nails:
+        nail_u_specs = {
+            "Nail_L": {"u_offset": 0.875, "v_offset": 0.0, "u_scale": 0.0625, "v_scale": 0.25, "clamp_v": True, "shrink_cull": False, "vtoon_bucket": "ped", "double_sided": True},
+            "Nail_R": {"u_offset": 0.875, "v_offset": 0.0, "u_scale": 0.0625, "v_scale": 0.25, "clamp_v": True, "shrink_cull": False, "vtoon_bucket": "ped", "double_sided": True},
+            "Nail_Ribbon": {"u_offset": 0.9375, "v_offset": 0.125, "u_scale": 0.0625, "v_scale": 0.125, "clamp_v": True, "shrink_cull": False, "vtoon_bucket": "ped"},
+            "Nail_neko": {"u_offset": 0.972, "v_offset": 0.068, "u_scale": 0.022, "v_scale": 0.052, "shrink_cull": False, "vtoon_bucket": "ped"},
+        }
+        for nail_key, nail_cfg in nail_u_specs.items():
+            if bpy.data.objects.get(nail_key) is not None:
+                active_mesh_configs[nail_key] = nail_cfg
+
+    if is_calibrated_neko:
+        import_and_place_er_earrings(
+            bpy,
+            bmesh,
+            mathutils,
+            cli_args.hair_fbx,
+            arm_base,
+            unity_config,
+            active_mesh_configs,
         )
 
     scale_factor, vertical_offset = unity_scene_helper.compute_gtav_height_mapping(
@@ -953,6 +1072,62 @@ def build_shinano_er_for_gtav(cli_args):
         processed_objects,
         enable_blood_decals=bool(getattr(cli_args, "blood_decals", True)),
     )
+    apply_deferred_double_sided_backfaces(
+        processed_objects,
+        blender_hair_helper,
+        normal_offset=0.00035,
+    )
+
+    # 10. Create multi-shader VToon materials (ped / hair cutout / forward bangs alpha) BEFORE joining
+    texture_dir = os.path.abspath(cli_args.texture_dir)
+    atlas_image_path = os.path.join(texture_dir, cli_args.atlas_png)
+    normal_image_path = os.path.join(texture_dir, cli_args.normal_png)
+    spec_image_path = os.path.join(texture_dir, cli_args.spec_png)
+
+    atlas_image = bpy.data.images.load(atlas_image_path)
+    flat_normal_image = bpy.data.images.load(normal_image_path)
+    specular_image = bpy.data.images.load(spec_image_path)
+
+    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
+    ped_material = ped_damage_helper.create_ped_material(
+        create_shader,
+        "shinano_er_mat",
+        enable_blood_decals=enable_blood_decals,
+        diffuse_image=atlas_image,
+        bump_image=flat_normal_image,
+        spec_image=specular_image,
+        bumpiness=0.0,
+        specular_intensity=0.0,
+        specular_falloff=1.0,
+        specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
+        detail_settings=(0.0, 0.0, 0.0),
+        stubble_control=(0.0, 0.0),
+        um_global_params=(0.0, 0.0, 0.0, 0.0),
+    )
+    bucket_materials = {"ped": ped_material}
+    for proc_obj in processed_objects:
+        bucket_key = str(proc_obj.get("vtoon_bucket", "ped"))
+        if bucket_key == "cutout" and "cutout" not in bucket_materials:
+            bucket_materials["cutout"] = ped_damage_helper.create_ped_hair_cutout_material(
+                create_shader,
+                "shinano_er_hair_cutout",
+                diffuse_image=atlas_image,
+                bump_image=flat_normal_image,
+                spec_image=specular_image,
+            )
+        elif bucket_key == "alpha" and "alpha" not in bucket_materials:
+            bucket_materials["alpha"] = ped_damage_helper.create_ped_alpha_material(
+                create_shader,
+                "shinano_er_hair_alpha",
+                diffuse_image=atlas_image,
+                bump_image=flat_normal_image,
+                spec_image=specular_image,
+            )
+        target_mat = bucket_materials.get(bucket_key, ped_material)
+        proc_obj.data.materials.clear()
+        proc_obj.data.materials.append(target_mat)
+        for poly_item in proc_obj.data.polygons:
+            poly_item.material_index = 0
 
     print(
         i18n.translate("michael.build.joining_meshes", count=len(processed_objects))
@@ -984,39 +1159,6 @@ def build_shinano_er_for_gtav(cli_args):
             "michael.build.unified_summary", verts=total_verts, polys=total_polys
         )
     )
-
-    # 10. Create unified ped_default.sps shader material for the 4x2 Atlas
-    texture_dir = os.path.abspath(cli_args.texture_dir)
-    atlas_image_path = os.path.join(texture_dir, cli_args.atlas_png)
-    normal_image_path = os.path.join(texture_dir, cli_args.normal_png)
-    spec_image_path = os.path.join(texture_dir, cli_args.spec_png)
-
-    atlas_image = bpy.data.images.load(atlas_image_path)
-    flat_normal_image = bpy.data.images.load(normal_image_path)
-    specular_image = bpy.data.images.load(spec_image_path)
-
-    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
-    ped_material = ped_damage_helper.create_ped_material(
-        create_shader,
-        "shinano_er_mat",
-        enable_blood_decals=enable_blood_decals,
-        diffuse_image=atlas_image,
-        bump_image=flat_normal_image,
-        spec_image=specular_image,
-        bumpiness=0.0,
-        specular_intensity=0.0,
-        specular_falloff=1.0,
-        specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
-        detail_settings=(0.0, 0.0, 0.0),
-        stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
-    )
-
-    joined_mesh_obj.data.materials.clear()
-    joined_mesh_obj.data.materials.append(ped_material)
-
-    for poly_item in joined_mesh_obj.data.polygons:
-        poly_item.material_index = 0
 
     ped_damage_result = ped_damage_helper.apply_ped_damage_attributes_in_blender(
         bpy,

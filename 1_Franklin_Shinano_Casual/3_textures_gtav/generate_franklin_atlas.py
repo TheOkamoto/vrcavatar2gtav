@@ -36,6 +36,7 @@ import texture_calibration_helper as calibration_helper
 import unity_hair_helper
 import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
+import vtoon_profile_helper
 
 
 def read_binary_fbx_nodes(fbx_bytes: bytes) -> list:
@@ -458,7 +459,7 @@ def build_franklin_atlas(
                 )
             )
             warm_body_image = calibration_helper.apply_shinano_skin_warmth(
-                raw_body_image, red_gain=1.01, green_gain=0.94, blue_gain=0.93
+                raw_body_image
             )
             diffuse_pixel_array[
                 0:cell_dimension, cell_dimension : 2 * cell_dimension
@@ -601,9 +602,10 @@ def build_franklin_atlas(
             else Path(franklin_cfg["normal_png"])
         )
 
-        Image.fromarray(diffuse_pixel_array, "RGBA").save(
-            diffuse_final_path, format="PNG"
+        final_diffuse_img = vtoon_profile_helper.stamp_vtoon_watermark_block(
+            Image.fromarray(diffuse_pixel_array, "RGBA"), char_id=2
         )
+        final_diffuse_img.save(diffuse_final_path, format="PNG")
         Image.fromarray(specular_pixel_array, "RGBA").save(
             specular_final_path, format="PNG"
         )
@@ -644,6 +646,13 @@ def build_franklin_atlas(
             [diffuse_final_path, specular_final_path, normal_final_path],
         )
         print(project_i18n.translate("franklin.ytd_generated", path=output_ytd_file))
+        _generate_franklin_vtoon_profile(
+            franklin_cfg=franklin_cfg,
+            shinano_textures_directory=shinano_textures_directory,
+            face_spec_mask=face_spec_mask,
+            output_directory=output_directory,
+            custom_output_mode=bool(output_dir_override),
+        )
         return True
 
     except Exception as runtime_error:
@@ -651,6 +660,112 @@ def build_franklin_atlas(
             project_i18n.translate("franklin.atlas_failed", error=runtime_error)
         )
         return False
+
+
+def _generate_franklin_vtoon_profile(
+    *,
+    franklin_cfg: dict,
+    shinano_textures_directory: Path,
+    face_spec_mask: object,
+    output_directory: Path,
+    custom_output_mode: bool,
+) -> None:
+    """Create UV LUT, MatCap, and synced INI entry for char_id=2 (Shinano Casual)."""
+    assets_root = shinano_textures_directory.parent.parent
+    mat_dir = shinano_textures_directory.parent / "Material"
+    face_mat = mat_dir / "Shinano_face.mat"
+    body_mat = mat_dir / "Shinano_body.mat"
+    hair_mat = mat_dir / "Shinano_hair.mat"
+
+    slot_materials = {
+        vtoon_profile_helper.SLOT_CLOTH: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            None, vtoon_profile_helper.SLOT_CLOTH, albedo_color_already_baked=True
+        ),
+        vtoon_profile_helper.SLOT_SKIN: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(body_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_SKIN,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_FACE: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(face_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_FACE,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_EYES: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(face_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_EYES,
+            albedo_color_already_baked=True,
+        ),
+        vtoon_profile_helper.SLOT_HAIR: vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(hair_mat, assets_root=assets_root),
+            vtoon_profile_helper.SLOT_HAIR,
+            albedo_color_already_baked=True,
+        ),
+    }
+    lut_regions = [
+        {"u0": 0.00, "v0": 0.00, "u1": 0.50, "v1": 0.50, "slot_id": vtoon_profile_helper.SLOT_FACE, "shadow_mask": 0.88, "rim_mask": 0.15},
+        {"u0": 0.50, "v0": 0.00, "u1": 1.00, "v1": 0.50, "slot_id": vtoon_profile_helper.SLOT_SKIN, "shadow_mask": 0.90, "rim_mask": 0.28},
+        {"u0": 0.00, "v0": 0.50, "u1": 0.50, "v1": 1.00, "slot_id": vtoon_profile_helper.SLOT_CLOTH, "shadow_mask": 0.95, "rim_mask": 0.45},
+        {"u0": 0.50, "v0": 0.50, "u1": 1.00, "v1": 1.00, "slot_id": vtoon_profile_helper.SLOT_HAIR, "shadow_mask": 0.92, "rim_mask": 0.88},
+    ]
+
+    repo_root = project_paths.get_project_root()
+    pkg_dir = (
+        Path(franklin_cfg["character_dir"]) / "5_rpf_package"
+        if not custom_output_mode
+        else output_directory
+    )
+    sync_dirs = []
+    if not custom_output_mode:
+        for cand_dir in (
+            project_paths.get_gtav_root_dir(),
+            repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package",
+            repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package",
+        ):
+            if cand_dir and Path(cand_dir).is_dir():
+                sync_dirs.append(Path(cand_dir))
+
+    lut_path, _matcap = vtoon_profile_helper.generate_character_vtoon_assets(
+        char_id=2,
+        char_name="Shinano_Casual",
+        slug="shinano_franklin",
+        package_dir=pkg_dir,
+        lut_regions=lut_regions,
+        slot_materials=slot_materials,
+        mat_paths_for_matcap=[hair_mat],
+        assets_root=assets_root if assets_root.is_dir() else None,
+        sync_dirs=sync_dirs,
+    )
+
+    if face_spec_mask is not None and lut_path.is_file():
+        lut_img = Image.open(lut_path).convert("RGBA")
+        lut_w, lut_h = lut_img.size
+        face_w = lut_w // 2
+        face_h = lut_h // 2
+        mask_arr = (
+            numpy_lib.array(
+                Image.fromarray((face_spec_mask.astype(numpy_lib.uint8) * 255)).resize(
+                    (face_w, face_h), Image.Resampling.NEAREST
+                )
+            )
+            > 127
+        )
+        lut_arr = numpy_lib.array(lut_img)
+        eye_region = lut_arr[0:face_h, 0:face_w]
+        eye_region[mask_arr] = [
+            int(round((vtoon_profile_helper.SLOT_EYES / 15.0) * 255.0)),
+            85,
+            185,
+            78,
+        ]
+        lut_arr[0:face_h, 0:face_w] = eye_region
+        updated_lut = Image.fromarray(lut_arr, mode="RGBA")
+        updated_lut.save(lut_path)
+        for extra_dir in sync_dirs:
+            dst_lut = extra_dir / "vtoon_profiles" / lut_path.name
+            if dst_lut.parent.is_dir():
+                import shutil
+                shutil.copy2(lut_path, dst_lut)
 
 
 def main() -> int:

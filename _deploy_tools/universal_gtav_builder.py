@@ -576,9 +576,12 @@ def run_in_blender_build(manifest_path: Path) -> None:
         stubble_control=(0.0, 0.0),
         um_global_params=(0.0, 0.0, 0.0, 0.0),
     )
+    cutout_shader_mat = None
+    alpha_shader_mat = None
 
     slot_regions: Dict[int, Dict[str, Any]] = {}
     slot_is_face: Dict[int, bool] = {}
+    double_sided_slots: List[int] = []
     uv_regions_ci = {key.lower(): val for key, val in uv_regions_by_mat.items()}
     for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
         mat_name_raw = _strip_object_base_name(mat_item.name) if mat_item else ""
@@ -589,14 +592,63 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 if key_tok in low_mat_name or low_mat_name in key_tok:
                     region_found = reg_val
                     break
-        slot_regions[slot_idx] = region_found or default_region
+        resolved_reg = region_found or default_region
+        slot_regions[slot_idx] = resolved_reg
         slot_is_face[slot_idx] = "face" in low_mat_name
-        joined_mesh_obj.data.materials[slot_idx] = ped_shader_mat
+        if resolved_reg.get("is_double_sided"):
+            double_sided_slots.append(slot_idx)
+
+        alpha_mode = str(resolved_reg.get("alpha_mode", "opaque"))
+        if alpha_mode == "transparent":
+            if alpha_shader_mat is None:
+                alpha_shader_mat = ped_damage_helper.create_ped_alpha_material(
+                    create_shader,
+                    f"{ped_name}_hair_alpha",
+                    diffuse_image=atlas_img,
+                    bump_image=norm_img,
+                    spec_image=spec_img,
+                )
+            joined_mesh_obj.data.materials[slot_idx] = alpha_shader_mat
+        elif alpha_mode == "cutout":
+            if cutout_shader_mat is None:
+                cutout_shader_mat = ped_damage_helper.create_ped_hair_cutout_material(
+                    create_shader,
+                    f"{ped_name}_hair_cutout",
+                    diffuse_image=atlas_img,
+                    bump_image=norm_img,
+                    spec_image=spec_img,
+                )
+            joined_mesh_obj.data.materials[slot_idx] = cutout_shader_mat
+        else:
+            joined_mesh_obj.data.materials[slot_idx] = ped_shader_mat
+
+    if double_sided_slots:
+        dup_faces = blender_hair_helper.duplicate_double_sided_backfaces(
+            joined_mesh_obj,
+            material_indices=double_sided_slots,
+            normal_offset=0.00035,
+        )
+        print(f"[VToon] Duplicated {dup_faces} double-sided faces for slots {double_sided_slots}", flush=True)
+
+    # Deduplicate material slots down to active distinct GTA V shader buckets (ped / cutout / alpha)
+    unique_mats = []
+    mat_ptr_to_idx = {}
+    slot_remap = {}
+    for old_idx, mat_ref in enumerate(list(joined_mesh_obj.data.materials)):
+        mat_key_name = mat_ref.name if mat_ref is not None else ""
+        if mat_key_name not in mat_ptr_to_idx:
+            mat_ptr_to_idx[mat_key_name] = len(unique_mats)
+            unique_mats.append(mat_ref)
+        slot_remap[old_idx] = mat_ptr_to_idx[mat_key_name]
+    # Note: apply UVs and face flag per-original slot before collapsing material indices!
 
     uv_layer = joined_mesh_obj.data.uv_layers[0]
     uv_layer.name = "UVMap 0"
-    for poly_item in joined_mesh_obj.data.polygons:
-        reg_spec = slot_regions.get(poly_item.material_index, default_region)
+    poly_is_face = [False] * len(joined_mesh_obj.data.polygons)
+    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
+        orig_slot = poly_item.material_index
+        reg_spec = slot_regions.get(orig_slot, default_region)
+        poly_is_face[poly_seq_idx] = bool(slot_is_face.get(orig_slot))
         off_u = float(reg_spec["u_offset"])
         off_v = float(reg_spec["v_offset"])
         scl_u = float(reg_spec["u_scale"])
@@ -607,6 +659,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
             local_v = max(0.001, min(0.999, uv_coord.y % 1.0 if (uv_coord.y < 0.0 or uv_coord.y > 1.0) else uv_coord.y))
             uv_coord.x = local_u * scl_u + off_u
             uv_coord.y = local_v * scl_v + off_v
+        poly_item.material_index = slot_remap.get(orig_slot, 0)
+
+    joined_mesh_obj.data.materials.clear()
+    for unique_mat in unique_mats:
+        joined_mesh_obj.data.materials.append(unique_mat)
 
     ped_damage_res = ped_damage_helper.apply_ped_damage_attributes_in_blender(
         bpy,
@@ -622,8 +679,8 @@ def run_in_blender_build(manifest_path: Path) -> None:
     custom_normals = [tuple(loop_item.normal) for loop_item in joined_mesh_obj.data.loops]
     mesh_verts = joined_mesh_obj.data.vertices
     mesh_loops = joined_mesh_obj.data.loops
-    for poly_item in joined_mesh_obj.data.polygons:
-        if not slot_is_face.get(poly_item.material_index):
+    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
+        if not poly_is_face[poly_seq_idx]:
             continue
         for loop_idx in poly_item.loop_indices:
             vpos = mesh_verts[mesh_loops[loop_idx].vertex_index].co

@@ -12,10 +12,15 @@ armature prefix/suffix inference, GUID asset indexing, and multi-document Unity
 from __future__ import annotations
 
 from collections import deque
+import concurrent.futures
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import sys
+import tempfile
+import time as time_mod
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 COMMON_TOOLS_DIR = Path(__file__).resolve().parent
@@ -634,6 +639,68 @@ def _is_builtin_unity_guid(guid_str: str) -> bool:
     return not clean or clean.startswith(("0000000000000000", "f000000000000000"))
 
 
+def _scan_single_directory_tree_guids(
+    root_dir_path: str,
+    meta_suffixes: Tuple[str, ...],
+    skip_dirs: Set[str],
+    deadline_monotonic: float,
+) -> Dict[str, str]:
+    """Scan one directory subtree via os.scandir without redundant stat calls."""
+    found_map: Dict[str, str] = {}
+    pending_dirs: List[str] = [root_dir_path]
+    visited_paths: Set[str] = set()
+    while pending_dirs:
+        if time_mod.monotonic() > deadline_monotonic:
+            break
+        cur_dir_str = pending_dirs.pop()
+        if cur_dir_str in visited_paths:
+            continue
+        visited_paths.add(cur_dir_str)
+        try:
+            dir_entries = list(os.scandir(cur_dir_str))
+        except OSError:
+            continue
+        file_name_set: Set[str] = set()
+        meta_paths: List[Tuple[str, str]] = []
+        for entry_item in dir_entries:
+            entry_name = entry_item.name
+            if entry_item.is_dir(follow_symlinks=False):
+                if not entry_name.startswith(".") and entry_name.lower() not in skip_dirs:
+                    pending_dirs.append(entry_item.path)
+            else:
+                file_name_set.add(entry_name)
+                if entry_name.lower().endswith(meta_suffixes):
+                    meta_paths.append((entry_name, entry_item.path))
+        for entry_name, meta_full_path in meta_paths:
+            asset_file_name = entry_name[:-5]
+            if asset_file_name not in file_name_set:
+                continue
+            try:
+                with open(meta_full_path, "r", encoding="utf-8", errors="ignore") as meta_handle:
+                    for line_idx, line_text in enumerate(meta_handle):
+                        if line_text.startswith("guid:"):
+                            found_guid = line_text.split(":", 1)[1].strip().lower()
+                            if found_guid:
+                                found_map[found_guid] = os.path.join(cur_dir_str, asset_file_name)
+                            break
+                        if line_idx > 6:
+                            break
+            except OSError:
+                continue
+    return found_map
+
+
+def _get_guid_cache_file_path(assets_resolved: Path, include_materials: bool) -> Optional[Path]:
+    """Return a stable per-project disk cache path outside temporary unit-test folders."""
+    norm_str = str(assets_resolved)
+    tmp_root = str(Path(tempfile.gettempdir()).resolve())
+    if norm_str.startswith(tmp_root) or "/tmp/" in norm_str.replace("\\", "/"):
+        return None
+    cache_key = hashlib.sha1(f"{norm_str}|mats={int(include_materials)}".encode("utf-8")).hexdigest()[:12]
+    cache_dir = Path.home() / ".cache" / "vrc2gtav"
+    return cache_dir / f"ma_guid_index_{cache_key}.json"
+
+
 def _collect_guid_paths_for_ma(
     needed_guids: Set[str],
     anchor_path: Path,
@@ -643,7 +710,7 @@ def _collect_guid_paths_for_ma(
     budget_sec: float = 15.0,
     include_materials: bool = False,
 ) -> Dict[str, Path]:
-    """Resolve asset GUIDs quickly via depth 1-3 hint matching + resumable BFS cache."""
+    """Resolve asset GUIDs quickly via disk cache + parallel top-level os.scandir."""
     clean_guids = {
         guid_str.lower()
         for guid_str in needed_guids
@@ -674,16 +741,52 @@ def _collect_guid_paths_for_ma(
         if full_key
         else None
     )
+
+    disk_cache_path = (
+        _get_guid_cache_file_path(assets_resolved, include_materials)
+        if assets_resolved is not None
+        else None
+    )
+    if remaining and disk_cache_path is not None and disk_cache_path.is_file():
+        try:
+            cache_payload = json.loads(disk_cache_path.read_text(encoding="utf-8"))
+            cached_entries = cache_payload.get("entries", {})
+            if isinstance(cached_entries, dict):
+                for guid_key, raw_asset in cached_entries.items():
+                    asset_candidate = Path(raw_asset)
+                    _MA_GUID_CACHE.setdefault(guid_key, asset_candidate)
+                    if guid_key in remaining and asset_candidate.is_file():
+                        resolved[guid_key] = asset_candidate
+                        remaining.discard(guid_key)
+                if not remaining:
+                    return resolved
+        except (OSError, ValueError):
+            pass
+
     if scan_state is not None and scan_state["complete"]:
         return resolved
 
     hint_words = {
         tok.lower()
-        for raw_h in [anchor_path.stem] + list(name_hints)
-        for tok in re.split(r"[^A-Za-z0-9]+", str(raw_h or ""))
+        for raw_hint in [anchor_path.stem] + list(name_hints)
+        for tok in re.split(r"[^A-Za-z0-9]+", str(raw_hint or ""))
         if len(tok) >= 3
     }
-    hint_words.update({"shinano", "miltina", "milltina", "retargeted", "converted"})
+    hint_words.update(
+        {
+            "shinano",
+            "miltina",
+            "milltina",
+            "retargeted",
+            "converted",
+            "panda",
+            "nakonail",
+            "nail",
+            "neko",
+            "tonarino",
+            "prefab",
+        }
+    )
 
     search_roots: List[Path] = []
     if anchor_path:
@@ -701,7 +804,7 @@ def _collect_guid_paths_for_ma(
             cur_dir = parent_dir
 
     if assets_resolved is not None:
-        # Match depth 1-3 package directories against avatar/mesh tokens (e.g. OutfitRetargetingSystem/Outputs/Shinano Converted)
+        # Match depth 1-2 package directories against avatar/mesh tokens
         def _collect_hinted_dirs(root_lvl: Path, depth_rem: int) -> None:
             if depth_rem <= 0:
                 return
@@ -712,17 +815,17 @@ def _collect_guid_paths_for_ma(
             for entry_item in entries:
                 if not entry_item.is_dir(follow_symlinks=False) or entry_item.name.startswith("."):
                     continue
-                low_nm = entry_item.name.lower()
-                if low_nm in _SKIP_GUID_DIRS:
+                low_name = entry_item.name.lower()
+                if low_name in _SKIP_GUID_DIRS:
                     continue
-                entry_p = Path(entry_item.path)
-                if any(word in low_nm for word in hint_words):
-                    if entry_p not in search_roots:
-                        search_roots.append(entry_p)
+                entry_path = Path(entry_item.path)
+                if any(word in low_name for word in hint_words):
+                    if entry_path not in search_roots:
+                        search_roots.append(entry_path)
                 else:
-                    _collect_hinted_dirs(entry_p, depth_rem - 1)
+                    _collect_hinted_dirs(entry_path, depth_rem - 1)
 
-        _collect_hinted_dirs(assets_resolved, 3)
+        _collect_hinted_dirs(assets_resolved, 2)
 
         if unity_scene_helper is not None and hasattr(unity_scene_helper, "_priority_search_dirs"):
             for cand_dir in unity_scene_helper._priority_search_dirs(
@@ -731,81 +834,88 @@ def _collect_guid_paths_for_ma(
                 if cand_dir.is_dir() and cand_dir.resolve() != assets_resolved and cand_dir not in search_roots:
                     search_roots.append(cand_dir)
 
-    import time as time_mod
     deadline = time_mod.monotonic() + max(0.5, budget_sec)
     meta_suffixes = (
         (".prefab.meta", ".fbx.meta", ".mat.meta") if include_materials else (".prefab.meta", ".fbx.meta")
     )
-    local_seen: Set[Path] = scan_state["seen_dirs"] if scan_state is not None else set()
+    local_seen: Set[str] = scan_state["seen_dirs"] if scan_state is not None else set()
 
-    def _scan_dir_queue(dir_queue: deque) -> bool:
-        while dir_queue and remaining:
-            if time_mod.monotonic() > deadline:
-                return False
-            cur_dir = dir_queue.popleft()
-            cur_res = cur_dir.resolve()
-            if cur_res in local_seen:
-                continue
-            local_seen.add(cur_res)
-            try:
-                dir_entries = list(os.scandir(cur_res))
-            except OSError:
-                continue
-            for entry_item in dir_entries:
-                entry_name = entry_item.name
-                if entry_item.is_dir(follow_symlinks=False):
-                    if not entry_name.startswith(".") and entry_name.lower() not in _SKIP_GUID_DIRS:
-                        sub_res = Path(entry_item.path).resolve()
-                        if sub_res not in local_seen:
-                            dir_queue.append(sub_res)
-                else:
-                    low_name = entry_name.lower()
-                    if not low_name.endswith(meta_suffixes):
-                        continue
-                    try:
-                        with open(entry_item.path, "r", encoding="utf-8", errors="ignore") as meta_handle:
-                            for line_idx, line_text in enumerate(meta_handle):
-                                if line_text.startswith("guid:"):
-                                    found_guid = line_text.split(":", 1)[1].strip().lower()
-                                    if found_guid:
-                                        asset_path = Path(cur_res) / entry_name[:-5]
-                                        if asset_path.is_file():
-                                            _MA_GUID_CACHE.setdefault(found_guid, asset_path)
-                                            if found_guid in remaining:
-                                                resolved[found_guid] = asset_path
-                                                remaining.discard(found_guid)
-                                    break
-                                if line_idx > 6:
-                                    break
-                    except OSError:
-                        continue
-        return len(dir_queue) == 0
+    for priority_root in search_roots:
+        if not remaining or time_mod.monotonic() > deadline:
+            break
+        root_key = str(priority_root)
+        if root_key in local_seen:
+            continue
+        local_seen.add(root_key)
+        partial_map = _scan_single_directory_tree_guids(root_key, meta_suffixes, _SKIP_GUID_DIRS, deadline)
+        for guid_key, asset_str in partial_map.items():
+            asset_obj = Path(asset_str)
+            _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
+            if guid_key in remaining:
+                resolved[guid_key] = asset_obj
+                remaining.discard(guid_key)
 
-    priority_queue: deque = deque()
-    for root_dir in search_roots:
-        res_root = root_dir.resolve()
-        if res_root not in local_seen:
-            priority_queue.append(res_root)
-    if priority_queue:
-        _scan_dir_queue(priority_queue)
+    if remaining and assets_resolved is not None and time_mod.monotonic() <= deadline:
+        top_subdirs: List[str] = []
+        root_meta_hits = _scan_single_directory_tree_guids(
+            str(assets_resolved), meta_suffixes, set(), min(deadline, time_mod.monotonic() + 2.0)
+        )
+        try:
+            for top_entry in sorted(os.scandir(assets_resolved), key=lambda ent: ent.name):
+                if top_entry.is_dir(follow_symlinks=False) and not top_entry.name.startswith("."):
+                    if top_entry.name.lower() not in _SKIP_GUID_DIRS and top_entry.path not in local_seen:
+                        local_seen.add(top_entry.path)
+                        top_subdirs.append(top_entry.path)
+        except OSError:
+            pass
 
-    if remaining and scan_state is not None and time_mod.monotonic() <= deadline:
-        if not scan_state["initialized"]:
-            scan_state["initialized"] = True
-            try:
-                for top_entry in sorted(os.scandir(assets_resolved), key=lambda ent: ent.name):
-                    if top_entry.is_dir(follow_symlinks=False) and not top_entry.name.startswith("."):
-                        if top_entry.name.lower() not in _SKIP_GUID_DIRS:
-                            sub_res = Path(top_entry.path).resolve()
-                            if sub_res not in local_seen:
-                                scan_state["queue"].append(sub_res)
-            except OSError:
-                pass
-        completed_full = _scan_dir_queue(scan_state["queue"])
-        if completed_full and len(scan_state["queue"]) == 0:
-            scan_state["complete"] = True
+        disk_entries: Dict[str, str] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as dir_pool:
+            future_list = [
+                dir_pool.submit(
+                    _scan_single_directory_tree_guids,
+                    subdir_path,
+                    meta_suffixes,
+                    _SKIP_GUID_DIRS,
+                    deadline,
+                )
+                for subdir_path in top_subdirs
+            ]
+            for fut_item in concurrent.futures.as_completed(future_list):
+                try:
+                    sub_map = fut_item.result()
+                except Exception:
+                    continue
+                disk_entries.update(sub_map)
+                for guid_key, asset_str in sub_map.items():
+                    asset_obj = Path(asset_str)
+                    _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
+                    if guid_key in remaining:
+                        resolved[guid_key] = asset_obj
+                        remaining.discard(guid_key)
+
+        for guid_key, asset_str in root_meta_hits.items():
+            asset_obj = Path(asset_str)
+            _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
+            if guid_key in remaining:
+                resolved[guid_key] = asset_obj
+                remaining.discard(guid_key)
+        disk_entries.update(root_meta_hits)
+
+        if time_mod.monotonic() <= deadline:
+            if scan_state is not None:
+                scan_state["complete"] = True
             for missing_guid in remaining:
                 _MA_GUID_CACHE.setdefault(missing_guid, None)
+            if disk_cache_path is not None and disk_entries:
+                try:
+                    disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    disk_cache_path.write_text(
+                        json.dumps({"assets_root": str(assets_resolved), "entries": disk_entries}),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
 
     return resolved
 

@@ -787,3 +787,59 @@ def parse_offset_triple(raw_offset: Optional[str]) -> Tuple[float, float, float]
         return (float(parts[0]), float(parts[1]), float(parts[2]))
     except ValueError:
         return (0.0, 0.0, 0.0)
+
+
+def duplicate_double_sided_backfaces(
+    mesh_obj: Any,
+    material_indices: Optional[Sequence[int]] = None,
+    normal_offset: float = 0.00035,
+) -> int:
+    """Duplicate selected double-sided faces along smooth vertex normals with flipped winding."""
+    import bmesh
+    from mathutils import Vector
+
+    mesh_data = getattr(mesh_obj, "data", None)
+    if mesh_data is None or not getattr(mesh_data, "polygons", None):
+        return 0
+    target_set = {int(idx) for idx in material_indices} if material_indices is not None else None
+    bmesh_mod = bmesh.new()
+    bmesh_mod.from_mesh(mesh_data)
+    bmesh_mod.faces.ensure_lookup_table()
+    bmesh_mod.normal_update()
+    src_faces = [
+        face_item
+        for face_item in list(bmesh_mod.faces)
+        if target_set is None or int(face_item.material_index) in target_set
+    ]
+    if not src_faces:
+        bmesh_mod.free()
+        return 0
+    dup_res = bmesh.ops.duplicate(bmesh_mod, geom=src_faces)
+    dup_faces = [elem for elem in dup_res.get("geom", ()) if isinstance(elem, bmesh.types.BMFace)]
+    if dup_faces:
+        if normal_offset != 0.0:
+            vert_norm_accum: Dict[Any, Vector] = {}
+            vert_norm_fallback: Dict[Any, Vector] = {}
+            for face_item in dup_faces:
+                face_norm = face_item.normal
+                for vert_item in face_item.verts:
+                    if vert_item not in vert_norm_accum:
+                        vert_norm_accum[vert_item] = Vector((0.0, 0.0, 0.0))
+                        vert_norm_fallback[vert_item] = face_norm.copy()
+                    vert_norm_accum[vert_item] += face_norm
+            for vert_item, accum_vec in vert_norm_accum.items():
+                if accum_vec.length_squared > 1e-12:
+                    smooth_dir = accum_vec.normalized()
+                else:
+                    fallback_vec = vert_norm_fallback[vert_item]
+                    smooth_dir = (
+                        fallback_vec.normalized()
+                        if fallback_vec.length_squared > 1e-12
+                        else Vector((0.0, 0.0, 1.0))
+                    )
+                vert_item.co = vert_item.co - smooth_dir * float(normal_offset)
+        bmesh.ops.reverse_faces(bmesh_mod, faces=dup_faces)
+    bmesh_mod.to_mesh(mesh_data)
+    bmesh_mod.free()
+    mesh_data.update()
+    return len(dup_faces)

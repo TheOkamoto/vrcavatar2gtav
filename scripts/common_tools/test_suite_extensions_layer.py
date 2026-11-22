@@ -1196,6 +1196,62 @@ def test_universal_npc_pipeline() -> bool:
             f"replaced={prop_patch_res['replaced_props']} untouched={prop_patch_res['untouched']}",
         )
 
+        # 6. VToon watermarks, lilToon .mat parsing, INI upsert, and multi-SPS shader modes
+        import vtoon_profile_helper
+        import ped_damage_helper
+        import unity_hair_bake_layer
+
+        blank_atlas = Image.new("RGBA", (256, 256), (120, 140, 160, 255))
+        stamped_atlas = vtoon_profile_helper.stamp_vtoon_watermark_block(blank_atlas, 3)
+        decoded_id = vtoon_profile_helper.decode_vtoon_watermark_block(stamped_atlas)
+
+        trans_mat = mat_dir / "Hair_Trans_VToon.mat"
+        trans_mat.write_text(
+            "m_Name: Hair_Trans_VToon\n"
+            "m_Shader: {fileID: 4800000, guid: 3c79b10c7e0b2784aaa4c2f8dd17d55e, type: 3}\n"
+            "m_CustomRenderQueue: 2460\n"
+            "m_SavedProperties:\n"
+            "  m_Floats:\n"
+            "  - _Cull: 0\n"
+            "  - _ShadowBorder: 0.5\n"
+            "  m_Colors:\n"
+            "  - _ShadowColor: {r: 1, g: 0.9, b: 0.92, a: 1}\n",
+            encoding="utf-8",
+        )
+        parsed_trans = unity_hair_bake_layer.parse_unity_material(trans_mat)
+        parsed_vtoon = vtoon_profile_helper.parse_liltoon_mat_file(trans_mat)
+        slot_vtoon = vtoon_profile_helper.build_vtoon_slot_from_mat(
+            parsed_vtoon, vtoon_profile_helper.SLOT_HAIR
+        )
+
+        ini_target = tmp_root / "vtoon_test" / "GTAVVToon.ini"
+        vtoon_profile_helper.upsert_vtoon_ini_character(
+            [ini_target], 1, "CharOne", "vtoon_profiles\\lut1.png", "vtoon_profiles\\mc1.png", {0: slot_vtoon}
+        )
+        vtoon_profile_helper.upsert_vtoon_ini_character(
+            [ini_target], 2, "CharTwo", "vtoon_profiles\\lut2.png", "vtoon_profiles\\mc2.png", {4: slot_vtoon}
+        )
+        ini_txt = ini_target.read_text(encoding="utf-8")
+
+        created_shaders = []
+        ped_damage_helper.create_ped_hair_cutout_material(lambda sname: created_shaders.append(sname) or type("MatObj", (), {"name": sname, "node_tree": None})(), "h_cut")
+        ped_damage_helper.create_ped_alpha_material(lambda sname: created_shaders.append(sname) or type("MatObj", (), {"name": sname, "node_tree": None})(), "h_alp")
+
+        vtoon_unit_ok = (
+            decoded_id == 3
+            and parsed_trans.get("is_double_sided") is True
+            and parsed_trans.get("alpha_mode") == "transparent"
+            and abs(slot_vtoon.get("double_sided", 0.0) - 1.0) < 1e-5
+            and "[Char_1]" in ini_txt
+            and "[Char_2]" in ini_txt
+            and created_shaders == ["ped_hair_cutout_alpha.sps", "ped_alpha.sps"]
+        )
+        suite_passed &= print_status_result(
+            "VToon watermark, lilToon transparent shader detect, INI merge & multi-SPS materials",
+            vtoon_unit_ok,
+            f"watermark={decoded_id} mode={parsed_trans.get('alpha_mode')} shaders={created_shaders}",
+        )
+
     return suite_passed
 
 

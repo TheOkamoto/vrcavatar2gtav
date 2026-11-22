@@ -1014,12 +1014,91 @@ def build_trevor_miltina_avatar(cli_args=None):
                 ) or cloth_obj.vertex_groups.new(name=default_bone_name)
                 vert_group.add([vert_idx], 1.0, "REPLACE")
 
-    # 10. Guard RPF7 16 MiB limit on heavy accessories/hair and join kept meshes
+    # 10. Guard RPF7 16 MiB limit on heavy accessories/hair, assign per-mesh shaders & join
     ped_damage_helper.enforce_ped_rpf7_poly_budget(
         bpy,
         meshes_to_keep,
         enable_blood_decals=bool(getattr(cli_args, "blood_decals", True)),
     )
+
+    atlas_img_path = str(trevor_cfg["atlas_png"])
+    atlas_image = bpy.data.images.load(atlas_img_path)
+    atlas_image.name = "miltina_atlas_2k"
+
+    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
+    specular_image = None
+    spec_img_path = str(trevor_cfg["spec_png"])
+    if os.path.exists(spec_img_path):
+        specular_image = bpy.data.images.load(spec_img_path)
+        specular_image.name = "miltina_spec"
+
+    normal_image = None
+    normal_img_path = str(trevor_cfg["normal_png"])
+    if os.path.exists(normal_img_path):
+        normal_image = bpy.data.images.load(normal_img_path)
+        normal_image.name = "miltina_normal"
+
+    ped_material = ped_damage_helper.create_ped_material(
+        create_shader,
+        "miltina_maid_mat",
+        enable_blood_decals=enable_blood_decals,
+        diffuse_image=atlas_image,
+        bump_image=normal_image,
+        spec_image=specular_image,
+        bumpiness=0.0,
+        specular_intensity=0.0,
+        specular_falloff=1.0,
+        specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
+        detail_settings=(0.0, 0.0, 0.0),
+        stubble_control=(0.0, 0.0),
+        um_global_params=(0.0, 0.0, 0.0, 0.0),
+    )
+    miltina_cutout_mat = None
+    miltina_alpha_mat = None
+    for cloth_obj in meshes_to_keep:
+        low_obj = cloth_obj.name.lower()
+        mat_names_low = " ".join(mat_item.name.lower() for mat_item in cloth_obj.data.materials if mat_item)
+        is_alpha_bangs = (
+            cloth_obj.name == "Milltina_hair_front"
+            or "hair_alpha" in mat_names_low
+            or (cloth_obj in custom_hair_meshes and any(tok in low_obj for tok in ("bang", "front", "alpha", "trans")))
+        )
+        is_hair_mesh = (
+            cloth_obj in custom_hair_meshes
+            or cloth_obj.name in MILTINA_DEFAULT_HAIR_MESHES
+            or "hair" in low_obj
+        )
+        if is_alpha_bangs:
+            if cloth_obj in custom_hair_meshes:
+                blender_hair_helper.duplicate_double_sided_backfaces(cloth_obj, normal_offset=0.00035)
+            if miltina_alpha_mat is None:
+                miltina_alpha_mat = ped_damage_helper.create_ped_alpha_material(
+                    create_shader,
+                    "miltina_hair_alpha",
+                    diffuse_image=atlas_image,
+                    bump_image=normal_image,
+                    spec_image=specular_image,
+                )
+            chosen_mat = miltina_alpha_mat
+        elif is_hair_mesh:
+            if cloth_obj in custom_hair_meshes:
+                blender_hair_helper.duplicate_double_sided_backfaces(cloth_obj, normal_offset=0.00035)
+            if miltina_cutout_mat is None:
+                miltina_cutout_mat = ped_damage_helper.create_ped_hair_cutout_material(
+                    create_shader,
+                    "miltina_hair_cutout",
+                    diffuse_image=atlas_image,
+                    bump_image=normal_image,
+                    spec_image=specular_image,
+                )
+            chosen_mat = miltina_cutout_mat
+        else:
+            chosen_mat = ped_material
+
+        cloth_obj.data.materials.clear()
+        cloth_obj.data.materials.append(chosen_mat)
+        for poly_item in cloth_obj.data.polygons:
+            poly_item.material_index = 0
 
     for selected_obj in bpy.context.selected_objects:
         selected_obj.select_set(False)
@@ -1073,45 +1152,7 @@ def build_trevor_miltina_avatar(cli_args=None):
         )
     )
 
-    # 11. Configure ped_default.sps shader and assign textures
-    atlas_img_path = str(trevor_cfg["atlas_png"])
-    atlas_image = bpy.data.images.load(atlas_img_path)
-    atlas_image.name = "miltina_atlas_2k"
-
-    enable_blood_decals = bool(getattr(cli_args, "blood_decals", True))
-    specular_image = None
-    spec_img_path = str(trevor_cfg["spec_png"])
-    if os.path.exists(spec_img_path):
-        specular_image = bpy.data.images.load(spec_img_path)
-        specular_image.name = "miltina_spec"
-
-    normal_image = None
-    normal_img_path = str(trevor_cfg["normal_png"])
-    if os.path.exists(normal_img_path):
-        normal_image = bpy.data.images.load(normal_img_path)
-        normal_image.name = "miltina_normal"
-
-    ped_material = ped_damage_helper.create_ped_material(
-        create_shader,
-        "miltina_maid_mat",
-        enable_blood_decals=enable_blood_decals,
-        diffuse_image=atlas_image,
-        bump_image=normal_image,
-        spec_image=specular_image,
-        bumpiness=0.0,
-        specular_intensity=0.0,
-        specular_falloff=1.0,
-        specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
-        detail_settings=(0.0, 0.0, 0.0),
-        stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
-    )
-
-    unified_obj.data.materials.clear()
-    unified_obj.data.materials.append(ped_material)
-    for poly_item in unified_obj.data.polygons:
-        poly_item.material_index = 0
-
+    # 11. Apply ped damage attributes & smooth anime face normals (materials assigned pre-join)
     ped_damage_result = ped_damage_helper.apply_ped_damage_attributes_in_blender(
         bpy,
         unified_obj,

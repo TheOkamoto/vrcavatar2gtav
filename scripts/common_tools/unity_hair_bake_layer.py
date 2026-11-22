@@ -65,16 +65,35 @@ _USED_MATERIAL_TEX_PROPS = frozenset(
         "_MainTex",
         "_BaseMap",
         "_BaseColorMap",
+        "_MainColorAdjustMask",
         "_Main2ndTex",
         "_Main3rdTex",
         "_Main2ndBlendMask",
         "_Main3rdBlendMask",
+        "_MatCapTex",
+        "_MatCap2ndTex",
+        "_MatCap2ndBlendMask",
         "_AlphaMask",
         "_BumpMap",
         "_EmissionMap",
+        "_EmissionBlendMask",
+        "_Emission2ndMap",
+        "_Emission2ndBlendMask",
     }
 )
-_PRIMARY_MATERIAL_TEX_PROPS = frozenset({"_MainTex", "_BaseMap", "_BaseColorMap"})
+_PRIMARY_MATERIAL_TEX_PROPS = frozenset(
+    {
+        "_MainTex",
+        "_BaseMap",
+        "_BaseColorMap",
+        "_Main2ndTex",
+        "_Main3rdTex",
+        "_MatCap2ndTex",
+        "_EmissionMap",
+        "_Emission2ndMap",
+        "_AlphaMask",
+    }
+)
 HAIR_KEYWORD_TOKENS = (
     "hair",
     "bob",
@@ -417,17 +436,62 @@ def _extract_ref_guid(field_text: str) -> str:
 def parse_unity_material(
     mat_path: Union[str, Path],
     unity_assets_root: Optional[Path] = None,
+    _visited_mats: Optional[set] = None,
 ) -> Dict[str, Any]:
-    """Parse a Unity .mat YAML file (lilToon, Poiyomi, or Standard) into textures, colors, floats."""
+    """Parse a Unity .mat YAML file (lilToon, Poiyomi, or Standard) resolving m_Parent."""
     resolved_mat = project_paths.to_host_path(mat_path)
+    mat_key = str(resolved_mat.resolve()).lower()
+    seen_mats = set() if _visited_mats is None else set(_visited_mats)
+    if mat_key in seen_mats or not resolved_mat.is_file():
+        return {
+            "material_id": str(resolved_mat),
+            "name": resolved_mat.stem,
+            "mat_stem": resolved_mat.stem,
+            "mat_path": str(resolved_mat),
+            "shader_guid": "",
+            "tex_envs": {},
+            "floats": {},
+            "colors": {},
+            "is_metallic": False,
+            "semantic_tokens": [],
+            "cull_mode": 2.0,
+            "is_double_sided": False,
+            "alpha_mode": "opaque",
+            "cutoff": 0.38,
+            "render_queue": 2000,
+        }
+    seen_mats.add(mat_key)
     raw_text = resolved_mat.read_text(encoding="utf-8", errors="ignore")
+
+    parent_data: Optional[Dict[str, Any]] = None
+    parent_match = re.search(r"m_Parent:\s*\{([^\}]*)\}", raw_text)
+    parent_guid = _extract_ref_guid(parent_match.group(1)) if parent_match else ""
+    if parent_guid:
+        parent_path = resolve_unity_guid(
+            parent_guid,
+            resolved_mat,
+            unity_assets_root,
+            allow_full_scan=True,
+        )
+        if parent_path and parent_path.is_file():
+            parent_data = parse_unity_material(
+                parent_path,
+                unity_assets_root=unity_assets_root,
+                _visited_mats=seen_mats,
+            )
 
     name_match = re.search(r"^\s*m_Name:\s*(.*)$", raw_text, re.MULTILINE)
     mat_name = name_match.group(1).strip() if name_match else resolved_mat.stem
     shader_match = re.search(r"m_Shader:\s*\{([^\}]*)\}", raw_text)
-    shader_guid = _extract_ref_guid(shader_match.group(1)) if shader_match else ""
+    shader_guid = _extract_ref_guid(shader_match.group(1)) if shader_match else (
+        str(parent_data.get("shader_guid", "")) if parent_data else ""
+    )
 
-    tex_envs: Dict[str, Dict[str, Any]] = {}
+    tex_envs: Dict[str, Dict[str, Any]] = (
+        {key_name: dict(val_entry) for key_name, val_entry in parent_data.get("tex_envs", {}).items()}
+        if parent_data
+        else {}
+    )
     tex_section_match = re.search(
         r"m_TexEnvs:(.*?)(?:^\s*m_Ints:|^\s*m_Floats:|^\s*m_Colors:|\Z)",
         raw_text,
@@ -471,7 +535,9 @@ def parse_unity_material(
                 ),
             }
 
-    floats_dict: Dict[str, float] = {}
+    floats_dict: Dict[str, float] = (
+        dict(parent_data.get("floats", {})) if parent_data else {}
+    )
     floats_section = re.search(
         r"m_Floats:(.*?)(?:^\s*m_Colors:|^\s*m_Ints:|\Z)",
         raw_text,
@@ -483,7 +549,11 @@ def parse_unity_material(
         ):
             floats_dict[flt_match.group(1)] = float(flt_match.group(2))
 
-    colors_dict: Dict[str, List[float]] = {}
+    colors_dict: Dict[str, List[float]] = (
+        {key_name: list(val_entry) for key_name, val_entry in parent_data.get("colors", {}).items()}
+        if parent_data
+        else {}
+    )
     colors_section = re.search(r"m_Colors:(.*)", raw_text, re.DOTALL)
     if colors_section:
         for col_match in re.finditer(
@@ -527,6 +597,40 @@ def parse_unity_material(
         if token in lower_label or token in str(tex_envs.get("_MainTex", {}).get("path", "")).lower():
             semantic_tokens.append(token)
 
+    rq_match = re.search(r"m_CustomRenderQueue:\s*(-?\d+)", raw_text)
+    render_queue = int(rq_match.group(1)) if rq_match else 2000
+    kw_match = re.search(r"m_ShaderKeywords:\s*(.*)$", raw_text, re.MULTILINE)
+    shader_keywords = kw_match.group(1) if kw_match else ""
+    cull_mode = float(floats_dict.get("_Cull", 2.0))
+    is_double_sided = cull_mode < 0.5
+    trans_shader_guids = {
+        "3c79b10c7e0b2784aaa4c2f8dd17d55e",
+        "165365ab7100a044ca85fc8c33548a62",
+        "0c762f24b85918a49812fc5690619178",
+        "b269573b9937b8340b3e9e191a3ba5a8",
+        "7171688840c632447b22ec14e2bdef7e",
+        "6a77405f7dfdc1447af58854c7f43f39",
+        "9cf054060007d784394b8b0bb703e441",
+    }
+    has_alpha_mask = bool(tex_envs.get("_AlphaMask", {}).get("path"))
+    if (
+        shader_guid.lower() in trans_shader_guids
+        or render_queue >= 2900
+        or "_ALPHABLEND_ON" in shader_keywords
+        or any(tok in word_tokens for tok in ("alpha", "bang", "bangs", "trans", "transparent"))
+    ):
+        alpha_mode = "transparent"
+    elif (
+        render_queue >= 2400
+        or "_ALPHATEST_ON" in shader_keywords
+        or has_alpha_mask
+        or "cut" in shader_keywords.lower()
+        or "hair" in lower_label
+    ):
+        alpha_mode = "cutout"
+    else:
+        alpha_mode = "opaque"
+
     return {
         "material_id": str(resolved_mat),
         "name": mat_name,
@@ -538,6 +642,11 @@ def parse_unity_material(
         "colors": colors_dict,
         "is_metallic": metallic_val >= 0.35 or has_metal_word,
         "semantic_tokens": semantic_tokens,
+        "cull_mode": cull_mode,
+        "is_double_sided": is_double_sided,
+        "alpha_mode": alpha_mode,
+        "cutoff": float(floats_dict.get("_Cutoff", 0.38)),
+        "render_queue": render_queue,
     }
 
 
@@ -752,13 +861,30 @@ def _dilate_black_uv_background_if_detected(
     return pil_image.fromarray(work_arr, mode="RGBA")
 
 
+def _lil_blend_linear(dst_lin: Any, src_lin: Any, alpha_weight: Any, blend_mode: int, numpy_mod: Any) -> Any:
+    """Apply lilToon lilBlendColor in linear space cleanly (Normal/Add/Screen/Multiply)."""
+    if blend_mode == 1:
+        out_lin = dst_lin + src_lin
+    elif blend_mode == 2:
+        out_lin = numpy_mod.maximum(dst_lin + src_lin - dst_lin * src_lin, dst_lin)
+    elif blend_mode == 3:
+        out_lin = dst_lin * src_lin
+    else:
+        out_lin = src_lin
+    return dst_lin * (1.0 - alpha_weight) + out_lin * alpha_weight
+
+
 def composite_unity_material_textures(
     mat_info: Dict[str, Any],
     tile_size: Tuple[int, int] = (512, 512),
+    preserve_alpha: bool = True,
+    apply_matcap2nd_mul: bool = True,
+    force_iris_normal_2nd: bool = False,
 ) -> Tuple[Any, Any, Any]:
     """
-    Bake a single Unity hair .mat (lilToon / Standard) into (diffuse_rgba, normal_rgb, spec_rgb)
-    calibrated safely for GTA V ped_default.sps.
+    Bake a single Unity lilToon/Standard .mat into (diffuse_rgba, normal_rgb, spec_rgb)
+    using exact linear-space lilToon HSVG, _Color, _Main2nd/_Main3rd, _MatCap2nd Multiply,
+    and _Emission/_Emission2nd blending.
     """
     import numpy as numpy_mod
     from PIL import Image as pil_image
@@ -789,6 +915,10 @@ def composite_unity_material_textures(
                 return loaded, tuple(entry.get("scale", (1.0, 1.0))), tuple(entry.get("offset", (0.0, 0.0)))
         return pil_image.new("RGBA", (target_w, target_h), default_rgba), (1.0, 1.0), (0.0, 0.0)
 
+    def _srgb_vec_to_lin(col_vec: Sequence[float]) -> Any:
+        arr_rgb = numpy_mod.array(col_vec[:3], dtype=numpy_mod.float32)
+        return numpy_mod.power(numpy_mod.maximum(arr_rgb, 0.0), 2.2)
+
     main_img, main_scale, main_off = _load_slot_rgba(
         ("_MainTex", "_BaseMap", "_BaseColorMap"),
         (255, 255, 255, 255),
@@ -808,18 +938,11 @@ def composite_unity_material_textures(
         toned_rgb = raw_main_rgb * (1.0 - adj_mask) + toned_rgb * adj_mask
 
     base_color = colors.get("_Color") or colors.get("_BaseColor") or [1.0, 1.0, 1.0, 1.0]
-    tint_srgb = numpy_mod.array(
-        [
-            _linear_channel_to_srgb(base_color[0]),
-            _linear_channel_to_srgb(base_color[1]),
-            _linear_channel_to_srgb(base_color[2]),
-        ],
-        dtype=numpy_mod.float32,
-    )
-    base_rgb = numpy_mod.clip(toned_rgb * tint_srgb[None, None, :], 0.0, 255.0)
+    base_lin = numpy_mod.power(numpy_mod.clip(toned_rgb / 255.0, 0.0, 1.0), 2.2)
+    base_lin = base_lin * _srgb_vec_to_lin(base_color)[None, None, :]
     alpha_channel = base_arr[..., 3:4]
 
-    # Composite lilToon 2nd and 3rd layers (_Main2ndTex / _Main3rdTex)
+    # Composite lilToon 2nd and 3rd layers (_Main2ndTex / _Main3rdTex) in linear space
     for idx_str, use_flag, col_key, mask_key, blend_keys in (
         ("2nd", "_UseMain2ndTex", "_Color2nd", "_Main2ndBlendMask", ("_Main2ndTexBlendMode", "_Main2ndTex_BlendMode")),
         ("3rd", "_UseMain3rdTex", "_Color3rd", "_Main3rdBlendMask", ("_Main3rdTexBlendMode", "_Main3rdTex_BlendMode")),
@@ -827,22 +950,18 @@ def composite_unity_material_textures(
         if floats.get(use_flag, 0.0) < 0.5:
             continue
         layer_tex_key = f"_Main{idx_str}Tex"
+        layer_entry = tex_envs.get(layer_tex_key)
+        if not layer_entry or not layer_entry.get("path") or not os.path.isfile(layer_entry["path"]):
+            continue
         layer_col = colors.get(col_key, [1.0, 1.0, 1.0, 1.0])
-        layer_img, l_scale, l_off = _load_slot_rgba((layer_tex_key,), (255, 255, 255, 255))
-        layer_img = _apply_uv_tile_transform(layer_img, l_scale, l_off)
+        layer_img, layer_scale, layer_off = _load_slot_rgba((layer_tex_key,), (255, 255, 255, 255))
+        layer_img = _apply_uv_tile_transform(layer_img, layer_scale, layer_off)
         layer_arr = numpy_mod.array(layer_img, dtype=numpy_mod.float32)
 
-        layer_tint = numpy_mod.array(
-            [
-                _linear_channel_to_srgb(layer_col[0]),
-                _linear_channel_to_srgb(layer_col[1]),
-                _linear_channel_to_srgb(layer_col[2]),
-            ],
-            dtype=numpy_mod.float32,
-        )
-        layer_rgb = numpy_mod.clip(layer_arr[..., :3] * layer_tint[None, None, :], 0.0, 255.0)
-        blend_mask_img, m_scale, m_off = _load_slot_rgba((mask_key,), (255, 255, 255, 255))
-        blend_mask_img = _apply_uv_tile_transform(blend_mask_img, m_scale, m_off)
+        layer_lin = numpy_mod.power(numpy_mod.clip(layer_arr[..., :3] / 255.0, 0.0, 1.0), 2.2)
+        layer_lin = layer_lin * _srgb_vec_to_lin(layer_col)[None, None, :]
+        blend_mask_img, mask_scale, mask_off = _load_slot_rgba((mask_key,), (255, 255, 255, 255))
+        blend_mask_img = _apply_uv_tile_transform(blend_mask_img, mask_scale, mask_off)
         blend_mask_arr = numpy_mod.array(blend_mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
         layer_alpha = (layer_arr[..., 3:4] / 255.0) * blend_mask_arr * max(0.0, min(1.0, float(layer_col[3])))
 
@@ -851,31 +970,77 @@ def composite_unity_material_textures(
             if b_key in floats:
                 raw_blend_val = floats[b_key]
                 break
-        blend_mode = int(round(raw_blend_val))
-        if blend_mode == 1:  # Add
-            blended = numpy_mod.clip(base_rgb + layer_rgb * layer_alpha, 0.0, 255.0)
-        elif blend_mode == 2:  # Screen
-            screened = 255.0 - ((255.0 - base_rgb) * (255.0 - layer_rgb) / 255.0)
-            blended = base_rgb * (1.0 - layer_alpha) + screened * layer_alpha
-        elif blend_mode == 3:  # Multiply
-            multed = (base_rgb * layer_rgb) / 255.0
-            blended = base_rgb * (1.0 - layer_alpha) + multed * layer_alpha
-        else:  # Normal alpha blend
-            blended = base_rgb * (1.0 - layer_alpha) + layer_rgb * layer_alpha
-        base_rgb = blended
+        blend_mode = 0 if (force_iris_normal_2nd and idx_str == "2nd") else int(round(raw_blend_val))
+        base_lin = _lil_blend_linear(base_lin, layer_lin, layer_alpha, blend_mode, numpy_mod)
 
-    # Optional Emission tint (subtle so pins/accents stay readable without blowing out)
-    if floats.get("_UseEmission", 0.0) >= 0.5:
-        em_col = colors.get("_EmissionColor", [0.0, 0.0, 0.0, 0.0])
-        em_entry = tex_envs.get("_EmissionMap")
-        if em_entry and em_entry.get("path") and os.path.isfile(em_entry["path"]):
-            em_img, em_scale, em_off = _load_slot_rgba(("_EmissionMap",), (255, 255, 255, 255))
-            em_img = _apply_uv_tile_transform(em_img, em_scale, em_off)
-            em_arr = numpy_mod.array(em_img, dtype=numpy_mod.float32)[..., :3]
-            em_rgb = em_arr * numpy_mod.array(em_col[:3], dtype=numpy_mod.float32)[None, None, :]
-            base_rgb = numpy_mod.clip(base_rgb + em_rgb * 0.25, 0.0, 255.0)
+    # Apply diffuse-multiply MatCap2nd (e.g. Lueur Body Pinkpresetreal warm.png / Miltina cool.png)
+    if (
+        apply_matcap2nd_mul
+        and floats.get("_UseMatCap2nd", 0.0) >= 0.5
+        and int(round(floats.get("_MatCap2ndBlendMode", 1.0))) == 3
+    ):
+        mc2_entry = tex_envs.get("_MatCap2ndTex")
+        if mc2_entry and mc2_entry.get("path") and os.path.isfile(mc2_entry["path"]):
+            with pil_image.open(mc2_entry["path"]) as mc2_raw:
+                mc2_arr = numpy_mod.array(mc2_raw.convert("RGB"), dtype=numpy_mod.float32) / 255.0
+            rad_y, rad_x = max(1, mc2_arr.shape[0] // 10), max(1, mc2_arr.shape[1] // 10)
+            mid_y, mid_x = mc2_arr.shape[0] // 2, mc2_arr.shape[1] // 2
+            mc2_center = mc2_arr[mid_y - rad_y : mid_y + rad_y, mid_x - rad_x : mid_x + rad_x].mean(axis=(0, 1))
+            mc2_col = colors.get("_MatCap2ndColor", [1.0, 1.0, 1.0, 1.0])
+            mc2_lin = numpy_mod.power(numpy_mod.clip(mc2_center, 0.0, 1.0), 2.2) * _srgb_vec_to_lin(mc2_col)
+            mc2_blend = max(0.0, min(1.0, float(floats.get("_MatCap2ndBlend", 1.0)) * float(mc2_col[3])))
+            mc2_mask_arr = numpy_mod.ones((target_h, target_w, 1), dtype=numpy_mod.float32)
+            mc2_mask_entry = tex_envs.get("_MatCap2ndBlendMask")
+            if mc2_mask_entry and mc2_mask_entry.get("path") and os.path.isfile(mc2_mask_entry["path"]):
+                mc2_m_img, mc2_ms, mc2_mo = _load_slot_rgba(("_MatCap2ndBlendMask",), (255, 255, 255, 255))
+                mc2_m_img = _apply_uv_tile_transform(mc2_m_img, mc2_ms, mc2_mo)
+                mc2_mask_arr = numpy_mod.array(mc2_m_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+            base_lin = _lil_blend_linear(
+                base_lin,
+                base_lin * mc2_lin[None, None, :],
+                mc2_blend * mc2_mask_arr,
+                0,
+                numpy_mod,
+            )
 
-    # Apply _AlphaMask cleanly for edge dilation while emitting opaque RGBA for ped_default.sps
+    # Apply 1st and 2nd Emission layers cleanly in linear space
+    for use_em_key, map_em_key, mask_em_key, col_em_key, blend_em_key, mode_em_key in (
+        ("_UseEmission", "_EmissionMap", "_EmissionBlendMask", "_EmissionColor", "_EmissionBlend", "_EmissionBlendMode"),
+        ("_UseEmission2nd", "_Emission2ndMap", "_Emission2ndBlendMask", "_Emission2ndColor", "_Emission2ndBlend", "_Emission2ndBlendMode"),
+    ):
+        if floats.get(use_em_key, 0.0) < 0.5:
+            continue
+        em_entry = tex_envs.get(map_em_key)
+        if not em_entry or not em_entry.get("path") or not os.path.isfile(em_entry["path"]):
+            continue
+        em_raw = colors.get(col_em_key, [0.0, 0.0, 0.0, 1.0])
+        em_gain = numpy_mod.clip(numpy_mod.array(em_raw[:3], dtype=numpy_mod.float32), 0.0, 1.55)
+        em_img, em_scale, em_off = _load_slot_rgba((map_em_key,), (255, 255, 255, 255))
+        em_img = _apply_uv_tile_transform(em_img, em_scale, em_off)
+        em_arr = numpy_mod.array(em_img, dtype=numpy_mod.float32) / 255.0
+        em_lin = numpy_mod.power(numpy_mod.clip(em_arr[..., :3], 0.0, 1.0), 2.2)
+        em_tint = numpy_mod.power(numpy_mod.minimum(em_gain, 1.0), 2.2) * numpy_mod.maximum(em_gain, 1.0)
+        em_val = em_lin * em_tint[None, None, :]
+        em_mask_val = 1.0
+        if tex_envs.get(mask_em_key, {}).get("path") and os.path.isfile(tex_envs[mask_em_key]["path"]):
+            em_m_img, em_ms, em_mo = _load_slot_rgba((mask_em_key,), (255, 255, 255, 255))
+            em_m_img = _apply_uv_tile_transform(em_m_img, em_ms, em_mo)
+            em_mask_val = numpy_mod.array(em_m_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+        em_alpha = max(0.0, min(1.0, float(floats.get(blend_em_key, 1.0)) * float(em_raw[3]))) * em_arr[..., 3:4] * em_mask_val
+        em_mode = int(round(floats.get(mode_em_key, 1.0)))
+        base_lin = _lil_blend_linear(base_lin, em_val, em_alpha, em_mode, numpy_mod)
+
+    base_rgb = numpy_mod.clip(
+        numpy_mod.power(numpy_mod.clip(base_lin, 0.0, 1.0), 1.0 / 2.2) * 255.0,
+        0.0,
+        255.0,
+    )
+
+    # Apply _AlphaMask and _Color.a cleanly while preserving cutout/translucent alpha channels
+    base_col = colors.get("_Color", [1.0, 1.0, 1.0, 1.0])
+    color_alpha = max(0.0, min(1.0, float(base_col[3]) if len(base_col) >= 4 else 1.0))
+    alpha_channel = alpha_channel * color_alpha
+
     alpha_mask_entry = tex_envs.get("_AlphaMask")
     if alpha_mask_entry and alpha_mask_entry.get("path") and os.path.isfile(alpha_mask_entry["path"]):
         am_img, am_scale, am_off = _load_slot_rgba(("_AlphaMask",), (255, 255, 255, 255))
@@ -888,7 +1053,9 @@ def composite_unity_material_textures(
 
     rgba_work = numpy_mod.concatenate([base_rgb, alpha_channel], axis=-1).astype(numpy_mod.uint8)
     rgba_dilated = _dilate_rgba_transparent_edges(rgba_work, passes=10)
-    rgba_dilated[..., 3] = 255
+    alpha_mode = str(mat_info.get("alpha_mode", "cutout"))
+    if not preserve_alpha or alpha_mode == "opaque":
+        rgba_dilated[..., 3] = 255
     diffuse_out = pil_image.fromarray(rgba_dilated, mode="RGBA")
 
     # Normal tile: use _BumpMap if _UseBumpMap enabled, else generate subtle strand normal
@@ -919,6 +1086,73 @@ def composite_unity_material_textures(
     spec_out = pil_image.fromarray(spec_rgb, mode="RGB")
 
     return diffuse_out, normal_out, spec_out
+
+
+def bake_liltoon_mat_to_image(
+    mat_path: Union[str, Path],
+    tile_size: Tuple[int, int] = (1024, 1024),
+    preserve_alpha: bool = True,
+    unity_assets_root: Optional[Path] = None,
+    apply_matcap2nd_mul: bool = True,
+    force_iris_normal_2nd: bool = False,
+) -> Optional[Tuple[Any, Any, Any, Dict[str, Any]]]:
+    """Parse a Unity .mat (with m_Parent inheritance) and bake diffuse, normal, spec images."""
+    resolved = project_paths.to_host_path(mat_path)
+    if not resolved.is_file():
+        return None
+    root_dir = Path(unity_assets_root) if unity_assets_root else find_unity_assets_root(resolved)
+    parsed_mat = parse_unity_material(resolved, unity_assets_root=root_dir)
+    diff_img, norm_img, spec_img = composite_unity_material_textures(
+        parsed_mat,
+        tile_size=tile_size,
+        preserve_alpha=preserve_alpha,
+        apply_matcap2nd_mul=apply_matcap2nd_mul,
+        force_iris_normal_2nd=force_iris_normal_2nd,
+    )
+    return diff_img, norm_img, spec_img, parsed_mat
+
+
+def extract_liltoon_emission_mask(
+    mat_info: Dict[str, Any],
+    tile_size: Tuple[int, int] = (512, 512),
+    threshold: float = 0.06,
+) -> Optional[Any]:
+    """Build a boolean 2D emission glow mask combining _EmissionMap and _Emission2ndMap."""
+    import numpy as numpy_mod
+    from PIL import Image as pil_image
+
+    tex_envs = mat_info.get("tex_envs", {})
+    floats = mat_info.get("floats", {})
+    colors = mat_info.get("colors", {})
+    target_w, target_h = int(tile_size[0]), int(tile_size[1])
+    combined_luma = numpy_mod.zeros((target_h, target_w), dtype=numpy_mod.float32)
+    found_any = False
+
+    for use_key, map_key, col_key, weight_gain in (
+        ("_UseEmission", "_EmissionMap", "_EmissionColor", 1.0),
+        ("_UseEmission2nd", "_Emission2ndMap", "_Emission2ndColor", 1.35),
+    ):
+        if floats.get(use_key, 0.0) < 0.5:
+            continue
+        entry = tex_envs.get(map_key)
+        if not entry or not entry.get("path") or not os.path.isfile(entry["path"]):
+            continue
+        col_vec = colors.get(col_key, [1.0, 1.0, 1.0, 1.0])
+        with pil_image.open(entry["path"]) as raw_em:
+            em_resized = raw_em.convert("RGBA").resize(
+                (target_w, target_h), pil_image.Resampling.LANCZOS
+            )
+        em_arr = numpy_mod.array(em_resized, dtype=numpy_mod.float32) / 255.0
+        rgb_gain = numpy_mod.clip(numpy_mod.array(col_vec[:3], dtype=numpy_mod.float32), 0.0, 1.5)
+        weighted = em_arr[..., :3] * rgb_gain[None, None, :] * weight_gain
+        luma_map = weighted.max(axis=-1) * em_arr[..., 3]
+        combined_luma = numpy_mod.maximum(combined_luma, luma_map)
+        found_any = True
+
+    if not found_any:
+        return None
+    mask_bool = combined_luma > float(threshold)
+    return mask_bool if bool(mask_bool.any()) else None
 
 
 def compute_quadrant_tile_entries(
@@ -988,6 +1222,10 @@ def compute_quadrant_tile_entries(
                 "tex_stem": Path(main_tex_path).stem if main_tex_path else "",
                 "semantic_tokens": list(mat_item.get("semantic_tokens", [])),
                 "is_metallic": bool(mat_item.get("is_metallic", False)),
+                "is_double_sided": bool(mat_item.get("is_double_sided", False)),
+                "cull_mode": float(mat_item.get("cull_mode", 2.0)),
+                "alpha_mode": str(mat_item.get("alpha_mode", "cutout")),
+                "cutoff": float(mat_item.get("cutoff", 0.38)),
                 "uv_rect": [
                     round(quad_u0 + local_u0 * quad_du, 6),
                     round(quad_v0 + local_v0 * quad_dv, 6),

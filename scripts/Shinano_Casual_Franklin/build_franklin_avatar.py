@@ -647,9 +647,14 @@ if hair_mode == "custom":
     prepacked_mat = bpy.data.materials.get("Shinano_hair_prepacked") or bpy.data.materials.new(
         name="Shinano_hair_prepacked"
     )
+    prepacked_alpha_mat = bpy.data.materials.get("Shinano_hair_prepacked_alpha") or bpy.data.materials.new(
+        name="Shinano_hair_prepacked_alpha"
+    )
     for imported_obj in custom_hair_objs:
+        is_bang_alpha = any(tok in imported_obj.name.lower() for tok in ("bang", "front", "alpha", "trans"))
+        chosen_prepacked = prepacked_alpha_mat if is_bang_alpha else prepacked_mat
         imported_obj.data.materials.clear()
-        imported_obj.data.materials.append(prepacked_mat)
+        imported_obj.data.materials.append(chosen_prepacked)
         for poly_item in imported_obj.data.polygons:
             poly_item.material_index = 0
         custom_hair_mesh_names.add(imported_obj.name)
@@ -937,7 +942,7 @@ for mesh_name in include_mesh_names:
         bpy.context.view_layer.objects.active = new_obj
         bpy.ops.mesh.customdata_custom_splitnormals_clear()
 
-    # Copy non-alpha material slots
+    # Copy non-alpha material slots (use cutout hair for opaque default Shinano_hair.png; custom hair handles its own alpha slots)
     for mat_slot_item in src_obj.data.materials:
         if mesh_name == "Body" and mat_slot_item is not None and "alpha" in mat_slot_item.name.lower():
             continue
@@ -1155,7 +1160,7 @@ quadrant_map = {
 }
 
 shader_materials = {}
-for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume", "Shinano_hair"]:
+for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume"]:
     shader_materials[mat_name] = ped_damage_helper.create_ped_material(
         create_shader,
         mat_name,
@@ -1171,18 +1176,50 @@ for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume", "Shinano_hai
         stubble_control=(0.0, 0.0),
         um_global_params=(0.0, 0.0, 0.0, 0.0),
     )
+shader_materials["Shinano_hair"] = ped_damage_helper.create_ped_hair_cutout_material(
+    create_shader,
+    "Shinano_hair",
+    diffuse_image=atlas_img,
+    bump_image=flat_norm_img,
+    spec_image=black_spec_img,
+)
+shader_materials["Shinano_hair_alpha"] = ped_damage_helper.create_ped_alpha_material(
+    create_shader,
+    "Shinano_hair_alpha",
+    diffuse_image=atlas_img,
+    bump_image=flat_norm_img,
+    spec_image=black_spec_img,
+)
+
+# Duplicate double-sided hair polygons before assigning material buckets and joining
+double_sided_hair_slots = [
+    slot_idx
+    for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials)
+    if mat_item is not None and ("hair" in mat_item.name.lower())
+]
+if double_sided_hair_slots:
+    blender_hair_helper.duplicate_double_sided_backfaces(
+        joined_mesh_obj,
+        material_indices=double_sided_hair_slots,
+        normal_offset=0.00035,
+    )
 
 slot_to_key = {}
 for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
     if not mat_item:
         continue
-    if "prepacked" in mat_item.name.lower():
+    low_slot = mat_item.name.lower()
+    if "prepacked_alpha" in low_slot or "hair_alpha" in low_slot or "hair_bang" in low_slot:
+        joined_mesh_obj.data.materials[slot_idx] = shader_materials["Shinano_hair_alpha"]
+        slot_to_key[slot_idx] = "Shinano_hair_prepacked" if "prepacked" in low_slot else "Shinano_hair"
+        continue
+    if "prepacked" in low_slot:
         joined_mesh_obj.data.materials[slot_idx] = shader_materials["Shinano_hair"]
         slot_to_key[slot_idx] = "Shinano_hair_prepacked"
         continue
     matched = False
     for mat_key, shader_material in shader_materials.items():
-        if mat_key.lower() in mat_item.name.lower():
+        if mat_key.lower() in low_slot:
             joined_mesh_obj.data.materials[slot_idx] = shader_material
             slot_to_key[slot_idx] = mat_key
             matched = True
