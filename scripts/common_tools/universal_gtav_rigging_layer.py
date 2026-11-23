@@ -69,8 +69,28 @@ def _select_scene_or_prefab(
     """
     import avatar_archive_helper
 
-    proj_root = Path(scan_info["unity_project_root"])
+    preferred_prefab = scan_info.get("preferred_prefab")
+    if preferred_prefab and Path(str(preferred_prefab)).is_file():
+        pref_path = Path(str(preferred_prefab))
+        return pref_path, (preferred_name or pref_path.stem)
+
+    preferred_scene = scan_info.get("preferred_scene")
     scene_paths = [Path(pth) for pth in (scan_info.get("scenes") or ())]
+    if preferred_scene and Path(str(preferred_scene)).is_file():
+        chosen_scene = Path(str(preferred_scene))
+        discovered_avatars = avatar_archive_helper.discover_scene_avatars(chosen_scene)
+        selected_entry = avatar_archive_helper.prompt_select_scene_avatar(
+            discovered_avatars,
+            default_name=preferred_name or None,
+        )
+        chosen_name = (
+            str(selected_entry.get("name", "")).strip()
+            if selected_entry is not None
+            else (preferred_name or chosen_scene.stem)
+        )
+        return chosen_scene, chosen_name
+
+    proj_root = Path(scan_info["unity_project_root"])
     if scene_paths:
         chosen_scene = scene_paths[0]
         discovered_avatars = avatar_archive_helper.discover_scene_avatars(chosen_scene)
@@ -115,39 +135,54 @@ def _select_main_fbx(
     selected_prefab_or_scene: Optional[Path],
 ) -> Path:
     """Resolve the primary humanoid character FBX from MA plan or ingested files."""
-    for fbx_item in ma_plan.get("base_fbx_paths") or ():
-        cand = Path(fbx_item)
-        if cand.is_file():
-            return cand
+    anchor_tokens: List[str] = []
+    if selected_prefab_or_scene is not None:
+        anchor_tokens.append(selected_prefab_or_scene.stem.lower())
+    avatar_plan_name = str(ma_plan.get("avatar_name") or "").strip().lower()
+    if avatar_plan_name:
+        anchor_tokens.extend(tok for tok in avatar_plan_name.split() if len(tok) >= 3)
+    anchor_tokens.append(Path(scan_info["unity_project_root"]).name.lower())
+
+    def _score_fbx(fbx_file: Path) -> Tuple[int, int, int, int, int]:
+        stem_low = fbx_file.stem.lower()
+        in_loose = 1 if "_ziploosefbx" in str(fbx_file).lower() else 0
+        is_accessory = 1 if any(
+            tok in stem_low for tok in ("_for_", "wear", "dress", "outfit", "hair", "nail", "earring", "cloth")
+        ) else 0
+        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest")) else 0
+        matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
+        return (in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
+
+    plan_base_fbxs = [
+        Path(fbx_item)
+        for fbx_item in (ma_plan.get("base_fbx_paths") or ())
+        if Path(fbx_item).is_file()
+    ]
+    if plan_base_fbxs:
+        return sorted(plan_base_fbxs, key=_score_fbx)[0]
 
     fbx_candidates = [Path(item) for item in (scan_info.get("fbx_files") or ()) if Path(item).is_file()]
     if not fbx_candidates:
         raise FileNotFoundError("No FBX models found inside avatar workspace.")
-
-    anchor_tokens: List[str] = []
-    if selected_prefab_or_scene is not None:
-        anchor_tokens.append(selected_prefab_or_scene.stem.lower())
-    anchor_tokens.append(Path(scan_info["unity_project_root"]).name.lower())
-
-    def _score_fbx(fbx_file: Path) -> Tuple[int, int, int, int]:
-        stem_low = fbx_file.stem.lower()
-        in_loose = 1 if "_ziploosefbx" in str(fbx_file).lower() else 0
-        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest")) else 0
-        matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
-        return (in_loose, has_kaihen, matches_name, -fbx_file.stat().st_size)
-
     return sorted(fbx_candidates, key=_score_fbx)[0]
+
+
+PROTAGONIST_VTOON_CHAR_IDS: Dict[str, int] = {
+    "player_zero": 1,
+    "player_one": 2,
+    "player_two": 3,
+}
 
 
 def _pick_default_face_anim(
     scan_info: Dict[str, Any],
     avatar_hints: Sequence[str],
+    fallback_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Locate a `default` resting facial `.anim` file if present."""
+    """Locate a `default` resting facial `.anim` file without walking huge Unity trees."""
     anim_candidates = sorted(Path(pth) for pth in (scan_info.get("anim_files") or ()))
-    if not anim_candidates:
-        assets_dir = Path(scan_info["assets_root"])
-        anim_candidates = sorted(assets_dir.rglob("*.anim"))
+    if not anim_candidates and fallback_dir is not None and fallback_dir.is_dir():
+        anim_candidates = sorted(fallback_dir.rglob("*.anim"))
     for anim_file in anim_candidates:
         low_name = anim_file.stem.lower()
         if "default" in low_name or "idle" in low_name:
@@ -164,6 +199,21 @@ def prepare_universal_npc_build(
     blood_decals: bool = True,
     eye_blink: Optional[bool] = None,
     eye_blink_strength: Optional[float] = None,
+    mouth_open_strength: Optional[float] = None,
+    physbones_marshmallow: Optional[bool] = None,
+    import_face_blendshapes: Optional[bool] = None,
+    import_body_blendshapes: Optional[bool] = None,
+    blendshapes_source: Optional[str] = None,
+    physbones_source: Optional[str] = None,
+    blendshapes_cfg: Optional[str] = None,
+    face_anim: Optional[str] = None,
+    physbones_cfg: Optional[str] = None,
+    vtoon_char_id: Optional[int] = None,
+    atlas_size: int = 2048,
+    normal_size: int = 0,
+    secondary_atlas_size: int = 0,
+    texture_overrides: Optional[Dict[str, str]] = None,
+    deploy: bool = True,
 ) -> Dict[str, Any]:
     """
     Ingest Unity avatar archive/folder, discover & extract GTA V NPC staging,
@@ -172,6 +222,7 @@ def prepare_universal_npc_build(
     """
     import avatar_archive_helper
     import blendshape_helper
+    import eye_blink_helper
     import modular_avatar_helper
     import npc_registry_helper
     import physbone_helper
@@ -213,14 +264,22 @@ def prepare_universal_npc_build(
         )
 
     main_fbx = _select_main_fbx(scan_info, ma_plan, selected_scene_or_prefab)
-    extra_fbxs = [
-        Path(fbx_item)
-        for fbx_item in (ma_plan.get("extra_fbx_paths") or ())
-        if Path(fbx_item).is_file() and Path(fbx_item).resolve() != main_fbx.resolve()
-    ]
+    extra_fbxs: List[Path] = []
+    seen_extra_fbx = {str(main_fbx.resolve())}
+    for raw_fbx_item in (
+        *(ma_plan.get("base_fbx_paths") or ()),
+        *(ma_plan.get("extra_fbx_paths") or ()),
+    ):
+        cand_fbx = Path(raw_fbx_item)
+        if not cand_fbx.is_file():
+            continue
+        resolved_fbx = str(cand_fbx.resolve())
+        if resolved_fbx not in seen_extra_fbx:
+            seen_extra_fbx.add(resolved_fbx)
+            extra_fbxs.append(cand_fbx)
     all_fbxs = [main_fbx, *extra_fbxs]
 
-    print(f"[2/4] Discovering NPC target '{norm_ped}' in GTA V archives...", flush=True)
+    print(f"[2/4] Discovering target '{norm_ped}' in GTA V archives...", flush=True)
     reg_existing = npc_registry_helper.load_npc_registry(project_root).get("npcs", {}).get(norm_ped)
     cached_location = reg_existing.get("location") if (not force_reextract and isinstance(reg_existing, dict)) else None
     if isinstance(cached_location, dict) and cached_location.get("outer_rpf") and Path(str(cached_location["outer_rpf"])).is_file():
@@ -244,7 +303,19 @@ def prepare_universal_npc_build(
             if backup_comp_ydd.is_file():
                 vanilla_ped_ydd = str(backup_comp_ydd)
 
-    print("[3/4] Compiling 2K GTA V Texture Atlas & .ytd...", flush=True)
+    resolved_vtoon_id = (
+        int(vtoon_char_id)
+        if vtoon_char_id is not None
+        else PROTAGONIST_VTOON_CHAR_IDS.get(norm_ped, 4)
+    )
+    resolved_atlas_size = max(256, min(4096, int(atlas_size or 2048)))
+    resolved_normal_size = int(normal_size or 0)
+    resolved_secondary_size = int(secondary_atlas_size or 0)
+    print(
+        f"[3/4] Compiling {resolved_atlas_size}px GTA V Texture Atlas & .ytd "
+        f"(VToon char_id={resolved_vtoon_id})...",
+        flush=True,
+    )
     textures_dir = Path(staging_info["textures_dir"])
     atlas_manifest = universal_atlas_builder.build_universal_avatar_atlas(
         ped_name=norm_ped,
@@ -253,10 +324,30 @@ def prepare_universal_npc_build(
         source_fbx=main_fbx,
         extra_fbxs=extra_fbxs,
         output_dir=textures_dir,
-        atlas_size=2048,
+        atlas_size=resolved_atlas_size,
+        normal_size=resolved_normal_size,
+        ma_plan=ma_plan,
+        avatar_name=effective_avatar_name,
+        texture_overrides=texture_overrides,
+        vtoon_char_id=resolved_vtoon_id,
+        sync_to_game=bool(deploy),
     )
 
-    face_anim_path = _pick_default_face_anim(scan_info, hints)
+    anim_search_dir = (
+        main_fbx.parent.parent
+        if main_fbx.parent.parent.is_dir() and main_fbx.parent.parent != assets_root
+        else main_fbx.parent
+    )
+    explicit_face_anim = project_paths.to_host_path(face_anim) if face_anim else None
+    face_anim_path = (
+        explicit_face_anim
+        if (explicit_face_anim is not None and explicit_face_anim.is_file())
+        else _pick_default_face_anim(scan_info, hints, fallback_dir=anim_search_dir)
+    )
+    if explicit_face_anim is not None and not explicit_face_anim.is_file():
+        print(f"[Blendshapes] Requested --face-anim not found: {explicit_face_anim}", flush=True)
+    elif explicit_face_anim is not None:
+        print(f"[Blendshapes] Applying Face .anim override: {explicit_face_anim}", flush=True)
     char_pseudo_cfg: Dict[str, Any] = {
         "protagonist": norm_ped,
         "avatar_id": effective_avatar_name.lower(),
@@ -266,11 +357,14 @@ def prepare_universal_npc_build(
         "unity_scene": str(selected_scene_or_prefab or ""),
         "unity_avatar_name": effective_avatar_name,
         "face_anim": str(face_anim_path or ""),
-        "blendshapes_source": "auto",
-        "physbones_source": "auto",
-        "physbones_marshmallow": "false",
+        "blendshapes_source": str(blendshapes_source or "auto"),
+        "physbones_source": str(physbones_source or "auto"),
+        "physbones_marshmallow": "true" if physbones_marshmallow else "false",
         "eye_blink": "on" if eye_blink is True else ("off" if eye_blink is False else "auto"),
         "eye_blink_strength": str(eye_blink_strength) if eye_blink_strength is not None else "0.80",
+        "mouth_open_strength": str(
+            eye_blink_helper.resolve_mouth_open_strength(mouth_open_strength)
+        ),
     }
 
     disabled_meshes = list(ma_plan.get("disabled_meshes") or ())
@@ -284,26 +378,45 @@ def prepare_universal_npc_build(
     saved_bs_cfg = blender_dir / f"{norm_ped}_blendshapes.cfg"
     saved_pb_cfg = blender_dir / f"{norm_ped}_physbones.cfg"
 
+    active_face_mesh = next(
+        (m_name for m_name in active_meshes if m_name.lower() == "body"),
+        next(
+            (
+                m_name
+                for m_name in active_meshes
+                if any(tok in m_name.lower() for tok in ("face", "head", "body"))
+            ),
+            "Body",
+        ),
+    )
+    bs_source_eff = str(blendshapes_source or ("unity" if selected_scene_or_prefab else "auto"))
     blendshape_res = blendshape_helper.resolve_character_blendshapes(
         char_pseudo_cfg,
         fbx_paths=[str(pth) for pth in all_fbxs],
         character_hints=hints,
-        default_face_mesh="Body",
-        override_source="unity" if selected_scene_or_prefab else "auto",
+        default_face_mesh=active_face_mesh,
+        unity_assets_root=assets_root,
+        override_source=bs_source_eff,
+        override_cfg_path=blendshapes_cfg or None,
         override_unity_scene=selected_scene_or_prefab,
         override_avatar_name=effective_avatar_name,
         override_face_anim=face_anim_path,
         save_cfg_path=saved_bs_cfg,
+        import_face=import_face_blendshapes,
+        import_body=import_body_blendshapes,
     )
 
+    pb_source_eff = str(physbones_source or ("unity" if selected_scene_or_prefab else "auto"))
     physbone_res = physbone_helper.resolve_character_physbones(
         char_pseudo_cfg,
         fbx_paths=[str(pth) for pth in all_fbxs],
         character_hints=hints,
         unity_assets_root=assets_root,
-        override_source="unity" if selected_scene_or_prefab else "auto",
+        override_source=pb_source_eff,
+        override_cfg_path=physbones_cfg or None,
         override_unity_scene=selected_scene_or_prefab,
         override_avatar_name=effective_avatar_name,
+        override_marshmallow=physbones_marshmallow,
         save_cfg_path=saved_pb_cfg,
         max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
         override_excluded_meshes=disabled_meshes,
@@ -345,6 +458,11 @@ def prepare_universal_npc_build(
         "blood_decals": bool(blood_decals),
         "eye_blink": char_pseudo_cfg["eye_blink"],
         "eye_blink_strength": float(char_pseudo_cfg["eye_blink_strength"]),
+        "mouth_open_strength": float(char_pseudo_cfg["mouth_open_strength"]),
+        "atlas_size": resolved_atlas_size,
+        "normal_size": resolved_normal_size,
+        "secondary_atlas_size": resolved_secondary_size,
+        "deploy": bool(deploy),
         "ma_plan_path": str(ma_plan_path),
         "location": npc_location,
         "staging_info": {key: str(val) for key, val in staging_info.items() if isinstance(val, (str, Path))},
@@ -368,6 +486,7 @@ def prepare_universal_npc_build(
         "ytd_file": str(atlas_manifest["ytd_file"]),
         "physbones_cfg": str(saved_pb_cfg),
         "build_manifest": str(build_manifest_path),
+        "deployed": bool(deploy),
         "location": npc_location,
     }
     npc_registry_helper.save_npc_registry(reg_data, project_root)
@@ -671,29 +790,18 @@ def _compute_soft_skirt_weights(
     return remapped
 
 
-def _extract_case_insensitive_jaw_weights(orig_body_obj: Any) -> Dict[int, float]:
+def _extract_case_insensitive_jaw_weights(
+    orig_body_obj: Any,
+    mouth_open_strength: Optional[float] = None,
+) -> Dict[int, float]:
     """Derive FACIAL_jaw weights from `vrc.v_aa` (any casing) or `kuchi_a` / `あ`."""
-    jaw_weights: Dict[int, float] = {}
-    if not orig_body_obj or not getattr(orig_body_obj.data, "shape_keys", None):
-        return jaw_weights
-    key_blocks = orig_body_obj.data.shape_keys.key_blocks
-    key_ci = {kb_item.name.strip().lower(): kb_item for kb_item in key_blocks}
-    shape_aa = (
-        key_ci.get("vrc.v_aa")
-        or key_ci.get("vrc.aa")
-        or key_ci.get("kuchi_a")
-        or key_ci.get("あ")
+    import eye_blink_helper
+
+    return eye_blink_helper.extract_facial_jaw_weights(
+        orig_body_obj,
+        mouth_open_strength=mouth_open_strength,
+        delta_z_threshold=-0.0004,
     )
-    basis_key = key_ci.get("basis") or key_blocks[0]
-    if shape_aa and basis_key:
-        for vert_item in orig_body_obj.data.vertices:
-            delta_z = (
-                shape_aa.data[vert_item.index].co.z - basis_key.data[vert_item.index].co.z
-            )
-            if delta_z < -0.0004:
-                jaw_w = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
-                jaw_weights[vert_item.index] = jaw_w
-    return jaw_weights
 
 
 def _inspect_componentped_drawable_keys(

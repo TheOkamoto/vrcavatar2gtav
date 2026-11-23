@@ -93,6 +93,7 @@ try:
     MARSHMALLOW_PB_AVATAR_PRESETS,
     apply_marshmallow_pb_presets,
     compute_gtav_bone_tag,
+    VANILLA_RESERVED_BONE_TAGS,
     resolve_bone_from_mapping,
     resolve_michael_er_gtav_bone,
     resolve_neko_mimi_gtav_bone,
@@ -168,6 +169,7 @@ except ImportError:
     MARSHMALLOW_PB_AVATAR_PRESETS,
     apply_marshmallow_pb_presets,
     compute_gtav_bone_tag,
+    VANILLA_RESERVED_BONE_TAGS,
     resolve_bone_from_mapping,
     resolve_michael_er_gtav_bone,
     resolve_neko_mimi_gtav_bone,
@@ -555,7 +557,7 @@ def pack_physbone_chains_to_gtav_budget(
                 slack_bones -= extra_needed
 
     kept_flat = [item_rec for unit_items in kept_units for item_rec in unit_items]
-    used_tags: Set[int] = set(PARENT_BONE_TAGS.values())
+    used_tags: Set[int] = set(PARENT_BONE_TAGS.values()) | set(VANILLA_RESERVED_BONE_TAGS)
     chains_out = {}
     bone_map_out: Dict[str, str] = {}
     custom_bones_out: List[str] = []

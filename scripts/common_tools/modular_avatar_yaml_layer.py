@@ -248,6 +248,48 @@ def resolve_ma_bone_mapping(
     return mapping
 
 
+def _parse_unity_vec3(block: str, field_name: str, default_xyz: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    """Extract an `{x: ..., y: ..., z: ...}` Unity YAML vector field cleanly."""
+    match_obj = re.search(rf"^\s*{re.escape(field_name)}:\s*\{{([^}}]*)\}}", block, re.MULTILINE)
+    if not match_obj:
+        return default_xyz
+    vals = {"x": default_xyz[0], "y": default_xyz[1], "z": default_xyz[2]}
+    for part in match_obj.group(1).split(","):
+        if ":" not in part:
+            continue
+        key_tok, raw_val = part.split(":", 1)
+        key_clean = key_tok.strip()
+        if key_clean in vals:
+            try:
+                vals[key_clean] = float(raw_val.strip())
+            except ValueError:
+                pass
+    return (vals["x"], vals["y"], vals["z"])
+
+
+def _parse_unity_quat(
+    block: str,
+    field_name: str,
+    default_xyzw: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+) -> Tuple[float, float, float, float]:
+    """Extract an `{x: ..., y: ..., z: ..., w: ...}` Unity YAML quaternion field."""
+    match_obj = re.search(rf"^\s*{re.escape(field_name)}:\s*\{{([^}}]*)\}}", block, re.MULTILINE)
+    if not match_obj:
+        return default_xyzw
+    vals = {"x": default_xyzw[0], "y": default_xyzw[1], "z": default_xyzw[2], "w": default_xyzw[3]}
+    for part in match_obj.group(1).split(","):
+        if ":" not in part:
+            continue
+        key_tok, raw_val = part.split(":", 1)
+        key_clean = key_tok.strip()
+        if key_clean in vals:
+            try:
+                vals[key_clean] = float(raw_val.strip())
+            except ValueError:
+                pass
+    return (vals["x"], vals["y"], vals["z"], vals["w"])
+
+
 def _extract_inline_ref(field_snippet: str) -> Tuple[str, str]:
     """Extract `(fileID, guid)` from a Unity object reference `{fileID: ..., guid: ...}`."""
     fid_m = re.search(r"fileID:\s*(-?\d+)", field_snippet)
@@ -354,30 +396,39 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                     "go_fid": go_id,
                     "father_tr": father_m.group(1) if father_m else "0",
                     "children": child_fids,
+                    "pos": _parse_unity_vec3(block, "m_LocalPosition", (0.0, 0.0, 0.0)),
+                    "rot": _parse_unity_quat(block, "m_LocalRotation", (0.0, 0.0, 0.0, 1.0)),
+                    "scale": _parse_unity_vec3(block, "m_LocalScale", (1.0, 1.0, 1.0)),
                 }
                 go_to_tr[go_id] = file_id
         elif class_id in ("23", "137"):
             go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
             en_m = re.search(r"^\s*m_Enabled:[ \t]*(\d+)", block, re.MULTILINE)
             mesh_m = re.search(r"m_Mesh:\s*\{([^\}]*)\}", block)
+            root_bone_m = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", block)
             mat_sec = re.search(
                 r"m_Materials:(.*?)(?=^\s{2}[a-zA-Z_][a-zA-Z0-9_]*:|\Z)",
                 block,
                 re.DOTALL | re.MULTILINE,
             )
             mat_guids = (
-                [gid.lower() for gid in re.findall(r"guid:\s*([0-9a-fA-F]{32})", mat_sec.group(1))]
+                [
+                    _extract_inline_ref(entry_txt)[1]
+                    for entry_txt in re.findall(r"-\s*\{([^}]*)\}", mat_sec.group(1))
+                ]
                 if mat_sec
                 else []
             )
             mesh_fid, mesh_guid = _extract_inline_ref(mesh_m.group(1)) if mesh_m else ("0", "")
             if go_m:
                 renderers[go_m.group(1)] = {
+                    "comp_fid": file_id,
                     "go_fid": go_m.group(1),
                     "class_id": class_id,
                     "enabled": (int(en_m.group(1)) != 0) if en_m else True,
                     "mesh_fid": mesh_fid,
                     "mesh_guid": mesh_guid,
+                    "root_bone_tr": root_bone_m.group(1) if root_bone_m else "0",
                     "mat_guids": mat_guids,
                 }
         elif class_id == "33":
@@ -707,7 +758,7 @@ def _collect_guid_paths_for_ma(
     assets_root: Optional[Path],
     *,
     name_hints: Sequence[str] = (),
-    budget_sec: float = 15.0,
+    budget_sec: float = 90.0,
     include_materials: bool = False,
 ) -> Dict[str, Path]:
     """Resolve asset GUIDs quickly via disk cache + parallel top-level os.scandir."""
@@ -747,12 +798,14 @@ def _collect_guid_paths_for_ma(
         if assets_resolved is not None
         else None
     )
+    disk_entries: Dict[str, str] = {}
     if remaining and disk_cache_path is not None and disk_cache_path.is_file():
         try:
             cache_payload = json.loads(disk_cache_path.read_text(encoding="utf-8"))
             cached_entries = cache_payload.get("entries", {})
             if isinstance(cached_entries, dict):
                 for guid_key, raw_asset in cached_entries.items():
+                    disk_entries[guid_key] = raw_asset
                     asset_candidate = Path(raw_asset)
                     _MA_GUID_CACHE.setdefault(guid_key, asset_candidate)
                     if guid_key in remaining and asset_candidate.is_file():
@@ -839,6 +892,7 @@ def _collect_guid_paths_for_ma(
         (".prefab.meta", ".fbx.meta", ".mat.meta") if include_materials else (".prefab.meta", ".fbx.meta")
     )
     local_seen: Set[str] = scan_state["seen_dirs"] if scan_state is not None else set()
+    new_cache_hits = 0
 
     for priority_root in search_roots:
         if not remaining or time_mod.monotonic() > deadline:
@@ -846,9 +900,13 @@ def _collect_guid_paths_for_ma(
         root_key = str(priority_root)
         if root_key in local_seen:
             continue
-        local_seen.add(root_key)
         partial_map = _scan_single_directory_tree_guids(root_key, meta_suffixes, _SKIP_GUID_DIRS, deadline)
+        if time_mod.monotonic() <= deadline:
+            local_seen.add(root_key)
         for guid_key, asset_str in partial_map.items():
+            if guid_key not in disk_entries:
+                new_cache_hits += 1
+            disk_entries[guid_key] = asset_str
             asset_obj = Path(asset_str)
             _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
             if guid_key in remaining:
@@ -857,37 +915,61 @@ def _collect_guid_paths_for_ma(
 
     if remaining and assets_resolved is not None and time_mod.monotonic() <= deadline:
         top_subdirs: List[str] = []
-        root_meta_hits = _scan_single_directory_tree_guids(
-            str(assets_resolved), meta_suffixes, set(), min(deadline, time_mod.monotonic() + 2.0)
-        )
+        root_meta_hits: Dict[str, str] = {}
         try:
-            for top_entry in sorted(os.scandir(assets_resolved), key=lambda ent: ent.name):
-                if top_entry.is_dir(follow_symlinks=False) and not top_entry.name.startswith("."):
-                    if top_entry.name.lower() not in _SKIP_GUID_DIRS and top_entry.path not in local_seen:
-                        local_seen.add(top_entry.path)
-                        top_subdirs.append(top_entry.path)
+            root_entries = list(os.scandir(assets_resolved))
         except OSError:
-            pass
+            root_entries = []
+        root_file_names: Set[str] = set()
+        root_meta_items: List[Tuple[str, str]] = []
+        for top_entry in sorted(root_entries, key=lambda ent: ent.name):
+            if top_entry.is_dir(follow_symlinks=False) and not top_entry.name.startswith("."):
+                if top_entry.name.lower() not in _SKIP_GUID_DIRS and top_entry.path not in local_seen:
+                    top_subdirs.append(top_entry.path)
+            else:
+                root_file_names.add(top_entry.name)
+                if top_entry.name.lower().endswith(meta_suffixes):
+                    root_meta_items.append((top_entry.name, top_entry.path))
+        for meta_name, meta_full in root_meta_items:
+            asset_file_name = meta_name[:-5]
+            if asset_file_name not in root_file_names:
+                continue
+            try:
+                with open(meta_full, "r", encoding="utf-8", errors="ignore") as meta_handle:
+                    for line_idx, line_text in enumerate(meta_handle):
+                        if line_text.startswith("guid:"):
+                            found_guid = line_text.split(":", 1)[1].strip().lower()
+                            if found_guid:
+                                root_meta_hits[found_guid] = os.path.join(str(assets_resolved), asset_file_name)
+                            break
+                        if line_idx > 6:
+                            break
+            except OSError:
+                continue
 
-        disk_entries: Dict[str, str] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=12) as dir_pool:
-            future_list = [
+            future_to_dir = {
                 dir_pool.submit(
                     _scan_single_directory_tree_guids,
                     subdir_path,
                     meta_suffixes,
                     _SKIP_GUID_DIRS,
                     deadline,
-                )
+                ): subdir_path
                 for subdir_path in top_subdirs
-            ]
-            for fut_item in concurrent.futures.as_completed(future_list):
+            }
+            for fut_item in concurrent.futures.as_completed(future_to_dir):
+                sub_dir = future_to_dir[fut_item]
                 try:
                     sub_map = fut_item.result()
                 except Exception:
                     continue
-                disk_entries.update(sub_map)
+                if time_mod.monotonic() <= deadline:
+                    local_seen.add(sub_dir)
                 for guid_key, asset_str in sub_map.items():
+                    if guid_key not in disk_entries:
+                        new_cache_hits += 1
+                    disk_entries[guid_key] = asset_str
                     asset_obj = Path(asset_str)
                     _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
                     if guid_key in remaining:
@@ -895,27 +977,33 @@ def _collect_guid_paths_for_ma(
                         remaining.discard(guid_key)
 
         for guid_key, asset_str in root_meta_hits.items():
+            if guid_key not in disk_entries:
+                new_cache_hits += 1
+            disk_entries[guid_key] = asset_str
             asset_obj = Path(asset_str)
             _MA_GUID_CACHE.setdefault(guid_key, asset_obj)
             if guid_key in remaining:
                 resolved[guid_key] = asset_obj
                 remaining.discard(guid_key)
-        disk_entries.update(root_meta_hits)
 
-        if time_mod.monotonic() <= deadline:
+        if time_mod.monotonic() <= deadline and not remaining:
+            if scan_state is not None:
+                scan_state["complete"] = True
+        elif time_mod.monotonic() <= deadline and len(top_subdirs) + len(search_roots) > 0:
             if scan_state is not None:
                 scan_state["complete"] = True
             for missing_guid in remaining:
                 _MA_GUID_CACHE.setdefault(missing_guid, None)
-            if disk_cache_path is not None and disk_entries:
-                try:
-                    disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    disk_cache_path.write_text(
-                        json.dumps({"assets_root": str(assets_resolved), "entries": disk_entries}),
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
+
+    if disk_cache_path is not None and disk_entries and new_cache_hits > 0:
+        try:
+            disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            disk_cache_path.write_text(
+                json.dumps({"assets_root": str(assets_resolved), "entries": disk_entries}),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     return resolved
 
@@ -952,4 +1040,507 @@ def _is_go_active_in_doc(
             break
         cur_tr = parent_tr
     return True
+
+
+IDENTITY_UNITY_TRS: Tuple[
+    Tuple[float, float, float],
+    Tuple[float, float, float, float],
+    Tuple[float, float, float],
+] = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0))
+
+
+def _quat_mul_unity(
+    quat_a: Tuple[float, float, float, float],
+    quat_b: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    """Multiply two Unity quaternions `(x, y, z, w)` cleanly."""
+    ax_val, ay_val, az_val, aw_val = quat_a
+    bx_val, by_val, bz_val, bw_val = quat_b
+    return (
+        aw_val * bx_val + ax_val * bw_val + ay_val * bz_val - az_val * by_val,
+        aw_val * by_val - ax_val * bz_val + ay_val * bw_val + az_val * bx_val,
+        aw_val * bz_val + ax_val * by_val - ay_val * bx_val + az_val * bw_val,
+        aw_val * bw_val - ax_val * bx_val - ay_val * by_val - az_val * bz_val,
+    )
+
+
+def _quat_rotate_vec_unity(
+    quat_xyzw: Tuple[float, float, float, float],
+    vec_xyz: Tuple[float, float, float],
+) -> Tuple[float, float, float]:
+    """Rotate 3D vector `(x, y, z)` by Unity quaternion `(x, y, z, w)`."""
+    qx_val, qy_val, qz_val, qw_val = quat_xyzw
+    vx_val, vy_val, vz_val = vec_xyz
+    cross_x = 2.0 * (qy_val * vz_val - qz_val * vy_val)
+    cross_y = 2.0 * (qz_val * vx_val - qx_val * vz_val)
+    cross_z = 2.0 * (qx_val * vy_val - qy_val * vx_val)
+    return (
+        vx_val + qw_val * cross_x + (qy_val * cross_z - qz_val * cross_y),
+        vy_val + qw_val * cross_y + (qz_val * cross_x - qx_val * cross_z),
+        vz_val + qw_val * cross_z + (qx_val * cross_y - qy_val * cross_x),
+    )
+
+
+def compose_unity_trs(
+    parent_trs: Tuple[
+        Tuple[float, float, float],
+        Tuple[float, float, float, float],
+        Tuple[float, float, float],
+    ],
+    local_trs: Tuple[
+        Tuple[float, float, float],
+        Tuple[float, float, float, float],
+        Tuple[float, float, float],
+    ],
+) -> Tuple[
+    Tuple[float, float, float],
+    Tuple[float, float, float, float],
+    Tuple[float, float, float],
+]:
+    """Compose `parent_trs * local_trs` matching Unity's `Transform` hierarchy."""
+    par_pos, par_rot, par_scale = parent_trs
+    loc_pos, loc_rot, loc_scale = local_trs
+    scaled_pos = (
+        loc_pos[0] * par_scale[0],
+        loc_pos[1] * par_scale[1],
+        loc_pos[2] * par_scale[2],
+    )
+    rot_pos = _quat_rotate_vec_unity(par_rot, scaled_pos)
+    return (
+        (par_pos[0] + rot_pos[0], par_pos[1] + rot_pos[1], par_pos[2] + rot_pos[2]),
+        _quat_mul_unity(par_rot, loc_rot),
+        (
+            par_scale[0] * loc_scale[0],
+            par_scale[1] * loc_scale[1],
+            par_scale[2] * loc_scale[2],
+        ),
+    )
+
+
+def unity_trs_to_blender_matrix_rows(
+    unity_trs: Tuple[
+        Tuple[float, float, float],
+        Tuple[float, float, float, float],
+        Tuple[float, float, float],
+    ],
+    *,
+    is_bone: bool = True,
+) -> List[List[float]]:
+    """Convert Unity world `(pos, rot, scale)` into a 4x4 Blender matrix (`F4 @ U @ J4` or `F4 @ U @ F4^T`)."""
+    pos_u, rot_u, scale_u = unity_trs
+    qx_val, qy_val, qz_val, qw_val = rot_u
+    norm_sq = qx_val * qx_val + qy_val * qy_val + qz_val * qz_val + qw_val * qw_val
+    if norm_sq > 1e-12:
+        inv_norm = norm_sq ** -0.5
+        qx_val *= inv_norm
+        qy_val *= inv_norm
+        qz_val *= inv_norm
+        qw_val *= inv_norm
+    xx_val, yy_val, zz_val = qx_val * qx_val, qy_val * qy_val, qz_val * qz_val
+    xy_val, xz_val, yz_val = qx_val * qy_val, qx_val * qz_val, qy_val * qz_val
+    wx_val, wy_val, wz_val = qw_val * qx_val, qw_val * qy_val, qw_val * qz_val
+    sx_val, sy_val, sz_val = scale_u
+
+    rot_scaled = [
+        [(1.0 - 2.0 * (yy_val + zz_val)) * sx_val, 2.0 * (xy_val - wz_val) * sy_val, 2.0 * (xz_val + wy_val) * sz_val],
+        [2.0 * (xy_val + wz_val) * sx_val, (1.0 - 2.0 * (xx_val + zz_val)) * sy_val, 2.0 * (yz_val - wx_val) * sz_val],
+        [2.0 * (xz_val - wy_val) * sx_val, 2.0 * (yz_val + wx_val) * sy_val, (1.0 - 2.0 * (xx_val + yy_val)) * sz_val],
+    ]
+    mat_u = [
+        [rot_scaled[0][0], rot_scaled[0][1], rot_scaled[0][2], pos_u[0]],
+        [rot_scaled[1][0], rot_scaled[1][1], rot_scaled[1][2], pos_u[1]],
+        [rot_scaled[2][0], rot_scaled[2][1], rot_scaled[2][2], pos_u[2]],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    f4_mat = [
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    rhs_mat = (
+        [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+        if is_bone
+        else [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    def _mul4(left_m: List[List[float]], right_m: List[List[float]]) -> List[List[float]]:
+        out_m = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
+        for row_idx in range(4):
+            for col_idx in range(4):
+                out_m[row_idx][col_idx] = sum(
+                    left_m[row_idx][mid_idx] * right_m[mid_idx][col_idx]
+                    for mid_idx in range(4)
+                )
+        return out_m
+
+    return _mul4(_mul4(f4_mat, mat_u), rhs_mat)
+
+
+def extract_tr_mod_overrides(
+    mods_list: Sequence[Dict[str, Any]],
+    expected_guid: str = "",
+) -> Dict[str, Dict[str, Any]]:
+    """Collect `m_LocalPosition`/`m_LocalRotation`/`m_LocalScale` overrides keyed by target `fileID`."""
+    overrides: Dict[str, Dict[str, Any]] = {}
+    exp_low = expected_guid.strip().lower()
+    for mod_item in mods_list:
+        tgt_guid = str(mod_item.get("target_guid", "") or "").lower()
+        if exp_low and tgt_guid and tgt_guid != exp_low:
+            continue
+        tgt_fid = str(mod_item.get("target_fid", "") or "")
+        prop_path = str(mod_item.get("property", "") or "")
+        if not tgt_fid or "." not in prop_path:
+            continue
+        prefix_prop, axis_tok = prop_path.rsplit(".", 1)
+        if prefix_prop not in ("m_LocalPosition", "m_LocalRotation", "m_LocalScale"):
+            continue
+        try:
+            float_val = float(str(mod_item.get("value", "") or "").strip())
+        except ValueError:
+            continue
+        bucket = overrides.setdefault(tgt_fid, {})
+        bucket.setdefault(prefix_prop, {})[axis_tok] = float_val
+    return overrides
+
+
+def compute_doc_unity_world_transforms(
+    doc_data: Dict[str, Any],
+    *,
+    root_tr: Optional[str] = None,
+    base_world: Tuple[
+        Tuple[float, float, float],
+        Tuple[float, float, float, float],
+        Tuple[float, float, float],
+    ] = IDENTITY_UNITY_TRS,
+    overrides_by_tr: Optional[Dict[str, Dict[str, Any]]] = None,
+    treat_root_as_avatar_origin: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """Compute avatar-local Unity world transforms for all `Transform` nodes in `doc_data`."""
+    tr_map = doc_data.get("transforms", {})
+    go_map = doc_data.get("gameobjects", {})
+    ov_map = overrides_by_tr or {}
+    memo: Dict[str, Tuple[Any, str, Tuple[float, float, float]]] = {}
+
+    def _effective_local(tr_fid: str) -> Tuple[
+        Tuple[float, float, float],
+        Tuple[float, float, float, float],
+        Tuple[float, float, float],
+    ]:
+        info = tr_map[tr_fid]
+        pos_x, pos_y, pos_z = info.get("pos", (0.0, 0.0, 0.0))
+        rot_x, rot_y, rot_z, rot_w = info.get("rot", (0.0, 0.0, 0.0, 1.0))
+        scl_x, scl_y, scl_z = info.get("scale", (1.0, 1.0, 1.0))
+        tr_ov = ov_map.get(tr_fid)
+        if tr_ov:
+            pos_ov = tr_ov.get("m_LocalPosition", {})
+            pos_x = pos_ov.get("x", pos_x)
+            pos_y = pos_ov.get("y", pos_y)
+            pos_z = pos_ov.get("z", pos_z)
+            rot_ov = tr_ov.get("m_LocalRotation", {})
+            rot_x = rot_ov.get("x", rot_x)
+            rot_y = rot_ov.get("y", rot_y)
+            rot_z = rot_ov.get("z", rot_z)
+            rot_w = rot_ov.get("w", rot_w)
+            scl_ov = tr_ov.get("m_LocalScale", {})
+            scl_x = scl_ov.get("x", scl_x)
+            scl_y = scl_ov.get("y", scl_y)
+            scl_z = scl_ov.get("z", scl_z)
+        return ((pos_x, pos_y, pos_z), (rot_x, rot_y, rot_z, rot_w), (scl_x, scl_y, scl_z))
+
+    def _resolve_node(tr_fid: str, stack_seen: Set[str]) -> Tuple[Any, str, Tuple[float, float, float]]:
+        if tr_fid in memo:
+            return memo[tr_fid]
+        if tr_fid in stack_seen or tr_fid not in tr_map:
+            return (base_world, "", (1.0, 1.0, 1.0))
+        stack_seen.add(tr_fid)
+        tr_info = tr_map[tr_fid]
+        go_name = str(go_map.get(tr_info.get("go_fid", ""), {}).get("name", "") or "")
+        loc_trs = _effective_local(tr_fid)
+        loc_scale = loc_trs[2]
+        if root_tr and tr_fid == root_tr:
+            eff_loc = (
+                ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), loc_scale)
+                if treat_root_as_avatar_origin
+                else loc_trs
+            )
+            world_val = compose_unity_trs(base_world, eff_loc)
+            res = (world_val, go_name, loc_scale)
+            memo[tr_fid] = res
+            return res
+
+        father_fid = tr_info.get("father_tr", "0")
+        if father_fid == "0" or father_fid not in tr_map:
+            par_world, par_path = base_world, ""
+        else:
+            par_world, par_path, _ = _resolve_node(father_fid, stack_seen)
+        cur_path = f"{par_path}/{go_name}" if (par_path and go_name) else (par_path or go_name)
+        world_val = compose_unity_trs(par_world, loc_trs)
+        res = (world_val, cur_path, loc_scale)
+        memo[tr_fid] = res
+        return res
+
+    out_map: Dict[str, Dict[str, Any]] = {}
+    for tr_fid, tr_info in tr_map.items():
+        world_trs, node_path, loc_scale = _resolve_node(tr_fid, set())
+        go_name = str(go_map.get(tr_info.get("go_fid", ""), {}).get("name", "") or "")
+        out_map[tr_fid] = {
+            "name": go_name,
+            "path": node_path,
+            "father_tr": tr_info.get("father_tr", "0"),
+            "world": world_trs,
+            "local_scale": loc_scale,
+        }
+    return out_map
+
+
+def is_identity_mat4(mat_val: Any, tol: float = 1e-4) -> bool:
+    """Return True when a 4x4 matrix is within `tol` of the identity matrix."""
+    for row_idx in range(4):
+        for col_idx in range(4):
+            target_val = 1.0 if row_idx == col_idx else 0.0
+            if abs(float(mat_val[row_idx][col_idx]) - target_val) > tol:
+                return False
+    return True
+
+
+def compute_bone_unit_scale_correction(
+    fbx_points_by_bone: Dict[str, Tuple[float, float, float]],
+    bone_matrices: Dict[str, List[List[float]]],
+) -> float:
+    """
+    Detect FBX cm-to-m unit import scale baked on Unity `Armature` (e.g. `scale=(100,100,100)`
+    while inter-bone spatial span matches Blender at `1.0x`), returning the scalar factor to
+    multiply into Unity target bone 3x3 columns (`~0.01` when 100x unit mismatch exists, else `1.0`).
+    """
+    mats_low = {str(key).lower(): val for key, val in bone_matrices.items()}
+    fbx_pts: List[Tuple[float, float, float]] = []
+    uni_pts: List[Tuple[float, float, float]] = []
+    col_norms: List[float] = []
+    for bone_name, fbx_pt in fbx_points_by_bone.items():
+        rows = bone_matrices.get(bone_name) or mats_low.get(bone_name.lower())
+        if rows is None:
+            continue
+        fbx_pts.append(fbx_pt)
+        uni_pts.append((float(rows[0][3]), float(rows[1][3]), float(rows[2][3])))
+        col_norm = (rows[0][0] ** 2 + rows[1][0] ** 2 + rows[2][0] ** 2) ** 0.5
+        if col_norm > 1e-6:
+            col_norms.append(col_norm)
+    if len(fbx_pts) < 2 or not col_norms:
+        return 1.0
+
+    def _mean_radius(pts_list: List[Tuple[float, float, float]]) -> float:
+        cnt = float(len(pts_list))
+        cen_x = sum(pt_item[0] for pt_item in pts_list) / cnt
+        cen_y = sum(pt_item[1] for pt_item in pts_list) / cnt
+        cen_z = sum(pt_item[2] for pt_item in pts_list) / cnt
+        return sum(
+            (
+                (pt_item[0] - cen_x) ** 2
+                + (pt_item[1] - cen_y) ** 2
+                + (pt_item[2] - cen_z) ** 2
+            )
+            ** 0.5
+            for pt_item in pts_list
+        )
+
+    rad_f = _mean_radius(fbx_pts)
+    rad_u = _mean_radius(uni_pts)
+    if rad_f <= 1e-4 or rad_u <= 1e-4:
+        return 1.0
+    spatial_scale = rad_u / rad_f
+    col_norms.sort()
+    med_col = col_norms[len(col_norms) // 2]
+    if med_col <= 1e-6:
+        return 1.0
+    ratio = med_col / spatial_scale
+    if abs(ratio - 1.0) > 0.5:
+        return spatial_scale / med_col
+    return 1.0
+
+
+_MAT_MOD_PROP_RE = re.compile(r"^m_Materials\.Array\.data\[(\d+)\]$")
+
+
+def extract_renderer_mod_overrides(
+    mods_list: Sequence[Dict[str, Any]],
+    expected_guid: str = "",
+) -> Dict[str, Any]:
+    """
+    Collect PrefabInstance `m_Materials.Array.data[N]`, `m_Enabled`, and `m_IsActive`
+    overrides matching `expected_guid` keyed by target component/GameObject `fileID`.
+    """
+    materials: Dict[str, Dict[int, str]] = {}
+    enabled_map: Dict[str, bool] = {}
+    active_map: Dict[str, bool] = {}
+    exp_low = expected_guid.strip().lower()
+    for mod_item in mods_list:
+        tgt_guid = str(mod_item.get("target_guid", "") or "").lower()
+        if exp_low and tgt_guid and tgt_guid != exp_low:
+            continue
+        tgt_fid = str(mod_item.get("target_fid", "") or "")
+        prop_path = str(mod_item.get("property", "") or "")
+        if not tgt_fid or not prop_path:
+            continue
+        mat_match = _MAT_MOD_PROP_RE.match(prop_path)
+        if mat_match:
+            ref_guid = str(mod_item.get("ref_guid", "") or "").lower()
+            if ref_guid:
+                materials.setdefault(tgt_fid, {})[int(mat_match.group(1))] = ref_guid
+        elif prop_path == "m_Enabled":
+            raw_val = str(mod_item.get("value", "1") or "1").strip()
+            enabled_map[tgt_fid] = raw_val != "0"
+        elif prop_path == "m_IsActive":
+            raw_val = str(mod_item.get("value", "1") or "1").strip()
+            active_map[tgt_fid] = raw_val != "0"
+    return {"materials": materials, "enabled": enabled_map, "active": active_map}
+
+
+def resolve_overridden_renderer_mats(
+    rend_info: Dict[str, Any],
+    renderer_overrides: Optional[Dict[str, Any]],
+) -> List[str]:
+    """Apply PrefabInstance `m_Materials.Array.data[N]` overrides onto `rend_info['mat_guids']`."""
+    eff_mats = [str(gid or "").lower() for gid in (rend_info.get("mat_guids") or ())]
+    if not renderer_overrides:
+        return eff_mats
+    comp_fid = str(rend_info.get("comp_fid", "") or "")
+    slot_map = (renderer_overrides.get("materials") or {}).get(comp_fid)
+    if not slot_map:
+        return eff_mats
+    max_slot = max(slot_map.keys())
+    while len(eff_mats) <= max_slot:
+        eff_mats.append("")
+    for slot_idx, new_guid in slot_map.items():
+        if 0 <= int(slot_idx) < len(eff_mats) and new_guid:
+            eff_mats[int(slot_idx)] = str(new_guid).lower()
+    return eff_mats
+
+
+def stamp_unity_mats_on_blender_objects(
+    mesh_objs: Sequence[Any],
+    mesh_mats_map: Optional[Dict[str, Sequence[Dict[str, Any]]]],
+) -> int:
+    """Attach compact per-mesh Unity `.mat` metadata JSON to imported Blender mesh objects."""
+    if not mesh_objs or not mesh_mats_map:
+        return 0
+    mats_ci = {str(key).strip().lower(): val for key, val in mesh_mats_map.items() if key}
+    stamped = 0
+    for mesh_obj in mesh_objs:
+        if getattr(mesh_obj, "type", "") != "MESH":
+            continue
+        base_name = re.sub(r"\.\d{3}$", "", str(getattr(mesh_obj, "name", "") or "")).strip()
+        mat_list = mesh_mats_map.get(base_name) or mats_ci.get(base_name.lower())
+        if not mat_list:
+            continue
+        compact_list = [
+            {
+                "name": str(item.get("name", "") or ""),
+                "mat_path": str(item.get("mat_path", "") or ""),
+                "mat_guid": str(item.get("mat_guid", "") or ""),
+            }
+            for item in mat_list
+            if isinstance(item, dict)
+        ]
+        if not compact_list:
+            continue
+        try:
+            mesh_obj["vrc2gtav_unity_mats_json"] = json.dumps(compact_list, ensure_ascii=False)
+            stamped += 1
+        except (TypeError, AttributeError):
+            pass
+    return stamped
+
+
+def apply_unity_textures_to_blender_meshes(
+    bpy_mod: Any,
+    mesh_objs: Sequence[Any],
+    mesh_mats_map: Optional[Dict[str, Sequence[Dict[str, Any]]]],
+) -> None:
+    """Attach primary Unity `_MainTex` textures onto imported Blender mesh materials."""
+    if not mesh_objs or not mesh_mats_map:
+        return
+    for mesh_obj in mesh_objs:
+        clean_name = re.sub(r"\.\d{3}$", "", str(getattr(mesh_obj, "name", "") or "")).strip()
+        mat_list = mesh_mats_map.get(clean_name)
+        if not mat_list:
+            continue
+        for slot_idx, mat_info in enumerate(mat_list):
+            if slot_idx >= len(mesh_obj.data.materials):
+                break
+            bl_mat = mesh_obj.data.materials[slot_idx]
+            if bl_mat is None:
+                continue
+            tex_envs = mat_info.get("tex_envs", {})
+            main_entry = tex_envs.get("_MainTex") or tex_envs.get("_BaseMap") or tex_envs.get("_BaseColorMap")
+            tex_path = main_entry.get("path") if isinstance(main_entry, dict) else None
+            if not tex_path or not os.path.isfile(tex_path):
+                continue
+            bl_mat.use_nodes = True
+            node_tree = bl_mat.node_tree
+            if node_tree is None:
+                continue
+            bsdf = next((node_item for node_item in node_tree.nodes if node_item.type == "BSDF_PRINCIPLED"), None)
+            if bsdf is None:
+                continue
+            tex_node = node_tree.nodes.new("ShaderNodeTexImage")
+            try:
+                tex_node.image = bpy_mod.data.images.load(tex_path, check_existing=True)
+            except Exception:
+                continue
+            node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+
+
+def _read_fbx_meta_mesh_fids(fbx_path: Path) -> Dict[str, str]:
+    """Parse fileID->mesh name mappings from a Unity `.fbx.meta` file when present."""
+    fid_map: Dict[str, str] = {}
+    meta_path = Path(str(fbx_path) + ".meta")
+    if not meta_path.is_file():
+        return fid_map
+    try:
+        raw_text = meta_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return fid_map
+    rec_match = re.search(
+        r"fileIDToRecycleName:(.*?)(?=^\s{2}[A-Za-z_]|^\S|\Z)",
+        raw_text,
+        re.DOTALL | re.MULTILINE,
+    )
+    if rec_match:
+        for row_match in re.finditer(r"^\s*(-?\d+):\s*(.+?)\s*$", rec_match.group(1), re.MULTILINE):
+            fid_val = row_match.group(1).strip()
+            mesh_val = row_match.group(2).strip().strip("\"'")
+            if fid_val and mesh_val:
+                fid_map[fid_val] = mesh_val
+    tab_match = re.search(
+        r"internalIDToNameTable:(.*?)(?=^\s{2}[A-Za-z_]|^\S|\Z)",
+        raw_text,
+        re.DOTALL | re.MULTILINE,
+    )
+    if tab_match and "internalIDToNameTable: []" not in tab_match.group(0):
+        for entry_match in re.finditer(
+            r"43:\s*(-?\d+)\s*[\r\n]+\s*second:\s*(.+?)\s*$",
+            tab_match.group(1),
+            re.MULTILINE,
+        ):
+            fid_val = entry_match.group(1).strip()
+            mesh_val = entry_match.group(2).strip().strip("\"'")
+            if fid_val and mesh_val:
+                fid_map[fid_val] = mesh_val
+    return fid_map
+
+
+
+
+
 

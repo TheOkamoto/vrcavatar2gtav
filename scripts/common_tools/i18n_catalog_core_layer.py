@@ -1088,4 +1088,39 @@ CORE_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "ja": "{label} ({megabytes:.1f} MB) を {dest} にインストール中...",
         "pt": "Instalando {label} ({megabytes:.1f} MB) -> {dest}...",
     },
+    "repack.asi_loader_downloading": {
+        "en": "Downloading open-source Ultimate ASI Loader (dinput8.dll) -> {dest}...",
+        "ja": "オープンソースの Ultimate ASI Loader (dinput8.dll) をダウンロード中 -> {dest}...",
+        "pt": "Baixando Ultimate ASI Loader open-source (dinput8.dll) -> {dest}...",
+    },
+    "repack.asi_loader_ready": {
+        "en": "[OK] ASI Loader ready: {path}",
+        "ja": "[OK] ASI Loader 準備完了: {path}",
+        "pt": "[OK] ASI Loader pronto: {path}",
+    },
+    "repack.runtime_synced": {
+        "en": "[OK] Installed GTA V mod plugins into {dest}: {files}",
+        "ja": "[OK] GTA V 用プラグインを {dest} に配置しました: {files}",
+        "pt": "[OK] Plugins do mod instalados na pasta do GTA V ({dest}): {files}",
+    },
+    "manager.prereq_runtime_ok": {
+        "en": "[OK] GTA V runtime plugins ready: {items}",
+        "ja": "[OK] GTA V ランタイムプラグイン準備完了: {items}",
+        "pt": "[OK] Plugins de runtime no GTA V prontos: {items}",
+    },
+    "manager.prereq_asi_loader_missing": {
+        "en": "[WARN] Missing ASI Loader dinput8.dll in GTA V root ({path}). Run Setup/Download to install it.",
+        "ja": "[警告] GTA V フォルダに dinput8.dll がありません ({path})。セットアップ/ダウンロードを実行してください。",
+        "pt": "[AVISO] ASI Loader dinput8.dll ausente na pasta do GTA V ({path}). Execute Configurar/Baixar para instalar.",
+    },
+    "manager.prereq_scripthookv_missing": {
+        "en": "[WARN] ScriptHookV.dll not found in GTA V root ({path}). Download from https://www.dev-c.com/gtav/scripthookv/ and copy ScriptHookV.dll into your GTA V folder.",
+        "ja": "[警告] GTA V フォルダに ScriptHookV.dll が見つかりません ({path})。https://www.dev-c.com/gtav/scripthookv/ からダウンロードしてコピーしてください。",
+        "pt": "[AVISO] ScriptHookV.dll não encontrado na pasta do GTA V ({path}). Baixe em https://www.dev-c.com/gtav/scripthookv/ e copie para a pasta do GTA V.",
+    },
+    "manager.prereq_mods_loader_missing": {
+        "en": "[WARN] No mods/ folder ASI loader found (OpenIV.asi or RageOpenV.asi) in {path}. Install OpenIV ASI Manager (OpenIV.asi) or RageOpenV.asi so GTA V loads mods/.",
+        "ja": "[警告] mods/ フォルダ読込プラグイン (OpenIV.asi または RageOpenV.asi) が {path} にありません。mods/ を有効にするため導入してください。",
+        "pt": "[AVISO] Nenhum leitor da pasta mods/ (OpenIV.asi ou RageOpenV.asi) encontrado em {path}. Instale o OpenIV.asi (via OpenIV) ou RageOpenV.asi.",
+    },
 }

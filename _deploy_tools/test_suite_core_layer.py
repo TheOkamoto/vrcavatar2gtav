@@ -15,6 +15,7 @@ import argparse
 import ast
 import filecmp
 import io as io_stream
+import json
 import os
 import py_compile
 import re as regex_module
@@ -79,6 +80,7 @@ _PRUNED_WALK_DIRS = frozenset(
         "extracted_rpfs",
         "backups",
         "npcs",
+        "Toolchain",
     }
 )
 
@@ -339,10 +341,28 @@ def test_compiled_drawables_and_textures() -> bool:
             ):
                 blink_ydd_bones_ok = False
 
+    import npc_registry_helper
+    active_npcs_reg = npc_registry_helper.load_npc_registry(PROJECT_ROOT_DIR).get("npcs", {})
+
+    def _expected_blink_peak(ped_key: str, fallback_val: float) -> float:
+        npc_rec = active_npcs_reg.get(ped_key)
+        man_raw = str(npc_rec.get("build_manifest") or "") if isinstance(npc_rec, dict) else ""
+        if not isinstance(npc_rec, dict) or npc_rec.get("deployed") is False or not man_raw:
+            return fallback_val
+        man_path = project_paths.to_host_path(man_raw)
+        if man_path.is_file():
+            try:
+                man_obj = json.loads(man_path.read_text(encoding="utf-8"))
+                if man_obj.get("deploy", True) and "eye_blink_strength" in man_obj:
+                    return float(man_obj["eye_blink_strength"])
+            except Exception:
+                pass
+        return fallback_val
+
     blink_peaks_ok = (
-        abs(blink_max_by_model.get("player_zero", 1.0) - 0.5) < 0.02
-        and abs(blink_max_by_model.get("player_one", 1.0) - 0.5) < 0.02
-        and abs(blink_max_by_model.get("player_two", 1.0) - 0.6) < 0.02
+        abs(blink_max_by_model.get("player_zero", 1.0) - _expected_blink_peak("player_zero", 0.5)) < 0.02
+        and abs(blink_max_by_model.get("player_one", 1.0) - _expected_blink_peak("player_one", 0.5)) < 0.02
+        and abs(blink_max_by_model.get("player_two", 1.0) - _expected_blink_peak("player_two", 0.6)) < 0.02
     )
     blink_rot_modes_ok = (
         blink_rot_valid_by_model.get("player_zero", False)
@@ -503,11 +523,18 @@ def test_deployed_rpf_encryption_headers() -> bool:
 
     streamedpeds_extracted_dir = rpf_paths_cfg["streamedpeds_extracted"]
     if streamedpeds_extracted_dir.is_dir():
+        import npc_registry_helper
+        active_npcs_map = npc_registry_helper.load_npc_registry(PROJECT_ROOT_DIR).get("npcs", {})
         mismatched_yft_files = []
         for character_section in ("michael", "franklin", "trevor"):
             character_cfg = project_paths.get_character_paths(character_section)
             ped_name = str(character_cfg["ped_name"])
             compiled_yft = Path(character_cfg["target_yft"])
+            npc_rec = active_npcs_map.get(ped_name)
+            if isinstance(npc_rec, dict) and npc_rec.get("deployed", True):
+                npc_pkg_yft = PROJECT_ROOT_DIR / "npcs" / ped_name / "5_rpf_package" / f"{ped_name}.yft"
+                if npc_pkg_yft.is_file():
+                    compiled_yft = npc_pkg_yft
             staged_yft = streamedpeds_extracted_dir / f"{ped_name}.yft"
             if not compiled_yft.exists() or not staged_yft.exists():
                 mismatched_yft_files.append(
@@ -785,6 +812,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "test_suite_core_layer.py", deploy_dir / "test_suite_core_layer.py"),
         (common_dir / "test_suite_unity_physbones_layer.py", deploy_dir / "test_suite_unity_physbones_layer.py"),
         (common_dir / "test_suite_extensions_layer.py", deploy_dir / "test_suite_extensions_layer.py"),
+        (common_dir / "test_suite_restore_multislot_layer.py", deploy_dir / "test_suite_restore_multislot_layer.py"),
         (common_dir / "test_mod_suite.py", deploy_dir / "test_mod_suite.py"),
         (common_dir / "vrc2gtav_paths.py", deploy_dir / "vrc2gtav_paths.py"),
         (common_dir / "error_handler_helper.py", deploy_dir / "error_handler_helper.py"),
@@ -792,6 +820,7 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "modular_avatar_helper.py", deploy_dir / "modular_avatar_helper.py"),
         (common_dir / "build_universal_avatar.py", deploy_dir / "build_universal_avatar.py"),
         (common_dir / "npc_registry_helper.py", deploy_dir / "npc_registry_helper.py"),
+        (common_dir / "restore_vanilla_helper.py", deploy_dir / "restore_vanilla_helper.py"),
         (common_dir / "universal_atlas_builder.py", deploy_dir / "universal_atlas_builder.py"),
         (common_dir / "universal_gtav_builder.py", deploy_dir / "universal_gtav_builder.py"),
         (common_dir / "setup_first_run.py", deploy_dir / "setup_first_run.py"),

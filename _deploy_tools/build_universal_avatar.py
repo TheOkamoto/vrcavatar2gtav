@@ -156,10 +156,12 @@ def prepare_universal_avatar_job(
     target_character: Optional[str] = None,
     import_face: Optional[bool] = None,
     import_body: Optional[bool] = None,
+    face_anim: Optional[str] = None,
     physbones_marshmallow: bool = False,
     blood_decals: bool = True,
     eye_blink: Optional[bool] = None,
     eye_blink_strength: Optional[float] = None,
+    mouth_open_strength: Optional[float] = None,
     out_dir: Optional[str] = None,
     interactive: bool = False,
     auto_download_blender: bool = False,
@@ -298,9 +300,12 @@ def prepare_universal_avatar_job(
     primary_fbx = _choose_primary_fbx(all_fbx_paths, chosen_avatar_name, ma_plan)
     extra_outfit_fbxs = [fbx_item for fbx_item in all_fbx_paths if fbx_item != primary_fbx]
 
-    # Pick face .anim if one exists matching the avatar
-    face_anim_path: Optional[Path] = None
-    if use_face:
+    # Pick face .anim if explicit override provided or default matching the avatar
+    face_anim_path: Optional[Path] = (
+        Path(project_paths.to_host_path(face_anim)) if face_anim else None
+    )
+    if (face_anim_path is None or not face_anim_path.is_file()) and use_face:
+        face_anim_path = None
         anim_files: List[Path] = list(ingested.get("anim_files", ()))
         for anim_cand in anim_files:
             if anim_cand.name.lower() in ("default_face.anim", "default.anim"):
@@ -399,6 +404,9 @@ def prepare_universal_avatar_job(
         avatar_id=chosen_avatar_name or "",
         default=1.0,
     )
+    resolved_mouth_strength = eye_blink_helper.resolve_mouth_open_strength(
+        mouth_open_strength, char_cfg
+    )
     body_bs_weights = (bs_result.get("mesh_weights") or {}).get("Body") or {}
     blink_conflict = (
         eye_blink_helper.detect_custom_eye_expression_conflict(body_bs_weights)
@@ -437,6 +445,7 @@ def prepare_universal_avatar_job(
         "blood_decals_shader": ped_damage_helper.resolve_ped_shader_filename(bool(blood_decals)),
         "eye_blink": resolved_blink_mode,
         "eye_blink_strength": resolved_blink_strength,
+        "mouth_open_strength": resolved_mouth_strength,
         "eye_blink_conflict": blink_conflict or "",
         "out_dir": str(work_out_dir),
         "blender_exe": str(resolved_blender) if resolved_blender else "",
@@ -648,7 +657,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional peak blink closing factor (e.g. 0.50 Shinano / 0.60 Miltina)",
     )
-    parser.add_argument("--out-dir", help="Output working directory")
+    parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help="Optional mouth opening / FACIAL_jaw weight scale in [0.0, 1.0] (default: 0.35)",
+    )
+    parser.add_argument(
+        "--face-anim",
+        default=None,
+        help="Optional Unity .anim file overriding face blendshapes",
+    )
+    parser.add_argument(
+        "--out-dir", help="Output working directory")
     parser.add_argument("--blender-exe", help="Explicit path to Blender 4.0.2 executable")
     parser.add_argument(
         "--auto-download-blender",
@@ -706,6 +727,8 @@ def main(argv_list: Optional[Sequence[str]] = None) -> int:
                 blood_decals=bool(getattr(args, "blood_decals", True)),
                 eye_blink=getattr(args, "eye_blink", None),
                 eye_blink_strength=getattr(args, "eye_blink_strength", None),
+                mouth_open_strength=getattr(args, "mouth_open_strength", None),
+                face_anim=getattr(args, "face_anim", None),
             )
             return 0
 
@@ -717,10 +740,12 @@ def main(argv_list: Optional[Sequence[str]] = None) -> int:
             target_character=args.target_character,
             import_face=args.import_face_blendshapes,
             import_body=args.import_body_blendshapes,
+            face_anim=getattr(args, "face_anim", None),
             physbones_marshmallow=bool(args.physbones_marshmallow),
             blood_decals=bool(getattr(args, "blood_decals", True)),
             eye_blink=getattr(args, "eye_blink", None),
             eye_blink_strength=getattr(args, "eye_blink_strength", None),
+            mouth_open_strength=getattr(args, "mouth_open_strength", None),
             out_dir=args.out_dir,
             interactive=bool(args.interactive) and not bool(args.non_interactive),
             auto_download_blender=bool(args.auto_download_blender),

@@ -432,22 +432,20 @@ def load_unity_anim_blendshapes(
     if not resolved_path or not resolved_path.is_file():
         return {}
 
-    raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
-    curve_blocks = raw_text.split("  - serializedVersion: 2")
+    raw_text = resolved_path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    curve_blocks = re.split(r"(?m)^  - serializedVersion:\s*\d+", raw_text)
     shapes_map: Dict[str, float] = {}
 
     for curve_block in curve_blocks[1:]:
         val_match = re.search(r"value:\s*([-+\d.eE]+)", curve_block)
         attr_match = re.search(r"attribute:\s*([^\n]+)", curve_block)
-        path_match = re.search(r"path:\s*([^\n]+)", curve_block)
-        if not (val_match and attr_match and path_match):
+        if not (val_match and attr_match):
             continue
 
         raw_attribute = _decode_unity_scalar(attr_match.group(1))
-        if raw_attribute.startswith("blendShape."):
-            shape_name = raw_attribute[len("blendShape.") :].strip()
-        else:
-            shape_name = raw_attribute.replace("blendShape.", "").strip()
+        if not raw_attribute.lower().startswith("blendshape."):
+            continue
+        shape_name = raw_attribute[len("blendShape.") :].strip()
         if not shape_name:
             continue
 
@@ -1247,6 +1245,11 @@ def extract_unity_scene_blendshapes(
                 if include_zero or abs(weight_val) > 1e-6:
                     named_by_mesh.setdefault(target_mesh, {})[shape_name] = weight_val
 
+    for shape_dict in named_by_mesh.values():
+        for shape_key in list(shape_dict.keys()):
+            if is_nipple_blendshape_key(shape_key):
+                shape_dict[shape_key] = 0.0
+
     return {
         "loaded": True,
         "source_path": str(resolved_unity),
@@ -1256,6 +1259,25 @@ def extract_unity_scene_blendshapes(
         "indexed_mesh_weights": indexed_by_mesh,
         "warnings": [],
     }
+
+
+_NIPPLE_BLENDSHAPE_TOKENS = (
+    "nipple",
+    "nip_",
+    "tkb",
+    "chikubi",
+    "tikubi",
+    "chikuwa",
+    "chiku",
+    "\u4e73\u9996",
+    "\u4e73\u982d",
+)
+
+
+def is_nipple_blendshape_key(shape_key: str) -> bool:
+    """Return True when `shape_key` adjusts nipple relief (zeroed by default from Unity)."""
+    low_key = str(shape_key or "").strip().lower()
+    return any(tok in low_key for tok in _NIPPLE_BLENDSHAPE_TOKENS)
 
 
 def _read_leading_cfg_comments(cfg_path: Path) -> List[str]:

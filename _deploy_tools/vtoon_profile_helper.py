@@ -449,6 +449,30 @@ def _format_vec(vals: tuple | list) -> str:
     return ", ".join(f"{float(item):.4f}" for item in vals)
 
 
+def _format_vtoon_ini(global_cfg: dict[str, str], chars_map: dict[int, dict]) -> str:
+    """Serialize `GTAVVToon.ini` `[Global]` and `[Char_*]`/`[Mat_*]` sections deterministically."""
+    lines_out = [
+        "; GTAVVToon.ini - Auto-calibrated from Unity lilToon materials (press F10 in-game to hot-reload)",
+        "[Global]",
+    ]
+    for g_key, g_val in global_cfg.items():
+        lines_out.append(f"{g_key} = {g_val}")
+
+    for char_key_id in sorted(chars_map):
+        char_entry = chars_map[char_key_id]
+        lines_out.append("")
+        lines_out.append(f"[Char_{char_key_id}]")
+        for meta_key, meta_val in char_entry["meta"].items():
+            lines_out.append(f"{meta_key} = {meta_val}")
+        for slot_key_id in sorted(char_entry["slots"]):
+            lines_out.append("")
+            lines_out.append(f"[Mat_{char_key_id}_{slot_key_id}]")
+            for field_key, field_val in char_entry["slots"][slot_key_id].items():
+                lines_out.append(f"{field_key} = {field_val}")
+
+    return "\n".join(lines_out) + "\n"
+
+
 def upsert_vtoon_ini_character(
     ini_paths: list[Path],
     char_id: int,
@@ -481,27 +505,36 @@ def upsert_vtoon_ini_character(
             },
             "slots": serialized_slots,
         }
+        ini_path.write_text(_format_vtoon_ini(global_cfg, existing_chars), encoding="utf-8")
 
-        lines_out = [
-            "; GTAVVToon.ini - Auto-calibrated from Unity lilToon materials (press F10 in-game to hot-reload)",
-            "[Global]",
+
+def remove_vtoon_ini_character(
+    ini_paths: list[Path],
+    *,
+    char_ids: tuple[int, ...] = (),
+    char_names: tuple[str, ...] = (),
+) -> int:
+    """Remove matching `[Char_<id>]` entries from one or more `GTAVVToon.ini` files."""
+    target_ids = {int(cid) for cid in char_ids if cid is not None}
+    target_names = {str(cname).strip().lower() for cname in char_names if str(cname).strip()}
+    removed_total = 0
+    for ini_path in ini_paths:
+        if not ini_path or not Path(ini_path).is_file():
+            continue
+        global_cfg, existing_chars = _parse_existing_ini(Path(ini_path))
+        to_delete = [
+            cid
+            for cid, entry in existing_chars.items()
+            if cid in target_ids
+            or str(entry.get("meta", {}).get("name", "")).strip().lower() in target_names
         ]
-        for g_key, g_val in global_cfg.items():
-            lines_out.append(f"{g_key} = {g_val}")
-
-        for char_key_id in sorted(existing_chars):
-            char_entry = existing_chars[char_key_id]
-            lines_out.append("")
-            lines_out.append(f"[Char_{char_key_id}]")
-            for meta_key, meta_val in char_entry["meta"].items():
-                lines_out.append(f"{meta_key} = {meta_val}")
-            for slot_key_id in sorted(char_entry["slots"]):
-                lines_out.append("")
-                lines_out.append(f"[Mat_{char_key_id}_{slot_key_id}]")
-                for field_key, field_val in char_entry["slots"][slot_key_id].items():
-                    lines_out.append(f"{field_key} = {field_val}")
-
-        ini_path.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
+        if not to_delete:
+            continue
+        for cid in to_delete:
+            del existing_chars[cid]
+            removed_total += 1
+        Path(ini_path).write_text(_format_vtoon_ini(global_cfg, existing_chars), encoding="utf-8")
+    return removed_total
 
 
 def find_best_matcap_image_for_mats(

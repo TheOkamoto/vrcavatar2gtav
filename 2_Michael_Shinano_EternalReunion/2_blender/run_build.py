@@ -147,6 +147,17 @@ def main() -> int:
         default=None,
         help=i18n.translate("eye_blink.strength_cli_opt"),
     )
+    parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help=i18n.translate("eye_blink.mouth_open_cli_opt"),
+    )
+    parser.add_argument(
+        "--face-anim",
+        default=None,
+        help=i18n.translate("blendshapes.cli_face_anim"),
+    )
     parsed_args = parser.parse_args()
     if parsed_args.lang and parsed_args.lang != "auto":
         os.environ[i18n.LANG_ENV_VAR] = parsed_args.lang
@@ -175,6 +186,7 @@ def main() -> int:
         ("--hair-offset", parsed_args.hair_offset),
         ("--unity-scene", parsed_args.unity_scene),
         ("--unity-avatar-name", parsed_args.unity_avatar_name),
+        ("--face-anim", parsed_args.face_anim),
         ("--blendshapes-cfg", parsed_args.blendshapes_cfg),
         ("--blendshapes-source", parsed_args.blendshapes_source),
         ("--save-blendshapes-cfg", parsed_args.save_blendshapes_cfg),
@@ -201,6 +213,10 @@ def main() -> int:
     if parsed_args.eye_blink_strength is not None:
         extra_blender_args.extend(
             ["--eye-blink-strength", str(parsed_args.eye_blink_strength)]
+        )
+    if parsed_args.mouth_open_strength is not None:
+        extra_blender_args.extend(
+            ["--mouth-open-strength", str(parsed_args.mouth_open_strength)]
         )
 
     blender_command, blender_env = project_paths.build_blender_command(

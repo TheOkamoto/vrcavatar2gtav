@@ -210,6 +210,7 @@ try:
     extract_unity_scene_blendshapes,
     _read_leading_cfg_comments,
     _coerce_optional_bool,
+    is_nipple_blendshape_key,
     )
 except ImportError:
     from common_tools.blendshape_unity_yaml_layer import (
@@ -239,6 +240,7 @@ except ImportError:
     extract_unity_scene_blendshapes,
     _read_leading_cfg_comments,
     _coerce_optional_bool,
+    is_nipple_blendshape_key,
     )
 
 VALID_BLENDSHAPE_SOURCES: Tuple[str, ...] = ("auto", "unity", "cfg")
@@ -392,9 +394,13 @@ def resolve_character_blendshapes(
         anim_weights = load_unity_anim_blendshapes(effective_face_anim, include_zero=True)
         if anim_weights:
             anim_face_keys.update(anim_weights.keys())
-            existing_face_map = dict(resolved_meshes.get(default_face_mesh, {}))
+            target_mesh_key = next(
+                (key for key in resolved_meshes if key.lower() == default_face_mesh.lower()),
+                default_face_mesh,
+            )
+            existing_face_map = dict(resolved_meshes.get(target_mesh_key, {}))
             existing_face_map.update(anim_weights)
-            resolved_meshes[default_face_mesh] = existing_face_map
+            resolved_meshes[target_mesh_key] = existing_face_map
             resolved_metadata["face_anim"] = Path(effective_face_anim).name
 
     if not do_import_face and not do_import_body:
@@ -481,6 +487,12 @@ def resolve_character_blendshapes(
                         mesh_key, shape_key, extra_face_keys=anim_face_keys
                     )
                     if (is_face and not do_import_face) or (not is_face and not do_import_body):
+                        shape_dict[shape_key] = 0.0
+
+        if source_used != "cfg":
+            for shape_dict in resolved_meshes.values():
+                for shape_key in list(shape_dict.keys()):
+                    if is_nipple_blendshape_key(shape_key):
                         shape_dict[shape_key] = 0.0
 
         resolved_metadata["import_face"] = "1" if do_import_face else "0"

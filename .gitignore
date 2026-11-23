@@ -47,6 +47,8 @@ renders/
 # Technical exception: empty dummy mesh containers (no copyrighted geometry/textures)
 !_deploy_tools/head_000_r.ydd
 !_deploy_tools/p_eyes_dummy.ydd
+!unity_plugin/Assets/VRCAvatar2GTAV/Toolchain/_deploy_tools/head_000_r.ydd
+!unity_plugin/Assets/VRCAvatar2GTAV/Toolchain/_deploy_tools/p_eyes_dummy.ydd
 
 # Machine-local path configuration and dynamic registries
 vrc2gtav.cfg

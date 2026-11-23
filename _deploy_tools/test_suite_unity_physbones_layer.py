@@ -1395,5 +1395,194 @@ def test_unity_scene_and_fallbacks() -> bool:
             ),
         )
 
+        import types as types_mod
+        import eye_blink_helper as blink_mod
+
+        def _make_pt(pos_x: float, pos_y: float, pos_z: float):
+            return types_mod.SimpleNamespace(
+                co=types_mod.SimpleNamespace(x=pos_x, y=pos_y, z=pos_z)
+            )
+
+        mock_face = types_mod.SimpleNamespace(
+            matrix_world=None,
+            data=types_mod.SimpleNamespace(
+                vertices=[
+                    types_mod.SimpleNamespace(index=0),
+                    types_mod.SimpleNamespace(index=1),
+                    types_mod.SimpleNamespace(index=2),
+                ],
+                shape_keys=types_mod.SimpleNamespace(
+                    key_blocks=[
+                        types_mod.SimpleNamespace(
+                            name="Basis",
+                            data=[
+                                _make_pt(0.0, 0.0, 1.50),
+                                _make_pt(0.0, 0.0, 1.48),
+                                _make_pt(0.0, 0.0, 1.60),
+                            ],
+                        ),
+                        types_mod.SimpleNamespace(
+                            name="vrc.v_aa",
+                            data=[
+                                _make_pt(0.0, 0.0, 1.495),   # -5mm drop
+                                _make_pt(0.0, 0.0, 1.470),   # -10mm full jaw drop
+                                _make_pt(0.0, 0.0, 1.601),   # non-mouth upper vertex
+                            ],
+                        ),
+                    ]
+                ),
+            ),
+        )
+        jaw_shut = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.0)
+        jaw_def = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=None)
+        jaw_wide = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.85)
+        cs_win_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavExporterWindow.cs"
+        cs_cmd_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavCommandBuilder.cs"
+        mouth_ok = (
+            abs(blink_mod.resolve_mouth_open_strength(None) - 0.35) < 1e-6
+            and abs(blink_mod.resolve_mouth_open_strength(0.0, {"mouth_open_strength": "0.60"}) - 0.0) < 1e-6
+            and abs(blink_mod.resolve_mouth_open_strength(None, {"mouth_open_strength": "0.75"}) - 0.75) < 1e-6
+            and abs(blink_mod.parse_mouth_open_strength(1.8) - 1.0) < 1e-6
+            and jaw_shut == {}
+            and abs(jaw_def.get(1, 0.0) - 0.35) < 1e-6
+            and 2 not in jaw_def
+            and abs(jaw_wide.get(1, 0.0) - 0.85) < 1e-6
+            and jaw_def.get(0, 0.0) < jaw_wide.get(0, 0.0)
+            and cs_win_file.is_file()
+            and "MouthOpenStrength" in cs_win_file.read_text(encoding="utf-8")
+            and cs_cmd_file.is_file()
+            and "--mouth-open-strength" in cs_cmd_file.read_text(encoding="utf-8")
+        )
+        suite_passed &= print_status_result(
+            "Mouth opening slider & FACIAL_jaw weight scale (0.00..1.00, default=0.35)",
+            mouth_ok,
+            f"def={jaw_def.get(1, 0.0):.2f} wide={jaw_wide.get(1, 0.0):.2f} shut={len(jaw_shut)}",
+        )
+
+        with tempfile.TemporaryDirectory() as anim_tmp:
+            anim_ovr = Path(anim_tmp) / "FaceOverride_v3.anim"
+            anim_ovr.write_text(
+                "\n".join(
+                    [
+                        "%YAML 1.1",
+                        "  - serializedVersion: 3",
+                        "    curve:",
+                        "      - serializedVersion: 3",
+                        "        value: 65",
+                        "    attribute: blendShape.mouth_smile",
+                        "    path: ",
+                        "  - serializedVersion: 2",
+                        "    curve:",
+                        "      - serializedVersion: 3",
+                        "        value: 1",
+                        "    attribute: m_IsActive",
+                        "    path: Body",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            parsed_ovr = blendshape_helper.load_unity_anim_blendshapes(anim_ovr, include_zero=True)
+            cfg_base = Path(anim_tmp) / "base.cfg"
+            cfg_base.write_text("[Face]\nmouth_smile = 0.10\n", encoding="utf-8")
+            resolved_ovr = blendshape_helper.resolve_character_blendshapes(
+                {"blendshapes_source": "cfg", "blendshapes_cfg": str(cfg_base)},
+                default_face_mesh="Face",
+                override_face_anim=str(anim_ovr),
+            )
+            cs_log_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavLogConsoleWidget.cs"
+            win_txt = cs_win_file.read_text(encoding="utf-8")
+            cmd_txt = cs_cmd_file.read_text(encoding="utf-8")
+            log_txt = cs_log_file.read_text(encoding="utf-8")
+            face_ovr_ok = (
+                "m_IsActive" not in parsed_ovr
+                and abs(parsed_ovr.get("mouth_smile", 0.0) - 0.65) < 1e-6
+                and abs(resolved_ovr["mesh_weights"]["Face"]["mouth_smile"] - 0.65) < 1e-6
+                and "FaceBlendshapesAnim" in cmd_txt
+                and "--face-anim" in cmd_txt
+                and "DrawAnimClipOverrideRow" in log_txt
+                and "_wrapMiniLabelStyle" in win_txt
+            )
+            suite_passed &= print_status_result(
+                "Face blendshape .anim override & responsive UI layout",
+                face_ovr_ok,
+                f"anim_keys={list(parsed_ovr.keys())} face_smile={resolved_ovr['mesh_weights']['Face'].get('mouth_smile', 0.0):.2f}",
+            )
+
+        with tempfile.TemporaryDirectory() as rpf_tmp:
+            import struct as struct_mod
+            import npc_registry_helper as npc_mod
+            import ped_damage_helper as dmg_mod
+            import repack_and_deploy_everything as rpk_mod
+
+            rpf_src = Path(rpf_tmp) / "src_tree"
+            sub_dir = rpf_src / "ped_slot"
+            sub_dir.mkdir(parents=True, exist_ok=True)
+            (sub_dir / "head_000_r.ydd").write_bytes(
+                struct_mod.pack("<IIII", 0x37435352, 165, 0xA0000020, 0x50020080) + (b"\x01" * 240)
+            )
+            (rpf_src / "peds.ymt").write_bytes(b"<CPedModelInfo/>")
+            out_rpf = Path(rpf_tmp) / "streamed_out.rpf"
+            npc_mod.build_rpf7_open_streaming(out_rpf, rpf_src, "UnitRPF7Test")
+            lim_rep = dmg_mod.inspect_rpf7_archive_limits(out_rpf)
+            stream_ok = (
+                lim_rep["ok"]
+                and lim_rep["encryption"] == b"OPEN"
+                and lim_rep["entry_count"] == 4
+                and not lim_rep["resource_overflows"]
+                and not lim_rep["compressed_binaries"]
+                and rpk_mod.RPF7_STREAMING_THRESHOLD_BYTES == 850_000_000
+                and rpk_mod.SAFE_X64V_ARCHIVE_BYTES == 2_800_000_000
+            )
+            suite_passed &= print_status_result(
+                "Streaming RPF7 OPEN builder & OOM-safe threshold",
+                stream_ok,
+                f"entries={lim_rep['entry_count']} enc={lim_rep['encryption']} size={lim_rep['total_bytes']}",
+            )
+
+        with tempfile.TemporaryDirectory() as rage_tmp:
+            import avatar_archive_helper as arch_mod
+            import npc_registry_helper as npc_mod2
+            import vrc2gtav_paths as paths_mod2
+
+            rage_ws = Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "tools"
+            rage_ws.mkdir(parents=True, exist_ok=True)
+            exe_nm = "rage.exe" if os.name == "nt" else "rage"
+            fake_rage = rage_ws / exe_nm
+            fake_rage.write_bytes(b"FAKE_RAGE_BIN")
+            orig_get = paths_mod2.get_rage_cli
+            orig_root = paths_mod2.get_project_root
+            orig_stg = paths_mod2.get_staging_dir
+            orig_dl = arch_mod.download_and_install_rage
+            try:
+                fake_proj = Path(rage_tmp) / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
+                fake_proj.mkdir(parents=True, exist_ok=True)
+                paths_mod2.get_rage_cli = lambda: ""
+                paths_mod2.get_project_root = lambda: fake_proj
+                paths_mod2.get_staging_dir = lambda: Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "staging"
+                resolved_ws_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
+                fake_rage.unlink()
+
+                def _mock_dl(_proj):
+                    fake_rage.write_bytes(b"DL_RAGE")
+                    return fake_rage
+
+                arch_mod.download_and_install_rage = _mock_dl
+                resolved_dl_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
+                rage_guard_ok = (
+                    resolved_ws_cmd[0] == str(fake_rage)
+                    and resolved_dl_cmd[0] == str(fake_rage)
+                    and fake_rage.read_bytes() == b"DL_RAGE"
+                )
+            finally:
+                paths_mod2.get_rage_cli = orig_get
+                paths_mod2.get_project_root = orig_root
+                paths_mod2.get_staging_dir = orig_stg
+                arch_mod.download_and_install_rage = orig_dl
+            suite_passed &= print_status_result(
+                "Empty rage= fallback & auto-download guard (prevents WinError 87)",
+                rage_guard_ok,
+                f"resolved={exe_nm}",
+            )
+
     return suite_passed
 

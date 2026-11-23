@@ -179,6 +179,10 @@ def build_shinano_er_for_gtav(cli_args):
         target_cfg,
         avatar_id="shinano_er",
     )
+    mouth_open_strength = eye_blink_helper.resolve_mouth_open_strength(
+        getattr(cli_args, "mouth_open_strength", None),
+        target_cfg,
+    )
     blink_anchors = (
         eye_blink_helper.capture_eyelid_blink_anchors(ped_armature)
         if eye_blink_mode != "off"
@@ -818,32 +822,30 @@ def build_shinano_er_for_gtav(cli_args):
     depsgraph_eval = bpy.context.evaluated_depsgraph_get()
     depsgraph_eval = bpy.context.evaluated_depsgraph_get()
     # Precompute FACIAL_jaw weights derived from the vrc.v_aa shape key
-    body_jaw_weights = {}
     orig_body_obj = bpy.data.objects.get("Body")
-    if orig_body_obj and orig_body_obj.data.shape_keys:
-        shape_key_aa = orig_body_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
-        basis_key = orig_body_obj.data.shape_keys.key_blocks.get("Basis")
-        if shape_key_aa and basis_key:
-            for vert_item in orig_body_obj.data.vertices:
-                delta_z = (
-                    shape_key_aa.data[vert_item.index].co.z
-                    - basis_key.data[vert_item.index].co.z
-                )
-                if delta_z < -0.0005:
-                    jaw_weight_value = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
-                    body_jaw_weights[vert_item.index] = jaw_weight_value
-            print(
-                i18n.translate(
-                    "michael.build.jaw_weights_mapped", count=len(body_jaw_weights)
-                )
+    body_jaw_mask = eye_blink_helper.extract_facial_jaw_weights(
+        orig_body_obj, delta_z_threshold=-0.0005
+    )
+    body_jaw_weights = (
+        body_jaw_mask
+        if abs(mouth_open_strength - eye_blink_helper.DEFAULT_MOUTH_OPEN_STRENGTH) < 1e-6
+        else eye_blink_helper.extract_facial_jaw_weights(
+            orig_body_obj, mouth_open_strength=mouth_open_strength, delta_z_threshold=-0.0005
+        )
+    )
+    if body_jaw_weights:
+        print(
+            i18n.translate(
+                "michael.build.jaw_weights_mapped", count=len(body_jaw_weights)
             )
+        )
 
     blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
         bpy,
         orig_body_obj,
         eye_blink_mode=eye_blink_mode,
         shape_weights=resolved_mesh_weights.get("Body", {}),
-        exclude_vert_indices=body_jaw_weights.keys(),
+        exclude_vert_indices=body_jaw_mask.keys(),
     )
     if blink_rig_data.get("enabled"):
         print(
@@ -1451,6 +1453,12 @@ def parse_blender_cli_args():
         type=float,
         default=None,
         help=i18n.translate("eye_blink.strength_cli_opt"),
+    )
+    argument_parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help=i18n.translate("eye_blink.mouth_open_cli_opt"),
     )
     argument_parser.add_argument(
         "--texture-dir",

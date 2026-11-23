@@ -54,6 +54,8 @@ SOLLUMZ_LATEST_API_URL = "https://api.github.com/repos/Sollumz/Sollumz/releases/
 SOLLUMZ_FALLBACK_ZIP_URL = (
     "https://github.com/Sollumz/Sollumz/releases/download/v2.9.0/sollumz.zip"
 )
+RAGE_CLI_LATEST_API_URL = "https://api.github.com/repos/VIRUXE/rage-cli/releases/latest"
+RAGE_CLI_FALLBACK_TAG = "v0.29.0"
 
 VRC_AVATAR_DESCRIPTOR_GUID = "661092b4961be7145bfbe56e1e62337b"
 MA_COMPONENT_GUIDS: Set[str] = {
@@ -381,7 +383,7 @@ def download_and_install_blender(
     """
     active_logger = logger or err_helper.get_active_logger_from_env(stage_name="blender_setup")
     resolved_os = (target_os or _detect_host_target_os()).strip().lower()
-    tools_dir = Path(project_root) / "tools"
+    tools_dir = err_helper.resolve_workspace_root(project_root) / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
 
     if resolved_os == "windows":
@@ -450,6 +452,54 @@ def download_and_install_blender(
 
     active_logger.info(f"Blender ready: {target_exe}", always=True)
     return target_exe
+
+
+def download_and_install_rage(
+    project_root: Union[str, Path],
+    *,
+    target_os: Optional[str] = None,
+    download_url: Optional[str] = None,
+    logger: Optional[err_helper.PipelineLogger] = None,
+) -> Path:
+    """Download the latest `rage-cli` executable into `<project_root>/tools/`."""
+    active_logger = logger or err_helper.get_active_logger_from_env(stage_name="rage_setup")
+    resolved_os = (target_os or _detect_host_target_os()).strip().lower()
+    tools_dir = err_helper.resolve_workspace_root(project_root) / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    is_win = resolved_os == "windows"
+    exe_name = "rage.exe" if is_win else "rage"
+    asset_hint = "rage-windows-x86_64.exe" if is_win else "rage-linux-x86_64"
+    dest_path = tools_dir / exe_name
+    if dest_path.is_file() and dest_path.stat().st_size > 100000:
+        return dest_path
+
+    resolved_url = download_url
+    if not resolved_url:
+        try:
+            req = urllib.request.Request(
+                RAGE_CLI_LATEST_API_URL,
+                headers={"User-Agent": "vrc2gtav-setup/1.0", "Accept": "application/vnd.github+json"},
+            )
+            with urllib.request.urlopen(req, timeout=20.0) as resp:
+                release_json = json.loads(resp.read().decode("utf-8"))
+            for item in release_json.get("assets", []):
+                if str(item.get("name", "")).lower() == asset_hint:
+                    resolved_url = str(item.get("browser_download_url", ""))
+                    break
+        except Exception as exc:
+            active_logger.debug(f"GitHub latest lookup for rage-cli fell back: {exc}")
+    if not resolved_url:
+        resolved_url = f"https://github.com/VIRUXE/rage-cli/releases/download/{RAGE_CLI_FALLBACK_TAG}/{asset_hint}"
+
+    active_logger.info(f"Downloading rage-cli from {resolved_url}...", always=True)
+    _download_file_with_retry(resolved_url, dest_path, timeout_sec=120.0, logger=active_logger)
+    if not is_win:
+        try:
+            os.chmod(dest_path, 0o755)
+        except OSError:
+            pass
+    active_logger.info(f"rage-cli ready: {dest_path}", always=True)
+    return dest_path
 
 
 def _safe_join_under(base_dir: Path, member_rel: str) -> Path:
@@ -792,7 +842,7 @@ def ingest_avatar_source(
         }
 
     suffix_low = resolved_src.suffix.lower()
-    if suffix_low == ".unity":
+    if suffix_low in (".unity", ".prefab"):
         assets_root = resolved_src.parent
         unity_project_root = resolved_src.parent.parent
         for parent_dir in resolved_src.parents:
@@ -800,29 +850,53 @@ def ingest_avatar_source(
                 assets_root = parent_dir
                 unity_project_root = parent_dir.parent
                 break
-        scanned = _scan_project_files(assets_root)
-        if resolved_src not in scanned["scenes"]:
-            scanned["scenes"].insert(0, resolved_src)
+        # Scope subtree walk to avoid slow full-project scans on huge VRChat Unity projects
+        scan_scope: Optional[Path] = None
+        if resolved_src.parent != assets_root:
+            rel_parts = resolved_src.relative_to(assets_root).parts
+            if len(rel_parts) >= 2:
+                scan_scope = assets_root / rel_parts[0]
+        scanned = (
+            _scan_project_files(scan_scope)
+            if scan_scope is not None and scan_scope.is_dir()
+            else {"scenes": [], "fbx_files": [], "prefab_files": [], "anim_files": []}
+        )
+        if suffix_low == ".unity":
+            if resolved_src not in scanned["scenes"]:
+                scanned["scenes"].insert(0, resolved_src)
+            return {
+                "source_kind": "unity_scene",
+                "unity_project_root": unity_project_root,
+                "assets_root": assets_root,
+                "extracted_root": None,
+                "preferred_scene": resolved_src,
+                "preferred_prefab": None,
+                **scanned,
+            }
+        if resolved_src not in scanned["prefab_files"]:
+            scanned["prefab_files"].insert(0, resolved_src)
         return {
-            "source_kind": "unity_scene",
+            "source_kind": "unity_prefab",
             "unity_project_root": unity_project_root,
             "assets_root": assets_root,
             "extracted_root": None,
-            "preferred_scene": resolved_src,
+            "preferred_scene": None,
+            "preferred_prefab": resolved_src,
             **scanned,
         }
 
     if suffix_low not in (".zip", ".unitypackage"):
         raise err_helper.ArchiveExtractionError(
-            f"Unsupported avatar archive format {resolved_src.suffix!r}; expected .zip, .unitypackage, .unity, or Unity project directory.",
+            f"Unsupported avatar archive format {resolved_src.suffix!r}; expected .zip, .unitypackage, .unity, .prefab, or Unity project directory.",
             stage="ingest_source",
         )
 
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", resolved_src.stem).strip("_") or "avatar_pkg"
+    work_root = err_helper.resolve_workspace_root(proj_root)
     target_ws = (
         Path(workspace_dir)
         if workspace_dir is not None
-        else (proj_root / "imported_unity_projects" / safe_stem)
+        else (work_root / "imported_unity_projects" / safe_stem)
     )
     stamp_file = target_ws / ".vrc2gtav_source.json"
 

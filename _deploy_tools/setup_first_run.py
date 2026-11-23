@@ -28,7 +28,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT_HINT = CURRENT_SCRIPT_DIR.parent.parent
+if (CURRENT_SCRIPT_DIR / "scripts" / "common_tools").is_dir():
+    PROJECT_ROOT_HINT = CURRENT_SCRIPT_DIR
+elif (CURRENT_SCRIPT_DIR.parent / "scripts" / "common_tools").is_dir():
+    PROJECT_ROOT_HINT = CURRENT_SCRIPT_DIR.parent
+else:
+    PROJECT_ROOT_HINT = CURRENT_SCRIPT_DIR.parent.parent
 for tools_dir_candidate in (
     CURRENT_SCRIPT_DIR,
     PROJECT_ROOT_HINT / "scripts" / "common_tools",
@@ -183,6 +188,9 @@ def detect_unity_assets(current_value: str) -> Optional[Path]:
         except ValueError:
             pass
 
+    work_root = err_helper.resolve_workspace_root(PROJECT_ROOT_HINT)
+    if work_root != PROJECT_ROOT_HINT.resolve():
+        candidate_paths.append(work_root.parent / "Assets")
     candidate_paths.extend(
         [
             PROJECT_ROOT_HINT / "Assets",
@@ -218,7 +226,16 @@ def detect_blender_executable(current_value: str) -> Optional[str]:
         return format_path_for_cfg(which_blender)
 
     blender_candidates: List[Path] = []
+    work_root = err_helper.resolve_workspace_root(PROJECT_ROOT_HINT)
     blender_versions = ("4.0.2", "4.0", "4.1", "4.2", "3.6")
+    for tools_base in (work_root / "tools", PROJECT_ROOT_HINT / "tools"):
+        for version_tag in blender_versions:
+            blender_candidates.append(
+                tools_base / f"blender-{version_tag}-windows-x64" / "blender.exe"
+            )
+            blender_candidates.append(
+                tools_base / f"blender-{version_tag}-linux-x64" / "blender"
+            )
     for drive_char in ("c", "d", "e", "f"):
         prefix_base = (
             Path(f"{drive_char.upper()}:/")
@@ -260,13 +277,18 @@ def detect_rage_executable(current_value: str) -> Optional[str]:
     if which_rage:
         return format_path_for_cfg(which_rage)
 
-    rage_candidates = [
-        PROJECT_ROOT_HINT / "tools" / "rage",
-        PROJECT_ROOT_HINT / "tools" / "rage.exe",
-        Path.home() / ".local" / "bin" / "rage",
-        Path.home() / ".cargo" / "bin" / "rage",
-        Path.home() / ".gemini" / "antigravity" / "scratch" / "gtav_tools" / "rage",
-    ]
+    work_root = err_helper.resolve_workspace_root(PROJECT_ROOT_HINT)
+    rage_candidates = (
+        [work_root / "tools" / "rage.exe", PROJECT_ROOT_HINT / "tools" / "rage.exe"]
+        if os.name == "nt"
+        else [
+            work_root / "tools" / "rage",
+            PROJECT_ROOT_HINT / "tools" / "rage",
+            Path.home() / ".local" / "bin" / "rage",
+            Path.home() / ".cargo" / "bin" / "rage",
+            Path.home() / ".gemini" / "antigravity" / "scratch" / "gtav_tools" / "rage",
+        ]
+    )
     for candidate_bin in rage_candidates:
         if candidate_bin.is_file():
             return format_path_for_cfg(str(candidate_bin))
@@ -491,7 +513,7 @@ def ensure_character_blendshape_presets() -> bool:
     Never overwrites existing tracked presets under configs/*.cfg.
     """
     project_paths.invalidate_config_cache()
-    project_root_dir = project_paths.get_project_root_dir()
+    project_root_dir = project_paths.get_project_root()
     all_ready = True
 
     for avatar_id in project_paths.list_available_avatars():
@@ -560,6 +582,7 @@ def configure_vrc2gtav_cfg(
     avatar_zip_override: Optional[str] = None,
     unity_project_override: Optional[str] = None,
     download_blender: Optional[bool] = None,
+    download_rage: Optional[bool] = None,
     avatar_name_override: Optional[str] = None,
     target_character_override: Optional[str] = None,
     import_face_blendshapes: Optional[bool] = None,
@@ -711,20 +734,56 @@ def configure_vrc2gtav_cfg(
     else:
         chosen_rage = detected_rage or current_rage
 
+    rage_exists = False
+    if chosen_rage:
+        if shutil.which(chosen_rage):
+            rage_exists = True
+        else:
+            try:
+                rage_exists = project_paths.to_host_path(
+                    chosen_rage, project_root_dir=PROJECT_ROOT_HINT
+                ).is_file()
+            except ValueError:
+                rage_exists = Path(chosen_rage).is_file()
+    if not rage_exists and download_rage:
+        with err_helper.guarded_stage("download_rage", logger=active_logger):
+            dl_rage = avatar_archive_helper.download_and_install_rage(
+                PROJECT_ROOT_HINT, logger=active_logger
+            )
+            chosen_rage = format_path_for_cfg(str(dl_rage))
+
     if python_override:
         chosen_python = format_path_for_cfg(python_override)
-    elif current_python in ("", "python3", "python") or not Path(
-        project_paths.to_host_path(current_python, project_root_dir=PROJECT_ROOT_HINT)
-    ).exists():
-        chosen_python = format_path_for_cfg(sys.executable)
     else:
-        chosen_python = current_python
+        py_exists = False
+        if current_python not in ("", "python3", "python"):
+            try:
+                py_exists = Path(
+                    project_paths.to_host_path(
+                        current_python, project_root_dir=PROJECT_ROOT_HINT
+                    )
+                ).exists()
+            except ValueError:
+                py_exists = Path(current_python).is_file()
+        chosen_python = (
+            current_python if py_exists else format_path_for_cfg(sys.executable)
+        )
+
+    dir_updates: Dict[str, str] = {
+        "gtav_root": chosen_gtav_root,
+        "unity_assets": chosen_unity_assets,
+    }
+    work_root = err_helper.resolve_workspace_root(PROJECT_ROOT_HINT)
+    if work_root != PROJECT_ROOT_HINT.resolve():
+        cur_staging_raw = config_parser.get("directories", "staging", fallback="", raw=True).strip()
+        if not cur_staging_raw or cur_staging_raw == "${project_root}/staging":
+            dir_updates["staging"] = format_path_for_cfg(str(work_root / "staging"))
+        cur_backups_raw = config_parser.get("directories", "backups", fallback="", raw=True).strip()
+        if not cur_backups_raw or cur_backups_raw == "${project_root}/backups":
+            dir_updates["backups"] = format_path_for_cfg(str(work_root / "backups"))
 
     cfg_updates = {
-        "directories": {
-            "gtav_root": chosen_gtav_root,
-            "unity_assets": chosen_unity_assets,
-        },
+        "directories": dir_updates,
         "executables": {
             "blender": chosen_blender,
             "rage": chosen_rage,
@@ -1305,6 +1364,7 @@ def run_first_run_setup(
     avatar_zip_override: Optional[str] = None,
     unity_project_override: Optional[str] = None,
     download_blender: Optional[bool] = None,
+    download_rage: Optional[bool] = None,
     avatar_name_override: Optional[str] = None,
     target_character_override: Optional[str] = None,
     import_face_blendshapes: Optional[bool] = None,
@@ -1334,6 +1394,7 @@ def run_first_run_setup(
             avatar_zip_override=avatar_zip_override,
             unity_project_override=unity_project_override,
             download_blender=download_blender,
+            download_rage=download_rage,
             avatar_name_override=avatar_name_override,
             target_character_override=target_character_override,
             import_face_blendshapes=import_face_blendshapes,
@@ -1348,6 +1409,22 @@ def run_first_run_setup(
 
         ensure_character_blendshape_presets()
         extraction_ok = extract_vanilla_gtav_assets(force_reextract=force_reextract)
+        import repack_and_deploy_everything as repack_helper
+
+        host_gtav_dir = project_paths.get_gtav_root_dir()
+        if host_gtav_dir.is_dir():
+            repack_helper.sync_gtav_runtime_mods(
+                PROJECT_ROOT_HINT, host_gtav_dir, overwrite_inis=False
+            )
+            if (download_rage or download_blender) and not (host_gtav_dir / "dinput8.dll").is_file():
+                try:
+                    repack_helper.download_and_install_asi_loader(host_gtav_dir)
+                except Exception as dl_exc:
+                    print(
+                        f"[WARN] Could not auto-download dinput8.dll ASI loader: {dl_exc}",
+                        flush=True,
+                    )
+            repack_helper.print_gtav_runtime_status(host_gtav_dir)
         print_setup_diagnostics()
         return extraction_ok
     except Exception as exc:
@@ -1435,6 +1512,12 @@ def main() -> int:
         help="Automatically download portable Blender 4.0.2 + Sollumz when missing",
     )
     arg_parser.add_argument(
+        "--download-rage",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Automatically download rage-cli into tools/ when missing",
+    )
+    arg_parser.add_argument(
         "--import-face-blendshapes",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -1470,6 +1553,7 @@ def main() -> int:
         avatar_zip_override=parsed_args.avatar_zip,
         unity_project_override=parsed_args.unity_project,
         download_blender=parsed_args.download_blender,
+        download_rage=parsed_args.download_rage,
         avatar_name_override=parsed_args.avatar_name,
         target_character_override=parsed_args.target_character,
         import_face_blendshapes=parsed_args.import_face_blendshapes,

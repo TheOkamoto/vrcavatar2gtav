@@ -1,0 +1,11 @@
+# Python 3.10+ dependencies for vrcavatar2gtav host scripts
+# (atlas generators, helper libraries, CLI manager, and test suites).
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# Note: bpy, bmesh, mathutils, addon_utils, sollumz, and pymateria execute
+# inside Blender 4.0.2's embedded Python runtime + Sollumz v2.9.0 addon.
+
+numpy>=1.24.0
+Pillow>=10.0.0

@@ -195,6 +195,24 @@ def test_avatar_interchangeability() -> bool:
         (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink-strength"),
         (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink-strength"),
         (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink-strength"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--mouth-open-strength"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--mouth-open-strength"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--mouth-open-strength"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--mouth-open-strength"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--mouth-open-strength"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--mouth-open-strength"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--mouth-open-strength"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--mouth-open-strength"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--mouth-open-strength"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--face-anim"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--face-anim"),
+        (scripts_root / "common_tools" / "run_mod_manager.py", "--face-anim"),
+        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--face-anim"),
+        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--face-anim"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--face-anim"),
+        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--face-anim"),
+        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--face-anim"),
+        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--face-anim"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
@@ -1250,6 +1268,300 @@ def test_universal_npc_pipeline() -> bool:
             "VToon watermark, lilToon transparent shader detect, INI merge & multi-SPS materials",
             vtoon_unit_ok,
             f"watermark={decoded_id} mode={parsed_trans.get('alpha_mode')} shaders={created_shaders}",
+        )
+
+        # 7. Prefab ingest scoping, protagonist VToon char IDs, and Unity plugin non-destructive install
+        import avatar_archive_helper
+        import universal_gtav_rigging_layer
+
+        mock_unity_root = tmp_root / "MockUnityProj"
+        avatar_sub = mock_unity_root / "Assets" / "MyAvatar"
+        other_sub = mock_unity_root / "Assets" / "OtherAvatar"
+        avatar_sub.mkdir(parents=True, exist_ok=True)
+        other_sub.mkdir(parents=True, exist_ok=True)
+        target_prefab = avatar_sub / "MyAvatar.prefab"
+        unrelated_prefab = other_sub / "OtherAvatar.prefab"
+        target_prefab.write_text("%YAML 1.1\n--- !u!1 &1000\nGameObject:\n  m_Name: MyAvatar\n", encoding="utf-8")
+        unrelated_prefab.write_text("%YAML 1.1\n--- !u!1 &2000\nGameObject:\n  m_Name: OtherAvatar\n", encoding="utf-8")
+
+        ingested_prefab = avatar_archive_helper.ingest_avatar_source(target_prefab, tmp_root)
+        selected_src, selected_name = universal_gtav_rigging_layer._select_scene_or_prefab(
+            ingested_prefab, "MyAvatar"
+        )
+        protag_ids_ok = universal_gtav_rigging_layer.PROTAGONIST_VTOON_CHAR_IDS == {
+            "player_zero": 1,
+            "player_one": 2,
+            "player_two": 3,
+        }
+
+        import repack_and_deploy_everything as repack_helper
+
+        plugin_dir = PROJECT_ROOT_DIR / "unity_plugin"
+        editor_cs_files = sorted((plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor").glob("*.cs"))
+        cs_lengths_ok = bool(editor_cs_files) and all(
+            len(cs_path.read_text(encoding="utf-8").splitlines()) <= 500 for cs_path in editor_cs_files
+        )
+        existing_asset = mock_unity_root / "Assets" / "KeepMe.txt"
+        existing_asset.write_text("do-not-touch", encoding="utf-8")
+        legacy_plugin_dir = mock_unity_root / "Assets" / "VRC2GTAV"
+        legacy_plugin_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_plugin_dir / "old.txt").write_text("stale", encoding="utf-8")
+
+        sys.path.insert(0, str(plugin_dir))
+        try:
+            import install_unity_plugin
+            installed_dest = install_unity_plugin.install_plugin(mock_unity_root)
+        finally:
+            if str(plugin_dir) in sys.path:
+                sys.path.remove(str(plugin_dir))
+
+        mock_gtav = tmp_root / "MockGTAV"
+        mock_gtav.mkdir(parents=True, exist_ok=True)
+        (mock_gtav / "dinput8.dll").write_bytes(b"ASI_LOADER")
+        (mock_gtav / "ScriptHookV.dll").write_bytes(b"SHV")
+        (mock_gtav / "RageOpenV.asi").write_bytes(b"MODS_READER")
+        (mock_gtav / "GTAVVToon.ini").write_text("; custom\n", encoding="utf-8")
+        repack_helper.sync_gtav_runtime_mods(PROJECT_ROOT_DIR, mock_gtav, overwrite_inis=False)
+        rt_status = repack_helper.inspect_gtav_runtime_prerequisites(mock_gtav)
+        runtime_sync_ok = (
+            rt_status["asi_loader_ok"]
+            and rt_status["scripthookv_ok"]
+            and rt_status["mods_loader_ok"]
+            and rt_status["physbones_asi_ok"]
+            and rt_status["vtoon_asi_ok"]
+            and (mock_gtav / "GTAVVToon.ini").read_text(encoding="utf-8") == "; custom\n"
+        )
+
+        win_txt = (installed_dest / "Editor" / "Vrc2GtavExporterWindow.cs").read_text(encoding="utf-8")
+        prefab_list = ingested_prefab.get("prefab_files") or []
+        win_split = npc_registry_helper._split_archive_hit(
+            r"D:\GTAV\x64v.rpf:x64v.rpf/models/cdimages/streamedpeds_players.rpf/player_zero/player_zero.yft"
+        )
+        win_split_ok = win_split == (
+            "D:/GTAV/x64v.rpf",
+            "models/cdimages/streamedpeds_players.rpf",
+            "player_zero/player_zero.yft",
+        )
+        unity_plugin_ok = (
+            ingested_prefab.get("source_kind") == "unity_prefab"
+            and ingested_prefab.get("preferred_prefab") == target_prefab.resolve()
+            and target_prefab.resolve() in prefab_list
+            and unrelated_prefab.resolve() not in prefab_list
+            and selected_src == target_prefab.resolve()
+            and isinstance(selected_name, str)
+            and protag_ids_ok
+            and win_split_ok
+            and cs_lengths_ok
+            and runtime_sync_ok
+            and not legacy_plugin_dir.exists()
+            and 'Tools/VRCAvatar2GTAV/Export Avatar to GTA V' in win_txt
+            and existing_asset.read_text(encoding="utf-8") == "do-not-touch"
+        )
+        mock_x64v = tmp_root / "mock_x64v_extracted"
+        mock_players = tmp_root / "mock_players_extracted"
+        mock_ped = mock_players / "player_zero"
+        (mock_x64v / "models" / "cdimages").mkdir(parents=True, exist_ok=True)
+        (mock_x64v / "models" / "cdimages" / "componentpeds_test.rpf").write_bytes(b"C" * 4000)
+        mock_ped.mkdir(parents=True, exist_ok=True)
+        (mock_ped / "accs_000_u.ydd").write_bytes(b"D" * 629)
+        (mock_ped / "accs_diff_000_a_uni.ytd").write_bytes(b"V" * 100_000)
+        (mock_ped / "uppr_diff_000_a_uni.ytd").write_bytes(b"Y" * 800_000)
+        (mock_ped / "uppr_diff_000_b_uni.ytd").write_bytes(b"Y" * 800_000)
+        (mock_ped / "uppr_diff_001_a_uni.ytd").write_bytes(b"Y" * 800_000)
+        (mock_ped / "uppr_diff_002_a_uni.ytd").write_bytes(b"Y" * 800_000)
+
+        def _fake_compact_builder(
+            src_path: Path,
+            dst_path: Path,
+            *,
+            max_diffuse_px: int,
+            max_normal_px: int,
+        ) -> Path:
+            dst_path.write_bytes(b"K" * (1200 if max_diffuse_px >= 1024 else 400))
+            return dst_path
+
+        def _fake_dummy_builder(dst_path: Path) -> Path:
+            dst_path.write_bytes(b"M" * 256)
+            return dst_path
+
+        budget_res = repack_helper.ensure_x64v_streamed_budget(
+            mock_x64v,
+            mock_players,
+            safe_max_bytes=820_000,
+            compact_builder=_fake_compact_builder,
+            dummy_builder=_fake_dummy_builder,
+        )
+        budget_ok = (
+            budget_res["compacted"]
+            and budget_res["replaced_files"] == 4
+            and (mock_ped / "uppr_diff_000_a_uni.ytd").stat().st_size == 800_000
+            and (mock_ped / "uppr_diff_000_b_uni.ytd").stat().st_size == 400
+            and (mock_ped / "uppr_diff_001_a_uni.ytd").stat().st_size == 1200
+            and (mock_ped / "uppr_diff_002_a_uni.ytd").stat().st_size == 1200
+            and (mock_ped / "accs_diff_000_a_uni.ytd").stat().st_size == 256
+        )
+
+        import shutil
+        import subprocess
+        import tarfile
+        import unittest.mock
+        import error_handler_helper as err_helper
+
+        ws_bundled = err_helper.resolve_workspace_root(
+            tmp_root / "SomeUnityProj" / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
+        )
+        ws_standalone = err_helper.resolve_workspace_root(tmp_root / "StandaloneRepo")
+        ws_redirect_ok = (
+            ws_bundled == (tmp_root / "SomeUnityProj" / "VRCAvatar2GTAV_Work").resolve()
+            and ws_standalone == (tmp_root / "StandaloneRepo").resolve()
+        )
+
+        # Verify texture_overrides + atlas_size=512 + normal_size=64 cleanly with mocked rage build
+        tex_alt = mat_dir / "OverrideTex.png"
+        Image.new("RGBA", (32, 32), (25, 220, 45, 255)).save(tex_alt)
+        ovr_out = tmp_root / "atlas_ovr_out"
+        fake_fbx_ovr = mat_dir / "DummyModel.fbx"
+        fake_fbx_ovr.write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
+        alpha_mat.write_text("m_Name: DressMat\n", encoding="utf-8")
+
+        def _fake_rage_run(cmd_args, **_kwargs):
+            if "-o" in cmd_args:
+                out_idx = cmd_args.index("-o") + 1
+                Path(cmd_args[out_idx]).write_bytes(b"RSC7MOCK")
+            return subprocess.CompletedProcess(cmd_args, 0, "", "")
+
+        with unittest.mock.patch.object(universal_atlas_builder.subprocess, "run", side_effect=_fake_rage_run):
+            with unittest.mock.patch.object(
+                universal_atlas_builder,
+                "collect_avatar_materials",
+                return_value={
+                    "DressMat": {
+                        "main_tex": str(tex_img_path),
+                        "color_rgba": [0.2, 0.2, 0.9, 1.0],
+                        "bump_tex": str(tex_img_path),
+                        "bump_scale": 0.5,
+                        "emission_tex": None,
+                        "emission_rgba": [0.0, 0.0, 0.0, 1.0],
+                        "alpha_mask_tex": None,
+                        "alpha_mask_scale": 1.0,
+                        "alpha_mask_val": 0.0,
+                        "alpha_mode": "opaque",
+                        "is_double_sided": False,
+                        "cull_mode": 2.0,
+                        "cutoff": 0.5,
+                        "mat_path": str(alpha_mat),
+                    }
+                },
+            ):
+                atlas_ovr_res = universal_atlas_builder.build_universal_avatar_atlas(
+                    ped_name="player_zero",
+                    project_dir=tmp_root,
+                    scene_or_prefab=None,
+                    source_fbx=fake_fbx_ovr,
+                    output_dir=ovr_out,
+                    atlas_size=512,
+                    normal_size=64,
+                    texture_overrides={"DressMat": str(tex_alt)},
+                    vtoon_char_id=0,
+                    sync_to_game=False,
+                )
+        norm_check_sz = Image.open(atlas_ovr_res["normal_png"]).size
+        diff_px = Image.open(atlas_ovr_res["atlas_png"]).getpixel((16, 16))
+        atlas_res_ok = (
+            atlas_ovr_res["atlas_size"] == 512
+            and norm_check_sz == (64, 64)
+            and diff_px[1] > 180
+        )
+
+        # Verify explicit secondary_atlas_size=512 proactively compacts uppr_diff_001+
+        mock_sec_ped = tmp_root / "sec_players" / "player_zero"
+        mock_sec_x64v = tmp_root / "sec_x64v"
+        (mock_sec_x64v / "models" / "cdimages").mkdir(parents=True, exist_ok=True)
+        mock_sec_ped.mkdir(parents=True, exist_ok=True)
+        (mock_sec_ped / "uppr_diff_000_a_uni.ytd").write_bytes(b"A" * 800_000)
+        (mock_sec_ped / "uppr_diff_001_a_uni.ytd").write_bytes(b"B" * 800_000)
+        sec_res = repack_helper.ensure_x64v_streamed_budget(
+            mock_sec_x64v,
+            tmp_root / "sec_players",
+            safe_max_bytes=50_000_000,
+            secondary_atlas_size=512,
+            compact_builder=_fake_compact_builder,
+            dummy_builder=_fake_dummy_builder,
+        )
+        sec_budget_ok = (
+            sec_res["compacted"]
+            and (mock_sec_ped / "uppr_diff_000_a_uni.ytd").stat().st_size == 800_000
+            and (mock_sec_ped / "uppr_diff_001_a_uni.ytd").stat().st_size == 400
+        )
+
+        # Verify build_unitypackage bundles complete Toolchain & produces clean .unitypackage
+        pkg_build_stage = tmp_root / "pkg_stage"
+        pkg_plugin_copy = pkg_build_stage / "VRCAvatar2GTAV"
+        shutil.copytree(
+            plugin_dir / "Assets" / "VRCAvatar2GTAV",
+            pkg_plugin_copy,
+            ignore=shutil.ignore_patterns("Toolchain"),
+        )
+        out_pkg_file = pkg_build_stage / "TestOut.unitypackage"
+        sys.path.insert(0, str(plugin_dir))
+        try:
+            import build_unitypackage
+
+            built_pkg = build_unitypackage.create_unitypackage(
+                repo_root=PROJECT_ROOT_DIR,
+                plugin_root=pkg_plugin_copy,
+                output_path=out_pkg_file,
+            )
+        finally:
+            if str(plugin_dir) in sys.path:
+                sys.path.remove(str(plugin_dir))
+
+        packed_asset_paths: List[str] = []
+        with tarfile.open(built_pkg, "r:gz") as pkg_tar:
+            for member in pkg_tar.getmembers():
+                if member.name.endswith("/pathname") and member.isfile():
+                    raw_handle = pkg_tar.extractfile(member)
+                    if raw_handle is not None:
+                        packed_asset_paths.append(raw_handle.read().decode("utf-8").strip())
+        pkg_paths_ok = (
+            built_pkg.is_file()
+            and "Assets/VRCAvatar2GTAV/Editor/Vrc2GtavTexturesPanel.cs" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/run_mod_manager.py" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/2_Michael_Shinano_EternalReunion/5_rpf_package/GTAVPhysBones.asi" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/2_Michael_Shinano_EternalReunion/5_rpf_package/GTAVVToon.asi" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/_deploy_tools/head_000_r.ydd" in packed_asset_paths
+            and not any(
+                pth.lower().endswith((".rpf", ".yft", ".ytd", ".dds", ".fbx", ".dll", ".exe"))
+                or "/vtoon_profiles/" in pth.lower()
+                or pth.lower().endswith("/vrc2gtav.cfg")
+                for pth in packed_asset_paths
+            )
+        )
+
+        # Enforce byte-for-byte mirror parity between Google Drive source and Unity Toolchain bundle
+        bundled_tc_dir = plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
+        toolchain_mismatches: List[str] = []
+        if bundled_tc_dir.is_dir():
+            for tc_file in sorted(bundled_tc_dir.rglob("*")):
+                if not tc_file.is_file() or tc_file.name.endswith(".meta"):
+                    continue
+                rel_tc = tc_file.relative_to(bundled_tc_dir)
+                if rel_tc.as_posix() == "vrc2gtav.cfg" or "__pycache__" in rel_tc.parts:
+                    continue
+                orig_file = PROJECT_ROOT_DIR / rel_tc
+                if not orig_file.is_file() or tc_file.read_bytes() != orig_file.read_bytes():
+                    toolchain_mismatches.append(rel_tc.as_posix())
+        disc_cs = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavConfigDiscovery.cs").read_text(encoding="utf-8")
+        cmd_cs = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavCommandBuilder.cs").read_text(encoding="utf-8")
+        bundled_first_ok = (
+            not toolchain_mismatches
+            and "if (IsValidRepoRoot(bundled)) return Path.GetFullPath(bundled);" in disc_cs
+            and "PreferBundledToolchain" in cmd_cs
+        )
+        suite_passed &= print_status_result(
+            "Prefab scoped ingest, protagonist VToon IDs & non-destructive Unity plugin install",
+            unity_plugin_ok and budget_ok and ws_redirect_ok and atlas_res_ok and sec_budget_ok and pkg_paths_ok and bundled_first_ok and len(editor_cs_files) == 9,
+            f"kind={ingested_prefab.get('source_kind')} cs_files={len(editor_cs_files)} pkg_entries={len(packed_asset_paths)} bundled_first={bundled_first_ok} mismatches={len(toolchain_mismatches)}",
         )
 
     return suite_passed

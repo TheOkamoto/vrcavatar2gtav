@@ -428,18 +428,25 @@ def get_prop_dummy_ydd_path() -> Path:
 
 def get_rage_cli() -> str:
     """Return the RAGE CLI executable or command configured in [executables] -> rage."""
-    raw_rage_value = get_config_value("executables", "rage")
-    if "/" not in raw_rage_value and "\\" not in raw_rage_value:
-        located_binary = shutil.which(raw_rage_value)
-        if located_binary:
-            return located_binary
-        return raw_rage_value
+    raw_rage_value = get_config_value("executables", "rage").strip()
+    if raw_rage_value:
+        if "/" not in raw_rage_value and "\\" not in raw_rage_value:
+            located_binary = shutil.which(raw_rage_value)
+            if located_binary:
+                return located_binary
+            return raw_rage_value
+        host_rage_path = to_host_path(raw_rage_value, project_root_dir=get_project_root())
+        if host_rage_path.is_file():
+            return str(host_rage_path)
+        if is_windows_host():
+            return f"wsl {raw_rage_value}"
+        return str(host_rage_path)
 
-    host_rage_path = to_host_path(raw_rage_value, project_root_dir=get_project_root())
-    if is_windows_host() and not host_rage_path.exists():
-        # Fallback when invoked from Windows targeting a WSL-built rage binary.
-        return f"wsl {raw_rage_value}"
-    return str(host_rage_path)
+    exe_name = "rage.exe" if is_windows_host() else "rage"
+    for cand_dir in (get_staging_dir().parent / "tools", get_project_root() / "tools"):
+        if (cand_dir / exe_name).is_file():
+            return str(cand_dir / exe_name)
+    return shutil.which(exe_name) or shutil.which("rage") or ""
 
 
 def build_rage_command(*rage_args: str) -> List[str]:
@@ -875,6 +882,7 @@ _NON_PATH_OPTION_KEYS = frozenset(
         "physbones_marshmallow",
         "eye_blink",
         "eye_blink_strength",
+        "mouth_open_strength",
         "hair_scale",
         "hair_offset",
         "target_z_min",
@@ -891,7 +899,7 @@ _HAIR_OVERRIDE_OPTION_KEYS = frozenset(
     {"custom_hair", "fbx_hair", "hair_mat", "hair_tex", "hair_scale", "hair_offset"}
 )
 _PHYSBONE_OVERRIDE_OPTION_KEYS = frozenset(
-    {"physbones_source", "physbones_marshmallow", "eye_blink", "eye_blink_strength"}
+    {"physbones_source", "physbones_marshmallow", "eye_blink", "eye_blink_strength", "mouth_open_strength"}
 )
 _HAIR_MODE_KEYWORDS = frozenset({"auto", "default", "none"})
 

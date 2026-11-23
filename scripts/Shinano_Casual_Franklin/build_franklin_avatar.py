@@ -94,6 +94,12 @@ def parse_franklin_cli_args():
         default=None,
         help=project_i18n.translate("eye_blink.strength_cli_opt"),
     )
+    arg_parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help=project_i18n.translate("eye_blink.mouth_open_cli_opt"),
+    )
     arg_parser.add_argument("--unity-scene", default=None)
     arg_parser.add_argument("--unity-avatar-name", default=None)
     arg_parser.add_argument("--face-anim", default=None)
@@ -285,6 +291,10 @@ eye_blink_strength = eye_blink_helper.resolve_eye_blink_strength(
     getattr(CLI_ARGS, "eye_blink_strength", None),
     FRANKLIN_CFG,
     avatar_id="shinano_casual",
+)
+mouth_open_strength = eye_blink_helper.resolve_mouth_open_strength(
+    getattr(CLI_ARGS, "mouth_open_strength", None),
+    FRANKLIN_CFG,
 )
 blink_anchors = (
     eye_blink_helper.capture_eyelid_blink_anchors(franklin_armature)
@@ -510,29 +520,30 @@ print(
 bpy.context.view_layer.update()
 
 # Derive FACIAL_jaw skinning weights from the vrc.v_aa shape key displacement
-body_jaw_weights = {}
 orig_body_obj = bpy.data.objects.get("Body")
-if orig_body_obj and orig_body_obj.data.shape_keys:
-    shape_key_aa = orig_body_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
-    basis_shape_key = orig_body_obj.data.shape_keys.key_blocks.get("Basis")
-    if shape_key_aa and basis_shape_key:
-        for vertex_item in orig_body_obj.data.vertices:
-            delta_z = shape_key_aa.data[vertex_item.index].co.z - basis_shape_key.data[vertex_item.index].co.z
-            if delta_z < -0.0005:
-                jaw_weight = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))
-                body_jaw_weights[vertex_item.index] = jaw_weight
-        print(
-            project_i18n.translate(
-                "franklin.jaw_weights_mapped", count=len(body_jaw_weights)
-            )
+body_jaw_mask = eye_blink_helper.extract_facial_jaw_weights(
+    orig_body_obj, delta_z_threshold=-0.0005
+)
+body_jaw_weights = (
+    body_jaw_mask
+    if abs(mouth_open_strength - eye_blink_helper.DEFAULT_MOUTH_OPEN_STRENGTH) < 1e-6
+    else eye_blink_helper.extract_facial_jaw_weights(
+        orig_body_obj, mouth_open_strength=mouth_open_strength, delta_z_threshold=-0.0005
+    )
+)
+if body_jaw_weights:
+    print(
+        project_i18n.translate(
+            "franklin.jaw_weights_mapped", count=len(body_jaw_weights)
         )
+    )
 
 blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
     bpy,
     orig_body_obj,
     eye_blink_mode=eye_blink_mode,
     shape_weights=resolved_mesh_weights.get("Body", {}),
-    exclude_vert_indices=body_jaw_weights.keys(),
+    exclude_vert_indices=body_jaw_mask.keys(),
 )
 if blink_rig_data.get("enabled"):
     print(

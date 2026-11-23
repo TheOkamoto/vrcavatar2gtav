@@ -71,18 +71,36 @@ def sanitize_log_token(raw_token: str, fallback: str = "general") -> str:
     return cleaned or fallback
 
 
+def resolve_workspace_root(project_root: Union[str, Path]) -> Path:
+    """
+    When running from a bundled Unity plugin (`.../Assets/VRCAvatar2GTAV/Toolchain`),
+    redirect heavy runtime workspaces (`tools/`, `npcs/`, `logs/`, `staging/`) to
+    `<UnityProject>/VRCAvatar2GTAV_Work` so Unity never imports DLLs/builds into Assets/.
+    """
+    resolved = Path(project_root).resolve()
+    parts_low = [part.lower() for part in resolved.parts]
+    for part_idx in range(len(parts_low) - 1):
+        if (
+            parts_low[part_idx] == "assets"
+            and parts_low[part_idx + 1] in ("vrcavatar2gtav", "vrc2gtav")
+            and part_idx > 0
+        ):
+            return Path(*resolved.parts[:part_idx]) / "VRCAvatar2GTAV_Work"
+    return resolved
+
+
 def build_timestamped_log_path(
     project_root: Union[str, Path],
     avatar_name: str = "general",
     stage_name: str = "run",
     now_dt: Optional[datetime] = None,
 ) -> Path:
-    """Construct `<project_root>/logs/<YYYYMMDD_HHMMSS>_<avatar>_<stage>.log`."""
+    """Construct `<workspace_root>/logs/<YYYYMMDD_HHMMSS>_<avatar>_<stage>.log`."""
     timestamp_obj = now_dt or datetime.now()
     date_slug = timestamp_obj.strftime("%Y%m%d_%H%M%S")
     avatar_slug = sanitize_log_token(avatar_name, fallback="avatar")
     stage_slug = sanitize_log_token(stage_name, fallback="run")
-    logs_dir = Path(project_root) / "logs"
+    logs_dir = resolve_workspace_root(project_root) / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir / f"{date_slug}_{avatar_slug}_{stage_slug}.log"
 

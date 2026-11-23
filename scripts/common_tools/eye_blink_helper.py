@@ -203,6 +203,118 @@ def resolve_eye_blink_strength(
     return float(default)
 
 
+DEFAULT_MOUTH_OPEN_STRENGTH = 0.35
+MOUTH_OPEN_SHAPE_KEYS = (
+    "vrc.v_aa",
+    "vrc.aa",
+    "kuchi_a",
+    "あ",
+    "a",
+    "aa",
+    "jawopen",
+    "mouthopen",
+)
+
+
+def parse_mouth_open_strength(
+    raw_value: Any,
+    default: float = DEFAULT_MOUTH_OPEN_STRENGTH,
+) -> float:
+    """Normalize mouth-opening max FACIAL_jaw weight into [0.0, 1.0]."""
+    if raw_value is None or isinstance(raw_value, bool):
+        return float(default)
+    cleaned = str(raw_value).strip().lower()
+    if cleaned in ("", "auto", "default"):
+        return float(default)
+    try:
+        parsed_val = float(cleaned)
+    except ValueError:
+        return float(default)
+    if not math.isfinite(parsed_val):
+        return float(default)
+    return max(0.0, min(1.0, parsed_val))
+
+
+def resolve_mouth_open_strength(
+    cli_strength: Optional[float],
+    char_cfg: Optional[Mapping[str, Any]] = None,
+    *,
+    default: float = DEFAULT_MOUTH_OPEN_STRENGTH,
+) -> float:
+    """Resolve effective mouth opening factor (FACIAL_jaw weight ceiling) from CLI or config."""
+    if cli_strength is not None:
+        return parse_mouth_open_strength(cli_strength, default=default)
+    if char_cfg:
+        raw_cfg_strength = char_cfg.get("mouth_open_strength")
+        if raw_cfg_strength is not None and str(raw_cfg_strength).strip().lower() not in (
+            "",
+            "auto",
+            "default",
+        ):
+            return parse_mouth_open_strength(raw_cfg_strength, default=default)
+    return float(default)
+
+
+def extract_facial_jaw_weights(
+    orig_body_obj: Any,
+    mouth_open_strength: Optional[float] = DEFAULT_MOUTH_OPEN_STRENGTH,
+    *,
+    delta_z_threshold: float = -0.0004,
+) -> Dict[int, float]:
+    """
+    Derive FACIAL_jaw vertex weights from `vrc.v_aa` (or vowel-A / JawOpen keys)
+    scaled cleanly by `mouth_open_strength` in [0.0, 1.0].
+    """
+    strength = parse_mouth_open_strength(
+        mouth_open_strength, default=DEFAULT_MOUTH_OPEN_STRENGTH
+    )
+    if strength <= 0.0:
+        return {}
+    if not orig_body_obj or not getattr(orig_body_obj.data, "shape_keys", None):
+        return {}
+    key_blocks = orig_body_obj.data.shape_keys.key_blocks
+    key_ci = {kb_item.name.strip().lower(): kb_item for kb_item in key_blocks}
+    shape_aa = next(
+        (key_ci.get(cand_key) for cand_key in MOUTH_OPEN_SHAPE_KEYS if key_ci.get(cand_key)),
+        None,
+    )
+    basis_key = key_ci.get("basis") or key_blocks[0]
+    if not shape_aa or not basis_key:
+        return {}
+
+    world_mat3 = None
+    raw_world = getattr(orig_body_obj, "matrix_world", None)
+    if raw_world is not None and hasattr(raw_world, "to_3x3"):
+        world_mat3 = raw_world.to_3x3()
+
+    drop_threshold = abs(float(delta_z_threshold))
+    downward_drops: List[Tuple[int, float]] = []
+    for vert_item in orig_body_obj.data.vertices:
+        base_co = basis_key.data[vert_item.index].co
+        open_co = shape_aa.data[vert_item.index].co
+        if world_mat3 is not None:
+            delta_x = float(open_co.x) - float(base_co.x)
+            delta_y = float(open_co.y) - float(base_co.y)
+            delta_z = (
+                float(world_mat3[2][0]) * delta_x
+                + float(world_mat3[2][1]) * delta_y
+                + float(world_mat3[2][2]) * (float(open_co.z) - float(base_co.z))
+            )
+        else:
+            delta_z = float(open_co.z) - float(base_co.z)
+        if delta_z < -drop_threshold:
+            downward_drops.append((int(vert_item.index), abs(delta_z)))
+
+    if not downward_drops:
+        return {}
+    peak_drop = max(drop_val for _, drop_val in downward_drops)
+    norm_ref = min(0.0075, max(0.0025, peak_drop * 0.90))
+    return {
+        vert_idx: min(strength, max(0.0, (drop_val / norm_ref) * strength))
+        for vert_idx, drop_val in downward_drops
+    }
+
+
 def resolve_effective_eye_blink_mode(
     cli_eye_blink: Optional[bool],
     char_cfg: Optional[Mapping[str, Any]] = None,

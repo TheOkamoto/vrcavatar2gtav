@@ -442,6 +442,12 @@ def verify_system_prerequisites() -> bool:
         )
         verification_passed = False
 
+    resolved_gtav_root = project_paths.get_gtav_root_dir()
+    if resolved_gtav_root is not None and resolved_gtav_root.is_dir():
+        import repack_and_deploy_everything as repack_helper
+
+        repack_helper.print_gtav_runtime_status(resolved_gtav_root)
+
     return verification_passed
 
 
@@ -943,6 +949,11 @@ def main() -> None:
         help=project_i18n.translate("setup.cli_rage"),
     )
     argument_parser.add_argument(
+        "--python",
+        default=None,
+        help=project_i18n.translate("setup.cli_python"),
+    )
+    argument_parser.add_argument(
         "--export-blendshapes",
         action="store_true",
         help=project_i18n.translate("manager.cli_export_blendshapes"),
@@ -962,6 +973,11 @@ def main() -> None:
         "--blendshapes-cfg",
         default=None,
         help=project_i18n.translate("blendshapes.cli_cfg"),
+    )
+    argument_parser.add_argument(
+        "--face-anim",
+        default=None,
+        help=project_i18n.translate("blendshapes.cli_face_anim"),
     )
     argument_parser.add_argument(
         "--export-physbones",
@@ -1009,6 +1025,12 @@ def main() -> None:
         help=project_i18n.translate("eye_blink.strength_cli_opt"),
     )
     argument_parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help=project_i18n.translate("eye_blink.mouth_open_cli_opt"),
+    )
+    argument_parser.add_argument(
         "--avatar-zip",
         default=None,
         help="Path to avatar .zip or .unitypackage archive",
@@ -1023,6 +1045,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Auto-download portable Blender 4.0.2 + Sollumz if missing",
+    )
+    argument_parser.add_argument(
+        "--download-rage",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Auto-download rage-cli executable if missing",
     )
     argument_parser.add_argument(
         "--import-face-blendshapes",
@@ -1119,9 +1147,11 @@ def main() -> None:
             unity_assets_override=parsed_arguments.unity_assets,
             blender_override=parsed_arguments.blender,
             rage_override=parsed_arguments.rage,
+            python_override=parsed_arguments.python,
             avatar_zip_override=parsed_arguments.avatar_zip,
             unity_project_override=parsed_arguments.unity_project,
             download_blender=parsed_arguments.download_blender,
+            download_rage=parsed_arguments.download_rage,
             avatar_name_override=parsed_arguments.unity_avatar_name,
             target_character_override=setup_target_char,
             import_face_blendshapes=parsed_arguments.import_face_blendshapes,
@@ -1213,6 +1243,8 @@ def main() -> None:
                 blood_decals=True if parsed_arguments.blood_decals is None else bool(parsed_arguments.blood_decals),
                 eye_blink=parsed_arguments.eye_blink,
                 eye_blink_strength=parsed_arguments.eye_blink_strength,
+                mouth_open_strength=parsed_arguments.mouth_open_strength,
+                face_anim=parsed_arguments.face_anim,
             )
             print_section_header(project_i18n.translate("manager.cli_automated_done"))
             sys.exit(0)
@@ -1276,6 +1308,12 @@ def main() -> None:
             universal_argv.extend(
                 ["--eye-blink-strength", str(parsed_arguments.eye_blink_strength)]
             )
+        if parsed_arguments.mouth_open_strength is not None:
+            universal_argv.extend(
+                ["--mouth-open-strength", str(parsed_arguments.mouth_open_strength)]
+            )
+        if parsed_arguments.face_anim:
+            universal_argv.extend(["--face-anim", str(parsed_arguments.face_anim)])
         if not parsed_arguments.non_interactive:
             universal_argv.append("--interactive")
         if parsed_arguments.skip_blender:
@@ -1315,9 +1353,11 @@ def main() -> None:
             unity_assets_override=parsed_arguments.unity_assets,
             blender_override=parsed_arguments.blender,
             rage_override=parsed_arguments.rage,
+            python_override=parsed_arguments.python,
             avatar_zip_override=parsed_arguments.avatar_zip,
             unity_project_override=parsed_arguments.unity_project,
             download_blender=parsed_arguments.download_blender,
+            download_rage=parsed_arguments.download_rage,
             avatar_name_override=parsed_arguments.unity_avatar_name,
             target_character_override=auto_target_char,
             import_face_blendshapes=parsed_arguments.import_face_blendshapes,
@@ -1414,6 +1454,12 @@ def main() -> None:
             extra_blender_args.extend(
                 ["--eye-blink-strength", str(parsed_arguments.eye_blink_strength)]
             )
+        if parsed_arguments.mouth_open_strength is not None:
+            extra_blender_args.extend(
+                ["--mouth-open-strength", str(parsed_arguments.mouth_open_strength)]
+            )
+        if parsed_arguments.face_anim:
+            extra_blender_args.extend(["--face-anim", str(parsed_arguments.face_anim)])
         blender_status = execute_blender_build(
             selected_characters_list,
             extra_blender_args=extra_blender_args,

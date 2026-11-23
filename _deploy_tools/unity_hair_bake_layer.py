@@ -919,6 +919,12 @@ def composite_unity_material_textures(
         arr_rgb = numpy_mod.array(col_vec[:3], dtype=numpy_mod.float32)
         return numpy_mod.power(numpy_mod.maximum(arr_rgb, 0.0), 2.2)
 
+    has_main_tex = any(
+        isinstance(tex_envs.get(k_name), dict)
+        and tex_envs[k_name].get("path")
+        and os.path.isfile(tex_envs[k_name]["path"])
+        for k_name in ("_MainTex", "_BaseMap", "_BaseColorMap")
+    )
     main_img, main_scale, main_off = _load_slot_rgba(
         ("_MainTex", "_BaseMap", "_BaseColorMap"),
         (255, 255, 255, 255),
@@ -1002,6 +1008,32 @@ def composite_unity_material_textures(
                 0,
                 numpy_mod,
             )
+
+    # Apply 1st MatCap diffuse/metallic reflection when Multiply or when no _MainTex exists (e.g. Halo/Pearl)
+    mc1_mode = int(round(floats.get("_MatCapBlendMode", 1.0)))
+    if floats.get("_UseMatCap", 0.0) >= 0.5 and (mc1_mode == 3 or not has_main_tex):
+        mc1_entry = tex_envs.get("_MatCapTex")
+        if mc1_entry and mc1_entry.get("path") and os.path.isfile(mc1_entry["path"]):
+            with pil_image.open(mc1_entry["path"]) as mc1_raw:
+                mc1_arr = numpy_mod.array(mc1_raw.convert("RGB"), dtype=numpy_mod.float32) / 255.0
+            rad_y, rad_x = max(1, mc1_arr.shape[0] // 3), max(1, mc1_arr.shape[1] // 3)
+            mid_y, mid_x = mc1_arr.shape[0] // 2, mc1_arr.shape[1] // 2
+            mc1_patch = mc1_arr[mid_y - rad_y : mid_y + rad_y, mid_x - rad_x : mid_x + rad_x]
+            mc1_tone = (
+                mc1_patch.mean(axis=(0, 1))
+                if mc1_mode == 3
+                else numpy_mod.percentile(mc1_patch, 80, axis=(0, 1))
+            )
+            mc1_col = colors.get("_MatCapColor", [1.0, 1.0, 1.0, 1.0])
+            mc1_lin = numpy_mod.power(numpy_mod.clip(mc1_tone, 0.0, 1.0), 2.2) * _srgb_vec_to_lin(mc1_col)
+            mc1_blend = max(0.0, min(1.0, float(floats.get("_MatCapBlend", 1.0)) * float(mc1_col[3])))
+            mc1_src = (base_lin * mc1_lin[None, None, :]) if mc1_mode == 3 else numpy_mod.broadcast_to(mc1_lin[None, None, :], base_lin.shape)
+            base_lin = _lil_blend_linear(base_lin, mc1_src, mc1_blend, (0 if mc1_mode == 3 else mc1_mode), numpy_mod)
+    if not has_main_tex and floats.get("_UseRim", 0.0) >= 0.5:
+        rim_col = colors.get("_RimColor", [0.0, 0.0, 0.0, 0.0])
+        rim_a = max(0.0, min(1.0, float(rim_col[3]) if len(rim_col) >= 4 else 1.0)) * 0.45
+        if rim_a > 0.01:
+            base_lin = numpy_mod.clip(base_lin + _srgb_vec_to_lin(rim_col)[None, None, :] * rim_a, 0.0, 1.0)
 
     # Apply 1st and 2nd Emission layers cleanly in linear space
     for use_em_key, map_em_key, mask_em_key, col_em_key, blend_em_key, mode_em_key in (

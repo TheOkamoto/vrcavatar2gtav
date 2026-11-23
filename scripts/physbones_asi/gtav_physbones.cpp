@@ -30,6 +30,7 @@ namespace gtav_physbones {
 /** Resolve skeleton bone indices for all active chains and blink profiles on `ped`. */
 bool ResolveChainBoneIndices(
     int ped,
+    uint32_t pedModelHash,
     std::vector<PhysBoneChain>& chains,
     std::vector<BlinkProfile>& blinkProfiles,
     ProbeRefBone& outRefA,
@@ -38,8 +39,10 @@ bool ResolveChainBoneIndices(
     bool changed = false;
     ProbeRefBone nextRefA{};
     ProbeRefBone nextRefB{};
-    std::vector<ProbeRefBone> rootRefs;
-    std::vector<ProbeRefBone> allResolvedRefs;
+    std::vector<ProbeRefBone> modelRootRefs;
+    std::vector<ProbeRefBone> modelAllRefs;
+    std::vector<ProbeRefBone> wildcardRootRefs;
+    std::vector<ProbeRefBone> wildcardAllRefs;
 
     for (size_t chain_idx = 0; chain_idx < chains.size(); ++chain_idx) {
         PhysBoneChain& chain_ref = chains[chain_idx];
@@ -48,6 +51,7 @@ bool ResolveChainBoneIndices(
             changed = true;
             chain_ref.parentSkelIndex = nextParent;
         }
+        bool isModelMatch = (pedModelHash != 0U && chain_ref.modelHash == pedModelHash);
         for (size_t node_idx = 0; node_idx < chain_ref.bones.size(); ++node_idx) {
             BoneNodeCfg& bone_node = chain_ref.bones[node_idx];
             int resolved = CallGetPedBoneIndex(ped, bone_node.tag);
@@ -60,10 +64,13 @@ bool ResolveChainBoneIndices(
             }
             if (resolved >= 0) {
                 ProbeRefBone candidate{resolved, bone_node.localPos};
-                if (node_idx == 0) {
-                    rootRefs.push_back(candidate);
+                if (isModelMatch) {
+                    if (node_idx == 0) modelRootRefs.push_back(candidate);
+                    modelAllRefs.push_back(candidate);
+                } else {
+                    if (node_idx == 0) wildcardRootRefs.push_back(candidate);
+                    wildcardAllRefs.push_back(candidate);
                 }
-                allResolvedRefs.push_back(candidate);
             }
         }
     }
@@ -97,7 +104,10 @@ bool ResolveChainBoneIndices(
     }
 
     const std::vector<ProbeRefBone>& refSource =
-        (rootRefs.size() >= 2) ? rootRefs : allResolvedRefs;
+        (modelRootRefs.size() >= 2) ? modelRootRefs :
+        (modelAllRefs.size() >= 2) ? modelAllRefs :
+        (wildcardRootRefs.size() >= 2) ? wildcardRootRefs :
+        (!modelAllRefs.empty()) ? modelAllRefs : wildcardAllRefs;
     if (!refSource.empty()) {
         nextRefA = refSource[0];
         for (size_t idx = 1; idx < refSource.size(); ++idx) {
@@ -450,7 +460,7 @@ void ScriptMain() {
 
             if (slot.hasSkel) {
                 if (ResolveChainBoneIndices(
-                        slot.pedHandle, slot.chains, slot.blinkProfiles, slot.refA, slot.refB)) {
+                        slot.pedHandle, slot.modelHash, slot.chains, slot.blinkProfiles, slot.refA, slot.refB)) {
                     LogBoneIndexChange(slot);
                     slot.hasSkel = false;
                     slot.skel = ResolvedSkeleton{};
@@ -468,7 +478,7 @@ void ScriptMain() {
             if (!slot.hasSkel) {
                 int headIdx = CallGetPedBoneIndex(slot.pedHandle, kSkelHeadTag);
                 ResolveChainBoneIndices(
-                    slot.pedHandle, slot.chains, slot.blinkProfiles, slot.refA, slot.refB);
+                    slot.pedHandle, slot.modelHash, slot.chains, slot.blinkProfiles, slot.refA, slot.refB);
                 bool allowHeavy = (slot.heavyScanCooldown <= 0);
                 if (!TryResolvePedSkeleton(
                         slot.pedHandle, headIdx, slot.refA, slot.refB, allowHeavy, slot.skel)) {

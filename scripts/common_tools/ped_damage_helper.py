@@ -970,6 +970,7 @@ def enforce_ped_rpf7_poly_budget(
         "ribbon",
         "neko",
         "nail_ribbon",
+        "earring",
     ),
     hair_cloth_keywords: Tuple[str, ...] = (
         "hair",

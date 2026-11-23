@@ -21,18 +21,20 @@ import zlib
 try:
     from physbone_presets_layer import (
         SKEL_HEAD_TAG,
-    PARENT_BONE_TAGS,
-    _chain_parent_map,
-    MICHAEL_ER_BONE_MAP,
-    VRCHAT_PHYSBONE_SCRIPT_GUID,
+        PARENT_BONE_TAGS,
+        _chain_parent_map,
+        MICHAEL_ER_BONE_MAP,
+        VANILLA_RESERVED_BONE_TAGS,
+        VRCHAT_PHYSBONE_SCRIPT_GUID,
     )
 except ImportError:
     from common_tools.physbone_presets_layer import (
         SKEL_HEAD_TAG,
-    PARENT_BONE_TAGS,
-    _chain_parent_map,
-    MICHAEL_ER_BONE_MAP,
-    VRCHAT_PHYSBONE_SCRIPT_GUID,
+        PARENT_BONE_TAGS,
+        _chain_parent_map,
+        MICHAEL_ER_BONE_MAP,
+        VANILLA_RESERVED_BONE_TAGS,
+        VRCHAT_PHYSBONE_SCRIPT_GUID,
     )
 
 def parse_vec3_string(raw_text: str, default_val: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> Tuple[float, float, float]:
@@ -515,6 +517,10 @@ def merge_physbone_asi_ini(
     for rec in existing:
         rec_name = str(rec.get("name", ""))
         rec_model = str(rec.get("model", "")).strip().lower()
+        # Drop any legacy wildcard chain whose root tag collides with a vanilla GTA V skeleton tag
+        rec_bones = rec.get("bones") or ()
+        if not rec_model and rec_bones and int(rec_bones[0].get("tag", -1)) in VANILLA_RESERVED_BONE_TAGS:
+            continue
         if replaced_chain_models:
             if rec_model in replaced_chain_models or (rec_name, rec_model) in existing_pairs:
                 continue
@@ -570,6 +576,59 @@ def merge_physbone_asi_ini(
                 merged,
                 target_ped_model=target_ped_model,
                 blink_profiles=merged_blinks,
+            )
+    return resolved_ini
+
+
+def remove_ped_from_physbone_ini(
+    ini_path: str | Path,
+    ped_model: str,
+    *,
+    extra_sync_paths: Sequence[str | Path] = (),
+) -> Optional[Path]:
+    """Remove all PhysBone chains and Blink profiles scoped to `ped_model` from `GTAVPhysBones.ini`."""
+    resolved_ini = Path(ini_path)
+    if not resolved_ini.is_file():
+        return None
+    norm_model = str(ped_model or "").strip().lower()
+    if not norm_model:
+        return None
+    prefix_hints = {
+        "player_zero": ("PB_ER_",),
+        "player_one": ("PB_SC_",),
+        "player_two": ("PB_MT_",),
+    }.get(norm_model, ())
+    existing = _load_ini_chain_records(resolved_ini)
+    kept_chains: List[Dict[str, object]] = []
+    for rec in existing:
+        rec_model = str(rec.get("model", "")).strip().lower()
+        rec_name = str(rec.get("name", ""))
+        if rec_model == norm_model:
+            continue
+        if not rec_model and any(rec_name.startswith(pref) for pref in prefix_hints):
+            continue
+        kept_chains.append(rec)
+
+    existing_blinks = _load_ini_blink_profiles(resolved_ini)
+    kept_blinks = [
+        prof
+        for prof in existing_blinks
+        if str(prof.get("model", "")).strip().lower() != norm_model
+    ]
+    export_physbone_asi_ini(
+        resolved_ini,
+        kept_chains,
+        target_ped_model="all",
+        blink_profiles=kept_blinks,
+    )
+    for sync_target in extra_sync_paths:
+        sync_path = Path(sync_target)
+        if sync_path.parent.is_dir() and sync_path.resolve() != resolved_ini.resolve():
+            export_physbone_asi_ini(
+                sync_path,
+                kept_chains,
+                target_ped_model="all",
+                blink_profiles=kept_blinks,
             )
     return resolved_ini
 

@@ -1013,6 +1013,11 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "ja": "まばたきの最大閉じ具合 (`max_blink`、例: しなの 0.50 / ミルティナ 0.60・他の顔ブレンドシェイプは一切変更しません)",
         "pt": "Fator máximo opcional do piscar (`max_blink`, ex.: 0.50 Shinano / 0.60 Miltina) sem afetar nenhum outro blendshape facial",
     },
+    "eye_blink.mouth_open_cli_opt": {
+        "en": "Mouth opening strength scale (`FACIAL_jaw` weight ceiling 0.00-1.00; 0.00 closed, 0.35 default)",
+        "ja": "口の開き具合 (`FACIAL_jaw` 最大ウェイト 0.00〜1.00; 0.00=閉じる / 0.35=既定)",
+        "pt": "Intensidade de abertura da boca (peso máximo de `FACIAL_jaw` de 0.00 a 1.00; 0.00 fechada, 0.35 padrão)",
+    },
     "eye_blink.applied": {
         "en": "[OK] Natural eye blink rigged: shape_key='{key}', eyelid_verts={verts}, travel=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",
         "ja": "[OK] 自然なまばたき設定完了: shape_key='{key}', まぶた頂点={verts}, 可動量=(L:{left_mm:.1f}mm, R:{right_mm:.1f}mm)",

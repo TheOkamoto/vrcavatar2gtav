@@ -1,0 +1,315 @@
+# ==============================================================================
+# vrc2gtav.cfg.example
+# Centralized path and language configuration template for the vrc2gtav project.
+#
+# On first run (or by running `python run_mod_manager.py --setup`), the local
+# `vrc2gtav.cfg` file (ignored by Git) is generated automatically from this
+# template and populated with the real paths on your machine.
+#
+# Editing rules:
+#   - You may use forward slashes (C:/...) on both Windows and Linux/WSL.
+#   - The resolver (vrc2gtav_paths.py) automatically translates between Windows
+#     paths (X:/...) and WSL paths (/mnt/x/...) based on the host OS.
+#   - Variables written as ${section:key} are interpolated automatically.
+#   - Set VRC2GTAV_CFG in the environment to point to a custom .cfg file.
+#   - Set [general] language = auto | en | ja | pt (or VRC2GTAV_LANG env var).
+# ==============================================================================
+
+[general]
+# Interface language: auto (detect from OS locale), en (English), ja (Japanese), pt (Portuguese)
+language = auto
+
+[directories]
+# '.' resolves automatically to the directory containing vrc2gtav.cfg.
+project_root = .
+unity_assets = C:/VRChatProjects/waifuv4/Assets
+gtav_root = C:/Games/Grand Theft Auto V
+gtav_mods = ${gtav_root}/mods
+staging = ${project_root}/staging
+deploy_tools = ${project_root}/_deploy_tools
+scripts_root = ${project_root}/scripts
+common_tools = ${scripts_root}/common_tools
+backups = ${project_root}/backups
+renders_output = ${staging}/output
+artifacts =
+
+[executables]
+blender = C:/Program Files/Blender Foundation/Blender 4.0/blender.exe
+rage = rage
+python = python3
+ffmpeg = ffmpeg
+windows_cmd = C:/Windows/System32/cmd.exe
+
+[common_assets]
+dummy_ydd = ${directories:deploy_tools}/head_000_r.ydd
+prop_dummy_ydd = ${directories:deploy_tools}/p_eyes_dummy.ydd
+manager_script = ${directories:project_root}/run_mod_manager.py
+apply_characters_script = ${directories:common_tools}/apply_characters.py
+apply_all_characters_script = ${directories:common_tools}/apply_all_characters.py
+repack_deploy_script = ${directories:common_tools}/repack_and_deploy_everything.py
+test_suite_script = ${directories:common_tools}/test_mod_suite.py
+
+[rpf_paths]
+streamedpeds_extracted = ${directories:staging}/streamedpeds_players_extracted
+streamedpeds_rpf_relative = models/cdimages/streamedpeds_players.rpf
+x64v_extracted = ${directories:staging}/x64v_extracted
+x64v_modded_rpf = ${directories:staging}/x64v_modded.rpf
+x64v_game_rpf = ${directories:gtav_mods}/x64v.rpf
+x64v_vanilla_rpf = ${directories:gtav_root}/x64v.rpf
+
+mppatches_extracted = ${directories:staging}/mppatches_extracted
+mppatches_dlc_extracted = ${directories:staging}/mppatchesng_extracted
+mppatches_modded_rpf = ${directories:staging}/mppatchesng_dlc.rpf
+mppatches_game_rpf = ${directories:gtav_mods}/update/x64/dlcpacks/mppatchesng/dlc.rpf
+mppatches_rpf_relative = x64/models/cdimages/mppatches.rpf
+
+patchday3ng_models_extracted = ${directories:staging}/patchday3ng_models_extracted
+patchday3ng_dlc_extracted = ${directories:staging}/patchday3ng_dlc_extracted
+patchday3ng_modded_rpf = ${directories:staging}/patchday3ng_dlc.rpf
+patchday3ng_game_rpf = ${directories:gtav_mods}/update/x64/dlcpacks/patchday3ng/dlc.rpf
+patchday3ng_rpf_relative = x64/models/cdimages/patchday3ng.rpf
+
+patchday4ng_models_extracted = ${directories:staging}/patchday4ng_models_extracted
+patchday4ng_dlc_extracted = ${directories:staging}/patchday4ng_dlc_extracted
+patchday4ng_modded_rpf = ${directories:staging}/patchday4ng_dlc.rpf
+patchday4ng_game_rpf = ${directories:gtav_mods}/update/x64/dlcpacks/patchday4ng/dlc.rpf
+patchday4ng_rpf_relative = x64/models/cdimages/patchday4ng.rpf
+
+vanilla_skeletons_backup = ${directories:staging}/backup_vanilla_skeletons
+streamedpeds_backup_player_two = ${directories:staging}/backup_vanilla_player_two/player_two
+mppatches_backup_player_two = ${directories:staging}/backup_vanilla_mppatches_player_two/player_two
+streamedpedprops_extracted = ${directories:staging}/streamedpedprops_extracted
+streamedpedprops_rpf_relative = models/cdimages/streamedpedprops.rpf
+streamedpedprops_backup_p_eyes = ${directories:staging}/backup_vanilla_streamedpedprops_p_eyes
+
+# ==============================================================================
+# GTA V Protagonist Slots (Interchangeable VRChat Avatar Assignments)
+# Change `avatar` on any protagonist to swap characters freely:
+#   Options: shinano_casual | shinano_er | miltina_maid
+# Optional per-protagonist hair override:
+#   custom_hair = auto | default | none | <path to .prefab or .fbx>
+#   hair_mat    = <optional .mat override>
+#   hair_tex    = <optional texture override>
+#   hair_scale  = 1.0
+#   hair_offset = 0,0,0
+# ==============================================================================
+
+[franklin]
+avatar = shinano_casual
+ped_name = player_one
+prop_ped_name = player_one_p
+skeleton_yft = ${avatar_shinano_casual:character_dir}/2_blender/player_one.yft
+physbones_cfg = ${directories:project_root}/configs/shinano_casual_physbones.cfg
+target_z_min = -0.907
+target_z_max = 0.640
+arm_pose_degrees = -55.0
+staging_streamed_ped_dir = ${rpf_paths:streamedpeds_extracted}/player_one
+staging_mppatches_ped_dir = ${rpf_paths:mppatches_extracted}/player_one
+staging_patchday4_ped_dir = ${rpf_paths:patchday4ng_models_extracted}/player_one
+staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_one_p
+
+[michael]
+avatar = shinano_er
+ped_name = player_zero
+prop_ped_name = player_zero_p
+skeleton_yft = ${avatar_shinano_er:character_dir}/2_blender/player_zero.yft
+physbones_cfg = ${directories:project_root}/configs/michael_neko_mimi_physbones.cfg
+target_z_min = -0.907
+target_z_max = 0.645
+arm_pose_degrees = -55.0
+staging_streamed_ped_dir = ${rpf_paths:streamedpeds_extracted}/player_zero
+staging_mppatches_ped_dir = ${rpf_paths:mppatches_extracted}/player_zero
+staging_patchday4_ped_dir = ${rpf_paths:patchday4ng_models_extracted}/player_zero
+staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_zero_p
+
+[trevor]
+avatar = miltina_maid
+ped_name = player_two
+prop_ped_name = player_two_p
+skeleton_yft = ${avatar_miltina_maid:character_dir}/2_blender/player_two.yft
+physbones_cfg = ${directories:project_root}/configs/miltina_maid_physbones.cfg
+target_z_min = -0.908
+target_z_max = 0.642
+arm_pose_degrees = -55.0
+staging_streamed_ped_dir = ${rpf_paths:streamedpeds_extracted}/player_two
+staging_mppatches_ped_dir = ${rpf_paths:mppatches_extracted}/player_two
+staging_patchday4_ped_dir = ${rpf_paths:patchday4ng_models_extracted}/player_two
+staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_two_p
+
+# ==============================================================================
+# VRChat Avatar Presets (Protagonist-Independent Assets, Textures & Builders)
+# ==============================================================================
+
+[avatar_shinano_casual]
+unity_scene =
+unity_avatar_name = Shinano
+blendshapes_source = auto
+blendshapes_cfg = ${directories:project_root}/configs/shinano_blendshapes.cfg
+physbones_source = auto
+physbones_marshmallow = false
+eye_blink = auto
+eye_blink_strength = 0.50
+fbx_hair =
+custom_hair =
+hair_mat =
+hair_tex =
+hair_scale = 1.0
+hair_offset = 0,0,0
+character_dir = ${directories:project_root}/1_Franklin_Shinano_Casual
+scripts_dir = ${directories:scripts_root}/Shinano_Casual_Franklin
+source_fbx = ${directories:unity_assets}/Shinano/FBX/Shinano.fbx
+face_anim = ${directories:unity_assets}/ShinanoDefAdultNewv5.anim
+
+tex_shinano_dir = ${directories:unity_assets}/Shinano/Texture
+tex_moon_butterfly_dir = ${directories:unity_assets}/MoonButterfly eye/Sinano/Texture
+tex_face = ${tex_shinano_dir}/Color/Eye/Shinano_face_blue.png
+tex_makeup = ${tex_shinano_dir}/Make up/Shinano_face_makeup1.png
+tex_eye_sky = ${tex_moon_butterfly_dir}/sky.png
+tex_eye_cloud = ${tex_moon_butterfly_dir}/Cloud.jpg
+tex_eye_cloud_mask = ${tex_moon_butterfly_dir}/無題157_20260711214118.png
+tex_eye_highlight = ${tex_moon_butterfly_dir}/Eye-highlight.png
+tex_body = ${tex_shinano_dir}/Shinano_body.png
+tex_costume = ${tex_shinano_dir}/Shinano_costume.png
+tex_hair = ${tex_shinano_dir}/Shinano_hair.png
+
+staging_textures_src_dir = ${directories:staging}/textures_src
+textures_dir = ${character_dir}/3_textures_gtav/textures
+atlas_png = ${textures_dir}/shinano_atlas_2k.png
+normal_png = ${textures_dir}/shinano_flat_normal.png
+spec_png = ${textures_dir}/shinano_black_spec.png
+ytd_dir = ${character_dir}/3_textures_gtav
+ytd_name = shinano_franklin_2k.ytd
+ytd_file = ${ytd_dir}/${ytd_name}
+
+blender_script = ${scripts_dir}/build_franklin_avatar.py
+blender_runner_script = ${scripts_dir}/run_build_franklin.py
+atlas_script = ${scripts_dir}/generate_franklin_atlas.py
+
+[avatar_shinano_er]
+unity_scene =
+unity_avatar_name = Shinano Eternal Reunion
+blendshapes_source = auto
+blendshapes_cfg = ${directories:project_root}/configs/shinano_er_blendshapes.cfg
+physbones_source = auto
+physbones_marshmallow = false
+eye_blink = auto
+eye_blink_strength = 0.50
+custom_hair =
+hair_mat =
+hair_tex =
+hair_scale = 1.0
+hair_offset = 0,0,0
+character_dir = ${directories:project_root}/2_Michael_Shinano_EternalReunion
+scripts_dir = ${directories:scripts_root}/Shinano_EternalReunion_Michael
+fbx_shinano = ${directories:unity_assets}/Shinano/FBX/Shinano.fbx
+fbx_outfit = ${directories:unity_assets}/Vagrant Brand/Eternal Reunion/Avatars/Shinano/FBX/ER_Shi.fbx
+fbx_watch = ${directories:unity_assets}/Vagrant Brand/Eternal Reunion/Pocket Watch/FBX/ER_PW.fbx
+fbx_hair = ${directories:unity_assets}/Li-ne/Neko Tied Bob hair/_Fbx/Neko Tied Bob hair.fbx
+face_anim = ${directories:unity_assets}/ShinanoDefAdultNewv5.anim
+
+tex_shinano_dir = ${directories:unity_assets}/Shinano/Texture
+tex_moon_butterfly_dir = ${directories:unity_assets}/MoonButterfly eye/Sinano/Texture
+tex_er_dir = ${directories:unity_assets}/Vagrant Brand/Eternal Reunion/TEX
+tex_er_main_dir = ${tex_er_dir}/MainTEX
+tex_er_masks_dir = ${tex_er_dir}/Masks
+tex_er_normals_dir = ${tex_er_dir}/Normal
+tex_hair_dir = ${directories:unity_assets}/Li-ne/Neko Tied Bob hair
+
+tex_face = ${tex_shinano_dir}/Color/Eye/Shinano_face_blue.png
+tex_makeup = ${tex_shinano_dir}/Make up/Shinano_face_makeup1.png
+tex_face_emission = ${tex_shinano_dir}/Mask/Shinano_face_emission_mask.png
+tex_eye_sky = ${tex_moon_butterfly_dir}/sky.png
+tex_eye_cloud = ${tex_moon_butterfly_dir}/Cloud.jpg
+tex_eye_cloud_mask = ${tex_moon_butterfly_dir}/無題157_20260711214118.png
+tex_eye_highlight = ${tex_moon_butterfly_dir}/Eye-highlight.png
+tex_body = ${tex_shinano_dir}/Shinano_body.png
+
+tex_er_un1_diffuse = ${tex_er_main_dir}/V3_UN1.png
+tex_er_un1_metallic = ${tex_er_masks_dir}/UN1_M.png
+tex_er_un1_smoothness = ${tex_er_masks_dir}/UN1_S.png
+tex_er_un1_normal = ${tex_er_normals_dir}/UN1_N.png
+
+tex_er_un2_diffuse = ${tex_er_main_dir}/V3_UN2.png
+tex_er_un2_metallic = ${tex_er_masks_dir}/UN2_M.png
+tex_er_un2_smoothness = ${tex_er_masks_dir}/UN2_S.png
+tex_er_un2_normal = ${tex_er_normals_dir}/UN2_N.png
+
+tex_er_un3_diffuse = ${tex_er_main_dir}/V3_UN3.png
+tex_er_un3_metallic = ${tex_er_masks_dir}/UN3_M.png
+tex_er_un3_smoothness = ${tex_er_masks_dir}/UN3_S.png
+tex_er_un3_normal = ${tex_er_normals_dir}/UN3_N.png
+
+tex_er_un4_diffuse = ${tex_er_main_dir}/UN4.png
+tex_er_un4_metallic = ${tex_er_masks_dir}/UN4_M.png
+tex_er_un4_smoothness = ${tex_er_masks_dir}/UN4_S.png
+tex_er_un4_normal = ${tex_er_normals_dir}/UN4_N.png
+
+tex_hair_diffuse = ${tex_hair_dir}/_Mat/Tex/Blue.png
+tex_hair_light_mask = ${tex_hair_dir}/_Mat/C/Light Mask.png
+tex_hair_normal = ${tex_hair_dir}/_Mat/C/Normal map.png
+tex_hair_acc_blue = ${tex_hair_dir}/Accessories/Blue.png
+tex_hair_acc_pin = ${tex_hair_dir}/Accessories/c/Pin Mat.png
+tex_hair_acc_mat = ${tex_hair_dir}/Accessories/c/Accessories Mat.png
+
+textures_dir = ${character_dir}/3_textures_gtav/textures_atlas
+atlas_png = ${textures_dir}/shinano_er_atlas.png
+normal_png = ${textures_dir}/shinano_flat_normal.png
+spec_png = ${textures_dir}/shinano_black_spec.png
+er_normal_png = ${textures_dir}/shinano_er_normal.png
+er_spec_png = ${textures_dir}/shinano_er_spec.png
+ytd_dir = ${character_dir}/3_textures_gtav
+ytd_name = test_er.ytd
+ytd_file = ${ytd_dir}/${ytd_name}
+ytd_backup_file = ${ytd_dir}/shinano_michael_er_2k.ytd
+
+blender_script = ${scripts_dir}/build_michael_er.py
+blender_runner_script = ${scripts_dir}/run_build_er.py
+atlas_script = ${scripts_dir}/generate_er_atlas.py
+deploy_script = ${scripts_dir}/deploy_michael_er.py
+
+[avatar_miltina_maid]
+unity_scene =
+unity_avatar_name = Milltina
+blendshapes_source = auto
+blendshapes_cfg = ${directories:project_root}/configs/miltina_blendshapes.cfg
+physbones_source = auto
+physbones_marshmallow = false
+eye_blink = auto
+eye_blink_strength = 0.60
+fbx_hair =
+custom_hair =
+hair_mat =
+hair_tex =
+hair_scale = 1.0
+hair_offset = 0,0,0
+character_dir = ${directories:project_root}/3_Trevor_Miltina_Maid
+scripts_dir = ${directories:scripts_root}/Miltina_Maid_Trevor
+source_fbx = ${directories:unity_assets}/DOLOSart/1.Milltina/FBX/Milltina.fbx
+face_anim = ${directories:unity_assets}/Miltina_close eyes_Base_adult.anim
+
+tex_dolosart_dir = ${directories:unity_assets}/DOLOSart/1.Milltina/Material/Texture
+tex_dolosart_normal_dir = ${directories:unity_assets}/DOLOSart/1.Milltina/Material/Normal
+tex_nagima_dir = ${directories:unity_assets}/NAGIMA/AWEyes_Texture/Milltina_AWEyes/Material
+
+tex_face = ${tex_dolosart_dir}/Milltina_Face.png
+tex_eye_base = ${tex_nagima_dir}/Texture/Milltina_AWEyes_Blue Sea.png
+tex_eye_highlight = ${tex_nagima_dir}/Osakana/Milltina_AWEyes_Osakana.png
+tex_body = ${tex_dolosart_dir}/Milltina_Body.png
+tex_costume = ${tex_dolosart_dir}/Milltina_Costume.png
+tex_costume_normal = ${tex_dolosart_normal_dir}/Milltina_Costume_Normal.png
+tex_hair = ${tex_dolosart_dir}/Milltina_Hair.png
+
+textures_dir = ${character_dir}/3_textures_gtav
+atlas_png = ${textures_dir}/miltina_atlas_2k.png
+normal_png = ${textures_dir}/miltina_normal.png
+spec_png = ${textures_dir}/miltina_spec.png
+ytd_dir = ${character_dir}/3_textures_gtav
+ytd_name = miltina_maid.ytd
+ytd_file = ${ytd_dir}/${ytd_name}
+
+blender_script = ${scripts_dir}/build_trevor_miltina.py
+atlas_script = ${scripts_dir}/generate_miltina_atlas.py
+pipeline_script = ${scripts_dir}/run_pipeline.py
+apply_script = ${scripts_dir}/apply_miltina_to_trevor.py
+preview_rpf = ${textures_dir}/miltina_preview.rpf
+preview_renders_dir = ${directories:renders_output}

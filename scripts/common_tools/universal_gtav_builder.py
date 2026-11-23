@@ -107,6 +107,9 @@ def run_in_blender_build(manifest_path: Path) -> None:
         for list_key in ("base_fbx_paths", "extra_fbx_paths"):
             if isinstance(ma_plan.get(list_key), list):
                 ma_plan[list_key] = [str(project_paths.to_host_path(item)) for item in ma_plan[list_key]]
+        for inst_item in ma_plan.get("fbx_instances", ()) or ():
+            if isinstance(inst_item, dict) and inst_item.get("fbx_path"):
+                inst_item["fbx_path"] = str(project_paths.to_host_path(inst_item["fbx_path"]))
         for item_key in ("scene_path", "assets_root"):
             if ma_plan.get(item_key):
                 ma_plan[item_key] = str(project_paths.to_host_path(ma_plan[item_key]))
@@ -197,6 +200,10 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
     eye_blink_mode = str(manifest.get("eye_blink", "auto")).lower()
     eye_blink_strength = float(manifest.get("eye_blink_strength", 0.80))
+    mouth_open_strength = eye_blink_helper.parse_mouth_open_strength(
+        manifest.get("mouth_open_strength"),
+        default=eye_blink_helper.DEFAULT_MOUTH_OPEN_STRENGTH,
+    )
     blink_anchors = (
         eye_blink_helper.capture_eyelid_blink_anchors(ped_armature)
         if eye_blink_mode != "off"
@@ -239,7 +246,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
     if ma_plan.get("loaded"):
         modular_avatar_helper.apply_modular_avatar_plan_in_blender(
-            bpy, src_armature, ma_plan, import_extra_fbx=True
+            bpy,
+            src_armature,
+            ma_plan,
+            import_extra_fbx=True,
+            primary_base_fbx=source_fbx,
         )
 
     disabled_ci = {str(name).strip().lower() for name in (manifest.get("disabled_meshes") or ())}
@@ -275,14 +286,57 @@ def run_in_blender_build(manifest_path: Path) -> None:
         (obj_item for obj_item in active_meshes if _strip_object_base_name(obj_item.name).lower() == "body"),
         active_meshes[0],
     )
-    body_jaw_weights = _extract_case_insensitive_jaw_weights(body_obj)
-    blink_rig_data = eye_blink_helper.extract_body_eyelid_blink_rig_data(
-        bpy,
-        body_obj,
-        eye_blink_mode=eye_blink_mode,
-        shape_weights=blendshape_weights.get(body_obj.name) or blendshape_weights.get("Body", {}),
-        exclude_vert_indices=body_jaw_weights.keys(),
+    body_jaw_mask = _extract_case_insensitive_jaw_weights(body_obj)
+    body_jaw_weights = (
+        body_jaw_mask
+        if abs(mouth_open_strength - eye_blink_helper.DEFAULT_MOUTH_OPEN_STRENGTH) < 1e-6
+        else _extract_case_insensitive_jaw_weights(
+            body_obj, mouth_open_strength=mouth_open_strength
+        )
     )
+
+    blink_candidates = [
+        obj_item
+        for obj_item in active_meshes
+        if _strip_object_base_name(obj_item.name).lower() in ("body", "face", "head", "body_base")
+    ]
+    seen_blink_names = {item.name for item in blink_candidates}
+    for obj_item in active_meshes:
+        if obj_item.name not in seen_blink_names:
+            blink_candidates.append(obj_item)
+            seen_blink_names.add(obj_item.name)
+
+    blink_body_obj = body_obj
+    blink_rig_data: Dict[str, Any] = {"enabled": False, "reason": "no_candidates"}
+    for cand_idx, cand_obj in enumerate(blink_candidates):
+        cand_jaw = body_jaw_mask if cand_obj == body_obj else _extract_case_insensitive_jaw_weights(cand_obj)
+        cand_weights = (
+            blendshape_weights.get(cand_obj.name)
+            or blendshape_weights.get(_strip_object_base_name(cand_obj.name))
+            or blendshape_weights.get("Body", {})
+        )
+        cand_res = eye_blink_helper.extract_body_eyelid_blink_rig_data(
+            bpy,
+            cand_obj,
+            eye_blink_mode=eye_blink_mode,
+            shape_weights=cand_weights,
+            exclude_vert_indices=cand_jaw.keys(),
+        )
+        if cand_idx == 0:
+            blink_rig_data = cand_res
+        if cand_res.get("enabled"):
+            blink_body_obj = cand_obj
+            blink_rig_data = cand_res
+            print(
+                f"[EyeBlink] Extracted eyelid rig from '{cand_obj.name}' (key={cand_res.get('shape_key')})",
+                flush=True,
+            )
+            break
+    if not blink_rig_data.get("enabled") and eye_blink_mode != "off":
+        print(
+            f"[EyeBlink] Skipped eyelid rig ({blink_rig_data.get('reason', 'unknown')})",
+            flush=True,
+        )
 
     # 3. Load resolved PhysBones config and resolve chains against current armature
     pb_cfg = physbone_helper.load_physbone_config(project_paths.to_host_path(manifest["physbones_cfg"]))
@@ -294,17 +348,56 @@ def run_in_blender_build(manifest_path: Path) -> None:
     depsgraph_eval = bpy.context.evaluated_depsgraph_get()
     processed_objs: List[Any] = []
     parsed_mats = atlas_manifest.get("all_parsed_materials") or {}
+    parsed_mats_by_path = {
+        str(info.get("mat_path", "") or "").replace("\\", "/").lower(): info
+        for info in parsed_mats.values()
+        if isinstance(info, dict) and info.get("mat_path")
+    }
     uv_regions_by_mat = atlas_manifest.get("materials") or {}
+    uv_regions_by_mat_path = {
+        str(key).replace("\\", "/").lower(): val
+        for key, val in (atlas_manifest.get("materials_by_path") or {}).items()
+    }
     uv_regions_by_stem = atlas_manifest.get("textures_by_stem") or {}
     default_region = (
         next(iter(uv_regions_by_mat.values()), None)
         or next(iter(uv_regions_by_stem.values()), None)
         or {"u_offset": 0.0, "v_offset": 0.0, "u_scale": 1.0, "v_scale": 1.0}
     )
+    ma_mesh_mats_map = ma_plan.get("mesh_materials") or {}
+    ma_mesh_mats_ci = {str(mesh_key).strip().lower(): val for mesh_key, val in ma_mesh_mats_map.items() if mesh_key}
+    tagged_mat_cache: Dict[Tuple[str, str], Any] = {}
+
+    def _get_tagged_unity_mat(u_spec: Dict[str, Any], fallback_label: str) -> Any:
+        u_path = str(u_spec.get("mat_path", "") or "").strip()
+        u_name = str(u_spec.get("name", "") or "").strip() or fallback_label
+        cache_key = (u_path.replace("\\", "/").lower(), u_name)
+        cached_mat = tagged_mat_cache.get(cache_key)
+        if cached_mat is not None:
+            return cached_mat
+        bl_mat = bpy.data.materials.new(name=f"vrc_{u_name[:40]}")
+        bl_mat["vrc2gtav_mat_path"] = u_path
+        bl_mat["vrc2gtav_mat_name"] = u_name
+        tagged_mat_cache[cache_key] = bl_mat
+        return bl_mat
 
     for src_obj in active_meshes:
         eval_obj = src_obj.evaluated_get(depsgraph_eval)
         new_mesh = bpy.data.meshes.new_from_object(eval_obj)
+
+        unity_mats_list: List[Dict[str, Any]] = []
+        raw_mats_json = src_obj.get("vrc2gtav_unity_mats_json")
+        if raw_mats_json:
+            try:
+                loaded_mats = json.loads(str(raw_mats_json))
+                if isinstance(loaded_mats, list):
+                    unity_mats_list = [item for item in loaded_mats if isinstance(item, dict)]
+            except ValueError:
+                pass
+        if not unity_mats_list:
+            base_obj_name = _strip_object_base_name(src_obj.name)
+            fb_list = ma_mesh_mats_map.get(base_obj_name) or ma_mesh_mats_ci.get(base_obj_name.lower()) or []
+            unity_mats_list = [item for item in fb_list if isinstance(item, dict)]
 
         bm_data = bmesh.new()
         bm_data.from_mesh(new_mesh)
@@ -314,14 +407,23 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
         strip_indices = []
         for mat_idx, mat_slot in enumerate(src_obj.data.materials):
-            if mat_slot is None:
+            u_spec = unity_mats_list[mat_idx] if mat_idx < len(unity_mats_list) else {}
+            u_path_norm = str(u_spec.get("mat_path", "") or "").replace("\\", "/").lower()
+            u_name = str(u_spec.get("name", "") or "").strip()
+            mat_name_check = u_name or (mat_slot.name if mat_slot is not None else "")
+            if not mat_name_check:
                 continue
-            mat_key = _strip_object_base_name(mat_slot.name)
-            mat_meta = parsed_mats.get(mat_key) or parsed_mats.get(mat_slot.name) or {}
+            mat_key = _strip_object_base_name(mat_name_check)
+            mat_meta = (
+                parsed_mats_by_path.get(u_path_norm)
+                or parsed_mats.get(mat_key)
+                or parsed_mats.get(mat_name_check)
+                or {}
+            )
             if mat_meta.get("is_body_alpha_overlay") or (
                 _strip_object_base_name(src_obj.name).lower() == "body"
-                and "alpha" in mat_slot.name.lower()
-                and "hair" not in mat_slot.name.lower()
+                and "alpha" in mat_name_check.lower()
+                and "hair" not in mat_name_check.lower()
             ):
                 strip_indices.append(mat_idx)
 
@@ -360,13 +462,25 @@ def run_in_blender_build(manifest_path: Path) -> None:
             bpy.context.view_layer.objects.active = new_obj
             bpy.ops.mesh.customdata_custom_splitnormals_clear()
 
-        # Preserve material names cleanly so atlas slot remapper finds every tile
+        # Preserve Unity material assignments so every mesh/slot maps to its exact atlas tile
         kept_slots_map: Dict[int, int] = {}
-        for old_idx, mat_item in enumerate(src_obj.data.materials):
-            if old_idx in strip_indices:
-                continue
-            kept_slots_map[old_idx] = len(new_obj.data.materials)
-            new_obj.data.materials.append(mat_item)
+        if src_obj.data.materials:
+            new_obj.data.materials.clear()
+            for old_idx, mat_item in enumerate(src_obj.data.materials):
+                if old_idx in strip_indices:
+                    continue
+                kept_slots_map[old_idx] = len(new_obj.data.materials)
+                if unity_mats_list:
+                    u_spec = unity_mats_list[min(old_idx, len(unity_mats_list) - 1)]
+                    fb_label = mat_item.name if mat_item is not None else src_obj.name
+                    new_obj.data.materials.append(_get_tagged_unity_mat(u_spec, fb_label))
+                else:
+                    new_obj.data.materials.append(mat_item)
+        elif unity_mats_list:
+            new_obj.data.materials.clear()
+            new_obj.data.materials.append(_get_tagged_unity_mat(unity_mats_list[0], src_obj.name))
+            for poly_elem in new_obj.data.polygons:
+                poly_elem.material_index = 0
 
         if strip_indices and new_obj.data.polygons:
             for poly_elem in new_obj.data.polygons:
@@ -415,7 +529,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     jaw_grp.add([new_idx], jaw_val, "REPLACE")
                     head_grp.add([new_idx], max(0.0, 1.0 - jaw_val), "REPLACE")
 
-        if src_obj == body_obj and blink_rig_data.get("enabled"):
+        if src_obj == blink_body_obj and blink_rig_data.get("enabled"):
             eye_blink_helper.apply_eyelid_blink_weights_to_mesh(
                 new_obj,
                 blink_rig_data["weights_by_orig_vert"],
@@ -520,11 +634,69 @@ def run_in_blender_build(manifest_path: Path) -> None:
         if obj_item != ped_armature and obj_item not in processed_objs:
             bpy.data.objects.remove(obj_item, do_unlink=True)
 
+    uv_regions_ci = {key.lower(): val for key, val in uv_regions_by_mat.items()}
+
+    def _resolve_mat_region(mat_obj: Any) -> Dict[str, Any]:
+        if mat_obj is not None:
+            u_path = str(mat_obj.get("vrc2gtav_mat_path", "") or "").replace("\\", "/").lower()
+            if u_path:
+                found_path = uv_regions_by_mat_path.get(u_path)
+                if found_path is not None:
+                    return found_path
+                try:
+                    resolved_u = str(Path(u_path).resolve()).replace("\\", "/").lower()
+                    if resolved_u in uv_regions_by_mat_path:
+                        return uv_regions_by_mat_path[resolved_u]
+                except OSError:
+                    pass
+            u_name = str(mat_obj.get("vrc2gtav_mat_name", "") or "").strip()
+            if u_name:
+                found_u = uv_regions_by_mat.get(u_name) or uv_regions_ci.get(u_name.lower())
+                if found_u is not None:
+                    return found_u
+        mat_name_raw = _strip_object_base_name(mat_obj.name) if mat_obj else ""
+        low_name = mat_name_raw.lower()
+        found = uv_regions_by_mat.get(mat_name_raw) or uv_regions_ci.get(low_name)
+        if found is None:
+            for key_tok, reg_val in uv_regions_by_stem.items():
+                if key_tok in low_name or low_name in key_tok:
+                    found = reg_val
+                    break
+        return found or default_region
+
+    # Mark objects containing double-sided materials BEFORE decimation so RPF7 poly
+    # budget accounts for the 2x backface duplication performed below.
+    for proc_obj in processed_objs:
+        if getattr(proc_obj, "type", None) != "MESH" or getattr(proc_obj, "data", None) is None:
+            continue
+        obj_mats = list(proc_obj.data.materials)
+        ds_poly_count = sum(
+            1
+            for poly_item in proc_obj.data.polygons
+            if 0 <= poly_item.material_index < len(obj_mats)
+            and bool(_resolve_mat_region(obj_mats[poly_item.material_index]).get("is_double_sided"))
+        )
+        proc_obj["vtoon_double_sided"] = ds_poly_count * 2 >= max(1, len(proc_obj.data.polygons))
+
     # 6. Join active meshes and map shader + 2x2/NxN Atlas UVs + ped blood decals
     enable_blood_decals = bool(manifest.get("blood_decals", True))
     ped_damage_helper.enforce_ped_rpf7_poly_budget(
         bpy, processed_objs, enable_blood_decals=enable_blood_decals
     )
+
+    # Unify UV layer names before join so Blender merges all UVs into "UVMap 0"
+    for proc_obj in processed_objs:
+        if getattr(proc_obj, "type", None) != "MESH" or getattr(proc_obj, "data", None) is None:
+            continue
+        mesh_uvs = proc_obj.data.uv_layers
+        if not mesh_uvs:
+            mesh_uvs.new(name="UVMap 0")
+            continue
+        primary_uv = mesh_uvs.active or mesh_uvs[0]
+        for extra_uv in list(mesh_uvs):
+            if extra_uv != primary_uv:
+                mesh_uvs.remove(extra_uv)
+        primary_uv.name = "UVMap 0"
 
     bpy.ops.object.select_all(action="DESELECT")
     for proc_obj in processed_objs:
@@ -582,17 +754,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
     slot_regions: Dict[int, Dict[str, Any]] = {}
     slot_is_face: Dict[int, bool] = {}
     double_sided_slots: List[int] = []
-    uv_regions_ci = {key.lower(): val for key, val in uv_regions_by_mat.items()}
     for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
-        mat_name_raw = _strip_object_base_name(mat_item.name) if mat_item else ""
+        u_name_slot = str(mat_item.get("vrc2gtav_mat_name", "") or "").strip() if mat_item else ""
+        mat_name_raw = u_name_slot or (_strip_object_base_name(mat_item.name) if mat_item else "")
         low_mat_name = mat_name_raw.lower()
-        region_found = uv_regions_by_mat.get(mat_name_raw) or uv_regions_ci.get(low_mat_name)
-        if region_found is None:
-            for key_tok, reg_val in uv_regions_by_stem.items():
-                if key_tok in low_mat_name or low_mat_name in key_tok:
-                    region_found = reg_val
-                    break
-        resolved_reg = region_found or default_region
+        resolved_reg = _resolve_mat_region(mat_item)
         slot_regions[slot_idx] = resolved_reg
         slot_is_face[slot_idx] = "face" in low_mat_name
         if resolved_reg.get("is_double_sided"):
@@ -714,16 +880,62 @@ def run_in_blender_build(manifest_path: Path) -> None:
     exported_dir = os.path.join(str(project_paths.to_host_path(manifest["exported_models_dir"])), "")
     os.makedirs(exported_dir, exist_ok=True)
 
+    def _export_ydd_with_rpf7_guard(
+        target_ydd_name: str, dict_empty: Any, mesh_targets: Sequence[Any]
+    ) -> None:
+        ydd_out = Path(exported_dir) / f"{target_ydd_name}.ydd"
+        for attempt_idx in range(3):
+            bpy.ops.object.select_all(action="DESELECT")
+            dict_empty.select_set(True)
+            bpy.context.view_layer.objects.active = dict_empty
+            bpy.ops.sollumz.export_assets(
+                directory=exported_dir,
+                direct_export=True,
+                use_custom_settings=True,
+                target_versions={"GEN8"},
+                target_formats={"NATIVE", "CWXML"},
+                limit_to_selected=False,
+            )
+            if not ydd_out.is_file() or ydd_out.stat().st_size <= 16_400_000 or attempt_idx >= 2:
+                break
+            cur_bytes = ydd_out.stat().st_size
+            trim_ratio = max(0.35, min(0.88, (15_000_000.0 / float(cur_bytes)) * 0.90))
+            print(
+                f"[RPF7 Guard] {ydd_out.name} is {cur_bytes / 1048576.0:.2f} MiB (> 16 MiB); decimating by {trim_ratio:.2f} (attempt {attempt_idx + 1}/2)...",
+                flush=True,
+            )
+            import bmesh
+
+            for mesh_tgt in mesh_targets:
+                if mesh_tgt is None or getattr(mesh_tgt.data, "shape_keys", None):
+                    continue
+                bpy.context.view_layer.objects.active = mesh_tgt
+                dec_mod = mesh_tgt.modifiers.new("Rpf7SizeGuardDecimate", "DECIMATE")
+                dec_mod.decimate_type = "COLLAPSE"
+                dec_mod.ratio = trim_ratio
+                bpy.ops.object.modifier_move_to_index(modifier=dec_mod.name, index=0)
+                bpy.ops.object.modifier_apply(modifier=dec_mod.name)
+                if any(len(poly.vertices) != 3 for poly in mesh_tgt.data.polygons):
+                    bm_tmp = bmesh.new()
+                    bm_tmp.from_mesh(mesh_tgt.data)
+                    bmesh.ops.triangulate(bm_tmp, faces=bm_tmp.faces)
+                    bm_tmp.to_mesh(mesh_tgt.data)
+                    bm_tmp.free()
+                mesh_tgt.data.update()
+        ped_damage_helper.validate_rpf7_resource_file(ydd_out)
+
     if ped_format == "componentpeds":
         drawable_dict_empty = create_empty_object(SollumType.DRAWABLE_DICTIONARY)
         drawable_dict_empty.name = ped_name
         primary_set = set(comp_primary_keys)
         first_primary = comp_primary_keys[0] if comp_primary_keys else comp_all_keys[0]
+        exported_primary_meshes: List[Any] = []
 
         for slot_key in comp_all_keys:
             if slot_key == first_primary:
                 arm_slot = ped_armature
                 mesh_slot = joined_mesh_obj
+                exported_primary_meshes.append(mesh_slot)
             elif slot_key in primary_set:
                 arm_slot = ped_armature.copy()
                 arm_slot.data = ped_armature.data.copy()
@@ -731,6 +943,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 mesh_slot = joined_mesh_obj.copy()
                 mesh_slot.data = joined_mesh_obj.data.copy()
                 bpy.context.collection.objects.link(mesh_slot)
+                exported_primary_meshes.append(mesh_slot)
             else:
                 arm_slot = ped_armature.copy()
                 arm_slot.data = ped_armature.data.copy()
@@ -773,18 +986,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 mod_arm = mesh_slot.modifiers.new("Armature", "ARMATURE")
             mod_arm.object = arm_slot
 
-        bpy.ops.object.select_all(action="DESELECT")
-        drawable_dict_empty.select_set(True)
-        bpy.context.view_layer.objects.active = drawable_dict_empty
-        bpy.ops.sollumz.export_assets(
-            directory=exported_dir,
-            direct_export=True,
-            use_custom_settings=True,
-            target_versions={"GEN8"},
-            target_formats={"NATIVE", "CWXML"},
-            limit_to_selected=False,
-        )
-        ped_damage_helper.validate_rpf7_resource_file(Path(exported_dir) / f"{ped_name}.ydd")
+        _export_ydd_with_rpf7_guard(ped_name, drawable_dict_empty, exported_primary_meshes)
     else:
         export_drawables = [str(item) for item in (manifest.get("export_drawables") or ["uppr_000_u"])]
         drawable_dict_empty = create_empty_object(SollumType.DRAWABLE_DICTIONARY)
@@ -802,21 +1004,10 @@ def run_in_blender_build(manifest_path: Path) -> None:
         arm_mod = joined_mesh_obj.modifiers.new("Armature", "ARMATURE")
         arm_mod.object = ped_armature
 
-        bpy.ops.object.select_all(action="DESELECT")
-        drawable_dict_empty.select_set(True)
-        bpy.context.view_layer.objects.active = drawable_dict_empty
-        for slot_name in export_drawables:
-            drawable_dict_empty.name = slot_name
-            ped_armature.name = slot_name
-            bpy.ops.sollumz.export_assets(
-                directory=exported_dir,
-                direct_export=True,
-                use_custom_settings=True,
-                target_versions={"GEN8"},
-                target_formats={"NATIVE", "CWXML"},
-                limit_to_selected=False,
-            )
-            ped_damage_helper.validate_rpf7_resource_file(Path(exported_dir) / f"{slot_name}.ydd")
+        primary_slot = export_drawables[0]
+        drawable_dict_empty.name = primary_slot
+        ped_armature.name = primary_slot
+        _export_ydd_with_rpf7_guard(primary_slot, drawable_dict_empty, [joined_mesh_obj])
 
     # 8. Patch .yft skeleton with PyMateria
     yft_output_path = project_paths.to_host_path(manifest["target_yft"])
@@ -833,6 +1024,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     )
 
     # 9. Export & merge GTAVPhysBones.ini scoped by `model = <ped_name>`
+    should_deploy_ini = bool(manifest.get("deploy", True))
     if physbone_chain_records or blink_profiles_to_merge or eye_blink_mode == "off":
         local_ini = Path(exported_dir) / "GTAVPhysBones.ini"
         physbone_helper.export_physbone_asi_ini(
@@ -841,26 +1033,27 @@ def run_in_blender_build(manifest_path: Path) -> None:
             target_ped_model=ped_name,
             blink_profiles=blink_profiles_to_merge,
         )
-        repo_root = project_paths.get_project_root()
-        sync_targets = [
-            repo_root / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "GTAVPhysBones.ini",
-            repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini",
-            repo_root / "3_Trevor_Miltina_Maid" / "5_rpf_package" / "GTAVPhysBones.ini",
-        ]
-        gtav_root = project_paths.get_gtav_root_dir()
-        if gtav_root.is_dir():
-            sync_targets.append(gtav_root / "GTAVPhysBones.ini")
-        primary_merge_ini = sync_targets[1] if sync_targets[1].parent.is_dir() else local_ini
-        physbone_helper.merge_physbone_asi_ini(
-            primary_merge_ini,
-            physbone_chain_records,
-            own_prefixes=(),
-            target_ped_model="all",
-            extra_sync_paths=sync_targets,
-            blink_profiles=blink_profiles_to_merge,
-            own_blink_models=(ped_name,),
-            own_chain_models=(ped_name,),
-        )
+        if should_deploy_ini:
+            repo_root = project_paths.get_project_root()
+            gtav_root = project_paths.get_gtav_root_dir()
+            if gtav_root.is_dir():
+                gtav_ini = gtav_root / "GTAVPhysBones.ini"
+                seed_ini = (
+                    gtav_ini
+                    if gtav_ini.is_file()
+                    else repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini"
+                )
+                primary_merge_ini = seed_ini if seed_ini.is_file() else local_ini
+                physbone_helper.merge_physbone_asi_ini(
+                    primary_merge_ini,
+                    physbone_chain_records,
+                    own_prefixes=(),
+                    target_ped_model="all",
+                    extra_sync_paths=[local_ini, gtav_ini],
+                    blink_profiles=blink_profiles_to_merge,
+                    own_blink_models=(ped_name,),
+                    own_chain_models=(ped_name,),
+                )
         print(
             f"[PhysBones] Merged {len(physbone_chain_records)} chains + {len(blink_profiles_to_merge)} blink profiles for model={ped_name}",
             flush=True,
@@ -873,12 +1066,27 @@ def build_and_deploy_npc_from_source(
     target_ped: str,
     avatar_name: str = "",
     deploy: bool = True,
+    repack_archives: bool = True,
     force_reextract: bool = False,
     blood_decals: bool = True,
     eye_blink: Optional[bool] = None,
     eye_blink_strength: Optional[float] = None,
+    mouth_open_strength: Optional[float] = None,
+    physbones_marshmallow: Optional[bool] = None,
+    import_face_blendshapes: Optional[bool] = None,
+    import_body_blendshapes: Optional[bool] = None,
+    blendshapes_source: Optional[str] = None,
+    physbones_source: Optional[str] = None,
+    blendshapes_cfg: Optional[str] = None,
+    face_anim: Optional[str] = None,
+    physbones_cfg: Optional[str] = None,
+    vtoon_char_id: Optional[int] = None,
+    atlas_size: int = 2048,
+    normal_size: int = 0,
+    secondary_atlas_size: int = 0,
+    texture_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Full end-to-end NPC build pipeline: Ingest -> Atlas -> Blender -> Apply -> Deploy."""
+    """Full end-to-end build pipeline: Ingest -> Atlas -> Blender -> Apply -> Deploy."""
     import npc_registry_helper
     import vrc2gtav_paths as project_paths
 
@@ -890,9 +1098,24 @@ def build_and_deploy_npc_from_source(
         blood_decals=blood_decals,
         eye_blink=eye_blink,
         eye_blink_strength=eye_blink_strength,
+        mouth_open_strength=mouth_open_strength,
+        physbones_marshmallow=physbones_marshmallow,
+        import_face_blendshapes=import_face_blendshapes,
+        import_body_blendshapes=import_body_blendshapes,
+        blendshapes_source=blendshapes_source,
+        physbones_source=physbones_source,
+        blendshapes_cfg=blendshapes_cfg,
+        face_anim=face_anim,
+        physbones_cfg=physbones_cfg,
+        vtoon_char_id=vtoon_char_id,
+        atlas_size=atlas_size,
+        normal_size=normal_size,
+        secondary_atlas_size=secondary_atlas_size,
+        texture_overrides=texture_overrides,
+        deploy=deploy,
     )
 
-    print("[4/4] Running Blender 4.0.2 + Sollumz NPC build...", flush=True)
+    print("[4/4] Running Blender 4.0.2 + Sollumz build...", flush=True)
     blender_bin = str(project_paths.to_host_path(project_paths.get_blender_exe()) or "")
     use_win_paths = blender_bin.lower().endswith(".exe") and os.name != "nt"
     manifest_arg = (
@@ -916,11 +1139,14 @@ def build_and_deploy_npc_from_source(
         apply_summary = npc_registry_helper.apply_npc_slot_replacement(
             manifest["ped_name"], npc_entry
         )
-        deployed_rpfs = npc_registry_helper.repack_and_deploy_npc_entry(
-            manifest["ped_name"], npc_entry
-        )
         manifest["apply_summary"] = apply_summary
-        manifest["deployed_rpfs"] = [str(pth) for pth in deployed_rpfs]
+        if repack_archives:
+            deployed_rpfs = npc_registry_helper.repack_and_deploy_npc_entry(
+                manifest["ped_name"],
+                npc_entry,
+                secondary_atlas_size=secondary_atlas_size,
+            )
+            manifest["deployed_rpfs"] = [str(pth) for pth in deployed_rpfs]
     return manifest
 
 
@@ -937,29 +1163,165 @@ def _cli_main() -> int:
         return 0
 
     parser = argparse.ArgumentParser(
-        description="Build and deploy any Unity/VRChat avatar onto any GTA V NPC."
+        description="Build and deploy any Unity/VRChat avatar onto GTA V protagonist/NPC slots."
     )
-    parser.add_argument("--source", required=True, help="Path to .zip/.unitypackage/.prefab/.unity or folder")
-    parser.add_argument("--target-ped", required=True, help="GTA V NPC model name (e.g. ig_lamardavis, a_f_y_beach_01)")
+    parser.add_argument("--source", default="", help="Path to .zip/.unitypackage/.prefab/.unity or folder")
+    parser.add_argument(
+        "--target-ped",
+        default="",
+        help="GTA V ped/protagonist name or comma-separated list (e.g. player_zero,player_one or ig_lamardavis)",
+    )
     parser.add_argument("--avatar-name", default="")
     parser.add_argument("--no-deploy", action="store_true")
+    parser.add_argument("--no-repack", action="store_true")
     parser.add_argument("--force-reextract", action="store_true")
     parser.add_argument("--blood-decals", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--eye-blink", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--eye-blink-strength", type=float, default=None)
+    parser.add_argument("--mouth-open-strength", type=float, default=None)
+    parser.add_argument("--physbones-marshmallow", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--import-face-blendshapes", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--import-body-blendshapes", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--blendshapes-source", choices=["auto", "unity", "cfg"], default=None)
+    parser.add_argument("--physbones-source", choices=["auto", "unity", "cfg"], default=None)
+    parser.add_argument("--blendshapes-cfg", default=None)
+    parser.add_argument("--face-anim", default=None)
+    parser.add_argument("--physbones-cfg", default=None)
+    parser.add_argument("--vtoon-char-id", type=int, default=None)
+    parser.add_argument("--atlas-size", type=int, default=2048)
+    parser.add_argument("--normal-size", type=int, default=0)
+    parser.add_argument("--secondary-atlas-size", type=int, default=0)
+    parser.add_argument("--texture-overrides", default=None)
+    parser.add_argument("--texture-override", action="append", default=[])
+    parser.add_argument("--slots-json", default=None, help="JSON file/payload defining multiple ped->avatar slots")
+    parser.add_argument("--restore-peds", default=None, help="Comma-separated peds to restore to vanilla")
+    parser.add_argument("--restore-all", action="store_true", help="Restore all modded peds to Rockstar vanilla")
+    parser.add_argument("--lang", choices=["auto", "en", "ja", "pt"], default="auto")
     parsed = parser.parse_args()
 
-    result = build_and_deploy_npc_from_source(
-        source_spec=parsed.source,
-        target_ped=parsed.target_ped,
-        avatar_name=parsed.avatar_name,
-        deploy=not parsed.no_deploy,
-        force_reextract=parsed.force_reextract,
-        blood_decals=parsed.blood_decals,
-        eye_blink=parsed.eye_blink,
-        eye_blink_strength=parsed.eye_blink_strength,
-    )
-    print(f"[DONE] NPC build complete: {result['ped_name']} -> {result['avatar_name']}", flush=True)
+    resolved_tex_overrides: Dict[str, str] = {}
+    if parsed.texture_overrides:
+        import vrc2gtav_paths as project_paths_cfg
+
+        json_path = project_paths_cfg.to_host_path(parsed.texture_overrides)
+        if json_path.is_file():
+            loaded_ovr = json.loads(json_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_ovr, dict):
+                resolved_tex_overrides.update(
+                    {
+                        str(mat_key): str(tex_val)
+                        for mat_key, tex_val in loaded_ovr.items()
+                        if str(tex_val).strip()
+                    }
+                )
+    for pair_raw in parsed.texture_override or ():
+        if "=" in str(pair_raw):
+            mat_key_tok, tex_val_tok = str(pair_raw).split("=", 1)
+            if mat_key_tok.strip() and tex_val_tok.strip():
+                resolved_tex_overrides[mat_key_tok.strip()] = tex_val_tok.strip()
+
+    try:
+        import vrc2gtav_i18n as project_i18n
+        project_i18n.set_active_language(parsed.lang)
+    except Exception:
+        pass
+
+    should_deploy = not parsed.no_deploy
+    should_repack = should_deploy and (not parsed.no_repack)
+
+    if parsed.restore_all or parsed.restore_peds:
+        import restore_vanilla_helper
+
+        restore_targets = [
+            tok.strip() for tok in str(parsed.restore_peds or "").split(",") if tok.strip()
+        ]
+        restore_vanilla_helper.restore_peds_to_vanilla(
+            restore_targets,
+            restore_all=bool(parsed.restore_all),
+            deploy=should_deploy,
+        )
+        return 0
+
+    if parsed.slots_json:
+        import restore_vanilla_helper
+        import vrc2gtav_paths as project_paths_cfg
+
+        slots_path = project_paths_cfg.to_host_path(parsed.slots_json)
+        shared_defaults = {
+            "source": parsed.source,
+            "force_reextract": parsed.force_reextract,
+            "blood_decals": parsed.blood_decals,
+            "eye_blink": parsed.eye_blink,
+            "eye_blink_strength": parsed.eye_blink_strength,
+            "mouth_open_strength": parsed.mouth_open_strength,
+            "physbones_marshmallow": parsed.physbones_marshmallow,
+            "import_face_blendshapes": parsed.import_face_blendshapes,
+            "import_body_blendshapes": parsed.import_body_blendshapes,
+            "blendshapes_source": parsed.blendshapes_source,
+            "physbones_source": parsed.physbones_source,
+            "blendshapes_cfg": parsed.blendshapes_cfg,
+            "face_anim": parsed.face_anim,
+            "physbones_cfg": parsed.physbones_cfg,
+            "atlas_size": parsed.atlas_size,
+            "normal_size": parsed.normal_size,
+            "secondary_atlas_size": parsed.secondary_atlas_size,
+            "texture_overrides": resolved_tex_overrides or None,
+        }
+        restore_vanilla_helper.run_multi_slot_builds(
+            slots_path if slots_path.is_file() else parsed.slots_json,
+            shared_defaults=shared_defaults,
+            deploy=should_deploy,
+            repack_and_deploy=should_repack,
+            secondary_atlas_size=parsed.secondary_atlas_size,
+        )
+        return 0
+
+    if not str(parsed.source or "").strip():
+        raise ValueError("--source is required unless --slots-json, --restore-peds, or --restore-all is used")
+
+    ped_targets = [
+        tok.strip() for tok in str(parsed.target_ped or "").split(",") if tok.strip()
+    ]
+    if not ped_targets:
+        raise ValueError("--target-ped must specify at least one target")
+
+    built_peds: List[str] = []
+    for idx_ped, ped_slot in enumerate(ped_targets):
+        result = build_and_deploy_npc_from_source(
+            source_spec=parsed.source,
+            target_ped=ped_slot,
+            avatar_name=parsed.avatar_name,
+            deploy=should_deploy,
+            repack_archives=False,
+            force_reextract=(parsed.force_reextract if idx_ped == 0 else False),
+            blood_decals=parsed.blood_decals,
+            eye_blink=parsed.eye_blink,
+            eye_blink_strength=parsed.eye_blink_strength,
+            mouth_open_strength=parsed.mouth_open_strength,
+            physbones_marshmallow=parsed.physbones_marshmallow,
+            import_face_blendshapes=parsed.import_face_blendshapes,
+            import_body_blendshapes=parsed.import_body_blendshapes,
+            blendshapes_source=parsed.blendshapes_source,
+            physbones_source=parsed.physbones_source,
+            blendshapes_cfg=parsed.blendshapes_cfg,
+            face_anim=parsed.face_anim,
+            physbones_cfg=parsed.physbones_cfg,
+            vtoon_char_id=parsed.vtoon_char_id if len(ped_targets) == 1 else None,
+            atlas_size=parsed.atlas_size,
+            normal_size=parsed.normal_size,
+            secondary_atlas_size=parsed.secondary_atlas_size,
+            texture_overrides=resolved_tex_overrides or None,
+        )
+        built_peds.append(str(result["ped_name"]))
+        print(f"[DONE] Build complete: {result['ped_name']} -> {result['avatar_name']}", flush=True)
+
+    if should_repack and built_peds:
+        import restore_vanilla_helper
+
+        restore_vanilla_helper.repack_and_deploy_built_peds(
+            built_peds,
+            secondary_atlas_size=parsed.secondary_atlas_size,
+        )
     return 0
 
 

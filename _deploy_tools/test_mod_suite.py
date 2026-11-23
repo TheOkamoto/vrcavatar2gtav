@@ -50,6 +50,9 @@ try:
         test_first_run_modular_avatar_and_error_handling,
         test_universal_npc_pipeline,
     )
+    from test_suite_restore_multislot_layer import (
+        test_restore_and_multislot_regressions,
+    )
 except ImportError:
     from common_tools import vrc2gtav_i18n as i18n
     from common_tools import vrc2gtav_paths as project_paths
@@ -77,6 +80,9 @@ except ImportError:
         test_first_run_modular_avatar_and_error_handling,
         test_universal_npc_pipeline,
     )
+    from common_tools.test_suite_restore_multislot_layer import (
+        test_restore_and_multislot_regressions,
+    )
 
 
 def run_source_only_validation_suite() -> bool:
@@ -94,6 +100,7 @@ def run_source_only_validation_suite() -> bool:
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
         (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
+        ("Restore-Vanilla & Multi-Slot Suite", test_restore_and_multislot_regressions()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -120,6 +127,7 @@ def run_full_validation_suite() -> bool:
         (i18n.translate("tests.suite_custom_hair"), test_custom_unity_hair_support()),
         (i18n.translate("tests.suite_first_run_ma"), test_first_run_modular_avatar_and_error_handling()),
         (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
+        ("Restore-Vanilla & Multi-Slot Suite", test_restore_and_multislot_regressions()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

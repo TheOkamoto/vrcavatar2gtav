@@ -326,6 +326,10 @@ def build_trevor_miltina_avatar(cli_args=None):
         trevor_cfg,
         avatar_id="miltina_maid",
     )
+    mouth_open_strength = eye_blink_helper.resolve_mouth_open_strength(
+        getattr(cli_args, "mouth_open_strength", None),
+        trevor_cfg,
+    )
     blink_anchors = (
         eye_blink_helper.capture_eyelid_blink_anchors(ped_armature)
         if eye_blink_mode != "off"
@@ -499,30 +503,29 @@ def build_trevor_miltina_avatar(cli_args=None):
     face_obj = bpy.data.objects.get("Body")
     blink_rig_data = {"enabled": False, "reason": "no_body_shape_keys"}
     if face_obj and face_obj.data.shape_keys:
-        shape_key_aa = face_obj.data.shape_keys.key_blocks.get("vrc.v_aa")
-        basis_key = face_obj.data.shape_keys.key_blocks.get("Basis")
-
         face_obj.vertex_groups.clear()
         jaw_vgroup = face_obj.vertex_groups.new(name="FACIAL_jaw")
         head_vgroup = face_obj.vertex_groups.new(name="SKEL_Head")
 
-        mapped_count = 0
-        jaw_excl_indices = set()
-        if shape_key_aa and basis_key:
-            for vertex_item in face_obj.data.vertices:
-                delta_z_offset = (
-                    shape_key_aa.data[vertex_item.index].co.z
-                    - basis_key.data[vertex_item.index].co.z
-                )
-                if delta_z_offset < -0.0005:
-                    jaw_weight = min(0.35, max(0.0, (abs(delta_z_offset) / 0.0075) * 0.35))
-                    jaw_vgroup.add([vertex_item.index], jaw_weight, "REPLACE")
-                    head_vgroup.add([vertex_item.index], max(0.0, 1.0 - jaw_weight), "REPLACE")
-                    jaw_excl_indices.add(vertex_item.index)
-                    mapped_count += 1
-                else:
-                    head_vgroup.add([vertex_item.index], 1.0, "REPLACE")
-            print(i18n.translate("trevor.build.jaw_mapped", count=mapped_count))
+        jaw_excl_map = eye_blink_helper.extract_facial_jaw_weights(
+            face_obj, delta_z_threshold=-0.0005
+        )
+        jaw_weights_map = (
+            jaw_excl_map
+            if abs(mouth_open_strength - eye_blink_helper.DEFAULT_MOUTH_OPEN_STRENGTH) < 1e-6
+            else eye_blink_helper.extract_facial_jaw_weights(
+                face_obj, mouth_open_strength=mouth_open_strength, delta_z_threshold=-0.0005
+            )
+        )
+        for vertex_item in face_obj.data.vertices:
+            jaw_weight = jaw_weights_map.get(vertex_item.index)
+            if jaw_weight is not None:
+                jaw_vgroup.add([vertex_item.index], jaw_weight, "REPLACE")
+                head_vgroup.add([vertex_item.index], max(0.0, 1.0 - jaw_weight), "REPLACE")
+            else:
+                head_vgroup.add([vertex_item.index], 1.0, "REPLACE")
+        if jaw_weights_map:
+            print(i18n.translate("trevor.build.jaw_mapped", count=len(jaw_weights_map)))
 
         print(i18n.translate("trevor.build.baking_face"))
         blendshape_helper.apply_blendshapes_to_blender_object(
@@ -538,7 +541,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             face_obj,
             eye_blink_mode=eye_blink_mode,
             shape_weights=resolved_mesh_weights.get("Body", {}),
-            exclude_vert_indices=jaw_excl_indices,
+            exclude_vert_indices=jaw_excl_map.keys(),
         )
         if blink_rig_data.get("enabled"):
             eye_blink_helper.apply_eyelid_blink_weights_to_mesh(
@@ -1511,6 +1514,12 @@ def main() -> int:
         type=float,
         default=None,
         help=i18n.translate("eye_blink.strength_cli_opt"),
+    )
+    parser.add_argument(
+        "--mouth-open-strength",
+        type=float,
+        default=None,
+        help=i18n.translate("eye_blink.mouth_open_cli_opt"),
     )
     parser.add_argument(
         "--unity-scene",

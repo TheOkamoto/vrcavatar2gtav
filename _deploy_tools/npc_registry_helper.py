@@ -10,12 +10,15 @@ repack deployment for vrc2gtav.
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -23,11 +26,13 @@ if str(_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(_MODULE_DIR))
 
 try:
+    import error_handler_helper as err_helper
     import ped_damage_helper
     import repack_and_deploy_everything as repack_helper
     import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 except ImportError:
+    from common_tools import error_handler_helper as err_helper
     from common_tools import ped_damage_helper
     from common_tools import repack_and_deploy_everything as repack_helper
     from common_tools import vrc2gtav_i18n as project_i18n
@@ -75,11 +80,55 @@ def _rage_keys_dir(staging_dir: Path) -> Optional[Path]:
     return None
 
 
+def ensure_rage_cli_ready(*, download_if_missing: bool = True) -> str:
+    """Resolve `rage` / `rage.exe`, auto-downloading into `<workspace_root>/tools` if missing."""
+    rage_cmd = project_paths.get_rage_cli().strip()
+    if rage_cmd:
+        if rage_cmd.startswith("wsl "):
+            return rage_cmd
+        if shutil.which(rage_cmd) or Path(rage_cmd).is_file():
+            return rage_cmd
+
+    proj_root = project_paths.get_project_root()
+    exe_name = "rage.exe" if os.name == "nt" else "rage"
+    work_tools_exe = err_helper.resolve_workspace_root(proj_root) / "tools" / exe_name
+    if work_tools_exe.is_file():
+        return str(work_tools_exe)
+
+    if download_if_missing:
+        try:
+            import avatar_archive_helper
+
+            downloaded_exe = avatar_archive_helper.download_and_install_rage(proj_root)
+            if downloaded_exe.is_file():
+                try:
+                    import setup_first_run
+
+                    cfg_file = project_paths.find_project_config_file()
+                    setup_first_run.update_cfg_values_in_place(
+                        cfg_file,
+                        {"executables": {"rage": str(downloaded_exe).replace("\\", "/")}},
+                    )
+                    project_paths.load_project_config(force_reload=True)
+                except Exception:
+                    pass
+                return str(downloaded_exe)
+        except Exception as dl_exc:
+            raise FileNotFoundError(
+                f"RAGE CLI ({exe_name}) missing and auto-download failed: {dl_exc}"
+            ) from dl_exc
+
+    raise FileNotFoundError(
+        f"RAGE CLI ({exe_name}) not found. Click 'Download Required Tools & Setup' in Unity."
+    )
+
+
 def build_safe_rage_cmd(*rage_args: str, gtav_root: Optional[Path] = None, staging_dir: Optional[Path] = None) -> List[str]:
     """
     Build a RAGE CLI invocation preferring pre-extracted `--keys` so running
     GTA V executables are never touched during active sessions.
     """
+    rage_executable = ensure_rage_cli_ready(download_if_missing=True)
     resolved_staging = staging_dir or project_paths.get_staging_dir()
     keys_dir = _rage_keys_dir(resolved_staging)
     global_flags: List[str] = []
@@ -89,7 +138,10 @@ def build_safe_rage_cmd(*rage_args: str, gtav_root: Optional[Path] = None, stagi
         resolved_gtav = gtav_root or project_paths.get_gtav_root_dir()
         if (resolved_gtav / "GTA5.exe").is_file():
             global_flags = ["--exe", str(resolved_gtav)]
-    return project_paths.build_rage_command(*global_flags, *rage_args)
+    if rage_executable.startswith("wsl "):
+        wsl_binary = rage_executable[4:].strip()
+        return ["wsl", wsl_binary, *global_flags, *rage_args]
+    return [rage_executable, *global_flags, *rage_args]
 
 
 def normalize_ped_model_name(raw_ped_name: str) -> str:
@@ -115,11 +167,18 @@ def _split_archive_hit(hit_line: str) -> Tuple[str, str, str]:
     """
     Split a `rage search` line such as:
       `/mnt/d/GTAV/x64e.rpf:x64e.rpf/models/cdimages/streamedpeds_ig.rpf/ig_lamardavis.yft`
+      `D:\\GTAV\\x64v.rpf:x64v.rpf/models/cdimages/streamedpeds_players.rpf/player_zero/player_zero.yft`
     into `(outer_archive_path, inner_rpf_rel, member_rel)`.
     """
-    if ":" not in hit_line:
-        return hit_line, "", ""
-    outer_path, internal_tail = hit_line.split(":", 1)
+    normalized = str(hit_line or "").replace("\\", "/")
+    colon_start = (
+        2 if len(normalized) >= 2 and normalized[1] == ":" and normalized[0].isalpha() else 0
+    )
+    colon_idx = normalized.find(":", colon_start)
+    if colon_idx < 0:
+        return normalized, "", ""
+    outer_path = normalized[:colon_idx]
+    internal_tail = normalized[colon_idx + 1 :]
     parts = [seg for seg in internal_tail.split("/") if seg]
     if parts and parts[0].lower().endswith(".rpf"):
         parts = parts[1:]
@@ -468,7 +527,7 @@ def get_npc_staging_paths(
             }
         )
 
-    char_work_dir = resolved_root / "npcs" / norm_ped
+    char_work_dir = err_helper.resolve_workspace_root(resolved_root) / "npcs" / norm_ped
     return {
         "ped_name": norm_ped,
         "ped_format": location["ped_format"],
@@ -533,12 +592,14 @@ def ensure_npc_staging_extracted(
     outer_dir = Path(paths_info["outer_extracted_dir"])
     inner_rpf = Path(paths_info["inner_rpf_file"])
     vanilla_outer = Path(paths_info["vanilla_outer_rpf"])
+    outer_game = Path(paths_info["outer_game_rpf"])
+    outer_seed = outer_game if outer_game.is_file() else vanilla_outer
 
-    outer_fresh = False
+    outer_fresh_vanilla = False
     if force_reextract or not inner_rpf.is_file():
-        print(f"[NPC Staging] Extracting {vanilla_outer.name} -> {outer_dir} ...", flush=True)
-        _extract_archive(vanilla_outer, outer_dir, gtav_root=resolved_gtav, staging_dir=resolved_staging)
-        outer_fresh = True
+        print(f"[NPC Staging] Extracting {outer_seed.name} ({outer_seed}) -> {outer_dir} ...", flush=True)
+        _extract_archive(outer_seed, outer_dir, gtav_root=resolved_gtav, staging_dir=resolved_staging)
+        outer_fresh_vanilla = (outer_seed == vanilla_outer)
 
     inner_dir = Path(paths_info["inner_extracted_dir"])
     has_ped_data = (
@@ -553,12 +614,25 @@ def ensure_npc_staging_extracted(
         print(f"[NPC Staging] Extracting {inner_rpf.name} -> {inner_dir} ...", flush=True)
         _extract_archive(inner_rpf, inner_dir, gtav_root=resolved_gtav, staging_dir=resolved_staging)
 
-    # Save immutable vanilla skeleton .yft + vanilla ped files before any overwrite
+    # Save immutable vanilla skeleton .yft + vanilla ped files strictly from Rockstar vanilla RPFs
     backup_yft = Path(paths_info["vanilla_skeleton_backup"])
-    if force_reextract or not backup_yft.is_file():
-        if outer_fresh and (inner_dir / f"{ped_name}.yft").is_file():
-            backup_yft.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(inner_dir / f"{ped_name}.yft", backup_yft)
+    npc_backup_dir = Path(paths_info["npc_backup_dir"])
+    need_yft_backup = force_reextract or not backup_yft.is_file()
+    need_dir_backup = (not npc_backup_dir.is_dir()) or (not any(npc_backup_dir.iterdir()))
+    if need_yft_backup or need_dir_backup:
+        if outer_fresh_vanilla and (inner_dir / f"{ped_name}.yft").is_file():
+            if need_yft_backup:
+                backup_yft.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(inner_dir / f"{ped_name}.yft", backup_yft)
+            if need_dir_backup:
+                npc_backup_dir.mkdir(parents=True, exist_ok=True)
+                for ext_name in (".yft", ".ymt", ".ydd", ".ytd", ".yld"):
+                    cand_file = inner_dir / f"{ped_name}{ext_name}"
+                    if cand_file.is_file():
+                        shutil.copy2(cand_file, npc_backup_dir / cand_file.name)
+                ped_subdir = inner_dir / ped_name
+                if ped_subdir.is_dir():
+                    shutil.copytree(ped_subdir, npc_backup_dir / ped_name, dirs_exist_ok=True)
         else:
             tmp_dir = resolved_staging / "_tmp_npc_vanilla_skel"
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -572,14 +646,24 @@ def ensure_npc_staging_extracted(
                 )
                 tmp_inner = tmp_dir / paths_info["inner_rpf_rel"]
                 if tmp_inner.is_file():
-                    backup_yft.parent.mkdir(parents=True, exist_ok=True)
-                    _extract_archive(
-                        tmp_inner,
-                        backup_yft.parent,
-                        gtav_root=resolved_gtav,
-                        staging_dir=resolved_staging,
-                        patterns=[f"{ped_name}.yft"],
-                    )
+                    if need_yft_backup:
+                        backup_yft.parent.mkdir(parents=True, exist_ok=True)
+                        _extract_archive(
+                            tmp_inner,
+                            backup_yft.parent,
+                            gtav_root=resolved_gtav,
+                            staging_dir=resolved_staging,
+                            patterns=[f"{ped_name}.yft"],
+                        )
+                    if need_dir_backup:
+                        npc_backup_dir.mkdir(parents=True, exist_ok=True)
+                        _extract_archive(
+                            tmp_inner,
+                            npc_backup_dir,
+                            gtav_root=resolved_gtav,
+                            staging_dir=resolved_staging,
+                            patterns=[f"{ped_name}.*", f"{ped_name}/*"],
+                        )
             finally:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -588,29 +672,20 @@ def ensure_npc_staging_extracted(
     if not blender_yft.is_file() and backup_yft.is_file():
         shutil.copy2(backup_yft, blender_yft)
 
-    # Save vanilla ped files backup for recovery / inspection
-    npc_backup_dir = Path(paths_info["npc_backup_dir"])
-    if not npc_backup_dir.is_dir() or not any(npc_backup_dir.iterdir()):
-        npc_backup_dir.mkdir(parents=True, exist_ok=True)
-        for ext_name in (".yft", ".ymt", ".ydd", ".ytd", ".yld"):
-            cand_file = inner_dir / f"{ped_name}{ext_name}"
-            if cand_file.is_file():
-                shutil.copy2(cand_file, npc_backup_dir / cand_file.name)
-        ped_subdir = inner_dir / ped_name
-        if ped_subdir.is_dir():
-            shutil.copytree(ped_subdir, npc_backup_dir / ped_name, dirs_exist_ok=True)
-
     for ovr_spec in paths_info["dlc_override_specs"]:
         dlc_dir = Path(ovr_spec["dlc_extracted_dir"])
         ovr_inner = Path(ovr_spec["inner_rpf_file"])
         models_dir = Path(ovr_spec["models_extracted_dir"])
+        game_dlc = Path(ovr_spec["game_dlc_rpf"])
+        vanilla_dlc = Path(ovr_spec["vanilla_dlc_rpf"])
+        dlc_seed = game_dlc if game_dlc.is_file() else vanilla_dlc
         if force_reextract or not ovr_inner.is_file():
             print(
-                f"[NPC Staging] Extracting DLC {ovr_spec['dlc_name']} -> {dlc_dir} ...",
+                f"[NPC Staging] Extracting DLC {ovr_spec['dlc_name']} ({dlc_seed}) -> {dlc_dir} ...",
                 flush=True,
             )
             _extract_archive(
-                Path(ovr_spec["vanilla_dlc_rpf"]),
+                dlc_seed,
                 dlc_dir,
                 gtav_root=resolved_gtav,
                 staging_dir=resolved_staging,
@@ -799,6 +874,7 @@ def repack_and_deploy_npc_entry(
     npc_entry: Dict[str, Any],
     *,
     skip_shared_archives: bool = False,
+    secondary_atlas_size: int = 0,
 ) -> List[Path]:
     """
     Repack the RPF hierarchy touched by `ped_name` (`OPEN`, `f_size=0`), verify
@@ -816,7 +892,49 @@ def repack_and_deploy_npc_entry(
     outer_src_dir = Path(info["outer_extracted_dir"])
     outer_game_rpf = Path(info["outer_game_rpf"])
 
-    if not skip_shared_archives or str(info["outer_rpf_name"]).lower() != "x64v.rpf":
+    outer_name_low = str(info["outer_rpf_name"]).lower()
+    prop_targets = location.get("prop_targets") or ()
+    has_streamed_props = any(
+        "streamedpedprops" in str(prop_tgt.get("inner_rpf_rel", "")).lower()
+        for prop_tgt in prop_targets
+    )
+    if has_streamed_props and not skip_shared_archives:
+        repack_paths_map = repack_helper._load_repack_paths()
+        streamed_props_rpf = Path(repack_paths_map["streamedpedprops_rpf_file"])
+        streamed_props_dir = Path(repack_paths_map["streamedpedprops_extracted_dir"])
+        x64v_modded_rpf = Path(repack_paths_map["x64v_modded_rpf_file"])
+        x64v_extracted_dir = Path(repack_paths_map["x64v_extracted_dir"])
+        x64v_game_rpf = Path(repack_paths_map["target_x64v_rpf_path"])
+        if streamed_props_dir.is_dir() and x64v_extracted_dir.is_dir():
+            repack_helper.repack_single_rpf_stage(
+                streamed_props_rpf,
+                streamed_props_dir,
+                "NPC props streamedpedprops.rpf",
+                rage_cli,
+            )
+            if outer_name_low != "x64v.rpf":
+                repack_helper.repack_single_rpf_stage(
+                    x64v_modded_rpf,
+                    x64v_extracted_dir,
+                    "NPC props outer x64v.rpf",
+                    rage_cli,
+                )
+                repack_helper.copy_file_with_progress(
+                    x64v_modded_rpf, x64v_game_rpf, "Deploy x64v.rpf"
+                )
+                deployed_paths.append(x64v_game_rpf)
+
+    if not skip_shared_archives or outer_name_low != "x64v.rpf":
+        if (
+            outer_name_low == "x64v.rpf"
+            and inner_rpf_dest.name.lower() == "streamedpeds_players.rpf"
+        ):
+            repack_helper.ensure_x64v_streamed_budget(
+                outer_src_dir,
+                inner_src_dir,
+                rage_cli,
+                secondary_atlas_size=secondary_atlas_size,
+            )
         repack_helper.repack_single_rpf_stage(
             inner_rpf_dest,
             inner_src_dir,
@@ -860,45 +978,16 @@ def repack_and_deploy_npc_entry(
         )
         deployed_paths.append(dlc_game_rpf)
 
-    prop_targets = location.get("prop_targets") or ()
-    has_streamed_props = any(
-        "streamedpedprops" in str(prop_tgt.get("inner_rpf_rel", "")).lower()
-        for prop_tgt in prop_targets
-    )
-    if has_streamed_props and not skip_shared_archives:
-        repack_paths_map = repack_helper._load_repack_paths()
-        streamed_props_rpf = Path(repack_paths_map["streamedpedprops_rpf_file"])
-        streamed_props_dir = Path(repack_paths_map["streamedpedprops_extracted_dir"])
-        x64v_modded_rpf = Path(repack_paths_map["x64v_modded_rpf_file"])
-        x64v_extracted_dir = Path(repack_paths_map["x64v_extracted_dir"])
-        x64v_game_rpf = Path(repack_paths_map["target_x64v_rpf_path"])
-        if streamed_props_dir.is_dir() and x64v_extracted_dir.is_dir():
-            repack_helper.repack_single_rpf_stage(
-                streamed_props_rpf,
-                streamed_props_dir,
-                "NPC props streamedpedprops.rpf",
-                rage_cli,
-            )
-            repack_helper.repack_single_rpf_stage(
-                x64v_modded_rpf,
-                x64v_extracted_dir,
-                "NPC props outer x64v.rpf",
-                rage_cli,
-            )
-            repack_helper.copy_file_with_progress(
-                x64v_modded_rpf, x64v_game_rpf, "Deploy x64v.rpf"
-            )
-            deployed_paths.append(x64v_game_rpf)
-
     for verify_rpf in deployed_paths:
         limit_rep = ped_damage_helper.inspect_rpf7_archive_limits(verify_rpf)
         if not limit_rep["ok"]:
             raise RuntimeError(f"RPF7 limit check failed for {verify_rpf}: {limit_rep}")
         proc_list = subprocess.run(
-            [rage_cli, "list", "-d", str(verify_rpf)],
+            build_safe_rage_cmd("list", "-d", str(verify_rpf)),
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120.0,
             check=True,
         )
@@ -912,4 +1001,215 @@ def repack_and_deploy_npc_entry(
                 f"Compressed TOC entries remain in {verify_rpf}: {bad_comp[:5]}"
             )
 
+    repack_helper.sync_gtav_runtime_mods(
+        project_paths.get_project_root(),
+        project_paths.get_gtav_root_dir(),
+        overwrite_inis=False,
+    )
+    gtav_dir = project_paths.get_gtav_root_dir()
+    if gtav_dir.is_dir() and not (gtav_dir / "dinput8.dll").is_file():
+        try:
+            repack_helper.download_and_install_asi_loader(gtav_dir)
+        except Exception as dl_exc:
+            print(f"[WARN] Could not auto-download dinput8.dll ASI loader: {dl_exc}", flush=True)
+    repack_helper.print_gtav_runtime_status(gtav_dir)
     return deployed_paths
+
+
+def build_rpf7_open_streaming(
+    output_rpf_path: Path,
+    source_directory_path: Path,
+    task_description: str = "",
+) -> Path:
+    """
+    Build an uncompressed `OPEN` RPF7 archive via 4 MB streaming I/O (`< 16 MB` RAM),
+    avoiding `rage.exe create` multi-gigabyte in-memory Vec OOM on large archives.
+    """
+    start_ts = time.time()
+    root_dir = Path(source_directory_path)
+    out_path = Path(output_rpf_path)
+    if not root_dir.is_dir():
+        raise FileNotFoundError(f"RPF7 source directory not found: {root_dir}")
+
+    nodes: List[Dict[str, Any]] = [
+        {
+            "path": root_dir,
+            "name": "",
+            "is_dir": True,
+            "start": 0,
+            "count": 0,
+            "size": 0,
+            "is_rsc7": False,
+            "d2_val": 0,
+            "d3_val": 0,
+            "sector": 0,
+            "name_off": 0,
+        }
+    ]
+    dir_queue: deque[int] = deque([0])
+    while dir_queue:
+        cur_idx = dir_queue.popleft()
+        cur_path = nodes[cur_idx]["path"]
+        children = sorted(
+            cur_path.iterdir(),
+            key=lambda item_p: (item_p.name.encode("ascii", "replace").lower(), item_p.name),
+        )
+        nodes[cur_idx]["start"] = len(nodes)
+        nodes[cur_idx]["count"] = len(children)
+        for child_path in children:
+            child_idx = len(nodes)
+            child_is_dir = child_path.is_dir()
+            nodes.append(
+                {
+                    "path": child_path,
+                    "name": child_path.name,
+                    "is_dir": child_is_dir,
+                    "start": 0,
+                    "count": 0,
+                    "size": 0,
+                    "is_rsc7": False,
+                    "d2_val": 0,
+                    "d3_val": 0,
+                    "sector": 0,
+                    "name_off": 0,
+                }
+            )
+            if child_is_dir:
+                dir_queue.append(child_idx)
+
+    names_buf = bytearray()
+    name_offsets: Dict[bytes, int] = {}
+    for node_rec in nodes:
+        name_bytes = str(node_rec["name"]).encode("ascii", "replace")
+        if name_bytes not in name_offsets:
+            name_offsets[name_bytes] = len(names_buf)
+            names_buf.extend(name_bytes)
+            names_buf.append(0)
+        node_rec["name_off"] = name_offsets[name_bytes]
+    while len(names_buf) % 16 != 0:
+        names_buf.append(0)
+    if len(names_buf) > 0xFFFF:
+        raise ValueError(f"RPF7 names table exceeds 64 KiB limit ({len(names_buf)} bytes)")
+
+    names_len = len(names_buf)
+    toc_len = len(nodes) * 16
+    data_start = ((16 + toc_len + names_len + 511) // 512) * 512
+    cur_sector = data_start // 512
+    total_payload_bytes = 0
+
+    for node_rec in nodes:
+        if node_rec["is_dir"]:
+            continue
+        file_size = node_rec["path"].stat().st_size
+        node_rec["size"] = file_size
+        node_rec["sector"] = cur_sector
+        with open(node_rec["path"], "rb") as probe_handle:
+            head16 = probe_handle.read(16)
+        if len(head16) >= 16 and head16[:4] == b"RSC7":
+            if file_size > ped_damage_helper.RPF7_MAX_RESOURCE_BYTES:
+                raise ValueError(
+                    f"RSC7 resource exceeds 16 MiB limit ({file_size} bytes): {node_rec['path']}"
+                )
+            _, _, sys_flags, gfx_flags = struct.unpack("<IIII", head16)
+            node_rec["is_rsc7"] = True
+            node_rec["d2_val"] = sys_flags
+            node_rec["d3_val"] = gfx_flags
+        else:
+            if file_size > 0xFFFFFFFF:
+                raise ValueError(f"Binary entry exceeds 4 GiB: {node_rec['path']}")
+            node_rec["d2_val"] = file_size & 0xFFFFFFFF
+            node_rec["d3_val"] = 0
+        sectors_needed = max(1, (file_size + 511) // 512) if file_size > 0 else 0
+        if (cur_sector + sectors_needed) >= 0x7FFFFF:
+            raise ValueError(
+                f"RPF7 sector offset limit (4.00 GiB) exceeded while packing {node_rec['name']}"
+            )
+        cur_sector += sectors_needed
+        total_payload_bytes += file_size
+
+    label = task_description or out_path.name
+    total_mb = total_payload_bytes / (1024.0 * 1024.0)
+    print(f"--- {label} (streaming RPF7 OPEN, {total_mb:.1f} MB input) ---", flush=True)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_name(f".{out_path.name}.tmp.{os.getpid()}")
+    chunk_bytes = 4 * 1024 * 1024
+    written_payload = 0
+    next_pct_step = 25.0
+    last_tty_print = 0.0
+    open_magic_u32 = struct.unpack("<I", b"OPEN")[0]
+
+    try:
+        with open(tmp_path, "wb") as out_handle:
+            out_handle.write(struct.pack("<IIII", 0x52504637, len(nodes), names_len, open_magic_u32))
+            for node_rec in nodes:
+                if node_rec["is_dir"]:
+                    d0_val = node_rec["name_off"] & 0xFFFF
+                    d1_val = 0x7FFFFF00
+                    d2_val = node_rec["start"]
+                    d3_val = node_rec["count"]
+                elif node_rec["is_rsc7"]:
+                    f_size = node_rec["size"]
+                    d0_val = (node_rec["name_off"] & 0xFFFF) | ((f_size & 0xFFFF) << 16)
+                    d1_val = (
+                        0x80000000
+                        | ((node_rec["sector"] & 0x7FFFFF) << 8)
+                        | ((f_size >> 16) & 0xFF)
+                    )
+                    d2_val = node_rec["d2_val"]
+                    d3_val = node_rec["d3_val"]
+                else:
+                    d0_val = node_rec["name_off"] & 0xFFFF
+                    d1_val = (node_rec["sector"] & 0x7FFFFF) << 8
+                    d2_val = node_rec["d2_val"]
+                    d3_val = 0
+                out_handle.write(struct.pack("<IIII", d0_val, d1_val, d2_val, d3_val))
+            out_handle.write(names_buf)
+            hdr_pad = data_start - out_handle.tell()
+            if hdr_pad > 0:
+                out_handle.write(b"\x00" * hdr_pad)
+
+            for node_rec in nodes:
+                if node_rec["is_dir"] or node_rec["size"] == 0:
+                    continue
+                with open(node_rec["path"], "rb") as src_handle:
+                    while True:
+                        block = src_handle.read(chunk_bytes)
+                        if not block:
+                            break
+                        out_handle.write(block)
+                        written_payload += len(block)
+                        if total_payload_bytes > 0:
+                            pct = min(99.9, (written_payload / total_payload_bytes) * 100.0)
+                            now_ts = time.time()
+                            if (sys.stdout.isatty() and now_ts - last_tty_print >= 0.25) or (
+                                not sys.stdout.isatty() and pct >= next_pct_step
+                            ):
+                                bar_str = repack_helper.format_progress_bar(pct / 100.0)
+                                repack_helper.write_progress_line(
+                                    f"  {bar_str} {pct:5.1f}% ({written_payload / (1024.0 * 1024.0):.1f}/{total_mb:.1f} MB | {now_ts - start_ts:.1f}s)",
+                                    is_final=False,
+                                )
+                                last_tty_print = now_ts
+                                while next_pct_step <= pct:
+                                    next_pct_step += 25.0
+                rem_bytes = node_rec["size"] % 512
+                if rem_bytes:
+                    out_handle.write(b"\x00" * (512 - rem_bytes))
+
+        os.replace(tmp_path, out_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+    elapsed_sec = max(0.001, time.time() - start_ts)
+    final_mb = out_path.stat().st_size / (1024.0 * 1024.0)
+    repack_helper.write_progress_line(
+        f"  {repack_helper.format_progress_bar(1.0)} 100.0% ({final_mb:.1f} MB) Finished in {elapsed_sec:.1f}s",
+        is_final=True,
+    )
+    repack_helper.patch_rpf7_open_and_zero_compressed(out_path)
+    return out_path
