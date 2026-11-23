@@ -384,12 +384,18 @@ namespace Vrc2Gtav.Editor
             if (!showAdvanced) return;
             EditorGUI.indentLevel++;
             EditorGUIUtility.labelWidth = baseLabelW + 18f;
-            opts.AvatarNameOverride = EditorGUILayout.TextField(T("opt.avatar_override"), opts.AvatarNameOverride);
+            if (!opts.PerProtagonistSlots)
+            {
+                opts.AvatarNameOverride = EditorGUILayout.TextField(T("opt.avatar_override"), opts.AvatarNameOverride);
+            }
             opts.BlendshapesSourceIdx = EditorGUILayout.Popup(T("opt.bs_source"), opts.BlendshapesSourceIdx, Vrc2GtavCommandBuilder.SourceModes);
             opts.BlendshapesCfg = Vrc2GtavLogConsoleWidget.DrawPathBrowseRow("Blendshapes .cfg", opts.BlendshapesCfg, string.Empty, true, false, "cfg", T("tools.browse"), paths.RepoRoot);
-            opts.FaceBlendshapesAnim = Vrc2GtavLogConsoleWidget.DrawAnimClipOverrideRow(
-                T("opt.face_anim"), opts.FaceBlendshapesAnim, ref faceAnimClip,
-                T("tools.browse"), Vrc2GtavConfigDiscovery.GetDefaultUnityAssetsPath(), wrapMiniLabelStyle);
+            if (!opts.PerProtagonistSlots)
+            {
+                opts.FaceBlendshapesAnim = Vrc2GtavLogConsoleWidget.DrawAnimClipOverrideRow(
+                    T("opt.face_anim"), opts.FaceBlendshapesAnim, ref faceAnimClip,
+                    T("tools.browse"), Vrc2GtavConfigDiscovery.GetDefaultUnityAssetsPath(), wrapMiniLabelStyle);
+            }
             opts.PhysbonesSourceIdx = EditorGUILayout.Popup(T("opt.pb_source"), opts.PhysbonesSourceIdx, Vrc2GtavCommandBuilder.SourceModes);
             opts.PhysbonesCfg = Vrc2GtavLogConsoleWidget.DrawPathBrowseRow("PhysBones .cfg", opts.PhysbonesCfg, string.Empty, true, false, "cfg", T("tools.browse"), paths.RepoRoot);
             opts.PhysbonesMarshmallow = EditorGUILayout.ToggleLeft(T("opt.marshmallow"), opts.PhysbonesMarshmallow);

@@ -77,6 +77,12 @@ namespace Vrc2Gtav.Editor
                 "2. Destinos no GTA V (Protagonistas)",
                 "2. GTA V 出力先（主人公スロット）"
             },
+            ["sec.targets_multi"] = new[]
+            {
+                "1 & 2. GTA V Protagonists & Avatar Slots",
+                "1 e 2. Protagonistas do GTA V e Slots de Avatar",
+                "1 & 2. GTA V 主人公とアバター割り当て"
+            },
             ["target.michael"] = new[]
             {
                 "Michael De Santa (player_zero)",
@@ -305,7 +311,7 @@ namespace Vrc2Gtav.Editor
                 "キャラ別アバタースロット（チェックした主人公ごとに1スロット追加）"
             },
             ["slot.header"] = new[] { "Avatar Slot for {0}", "Slot de Avatar: {0}", "{0} 用アバタースロット" },
-            ["slot.copy_main"] = new[] { "Use Main Source", "Copiar Principal", "メインからコピー" },
+            ["slot.copy_prev"] = new[] { "Copy Above Slot", "Copiar Slot Acima", "上のスロットをコピー" },
             ["slot.missing_err"] = new[]
             {
                 "Assign an avatar for every checked protagonist slot.",

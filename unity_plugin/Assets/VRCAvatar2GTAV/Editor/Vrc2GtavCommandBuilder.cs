@@ -15,6 +15,7 @@ namespace Vrc2Gtav.Editor
         public bool TargetTrevor;
         public bool PerProtagonistSlots;
         public bool UserDisabledPerSlotForMulti;
+        public bool UserEnabledPerSlotForSingle;
 
         public bool DeployToMods = true;
         public bool ImportFaceBlendshapes = true;

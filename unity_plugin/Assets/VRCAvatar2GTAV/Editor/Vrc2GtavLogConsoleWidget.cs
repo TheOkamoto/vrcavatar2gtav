@@ -6,9 +6,18 @@ namespace Vrc2Gtav.Editor
 {
     internal sealed class Vrc2GtavLogConsoleWidget
     {
+        private const string LogHeightPrefKey = "Vrc2Gtav.Exporter.LogPanelHeight";
+        private const float DefaultLogHeight = 185f;
+        private const float MinLogHeight = 72f;
+
         private Vector2 _logScroll;
         private bool _autoScrollLogs = true;
         private int _lastSeenLogCount;
+        private float _logHeight = DefaultLogHeight;
+        private bool _logHeightLoaded;
+        private bool _isResizingLogs;
+        private float _dragStartScreenY;
+        private float _dragStartHeight;
         private GUIStyle _logAreaStyle;
 
         public void Draw(
@@ -18,8 +27,15 @@ namespace Vrc2Gtav.Editor
             string statusMessage,
             MessageType statusSeverity,
             bool canStart,
-            System.Action onStartClicked)
+            System.Action onStartClicked,
+            float windowHeight = 680f,
+            System.Action onRepaintRequested = null)
         {
+            if (!_logHeightLoaded)
+            {
+                _logHeight = Mathf.Max(MinLogHeight, EditorPrefs.GetFloat(LogHeightPrefKey, DefaultLogHeight));
+                _logHeightLoaded = true;
+            }
             if (_logAreaStyle == null)
             {
                 _logAreaStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = false, fontSize = 11 };
@@ -59,6 +75,9 @@ namespace Vrc2Gtav.Editor
                 EditorGUILayout.HelpBox(statusMessage, statusSeverity);
             }
 
+            float maxLogHeight = Mathf.Max(MinLogHeight + 48f, windowHeight - 250f);
+            _logHeight = DrawLogResizeSplitter(maxLogHeight, onRepaintRequested);
+
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(Vrc2GtavLocalization.Get(langMode, "sec.logs"), EditorStyles.boldLabel, GUILayout.MinWidth(90f));
             GUILayout.FlexibleSpace();
@@ -90,9 +109,54 @@ namespace Vrc2Gtav.Editor
                 _logScroll.y = float.MaxValue;
             }
 
-            _logScroll = EditorGUILayout.BeginScrollView(_logScroll, GUILayout.Height(185f));
+            float clampedHeight = Mathf.Clamp(_logHeight, MinLogHeight, maxLogHeight);
+            _logScroll = EditorGUILayout.BeginScrollView(_logScroll, GUILayout.Height(clampedHeight));
             EditorGUILayout.TextArea(runner.GetCombinedLogs(), _logAreaStyle, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
+        }
+
+        private float DrawLogResizeSplitter(float maxLogHeight, System.Action onRepaintRequested)
+        {
+            Rect splitRect = GUILayoutUtility.GetRect(0f, 8f, GUILayout.ExpandWidth(true));
+            EditorGUIUtility.AddCursorRect(splitRect, MouseCursor.ResizeVertical);
+            Event evt = Event.current;
+            bool isHover = splitRect.Contains(evt.mousePosition);
+            if (evt.type == EventType.Repaint)
+            {
+                Color lineCol = _isResizingLogs
+                    ? new Color(0.35f, 0.68f, 1.0f, 0.95f)
+                    : (isHover ? new Color(0.75f, 0.78f, 0.84f, 0.70f) : new Color(0.55f, 0.57f, 0.62f, 0.35f));
+                Rect lineRect = new Rect(splitRect.x, splitRect.y + 3f, splitRect.width, 2f);
+                EditorGUI.DrawRect(lineRect, lineCol);
+                float gripW = Mathf.Min(44f, splitRect.width * 0.25f);
+                Rect gripRect = new Rect(splitRect.center.x - gripW * 0.5f, splitRect.y + 2f, gripW, 4f);
+                EditorGUI.DrawRect(gripRect, lineCol);
+            }
+
+            if (evt.type == EventType.MouseDown && evt.button == 0 && isHover)
+            {
+                _isResizingLogs = true;
+                _dragStartScreenY = GUIUtility.GUIToScreenPoint(evt.mousePosition).y;
+                _dragStartHeight = _logHeight;
+                evt.Use();
+            }
+            else if (_isResizingLogs && evt.type == EventType.MouseDrag)
+            {
+                float curScreenY = GUIUtility.GUIToScreenPoint(evt.mousePosition).y;
+                float deltaUp = _dragStartScreenY - curScreenY;
+                _logHeight = Mathf.Clamp(_dragStartHeight + deltaUp, MinLogHeight, maxLogHeight);
+                onRepaintRequested?.Invoke();
+                evt.Use();
+            }
+            else if (_isResizingLogs && (evt.type == EventType.MouseUp || evt.rawType == EventType.MouseUp))
+            {
+                _isResizingLogs = false;
+                EditorPrefs.SetFloat(LogHeightPrefKey, _logHeight);
+                onRepaintRequested?.Invoke();
+                if (evt.type == EventType.MouseUp) evt.Use();
+            }
+
+            return _logHeight;
         }
 
         public static void DrawStatusBadge(string text, bool ok)
@@ -272,6 +336,140 @@ namespace Vrc2Gtav.Editor
             GUI.contentColor = ok ? new Color(0.45f, 0.92f, 0.55f) : new Color(1.0f, 0.55f, 0.40f);
             GUILayout.Label((ok ? "[OK] " : "[!] ") + label, EditorStyles.miniLabel);
             GUI.contentColor = prev;
+        }
+    }
+
+    internal static class Vrc2GtavMultiSlotSync
+    {
+        public static ResolvedAvatarSource CloneSource(ResolvedAvatarSource src)
+        {
+            if (src == null) return new ResolvedAvatarSource();
+            return new ResolvedAvatarSource
+            {
+                Kind = src.Kind,
+                AvatarName = src.AvatarName,
+                SourcePath = src.SourcePath,
+                SceneAssetPath = src.SceneAssetPath,
+                IsSceneDirty = src.IsSceneDirty,
+                ObjectRef = src.ObjectRef
+            };
+        }
+
+        public static void SyncFirstSlotFromMain(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            Vrc2GtavExportOptions opts,
+            ResolvedAvatarSource mainAvatar,
+            AnimationClip mainFaceAnimClip = null)
+        {
+            var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
+            if (enabled.Count == 0 || mainAvatar == null || !mainAvatar.IsValid) return;
+            ProtagonistAvatarSlot first = enabled[0];
+            if (!first.Avatar.IsValid) first.Avatar = CloneSource(mainAvatar);
+            if (string.IsNullOrWhiteSpace(first.AvatarNameOverride) && !string.IsNullOrWhiteSpace(opts?.AvatarNameOverride))
+                first.AvatarNameOverride = opts.AvatarNameOverride;
+            if (string.IsNullOrWhiteSpace(first.FaceBlendshapesAnim) && !string.IsNullOrWhiteSpace(opts?.FaceBlendshapesAnim))
+            {
+                first.FaceBlendshapesAnim = opts.FaceBlendshapesAnim;
+                first.FaceAnimClip = mainFaceAnimClip;
+            }
+        }
+
+        public static ResolvedAvatarSource SyncMainFromFirstValidSlot(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            Vrc2GtavExportOptions opts,
+            ResolvedAvatarSource mainAvatar,
+            ref AnimationClip mainFaceAnimClip)
+        {
+            var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
+            for (int i = 0; i < enabled.Count; i++)
+            {
+                if (!enabled[i].Avatar.IsValid) continue;
+                ProtagonistAvatarSlot slot = enabled[i];
+                if (opts != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(slot.AvatarNameOverride)) opts.AvatarNameOverride = slot.AvatarNameOverride;
+                    if (!string.IsNullOrWhiteSpace(slot.FaceBlendshapesAnim))
+                    {
+                        opts.FaceBlendshapesAnim = slot.FaceBlendshapesAnim;
+                        mainFaceAnimClip = slot.FaceAnimClip;
+                    }
+                }
+                return CloneSource(slot.Avatar);
+            }
+            return mainAvatar ?? new ResolvedAvatarSource();
+        }
+
+        public static ResolvedAvatarSource ResolvePreviewAvatar(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            Vrc2GtavExportOptions opts,
+            ResolvedAvatarSource mainAvatar)
+        {
+            if (opts == null || !opts.PerProtagonistSlots) return mainAvatar;
+            var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
+            for (int i = 0; i < enabled.Count; i++)
+                if (enabled[i].Avatar.IsValid) return enabled[i].Avatar;
+            return mainAvatar;
+        }
+
+        public static bool HasAnySceneSlot(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            Vrc2GtavExportOptions opts)
+        {
+            var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
+            for (int i = 0; i < enabled.Count; i++)
+                if (enabled[i].Avatar.Kind == AvatarSourceKind.SceneGameObject) return true;
+            return false;
+        }
+
+        public static void SyncTargetModeAuto(
+            int targetCount,
+            Vrc2GtavExportOptions opts,
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            ref ResolvedAvatarSource mainAvatar,
+            ref AnimationClip mainFaceAnimClip)
+        {
+            if (opts == null) return;
+            if (targetCount <= 1)
+            {
+                opts.UserDisabledPerSlotForMulti = false;
+                if (opts.PerProtagonistSlots && !opts.UserEnabledPerSlotForSingle)
+                {
+                    mainAvatar = SyncMainFromFirstValidSlot(slots, opts, mainAvatar, ref mainFaceAnimClip);
+                    opts.PerProtagonistSlots = false;
+                }
+            }
+            else if (!opts.PerProtagonistSlots && !opts.UserDisabledPerSlotForMulti)
+            {
+                SyncFirstSlotFromMain(slots, opts, mainAvatar, mainFaceAnimClip);
+                opts.PerProtagonistSlots = true;
+            }
+        }
+
+        public static void ApplyPerSlotToggle(
+            bool nextPerSlot,
+            int targetCount,
+            Vrc2GtavExportOptions opts,
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+            ref ResolvedAvatarSource mainAvatar,
+            ref AnimationClip mainFaceAnimClip)
+        {
+            if (opts == null) return;
+            if (nextPerSlot != opts.PerProtagonistSlots)
+            {
+                if (nextPerSlot)
+                {
+                    SyncFirstSlotFromMain(slots, opts, mainAvatar, mainFaceAnimClip);
+                    opts.UserDisabledPerSlotForMulti = false;
+                    if (targetCount <= 1) opts.UserEnabledPerSlotForSingle = true;
+                }
+                else
+                {
+                    mainAvatar = SyncMainFromFirstValidSlot(slots, opts, mainAvatar, ref mainFaceAnimClip);
+                    opts.UserEnabledPerSlotForSingle = false;
+                    if (targetCount >= 2) opts.UserDisabledPerSlotForMulti = true;
+                }
+            }
+            opts.PerProtagonistSlots = nextPerSlot;
         }
     }
 }

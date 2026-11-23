@@ -328,35 +328,6 @@ namespace Vrc2Gtav.Editor
             return true;
         }
 
-        public static void SyncFirstSlotFromMain(
-            IList<ProtagonistAvatarSlot> slots,
-            Vrc2GtavExportOptions opts,
-            ResolvedAvatarSource mainAvatar,
-            AnimationClip mainFaceAnimClip = null)
-        {
-            List<ProtagonistAvatarSlot> enabled = GetEnabledSlots(slots, opts);
-            if (enabled.Count == 0 || mainAvatar == null || !mainAvatar.IsValid) return;
-            ProtagonistAvatarSlot first = enabled[0];
-            if (!first.Avatar.IsValid)
-            {
-                first.Avatar = new ResolvedAvatarSource
-                {
-                    Kind = mainAvatar.Kind,
-                    AvatarName = mainAvatar.AvatarName,
-                    SourcePath = mainAvatar.SourcePath,
-                    SceneAssetPath = mainAvatar.SceneAssetPath,
-                    IsSceneDirty = mainAvatar.IsSceneDirty,
-                    ObjectRef = mainAvatar.ObjectRef
-                };
-            }
-            if (string.IsNullOrWhiteSpace(first.AvatarNameOverride) && !string.IsNullOrWhiteSpace(opts?.AvatarNameOverride))
-                first.AvatarNameOverride = opts.AvatarNameOverride;
-            if (string.IsNullOrWhiteSpace(first.FaceBlendshapesAnim) && !string.IsNullOrWhiteSpace(opts?.FaceBlendshapesAnim))
-            {
-                first.FaceBlendshapesAnim = opts.FaceBlendshapesAnim;
-                first.FaceAnimClip = mainFaceAnimClip;
-            }
-        }
 
         public static void SaveAllDirtyAvatarScenes(
             ResolvedAvatarSource mainAvatar,
@@ -396,7 +367,7 @@ namespace Vrc2Gtav.Editor
             string emptyLabel = Vrc2GtavLocalization.Get(langMode, "avatar.none");
             string pickScene = Vrc2GtavLocalization.Get(langMode, "avatar.scene_picker");
             string pickFile = Vrc2GtavLocalization.Get(langMode, "avatar.browse_file");
-            string copyMain = Vrc2GtavLocalization.Get(langMode, "slot.copy_main");
+            string copyPrev = Vrc2GtavLocalization.Get(langMode, "slot.copy_prev");
 
             for (int i = 0; i < enabled.Count; i++)
             {
@@ -407,17 +378,10 @@ namespace Vrc2Gtav.Editor
                 EditorGUILayout.LabelField(
                     Vrc2GtavLocalization.Format(langMode, "slot.header", pedTitle),
                     EditorStyles.boldLabel);
-                if (mainAvatar != null && mainAvatar.IsValid && GUILayout.Button(copyMain, EditorStyles.miniButton, GUILayout.Width(115f)))
+                ResolvedAvatarSource prevAv = i > 0 ? enabled[i - 1].Avatar : null;
+                if (prevAv != null && prevAv.IsValid && GUILayout.Button(copyPrev, EditorStyles.miniButton, GUILayout.Width(118f)))
                 {
-                    slot.Avatar = new ResolvedAvatarSource
-                    {
-                        Kind = mainAvatar.Kind,
-                        AvatarName = mainAvatar.AvatarName,
-                        SourcePath = mainAvatar.SourcePath,
-                        SceneAssetPath = mainAvatar.SceneAssetPath,
-                        IsSceneDirty = mainAvatar.IsSceneDirty,
-                        ObjectRef = mainAvatar.ObjectRef
-                    };
+                    slot.Avatar = Vrc2GtavMultiSlotSync.CloneSource(prevAv);
                 }
                 EditorGUILayout.EndHorizontal();
 
