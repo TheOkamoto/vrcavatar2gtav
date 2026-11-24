@@ -25,6 +25,21 @@ struct ScopedDrawHookBypass {
 /** Self-contained 2x1 GPU readback pass decoding VToon character ID watermarks. */
 class VToonWatermarkProber {
 public:
+    static bool IsSrgbFormat(DXGI_FORMAT fmt) {
+        switch (fmt) {
+            case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            case DXGI_FORMAT_BC1_UNORM_SRGB:
+            case DXGI_FORMAT_BC2_UNORM_SRGB:
+            case DXGI_FORMAT_BC3_UNORM_SRGB:
+            case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            case DXGI_FORMAT_BC7_UNORM_SRGB:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     bool Initialize(
         ID3D11Device* d3dDevice,
         ID3D11BlendState* opaqueBlendState,
@@ -52,9 +67,24 @@ public:
             "  int pxY = max((int)heightVal - 2, 0);"
             "  return srcTex.Load(int3(pxX, pxY, 0));"
             "}";
+        const char* probePsSrgbHlsl =
+            "Texture2D srcTex : register(t0);"
+            "float LinearToSrgbChan(float linVal) {"
+            "  float clamped = saturate(linVal);"
+            "  return (clamped <= 0.0031308) ? (12.92 * clamped) : (1.055 * pow(max(clamped, 1e-7), 1.0 / 2.4) - 0.055);"
+            "}"
+            "float4 MainProbeSrgbPS(float4 svPos : SV_Position) : SV_Target0 {"
+            "  uint widthVal = 0; uint heightVal = 0;"
+            "  srcTex.GetDimensions(widthVal, heightVal);"
+            "  int pxX = ((int)svPos.x == 0) ? max((int)widthVal - 6, 0) : max((int)widthVal - 2, 0);"
+            "  int pxY = max((int)heightVal - 2, 0);"
+            "  float4 linPx = srcTex.Load(int3(pxX, pxY, 0));"
+            "  return float4(LinearToSrgbChan(linPx.r), LinearToSrgbChan(linPx.g), LinearToSrgbChan(linPx.b), linPx.a);"
+            "}";
 
         ID3DBlob* vsBlob = nullptr;
         ID3DBlob* psBlob = nullptr;
+        ID3DBlob* psSrgbBlob = nullptr;
         ID3DBlob* errBlob = nullptr;
         if (SUCCEEDED(D3DCompile(probeVsHlsl, std::strlen(probeVsHlsl), "probe_vs", nullptr, nullptr,
                                  "MainProbeVS", "vs_4_0", 0, 0, &vsBlob, &errBlob)) && vsBlob) {
@@ -67,6 +97,13 @@ public:
                                  "MainProbePS", "ps_4_0", 0, 0, &psBlob, &errBlob)) && psBlob) {
             d3dDevice->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &psProbe_);
             psBlob->Release();
+        }
+        if (errBlob) { errBlob->Release(); errBlob = nullptr; }
+
+        if (SUCCEEDED(D3DCompile(probePsSrgbHlsl, std::strlen(probePsSrgbHlsl), "probe_ps_srgb", nullptr, nullptr,
+                                 "MainProbeSrgbPS", "ps_4_0", 0, 0, &psSrgbBlob, &errBlob)) && psSrgbBlob) {
+            d3dDevice->CreatePixelShader(psSrgbBlob->GetBufferPointer(), psSrgbBlob->GetBufferSize(), nullptr, &psProbeSrgb_);
+            psSrgbBlob->Release();
         }
         if (errBlob) errBlob->Release();
 
@@ -88,7 +125,7 @@ public:
         probeRtDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         d3dDevice->CreateTexture2D(&probeRtDesc, nullptr, &probeStagingTex_);
 
-        ready_ = (vsProbe_ && psProbe_ && probeRtv_ && probeStagingTex_);
+        ready_ = (vsProbe_ && psProbe_ && psProbeSrgb_ && probeRtv_ && probeStagingTex_);
         return ready_;
     }
 
@@ -112,6 +149,10 @@ public:
         if (desc.Width < 256 || desc.Height < 256 || desc.SampleDesc.Count > 1) {
             return 0;
         }
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        diffSrv->GetDesc(&srvDesc);
+        const bool isSrgb = IsSrgbFormat(srvDesc.Format) || IsSrgbFormat(desc.Format);
+        ID3D11PixelShader* activePsProbe = isSrgb ? psProbeSrgb_ : psProbe_;
 
         // Capture OM/RS/IA/Shader stages around the 2x1 watermark readback draw
         ID3D11RenderTargetView* savedRtvs[8] = {};
@@ -171,7 +212,7 @@ public:
         d3dCtx->GSSetShader(nullptr, nullptr, 0);
         d3dCtx->HSSetShader(nullptr, nullptr, 0);
         d3dCtx->DSSetShader(nullptr, nullptr, 0);
-        d3dCtx->PSSetShader(psProbe_, nullptr, 0);
+        d3dCtx->PSSetShader(activePsProbe, nullptr, 0);
         d3dCtx->PSSetShaderResources(0, 1, &diffSrv);
         {
             ScopedDrawHookBypass bypassGuard;
@@ -237,6 +278,7 @@ private:
     bool ready_ = false;
     ID3D11VertexShader* vsProbe_ = nullptr;
     ID3D11PixelShader* psProbe_ = nullptr;
+    ID3D11PixelShader* psProbeSrgb_ = nullptr;
     ID3D11Texture2D* probeRtTex_ = nullptr;
     ID3D11RenderTargetView* probeRtv_ = nullptr;
     ID3D11Texture2D* probeStagingTex_ = nullptr;

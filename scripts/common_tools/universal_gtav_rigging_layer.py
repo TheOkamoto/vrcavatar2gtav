@@ -923,3 +923,277 @@ def _inspect_componentped_drawable_keys(
         primary_keys = [all_keys[0]]
     return all_keys, primary_keys
 
+
+_NON_TORSO_CLOTH_TOKENS = (
+    "body",
+    "skin",
+    "face",
+    "head",
+    "eye",
+    "lash",
+    "brow",
+    "mouth",
+    "teeth",
+    "tongue",
+    "hair",
+    "ear",
+    "tail",
+    "nail",
+    "shoe",
+    "slipper",
+    "boot",
+    "heel",
+    "sock",
+    "stocking",
+    "pin",
+    "halo",
+    "glass",
+    "beret",
+    "hat",
+    "cap",
+    "ribbon",
+    "choker",
+    "collar_acc",
+    "bag",
+    "pouch",
+    "watch",
+    "clock",
+    "ring",
+    "earring",
+    "pocky",
+    "button",
+)
+
+_TORSO_ARM_BONES = (
+    "SKEL_L_UpperArm",
+    "SKEL_R_UpperArm",
+    "RB_L_ArmRoll",
+    "RB_R_ArmRoll",
+)
+
+
+def _is_torso_skin_mesh(mesh_obj) -> bool:
+    if getattr(mesh_obj, "type", None) != "MESH" or not getattr(mesh_obj, "data", None):
+        return False
+    low_name = mesh_obj.name.lower()
+    mat_names = " ".join(
+        getattr(slot.material, "name", "").lower()
+        for slot in getattr(mesh_obj, "material_slots", ())
+        if getattr(slot, "material", None)
+    )
+    combined = f"{low_name} {mat_names}"
+    has_body = ("body" in combined) or ("skin" in combined)
+    if not has_body:
+        return False
+    blocked = (
+        "sweat",
+        "shirt",
+        "corset",
+        "dress",
+        "skirt",
+        "short",
+        "pant",
+        "shoe",
+        "hair",
+        "face",
+        "head",
+        "eye",
+        "lash",
+        "nail",
+        "ear",
+        "tail",
+    )
+    return not any(tok in low_name for tok in blocked)
+
+
+def _is_torso_clothing_mesh(mesh_obj) -> bool:
+    if getattr(mesh_obj, "type", None) != "MESH" or not getattr(mesh_obj, "data", None):
+        return False
+    if _is_torso_skin_mesh(mesh_obj):
+        return False
+    low_name = mesh_obj.name.lower()
+    return not any(tok in low_name for tok in _NON_TORSO_CLOTH_TOKENS)
+
+
+def _extract_vertex_weight_map(mesh_obj, vertex_obj) -> dict:
+    group_lookup = {grp.index: grp.name for grp in mesh_obj.vertex_groups}
+    weight_map = {}
+    for gpe in vertex_obj.groups:
+        grp_name = group_lookup.get(gpe.group)
+        if grp_name and gpe.weight > 1e-5:
+            weight_map[grp_name] = float(gpe.weight)
+    return weight_map
+
+
+def _assign_vertex_weight_map(mesh_obj, vertex_index: int, weight_map: dict) -> None:
+    filtered = {bn_name: val for bn_name, val in weight_map.items() if val > 1e-5}
+    total = sum(filtered.values())
+    if total <= 1e-6:
+        return
+    inv_total = 1.0 / total
+    existing = {grp.name: grp for grp in mesh_obj.vertex_groups}
+    for bn_name, raw_val in filtered.items():
+        grp = existing.get(bn_name)
+        if grp is None:
+            grp = mesh_obj.vertex_groups.new(name=bn_name)
+            existing[bn_name] = grp
+        grp.add([vertex_index], raw_val * inv_total, "REPLACE")
+    for bn_name, grp in existing.items():
+        if bn_name not in filtered:
+            try:
+                grp.remove([vertex_index])
+            except RuntimeError:
+                pass
+
+
+def _resolve_torso_bounds(armature_obj) -> tuple:
+    medial_limit = 0.140
+    chest_z_min = 0.250
+    chest_z_max = 0.620
+    if not armature_obj or getattr(armature_obj, "type", None) != "ARMATURE":
+        return medial_limit, chest_z_min, chest_z_max
+    bones = armature_obj.data.bones
+    mtx = armature_obj.matrix_world
+    arm_offsets = []
+    for arm_name in ("SKEL_L_UpperArm", "SKEL_R_UpperArm"):
+        arm_bone = bones.get(arm_name)
+        if arm_bone is not None:
+            arm_offsets.append(abs((mtx @ arm_bone.head_local).x))
+    if arm_offsets:
+        mean_arm_x = sum(arm_offsets) / float(len(arm_offsets))
+        medial_limit = max(0.118, min(0.155, mean_arm_x))
+    spine_bone = bones.get("SKEL_Spine2") or bones.get("SKEL_Spine1")
+    if spine_bone is not None:
+        chest_z_min = float((mtx @ spine_bone.head_local).z) - 0.060
+    neck_bone = bones.get("SKEL_Neck_1") or bones.get("SKEL_Head")
+    if neck_bone is not None:
+        chest_z_max = float((mtx @ neck_bone.head_local).z) + 0.025
+    return medial_limit, chest_z_min, max(chest_z_min + 0.150, chest_z_max)
+
+
+def conform_tight_torso_clothing_weights(
+    mesh_objects,
+    armature_obj=None,
+    max_skin_dist: float = 0.018,
+    min_clearance: float = 0.006,
+) -> int:
+    """Conform upper-chest fitted clothing away from arm bones and lift over skin."""
+    if not mesh_objects:
+        return 0
+    from mathutils import kdtree
+
+    medial_limit, chest_z_min, chest_z_max = _resolve_torso_bounds(armature_obj)
+    skin_samples = []
+    for skin_obj in mesh_objects:
+        if not _is_torso_skin_mesh(skin_obj):
+            continue
+        mtx = skin_obj.matrix_world
+        nrm_mtx = mtx.to_3x3()
+        for vtx in skin_obj.data.vertices:
+            w_pos = mtx @ vtx.co
+            if (
+                abs(w_pos.x) > medial_limit + 0.035
+                or w_pos.y >= -0.015
+                or not (chest_z_min - 0.04 <= w_pos.z <= chest_z_max + 0.03)
+            ):
+                continue
+            w_nrm = (nrm_mtx @ vtx.normal).normalized()
+            if w_nrm.y >= 0.25:
+                continue
+            skin_w = _extract_vertex_weight_map(skin_obj, vtx)
+            if not skin_w:
+                continue
+            skin_samples.append((w_pos, w_nrm, skin_w))
+
+    if not skin_samples:
+        return 0
+
+    kd_tree = kdtree.KDTree(len(skin_samples))
+    for smp_idx, (w_pos, _w_nrm, _skin_w) in enumerate(skin_samples):
+        kd_tree.insert(w_pos, smp_idx)
+    kd_tree.balance()
+
+    adjusted_count = 0
+    fade_span = 0.025
+    for cloth_obj in mesh_objects:
+        if not _is_torso_clothing_mesh(cloth_obj):
+            continue
+        cloth_data = cloth_obj.data
+        mtx = cloth_obj.matrix_world
+        inv_mtx = mtx.inverted()
+        nrm_mtx = mtx.to_3x3()
+        cloth_changed = False
+
+        for vtx in cloth_data.vertices:
+            w_pos = mtx @ vtx.co
+            if (
+                abs(w_pos.x) >= medial_limit
+                or w_pos.y >= -0.010
+                or not (chest_z_min <= w_pos.z <= chest_z_max)
+            ):
+                continue
+            w_nrm = (nrm_mtx @ vtx.normal).normalized()
+            if w_nrm.y >= -0.15:
+                continue
+
+            best_sample = None
+            best_dist = max_skin_dist
+            for _cand_pos, cand_idx, cand_dist in kd_tree.find_n(w_pos, 4):
+                if cand_dist > best_dist:
+                    continue
+                s_pos, s_nrm, s_weights = skin_samples[cand_idx]
+                if s_nrm.dot(w_nrm) <= 0.20:
+                    continue
+                if abs(w_pos.x) < abs(s_pos.x) - 0.025:
+                    continue
+                best_sample = (s_pos, s_nrm, s_weights)
+                best_dist = cand_dist
+                break
+
+            if best_sample is None:
+                continue
+
+            s_pos, s_nrm, s_weights = best_sample
+            edge_fade = min(1.0, max(0.0, (medial_limit - abs(w_pos.x)) / fade_span))
+            if edge_fade <= 1e-4:
+                continue
+
+            cur_weights = _extract_vertex_weight_map(cloth_obj, vtx)
+            arm_weight = sum(cur_weights.get(bn_name, 0.0) for bn_name in _TORSO_ARM_BONES)
+            prox_blend = min(1.0, 0.70 + 0.30 * (1.0 - (best_dist / max_skin_dist)))
+            blend_amt = edge_fade * prox_blend
+
+            did_modify_vtx = False
+            if arm_weight > 0.03:
+                new_weights = {}
+                for bn_name, w_val in cur_weights.items():
+                    if bn_name in _TORSO_ARM_BONES:
+                        rem_val = w_val * (1.0 - blend_amt)
+                        if rem_val > 1e-5:
+                            new_weights[bn_name] = rem_val
+                    else:
+                        new_weights[bn_name] = (w_val * (1.0 - blend_amt))
+                for bn_name, s_val in s_weights.items():
+                    if bn_name in _TORSO_ARM_BONES:
+                        continue
+                    new_weights[bn_name] = new_weights.get(bn_name, 0.0) + (s_val * blend_amt)
+                _assign_vertex_weight_map(cloth_obj, vtx.index, new_weights)
+                did_modify_vtx = True
+
+            signed_clear = (w_pos - s_pos).dot(s_nrm)
+            req_clear = min_clearance * edge_fade
+            if -0.004 <= signed_clear < req_clear:
+                lift_vec = s_nrm * (req_clear - signed_clear)
+                vtx.co = inv_mtx @ (w_pos + lift_vec)
+                did_modify_vtx = True
+                cloth_changed = True
+
+            if did_modify_vtx:
+                adjusted_count += 1
+
+        if cloth_changed:
+            cloth_data.update()
+
+    return adjusted_count
+
+

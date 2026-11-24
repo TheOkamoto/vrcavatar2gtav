@@ -1003,7 +1003,7 @@ def enforce_ped_rpf7_poly_budget(
     effective_max_polys = (
         int(max_total_polys)
         if max_total_polys is not None
-        else (250000 if enable_blood_decals else 380000)
+        else (310000 if enable_blood_decals else 420000)
     )
     valid_meshes = [
         obj
@@ -1012,6 +1012,11 @@ def enforce_ped_rpf7_poly_budget(
         and getattr(obj, "type", None) == "MESH"
         and getattr(obj, "data", None) is not None
     ]
+    try:
+        import blender_hair_helper as _hair_helper
+    except ImportError:
+        from common_tools import blender_hair_helper as _hair_helper
+
     def _effective_poly_weight(obj_item: Any) -> int:
         return 2 if bool(obj_item.get("vtoon_double_sided", False)) else 1
 
@@ -1038,8 +1043,7 @@ def enforce_ped_rpf7_poly_budget(
             return (orig_tris, orig_tris)
         bpy_module.context.view_layer.objects.active = obj_item
         decimate_mod = obj_item.modifiers.new("Rpf7PolyBudgetDecimate", "DECIMATE")
-        decimate_mod.decimate_type = "COLLAPSE"
-        decimate_mod.ratio = float(ratio_val)
+        _hair_helper.configure_rpf7_decimate_modifier(decimate_mod, obj_item, ratio_val)
         bpy_module.ops.object.modifier_apply(modifier=decimate_mod.name)
         if any(len(poly.vertices) != 3 for poly in obj_item.data.polygons):
             import bmesh
@@ -1097,7 +1101,7 @@ def enforce_ped_rpf7_poly_budget(
                 and len(obj_item.data.polygons) >= 15000
                 and any(keyword in obj_item.name.lower() for keyword in hair_cloth_keywords)
             ],
-            key=lambda obj_item: len(obj_item.data.polygons),
+            key=_hair_helper.rpf7_budget_priority_key,
             reverse=True,
         )
         _run_pass(pass2_candidates, hair_cloth_ratio, "dense hair/outfit")
@@ -1110,10 +1114,11 @@ def enforce_ped_rpf7_poly_budget(
                 obj_item
                 for obj_item in valid_meshes
                 if not _is_protected_face_or_body(obj_item)
+                and not _hair_helper.is_protected_small_torso_cloth(obj_item, obj_item.name in trimmed_names)
                 and not getattr(obj_item.data, "shape_keys", None)
                 and len(obj_item.data.polygons) >= 6000
             ],
-            key=lambda obj_item: len(obj_item.data.polygons),
+            key=_hair_helper.rpf7_budget_priority_key,
             reverse=True,
         )
         if not pass3_candidates:

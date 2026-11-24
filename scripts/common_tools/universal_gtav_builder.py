@@ -46,6 +46,7 @@ try:
     _compute_soft_skirt_weights,
     _extract_case_insensitive_jaw_weights,
     _inspect_componentped_drawable_keys,
+    conform_tight_torso_clothing_weights,
     )
 except ImportError:
     from common_tools.universal_gtav_rigging_layer import (
@@ -65,6 +66,7 @@ except ImportError:
     _compute_soft_skirt_weights,
     _extract_case_insensitive_jaw_weights,
     _inspect_componentped_drawable_keys,
+    conform_tight_torso_clothing_weights,
     )
 
 def map_blender_slots_to_unity_submeshes(
@@ -769,6 +771,15 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 mesh_uvs.remove(extra_uv)
         primary_uv.name = "UVMap 0"
 
+    conformed_cloth_verts = conform_tight_torso_clothing_weights(
+        processed_objs, ped_armature
+    )
+    if conformed_cloth_verts:
+        print(
+            f"[Rigging] Conformed {conformed_cloth_verts} upper-chest torso clothing vertices.",
+            flush=True,
+        )
+
     bpy.ops.object.select_all(action="DESELECT")
     for proc_obj in processed_objs:
         proc_obj.select_set(True)
@@ -776,6 +787,15 @@ def run_in_blender_build(manifest_path: Path) -> None:
     bpy.ops.object.join()
     joined_mesh_obj = processed_objs[0]
     joined_mesh_obj.name = "SKEL_ROOT"
+
+    welded_midline_pairs = blender_hair_helper.weld_symmetry_midline_seams(
+        joined_mesh_obj, respect_atlas_tiles=False
+    )
+    if welded_midline_pairs:
+        print(
+            f"[VToon] Welded {welded_midline_pairs} X=0 symmetry seam vertex pairs.",
+            flush=True,
+        )
 
     for poly_face in joined_mesh_obj.data.polygons:
         poly_face.use_smooth = True
@@ -801,8 +821,22 @@ def run_in_blender_build(manifest_path: Path) -> None:
     bpy.ops.object.vertex_group_normalize_all()
 
     atlas_img = bpy.data.images.load(str(project_paths.to_host_path(manifest["atlas_png"])))
-    norm_img = bpy.data.images.load(str(project_paths.to_host_path(manifest["normal_png"])))
-    spec_img = bpy.data.images.load(str(project_paths.to_host_path(manifest["spec_png"])))
+    norm_host_path = project_paths.to_host_path(manifest["normal_png"])
+    spec_host_path = project_paths.to_host_path(manifest["spec_png"])
+    norm_dds_path = norm_host_path.with_suffix(".dds")
+    spec_dds_path = spec_host_path.with_suffix(".dds")
+    blender_hair_helper.ensure_solid_rgba_dds(
+        norm_dds_path, rgba_color=(128, 128, 255, 255), size=32
+    )
+    blender_hair_helper.ensure_solid_rgba_dds(
+        spec_dds_path, rgba_color=(0, 0, 0, 255), size=32
+    )
+    norm_img = bpy.data.images.load(str(norm_dds_path), check_existing=True)
+    spec_img = bpy.data.images.load(str(spec_dds_path), check_existing=True)
+    if hasattr(norm_img, "colorspace_settings"):
+        norm_img.colorspace_settings.name = "Non-Color"
+    if hasattr(spec_img, "colorspace_settings"):
+        spec_img.colorspace_settings.name = "Non-Color"
 
     ped_shader_mat = ped_damage_helper.create_ped_material(
         create_shader,
@@ -988,8 +1022,9 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     continue
                 bpy.context.view_layer.objects.active = mesh_tgt
                 dec_mod = mesh_tgt.modifiers.new("Rpf7SizeGuardDecimate", "DECIMATE")
-                dec_mod.decimate_type = "COLLAPSE"
-                dec_mod.ratio = trim_ratio
+                blender_hair_helper.configure_rpf7_decimate_modifier(
+                    dec_mod, mesh_tgt, trim_ratio
+                )
                 bpy.ops.object.modifier_move_to_index(modifier=dec_mod.name, index=0)
                 bpy.ops.object.modifier_apply(modifier=dec_mod.name)
                 if any(len(poly.vertices) != 3 for poly in mesh_tgt.data.polygons):

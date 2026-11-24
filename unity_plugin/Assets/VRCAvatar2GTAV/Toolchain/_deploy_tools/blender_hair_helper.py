@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+import struct
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -729,30 +730,359 @@ def retarget_custom_hair_weights_to_head(
             head_group.add(all_indices, 1.0, "REPLACE")
 
 
+def ensure_solid_rgba_dds(
+    dds_path: Any,
+    rgba_color: Tuple[int, int, int, int] = (128, 128, 255, 255),
+    size: int = 32,
+) -> Path:
+    """
+    Write a valid uncompressed A8R8G8B8 DX9 DDS file filled with a constant RGBA color.
+    Matches `rage.exe textures encode -f rgba8 --mips 1` so Sollumz embeds exact
+    neutral BumpSampler/SpecSampler data instead of 16x16 missing checkerboards.
+    """
+    out_path = Path(dds_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    dim = max(4, int(size))
+    red, green, blue, alpha = (max(0, min(255, int(chan))) for chan in rgba_color)
+    pitch = dim * 4
+    header = struct.pack(
+        "<4s31I",
+        b"DDS ",
+        124,
+        0x100F,
+        dim,
+        dim,
+        pitch,
+        1,
+        1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        32,
+        0x41,
+        0,
+        32,
+        0x00FF0000,
+        0x0000FF00,
+        0x000000FF,
+        0xFF000000,
+        0x1000,
+        0, 0, 0, 0,
+    )
+    pixel_bytes = bytes((blue, green, red, alpha)) * (dim * dim)
+    out_path.write_bytes(header + pixel_bytes)
+    return out_path
+
+
+def weld_symmetry_midline_seams(
+    mesh_object: Any,
+    midline_tol: float = 0.00045,
+    match_dist: float = 0.0008,
+    normal_cos_threshold: float = 0.7,
+    respect_atlas_tiles: bool = False,
+) -> int:
+    """
+    Weld open-boundary symmetry seam pairs along X=0 (caused by UV mirror cuts or
+    decimation T-junctions) without merging opposite-normal double-sided shells.
+    """
+    import bmesh
+
+    mesh_data = getattr(mesh_object, "data", None)
+    if mesh_data is None or not getattr(mesh_data, "polygons", None):
+        return 0
+
+    bmesh_mod = bmesh.new()
+    bmesh_mod.from_mesh(mesh_data)
+    bmesh_mod.verts.ensure_lookup_table()
+    bmesh_mod.edges.ensure_lookup_table()
+    bmesh_mod.faces.ensure_lookup_table()
+    bmesh_mod.normal_update()
+
+    uv_layer = bmesh_mod.loops.layers.uv.active if respect_atlas_tiles else None
+    candidates: List[Tuple[Any, int, int, int, Any]] = []
+    for vert_item in bmesh_mod.verts:
+        if abs(float(vert_item.co.x)) > midline_tol:
+            continue
+        if not any(edge_item.is_boundary for edge_item in vert_item.link_edges):
+            continue
+        if not vert_item.link_faces:
+            continue
+        mat_idx = int(vert_item.link_faces[0].material_index)
+        uv_col, uv_row = -1, -1
+        if uv_layer is not None:
+            for loop_item in vert_item.link_loops:
+                uv_val = loop_item[uv_layer].uv
+                uv_col = max(0, min(3, int(float(uv_val.x) * 4.0)))
+                uv_row = max(0, min(3, int(float(uv_val.y) * 4.0)))
+                break
+        candidates.append((vert_item, mat_idx, uv_col, uv_row, vert_item.normal.copy()))
+
+    merge_verts: Set[Any] = set()
+    used_verts: Set[int] = set()
+    max_dist_sq = match_dist * match_dist
+    cand_count = len(candidates)
+    for idx_a in range(cand_count):
+        vert_a, mat_a, col_a, row_a, norm_a = candidates[idx_a]
+        if vert_a.index in used_verts:
+            continue
+        neighbors_a = {edge_item.other_vert(vert_a).index for edge_item in vert_a.link_edges}
+        best_match = None
+        best_dist_sq = max_dist_sq
+        for idx_b in range(idx_a + 1, cand_count):
+            vert_b, mat_b, col_b, row_b, norm_b = candidates[idx_b]
+            if vert_b.index in used_verts or vert_b.index in neighbors_a:
+                continue
+            if mat_a != mat_b or (col_a >= 0 and (col_a != col_b or row_a != row_b)):
+                continue
+            if norm_a.dot(norm_b) < normal_cos_threshold:
+                continue
+            delta_vec = vert_a.co - vert_b.co
+            dist_sq = float(delta_vec.length_squared)
+            if dist_sq <= best_dist_sq:
+                best_dist_sq = dist_sq
+                best_match = vert_b
+        if best_match is not None:
+            mid_y = 0.5 * (float(vert_a.co.y) + float(best_match.co.y))
+            mid_z = 0.5 * (float(vert_a.co.z) + float(best_match.co.z))
+            vert_a.co.x = 0.0
+            vert_a.co.y = mid_y
+            vert_a.co.z = mid_z
+            best_match.co.x = 0.0
+            best_match.co.y = mid_y
+            best_match.co.z = mid_z
+            used_verts.add(vert_a.index)
+            used_verts.add(best_match.index)
+            merge_verts.add(vert_a)
+            merge_verts.add(best_match)
+
+    welded_pairs = len(used_verts) // 2
+    if merge_verts:
+        bmesh.ops.remove_doubles(bmesh_mod, verts=list(merge_verts), dist=1e-4)
+        bmesh_mod.to_mesh(mesh_data)
+        mesh_data.update()
+    bmesh_mod.free()
+    return welded_pairs
+
+
+def configure_rpf7_decimate_modifier(
+    decimate_mod: Any,
+    obj_item: Any,
+    ratio_val: float,
+) -> float:
+    """
+    Configure Blender DECIMATE modifier to preserve X=0 symmetry and gently cap
+    collapse on fitted upper-torso garments so skin poke-through/T-junctions stay minimal.
+    """
+    low_name = str(getattr(obj_item, "name", "") or "").lower()
+    is_fitted_garment = any(
+        tok in low_name
+        for tok in ("sweat", "shirt", "corset", "top", "jersey", "dress", "bodysuit", "bra")
+    )
+    eff_ratio = max(0.80, float(ratio_val)) if is_fitted_garment else float(ratio_val)
+    decimate_mod.decimate_type = "COLLAPSE"
+    decimate_mod.ratio = eff_ratio
+    if hasattr(decimate_mod, "use_symmetry"):
+        decimate_mod.use_symmetry = True
+    if hasattr(decimate_mod, "symmetry_axis"):
+        decimate_mod.symmetry_axis = "X"
+    return eff_ratio
+
+
+_FITTED_TORSO_CLOTH_TOKENS = (
+    "sweat",
+    "shirt",
+    "corset",
+    "top",
+    "jersey",
+    "dress",
+    "skirt",
+    "bodysuit",
+    "bra",
+)
+
+
+def rpf7_budget_priority_key(obj_item: Any) -> Tuple[int, int]:
+    """
+    Sort key (used with reverse=True) for RPF7 poly-budget decimation passes:
+    defer fitted torso clothing (< 22k polys) behind heavy accessories/hair/large props.
+    """
+    low_name = str(getattr(obj_item, "name", "") or "").lower()
+    mesh_data = getattr(obj_item, "data", None)
+    poly_count = len(getattr(mesh_data, "polygons", ()) or ())
+    is_small_fitted_torso = poly_count < 22000 and any(
+        tok in low_name for tok in _FITTED_TORSO_CLOTH_TOKENS
+    )
+    return (0 if is_small_fitted_torso else 1, poly_count)
+
+
+def is_protected_small_torso_cloth(obj_item: Any, already_trimmed: bool) -> bool:
+    """Prevent iterative Pass-3 multi-round over-decimation on fitted torso garments."""
+    if not already_trimmed:
+        return False
+    low_name = str(getattr(obj_item, "name", "") or "").lower()
+    mesh_data = getattr(obj_item, "data", None)
+    poly_count = len(getattr(mesh_data, "polygons", ()) or ())
+    return poly_count < 22000 and any(
+        tok in low_name for tok in _FITTED_TORSO_CLOTH_TOKENS
+    )
+
+
+def _partition_component_by_z_bands(
+    comp_polys: List[int],
+    poly_verts_map: Dict[int, Tuple[int, ...]],
+    vertices_seq: Any,
+    max_polys: int,
+    max_verts: int,
+    max_loops: int,
+) -> List[List[int]]:
+    """Subdivide an oversized connected island horizontally across Z bands (never down X=0)."""
+    sort_items: List[Tuple[Tuple[float, float, float, int], int]] = []
+    has_co = bool(vertices_seq and hasattr(vertices_seq[0], "co"))
+    for poly_idx in comp_polys:
+        v_ids = poly_verts_map[poly_idx]
+        if has_co and v_ids:
+            count_inv = 1.0 / float(len(v_ids))
+            ctr_x = sum(float(vertices_seq[v_idx].co[0]) for v_idx in v_ids) * count_inv
+            ctr_y = sum(float(vertices_seq[v_idx].co[1]) for v_idx in v_ids) * count_inv
+            ctr_z = sum(float(vertices_seq[v_idx].co[2]) for v_idx in v_ids) * count_inv
+            # Pair symmetric (-x, +x) polygons together at the exact same quantized Z ring
+            sort_key = (round(ctr_z, 4), round(abs(ctr_x), 3), round(ctr_y, 3), poly_idx)
+        else:
+            sort_key = (0.0, 0.0, 0.0, poly_idx)
+        sort_items.append((sort_key, poly_idx))
+    sort_items.sort(key=lambda item: item[0])
+
+    chunks: List[List[int]] = []
+    cur_polys: List[int] = []
+    cur_verts: Set[int] = set()
+    cur_loops = 0
+    for _, poly_idx in sort_items:
+        v_ids = poly_verts_map[poly_idx]
+        add_loops = max(3, len(v_ids))
+        next_verts = cur_verts | set(v_ids)
+        if cur_polys and (
+            len(cur_polys) + 1 > max_polys
+            or len(next_verts) > max_verts
+            or cur_loops + add_loops > max_loops
+        ):
+            chunks.append(cur_polys)
+            cur_polys = [poly_idx]
+            cur_verts = set(v_ids)
+            cur_loops = add_loops
+        else:
+            cur_polys.append(poly_idx)
+            cur_verts = next_verts
+            cur_loops += add_loops
+    if cur_polys:
+        chunks.append(cur_polys)
+    return chunks
+
+
 def split_oversized_material_geometries(
     mesh_object: Any,
     max_vertices_per_chunk: int = 30000,
     log_callback: Optional[Callable[[str, int, int], None]] = None,
 ) -> int:
     """
-    Split any material group exceeding RAGE uint16 vertex safety thresholds into chunked
-    duplicate material slots so dense Booth hair meshes export without vertex overflow.
+    Split any material group exceeding RAGE uint16 vertex/polygon thresholds into chunked
+    duplicate material slots while keeping connected islands (and X=0 symmetry seams) intact.
     Returns count of additional chunk materials created.
     """
     mesh_data_elem = mesh_object.data
+    polys_seq = mesh_data_elem.polygons
+    verts_seq = getattr(mesh_data_elem, "vertices", ())
     polys_by_material: Dict[int, List[int]] = {}
-    for poly_item in mesh_data_elem.polygons:
-        polys_by_material.setdefault(poly_item.material_index, []).append(poly_item.index)
+    poly_verts_map: Dict[int, Tuple[int, ...]] = {}
+    for poly_item in polys_seq:
+        p_idx = poly_item.index
+        polys_by_material.setdefault(poly_item.material_index, []).append(p_idx)
+        poly_verts_map[p_idx] = tuple(int(v_idx) for v_idx in poly_item.vertices)
 
-    max_polys_per_chunk = max(10000, int(max_vertices_per_chunk * 0.65))
+    max_polys_per_chunk = max(10000, min(19500, int(max_vertices_per_chunk * 0.65)))
+    max_loops_per_chunk = 58000
     created_chunks = 0
 
     for mat_index, poly_indices in list(polys_by_material.items()):
-        if len(poly_indices) <= max_polys_per_chunk:
+        total_loops = sum(max(3, len(poly_verts_map[poly_item])) for poly_item in poly_indices)
+        unique_mat_verts = {v_idx for poly_item in poly_indices for v_idx in poly_verts_map[poly_item]}
+        if (
+            len(poly_indices) <= max_polys_per_chunk
+            and len(unique_mat_verts) <= max_vertices_per_chunk
+            and total_loops <= max_loops_per_chunk
+        ):
+            continue
+
+        # Discover connected islands within this material via shared vertex indices
+        parent_map = {poly_item: poly_item for poly_item in poly_indices}
+        vert_owner: Dict[int, int] = {}
+
+        def _find_root(node_id: int) -> int:
+            while parent_map[node_id] != node_id:
+                parent_map[node_id] = parent_map[parent_map[node_id]]
+                node_id = parent_map[node_id]
+            return node_id
+
+        for poly_item in poly_indices:
+            for v_idx in poly_verts_map[poly_item]:
+                first_pi = vert_owner.get(v_idx)
+                if first_pi is None:
+                    vert_owner[v_idx] = poly_item
+                else:
+                    root_a = _find_root(poly_item)
+                    root_b = _find_root(first_pi)
+                    if root_a != root_b:
+                        parent_map[root_b] = root_a
+
+        islands_map: Dict[int, List[int]] = {}
+        for poly_item in poly_indices:
+            islands_map.setdefault(_find_root(poly_item), []).append(poly_item)
+
+        units: List[Tuple[List[int], Set[int], int]] = []
+        for comp_polys in islands_map.values():
+            comp_verts = {v_idx for poly_item in comp_polys for v_idx in poly_verts_map[poly_item]}
+            comp_loops = sum(max(3, len(poly_verts_map[poly_item])) for poly_item in comp_polys)
+            if (
+                len(comp_polys) <= max_polys_per_chunk
+                and len(comp_verts) <= max_vertices_per_chunk
+                and comp_loops <= max_loops_per_chunk
+            ):
+                units.append((comp_polys, comp_verts, comp_loops))
+            else:
+                for sub_polys in _partition_component_by_z_bands(
+                    comp_polys,
+                    poly_verts_map,
+                    verts_seq,
+                    max_polys_per_chunk,
+                    max_vertices_per_chunk,
+                    max_loops_per_chunk,
+                ):
+                    sub_verts = {v_idx for poly_item in sub_polys for v_idx in poly_verts_map[poly_item]}
+                    sub_loops = sum(max(3, len(poly_verts_map[poly_item])) for poly_item in sub_polys)
+                    units.append((sub_polys, sub_verts, sub_loops))
+
+        # First-Fit-Decreasing bin packing keeps each connected component whole inside one chunk
+        units.sort(key=lambda unit_item: (len(unit_item[0]), len(unit_item[1])), reverse=True)
+        bins: List[Tuple[List[int], Set[int], int]] = []
+        for u_polys, u_verts, u_loops in units:
+            placed = False
+            for bin_idx, (b_polys, b_verts, b_loops) in enumerate(bins):
+                if len(b_polys) + len(u_polys) > max_polys_per_chunk:
+                    continue
+                if b_loops + u_loops > max_loops_per_chunk:
+                    continue
+                merged_verts = b_verts | u_verts
+                if len(merged_verts) > max_vertices_per_chunk:
+                    continue
+                b_polys.extend(u_polys)
+                bins[bin_idx] = (b_polys, merged_verts, b_loops + u_loops)
+                placed = True
+                break
+            if not placed:
+                bins.append((list(u_polys), set(u_verts), u_loops))
+
+        chunk_total = len(bins)
+        if chunk_total <= 1:
             continue
 
         base_material = mesh_data_elem.materials[mat_index]
-        chunk_total = math.ceil(len(poly_indices) / max_polys_per_chunk)
         if log_callback is not None:
             log_callback(base_material.name, len(poly_indices), chunk_total)
 
@@ -764,12 +1094,10 @@ def split_oversized_material_geometries(
             sub_materials.append(duplicated_mat)
             created_chunks += 1
 
-        for poly_seq, poly_idx in enumerate(poly_indices):
-            chunk_assignment = poly_seq // max_polys_per_chunk
-            target_mat = sub_materials[chunk_assignment]
-            mesh_data_elem.polygons[poly_idx].material_index = mesh_data_elem.materials.find(
-                target_mat.name
-            )
+        for chunk_idx, (b_polys, _, _) in enumerate(bins):
+            target_slot_idx = mesh_data_elem.materials.find(sub_materials[chunk_idx].name)
+            for poly_idx in b_polys:
+                polys_seq[poly_idx].material_index = target_slot_idx
 
     if created_chunks > 0:
         mesh_data_elem.update()

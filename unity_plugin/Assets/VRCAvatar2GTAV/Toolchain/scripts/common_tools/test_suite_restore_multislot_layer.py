@@ -1176,6 +1176,140 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
     return embed_ok and watermark_resize_ok and pb_extract_ok and rig_ok
 
 
+def _test_seam_dds_and_torso_decimate() -> bool:
+    import struct
+    import tempfile
+    import types
+
+    try:
+        import blender_hair_helper as bhh_mod
+    except ImportError:
+        import common_tools.blender_hair_helper as bhh_mod
+
+    class _FakeMatList(list):
+        def find(self, target_name: str) -> int:
+            for mat_pos, mat_entry in enumerate(self):
+                if getattr(mat_entry, "name", "") == target_name:
+                    return mat_pos
+            return -1
+
+    class _FakeMaterial:
+        def __init__(self, mat_name: str) -> None:
+            self.name = mat_name
+
+        def copy(self) -> "_FakeMaterial":
+            return _FakeMaterial(self.name)
+
+    verts_seq: List[Any] = []
+    polys_seq: List[Any] = []
+
+    def _add_symmetric_band_island(ring_count: int, z_base: float, z_step: float) -> List[int]:
+        island_poly_ids: List[int] = []
+        ring_verts: List[Tuple[int, int, int]] = []
+        for ring_idx in range(ring_count + 1):
+            z_coord = z_base + float(ring_idx) * z_step
+            idx_left = len(verts_seq)
+            verts_seq.append(types.SimpleNamespace(co=(-0.10, -0.05, z_coord)))
+            idx_mid = len(verts_seq)
+            verts_seq.append(types.SimpleNamespace(co=(0.0, -0.06, z_coord)))
+            idx_right = len(verts_seq)
+            verts_seq.append(types.SimpleNamespace(co=(0.10, -0.05, z_coord)))
+            ring_verts.append((idx_left, idx_mid, idx_right))
+        for ring_idx in range(ring_count):
+            row_a = ring_verts[ring_idx]
+            row_b = ring_verts[ring_idx + 1]
+            for tri_verts in (
+                (row_a[0], row_a[1], row_b[1]),
+                (row_a[0], row_b[1], row_b[0]),
+                (row_a[1], row_a[2], row_b[2]),
+                (row_a[1], row_b[2], row_b[1]),
+            ):
+                poly_id = len(polys_seq)
+                polys_seq.append(
+                    types.SimpleNamespace(index=poly_id, material_index=0, vertices=tri_verts)
+                )
+                island_poly_ids.append(poly_id)
+        return island_poly_ids
+
+    body_polys = _add_symmetric_band_island(7, 0.20, 0.03)
+    sweat_polys = _add_symmetric_band_island(8, 0.25, 0.03)
+    hair_polys = _add_symmetric_band_island(60, 0.50, 0.01)
+
+    mats_list = _FakeMatList([_FakeMaterial("ped_atlas")])
+    mesh_data = types.SimpleNamespace(
+        polygons=polys_seq,
+        vertices=verts_seq,
+        materials=mats_list,
+        update=lambda: None,
+    )
+    mock_obj = types.SimpleNamespace(name="SKEL_ROOT", data=mesh_data)
+    created_chunks = bhh_mod.split_oversized_material_geometries(
+        mock_obj, max_vertices_per_chunk=120
+    )
+    body_mats = {polys_seq[pid].material_index for pid in body_polys}
+    sweat_mats = {polys_seq[pid].material_index for pid in sweat_polys}
+    hair_sym_ok = True
+    for base_pid in range(hair_polys[0], hair_polys[-1] + 1, 4):
+        if polys_seq[base_pid].material_index != polys_seq[base_pid + 2].material_index:
+            hair_sym_ok = False
+            break
+    split_ok = (
+        created_chunks >= 1
+        and len(body_mats) == 1
+        and len(sweat_mats) == 1
+        and hair_sym_ok
+    )
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        norm_dds = tmp_path / "flat_normal.dds"
+        spec_dds = tmp_path / "black_spec.dds"
+        bhh_mod.ensure_solid_rgba_dds(norm_dds, rgba_color=(128, 128, 255, 255), size=32)
+        bhh_mod.ensure_solid_rgba_dds(spec_dds, rgba_color=(0, 0, 0, 255), size=32)
+        norm_raw = norm_dds.read_bytes()
+        spec_raw = spec_dds.read_bytes()
+        norm_hdr_ok = (
+            len(norm_raw) == 4224
+            and norm_raw[:4] == b"DDS "
+            and struct.unpack("<4I", norm_raw[4:20]) == (124, 0x100F, 32, 32)
+            and norm_raw[128:] == bytes((255, 128, 128, 255)) * 1024
+        )
+        spec_hdr_ok = (
+            len(spec_raw) == 4224
+            and spec_raw[:4] == b"DDS "
+            and spec_raw[128:] == bytes((0, 0, 0, 255)) * 1024
+        )
+        dds_ok = norm_hdr_ok and spec_hdr_ok
+
+    mod_sweat = types.SimpleNamespace(decimate_type="", ratio=1.0, use_symmetry=False, symmetry_axis="")
+    mod_hair = types.SimpleNamespace(decimate_type="", ratio=1.0, use_symmetry=False, symmetry_axis="")
+    sweat_obj = types.SimpleNamespace(name="ladies-sweat", data=types.SimpleNamespace(polygons=[0] * 18688))
+    shirt_obj = types.SimpleNamespace(name="UN1_Shirt", data=types.SimpleNamespace(polygons=[0] * 18150))
+    hair_obj = types.SimpleNamespace(name="Hair_Back", data=types.SimpleNamespace(polygons=[0] * 28000))
+    prop_obj = types.SimpleNamespace(name="Bag_Prop", data=types.SimpleNamespace(polygons=[0] * 21000))
+    eff_sweat = bhh_mod.configure_rpf7_decimate_modifier(mod_sweat, sweat_obj, 0.45)
+    eff_hair = bhh_mod.configure_rpf7_decimate_modifier(mod_hair, hair_obj, 0.45)
+    sorted_names = [
+        item.name
+        for item in sorted(
+            [sweat_obj, shirt_obj, hair_obj, prop_obj],
+            key=bhh_mod.rpf7_budget_priority_key,
+            reverse=True,
+        )
+    ]
+    decimate_ok = (
+        eff_sweat >= 0.80
+        and abs(eff_hair - 0.45) < 1e-6
+        and mod_sweat.use_symmetry is True
+        and mod_sweat.symmetry_axis == "X"
+        and mod_hair.use_symmetry is True
+        and bhh_mod.is_protected_small_torso_cloth(sweat_obj, True) is True
+        and bhh_mod.is_protected_small_torso_cloth(hair_obj, True) is False
+        and sorted_names == ["Hair_Back", "Bag_Prop", "ladies-sweat", "UN1_Shirt"]
+    )
+    return split_ok and dds_ok and decimate_ok
+
+
 def test_restore_and_multislot_regressions() -> bool:
     """Run all regression checks for scoped MA/Atlas, PhysBones isolation, Restore, and Multi-Slot."""
     print("[Restore/MultiSlot] Validating PRUNING, SCOPED ATLAS, PHYSBONES, RESTORE, MULTI-SLOT...")
@@ -1185,6 +1319,7 @@ def test_restore_and_multislot_regressions() -> bool:
     unity_trs_ok = _test_unity_transform_and_earring_alignment()
     mat_ovr_ok = _test_mat_overrides_and_non_colliding_atlas()
     single_tex_pb_ok = _test_single_tex_ytd_and_physbone_unwrap()
+    seam_dds_dec_ok = _test_seam_dds_and_torso_decimate()
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
     cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
@@ -1193,9 +1328,9 @@ def test_restore_and_multislot_regressions() -> bool:
         and all(len(cs_p.read_text(encoding="utf-8").splitlines()) <= 500 for cs_p in cs_files)
     )
 
-    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and cs_ok
+    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and cs_ok
     return print_status_result(
         "Restore-Vanilla & Per-Protagonist Multi-Slot Regression Suite",
         all_ok,
-        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, csharp={cs_ok}",
+        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, csharp={cs_ok}",
     )

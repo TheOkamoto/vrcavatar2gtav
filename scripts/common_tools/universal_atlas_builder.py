@@ -811,8 +811,8 @@ def build_universal_avatar_atlas(
         target_normal_size = min(atlas_size, normal_size)
         use_flat_normal = (not has_bump_map) or (target_normal_size <= 64)
     else:
-        use_flat_normal = not has_bump_map
-        target_normal_size = flat_tex_size if use_flat_normal else min(atlas_size, 1024)
+        use_flat_normal = True
+        target_normal_size = flat_tex_size
     if use_flat_normal:
         normal_canvas = Image.new("RGBA", (target_normal_size, target_normal_size), (128, 128, 255, 255))
     elif normal_canvas.width != target_normal_size:
