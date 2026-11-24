@@ -528,6 +528,9 @@ def extract_unity_scene_physbones(
         for asset_p in guid_map.values():
             _add_effective_fbx(asset_p)
 
+    if active_scene_meshes_ci:
+        excluded_meshes_ci.difference_update(active_scene_meshes_ci)
+
     all_fbx_bones, _init_weighted, fbx_parent_map, mesh_weights_by_file, has_skin_clusters = (
         _inspect_fbx_weights_detailed(effective_fbxs, excluded_meshes=sorted(excluded_meshes_ci))
     )
@@ -540,6 +543,9 @@ def extract_unity_scene_physbones(
             for mesh_low in file_mesh_map:
                 if mesh_low not in active_scene_meshes_ci and not _is_fallback_hair_protected(mesh_low):
                     excluded_meshes_ci.add(mesh_low)
+
+    if active_scene_meshes_ci:
+        excluded_meshes_ci.difference_update(active_scene_meshes_ci)
 
     weighted_fbx_bones: Set[str] = set()
     disabled_mesh_all_bones: Set[str] = set()
@@ -618,6 +624,73 @@ def extract_unity_scene_physbones(
             "is_animated": _ival("is_animated", 1),
         }
 
+    fbx_parent_targets_ci: Set[str] = set(fbx_parent_map.values())
+    humanoid_structural_roots_ci = frozenset(
+        {"hips", "pelvis", "spine", "chest", "upperchest", "upper_chest", "neck", "head"}
+    )
+
+    def _is_fbx_bone(cand_name: str) -> bool:
+        if not all_fbx_bones:
+            return True
+        low_val = str(cand_name or "").strip().lower()
+        if low_val in all_fbx_bones:
+            return True
+        dot_val = regex_module.sub(r"\s+(\d+)$", lambda match_obj: f".{int(match_obj.group(1)):03d}", low_val)
+        space_val = regex_module.sub(r"\.(\d{3})$", lambda match_obj: f" {int(match_obj.group(1))}", low_val)
+        return dot_val in all_fbx_bones or space_val in all_fbx_bones
+
+    def _fbx_has_ancestor(child_low: str, cand_ancestor_low: str) -> bool:
+        cur = child_low
+        for _step in range(16):
+            par_low = fbx_parent_map.get(cur, "")
+            if not par_low:
+                return False
+            if par_low == cand_ancestor_low:
+                return True
+            cur = par_low
+        return False
+
+    def _unwrap_container_spokes(raw_spokes: Sequence[List[str]]) -> Tuple[List[List[str]], bool]:
+        """Filter missing Unity-only transforms and strip colliding/unweighted container roots."""
+        if not raw_spokes:
+            return list(raw_spokes), False
+        cleaned_spokes: List[List[str]] = []
+        for spoke_seq in raw_spokes:
+            if not all_fbx_bones:
+                cleaned_spokes.append(list(spoke_seq))
+                continue
+            kept_fbx = [bone_nm for bone_nm in spoke_seq if _is_fbx_bone(bone_nm)]
+            if not kept_fbx:
+                continue
+            # Drop dead branches like [UN_Ribbon, RibbonRoot] when RibbonRoot is a non-FBX
+            # empty transform and UN_Ribbon already has real FBX children animating it.
+            if (
+                len(spoke_seq) >= 2
+                and len(kept_fbx) == 1
+                and kept_fbx[0].strip().lower() in fbx_parent_targets_ci
+            ):
+                continue
+            cleaned_spokes.append(kept_fbx)
+        if not cleaned_spokes:
+            return [], False
+        first_root = str(cleaned_spokes[0][0]).strip().lower() if cleaned_spokes[0] else ""
+        if not first_root or not all(len(spk) >= 3 and str(spk[0]).strip().lower() == first_root for spk in cleaned_spokes):
+            return [list(spk) for spk in cleaned_spokes], False
+        child_lows = [str(spk[1]).strip().lower() for spk in cleaned_spokes]
+        parent_mismatch = bool(fbx_parent_map) and any(
+            child_low in fbx_parent_map and not _fbx_has_ancestor(child_low, first_root)
+            for child_low in child_lows
+        )
+        unweighted_multi = (
+            len(cleaned_spokes) >= 2
+            and bool(weighted_fbx_bones)
+            and first_root not in weighted_fbx_bones
+            and all(child_low in weighted_fbx_bones for child_low in child_lows)
+        )
+        if parent_mismatch or unweighted_multi:
+            return [list(spk[1:]) for spk in cleaned_spokes], True
+        return [list(spk) for spk in cleaned_spokes], False
+
     extracted_spokes: List[Dict[str, Any]] = []
 
     # 1. Direct scene VRCPhysBones under avatar root
@@ -648,7 +721,7 @@ def extract_unity_scene_physbones(
         else:
             rt_tid = tf_id
             rt_name = comp_go_name
-        if not rt_name:
+        if not rt_name or rt_name.strip().lower() in humanoid_structural_roots_ci:
             continue
         ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
         if rt_tid in ignored_ids:
@@ -673,6 +746,7 @@ def extract_unity_scene_physbones(
             )
             _record_orphan(rt_name, orphan_reason, parent_nm_diag)
             continue
+        spokes, unwrapped = _unwrap_container_spokes(spokes)
         for spoke_bones in spokes:
             if allowed_bones_ci is not None and not any(
                 bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
@@ -685,7 +759,8 @@ def extract_unity_scene_physbones(
                 )
                 _record_orphan(spoke_rt, orphan_reason, parent_nm_diag)
                 continue
-            extracted_spokes.append(_pb_to_record(pb_data, rt_name, spoke_bones, all_desc, ancestors))
+            eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
+            extracted_spokes.append(_pb_to_record(pb_data, eff_rt_name, spoke_bones, all_desc, ancestors))
 
     # 2. Active child PrefabInstance VRCPhysBones (e.g. MA Shinano hair, outfits)
     for pi_id in sorted(visited_pis, key=lambda val_s: int(val_s)):
@@ -820,7 +895,7 @@ def extract_unity_scene_physbones(
             else:
                 rt_tid = pref_tid
                 rt_name = comp_pref_name
-            if not rt_name:
+            if not rt_name or rt_name.strip().lower() in humanoid_structural_roots_ci:
                 continue
             ignored_ids = {ref[0] for ref in eff_pb.get("ignored", []) if ref and ref[0] != "0"}
             if rt_tid in ignored_ids:
@@ -853,6 +928,7 @@ def extract_unity_scene_physbones(
                 )
                 _record_orphan(rt_name, orphan_reason, pref_parent_diag)
                 continue
+            spokes, unwrapped = _unwrap_container_spokes(spokes)
             for spoke_bones in spokes:
                 if allowed_bones_ci is not None and not any(
                     bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
@@ -865,7 +941,8 @@ def extract_unity_scene_physbones(
                     )
                     _record_orphan(spoke_rt, orphan_reason, pref_parent_diag)
                     continue
-                extracted_spokes.append(_pb_to_record(eff_pb, rt_name, spoke_bones, all_desc, anc_names))
+                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
+                extracted_spokes.append(_pb_to_record(eff_pb, eff_rt_name, spoke_bones, all_desc, anc_names))
 
     # 3. Fallback prefabs (e.g. Shinano.prefab when vrc2gtav.cfg sets custom_hair = default while scene had EditorOnly hair)
     seen_root_bones_ci = {rec["root_bone"].strip().lower() for rec in extracted_spokes}
@@ -903,7 +980,11 @@ def extract_unity_scene_physbones(
             rt_ref = pb_raw.get("root_tf")
             rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and rt_ref[0] in fb_doc["tfs"]) else tid
             rt_name = _resolve_tf_name(fb_doc, rt_tid) or _resolve_tf_name(fb_doc, tid)
-            if not rt_name or rt_name.strip().lower() in seen_root_bones_ci:
+            if (
+                not rt_name
+                or rt_name.strip().lower() in seen_root_bones_ci
+                or rt_name.strip().lower() in humanoid_structural_roots_ci
+            ):
                 continue
             if "physbone_" in rt_name.lower() or "breast" in rt_name.lower():
                 continue
@@ -918,6 +999,7 @@ def extract_unity_scene_physbones(
                 bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
             ):
                 continue
+            spokes, unwrapped = _unwrap_container_spokes(spokes)
             seen_root_bones_ci.add(rt_name.strip().lower())
             anc_names = []
             cur_anc = rt_tid
@@ -929,7 +1011,9 @@ def extract_unity_scene_physbones(
                 if aname:
                     anc_names.append(aname)
             for spoke_bones in spokes:
-                extracted_spokes.append(_pb_to_record(pb_raw, rt_name, spoke_bones, all_desc, anc_names))
+                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
+                seen_root_bones_ci.add(eff_rt_name.strip().lower())
+                extracted_spokes.append(_pb_to_record(pb_raw, eff_rt_name, spoke_bones, all_desc, anc_names))
 
     # 3b. Recover direct base-armature PBs tagged EditorOnly when custom_hair=default fallback is active
     if fallback_prefab_paths:
@@ -949,7 +1033,11 @@ def extract_unity_scene_physbones(
             rt_ref = pb_data.get("root_tf")
             rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and not rt_ref[1] and rt_ref[0] in scene_doc["tfs"]) else tf_id
             rt_name = _resolve_tf_name(scene_doc, rt_tid) or _resolve_tf_name(scene_doc, tf_id)
-            if not rt_name or rt_name.strip().lower() in seen_root_bones_ci:
+            if (
+                not rt_name
+                or rt_name.strip().lower() in seen_root_bones_ci
+                or rt_name.strip().lower() in humanoid_structural_roots_ci
+            ):
                 continue
             ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
             spokes, all_desc = _collect_linear_spokes(
@@ -963,10 +1051,13 @@ def extract_unity_scene_physbones(
                 bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
             ):
                 continue
+            spokes, unwrapped = _unwrap_container_spokes(spokes)
             seen_root_bones_ci.add(rt_name.strip().lower())
             ancestors = _scene_ancestor_names(rt_tid)
             for spoke_bones in spokes:
-                extracted_spokes.append(_pb_to_record(pb_data, rt_name, spoke_bones, all_desc, ancestors))
+                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
+                seen_root_bones_ci.add(eff_rt_name.strip().lower())
+                extracted_spokes.append(_pb_to_record(pb_data, eff_rt_name, spoke_bones, all_desc, ancestors))
 
     # 4. Marshmallow PB overrides (Breast_1.L/R or Breast_L/R)
     marshmallow_breasts: List[Dict[str, Any]] = []

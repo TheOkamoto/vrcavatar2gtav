@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 import unittest.mock
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 try:
     import test_suite_core_layer as core_suite
@@ -203,7 +203,10 @@ def _test_ma_fbx_pruning_and_scoped_atlas() -> tuple[bool, bool]:
         )
         out_atlas_dir = tmp_dir / "atlas_out"
 
+        captured_build_cmds: List[List[str]] = []
+
         def _fake_rage_run(cmd_args: Sequence[str], **_kwargs: Any) -> subprocess.CompletedProcess:
+            captured_build_cmds.append(list(cmd_args))
             if "-o" in cmd_args:
                 out_idx = list(cmd_args).index("-o") + 1
                 Path(cmd_args[out_idx]).write_bytes(b"RSC7MOCK")
@@ -227,12 +230,17 @@ def _test_ma_fbx_pruning_and_scoped_atlas() -> tuple[bool, bool]:
         spec_sz = Image.open(atlas_res["spec_png"]).size
         norm_sz = Image.open(atlas_res["normal_png"]).size
         diff_mode = Image.open(atlas_res["atlas_png"]).mode
+        rage_png_inputs = [
+            tok for cmd_list in captured_build_cmds for tok in cmd_list
+            if tok.lower().endswith(".png")
+        ]
         atlas_ok = (
             list(collected.keys()) == ["VariantSkin"]
             and collected["VariantSkin"]["alpha_mode"] == "opaque"
             and spec_sz == (512, 512)
             and norm_sz == (512, 512)
             and diff_mode == "RGB"
+            and rage_png_inputs == [str(atlas_res["atlas_png"])]
         )
         return pruning_ok, atlas_ok
 
@@ -992,6 +1000,182 @@ def _test_mat_overrides_and_non_colliding_atlas() -> bool:
     return override_ok and matcap_ok and atlas_disambig_ok and nipple_ok and glass_trans_ok
 
 
+def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
+    """Verify single-tex YTD, embedded bump/spec, watermark resize, and hair/ribbon PB fixes."""
+    from PIL import Image
+    import ped_damage_helper
+    import physbone_scene_extractor_layer as psel
+    import repack_and_deploy_everything as repack_helper
+    import universal_gtav_rigging_layer as rig_layer
+    import vtoon_profile_helper
+
+    class _FakeTexProps:
+        def __init__(self) -> None:
+            self.embedded = False
+
+    class _FakeTexNode:
+        def __init__(self) -> None:
+            self.image = None
+            self.texture_properties = _FakeTexProps()
+
+    class _FakeNodeTree:
+        def __init__(self, node_map: Dict[str, Any]) -> None:
+            self.nodes = node_map
+
+    class _FakeShaderMat:
+        def __init__(self) -> None:
+            self.name = ""
+            node_map = {
+                "DiffuseSampler": _FakeTexNode(),
+                "BumpSampler": _FakeTexNode(),
+                "SpecSampler": _FakeTexNode(),
+                "AnisoNoiseSpecSampler": _FakeTexNode(),
+            }
+            self.node_tree = _FakeNodeTree(node_map)
+
+    fake_mat = ped_damage_helper.create_ped_material(
+        lambda _shader_fn: _FakeShaderMat(),
+        "vrc_embed_test",
+        diffuse_image="diff_img",
+        bump_image="bump_img",
+        spec_image="spec_img",
+        embed_bump_spec=True,
+    )
+    embed_nodes = fake_mat.node_tree.nodes
+    embed_ok = (
+        embed_nodes["DiffuseSampler"].texture_properties.embedded is False
+        and embed_nodes["BumpSampler"].texture_properties.embedded is True
+        and embed_nodes["SpecSampler"].texture_properties.embedded is True
+        and embed_nodes["AnisoNoiseSpecSampler"].texture_properties.embedded is True
+    )
+
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_wm_resize_") as tmp_wm:
+        wm_dir = Path(tmp_wm)
+        stamped = vtoon_profile_helper.stamp_vtoon_watermark_block(
+            Image.new("RGB", (1024, 1024), (80, 120, 200)),
+            char_id=2,
+        )
+        wm_png = wm_dir / "player_two_atlas_2k.png"
+        stamped.save(wm_png)
+        repack_helper._resize_extracted_png_for_budget(wm_png, 512, 256)
+        with Image.open(wm_png) as resized_im:
+            watermark_resize_ok = (
+                resized_im.size == (512, 512)
+                and vtoon_profile_helper.decode_vtoon_watermark_block(resized_im) == 2
+            )
+
+        import physbone_helper
+
+        pb_script_line = (
+            f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, "
+            f"guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}\n"
+        )
+        scene_file = wm_dir / "HairBow.unity"
+        scene_file.write_text(
+            "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
+            "--- !u!1 &10\nGameObject:\n  m_Component:\n  - component: {fileID: 11}\n  m_Name: TestAvatar\n  m_IsActive: 1\n"
+            "--- !u!4 &11\nTransform:\n  m_GameObject: {fileID: 10}\n  m_Father: {fileID: 0}\n  m_Children:\n  - {fileID: 21}\n  - {fileID: 31}\n  - {fileID: 41}\n"
+            "--- !u!1 &20\nGameObject:\n  m_Component:\n  - component: {fileID: 21}\n  - component: {fileID: 22}\n  m_Name: Head\n  m_IsActive: 1\n"
+            "--- !u!4 &21\nTransform:\n  m_GameObject: {fileID: 20}\n  m_Father: {fileID: 11}\n  m_Children:\n  - {fileID: 25}\n  - {fileID: 26}\n  - {fileID: 51}\n"
+            "--- !u!114 &22\nMonoBehaviour:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n"
+            + pb_script_line
+            + "  rootTransform: {fileID: 21}\n"
+            "--- !u!1 &24\nGameObject:\n  m_Component:\n  - component: {fileID: 25}\n  m_Name: Child\n  m_IsActive: 1\n"
+            "--- !u!4 &25\nTransform:\n  m_GameObject: {fileID: 24}\n  m_Father: {fileID: 21}\n  m_Children: []\n"
+            "--- !u!1 &27\nGameObject:\n  m_Component:\n  - component: {fileID: 26}\n  - component: {fileID: 28}\n  m_Name: Back.R.001\n  m_IsActive: 1\n"
+            "--- !u!4 &26\nTransform:\n  m_GameObject: {fileID: 27}\n  m_Father: {fileID: 21}\n  m_Children:\n  - {fileID: 29}\n"
+            "--- !u!114 &28\nMonoBehaviour:\n  m_GameObject: {fileID: 27}\n  m_Enabled: 1\n"
+            + pb_script_line
+            + "  rootTransform: {fileID: 26}\n"
+            "--- !u!1 &30\nGameObject:\n  m_Component:\n  - component: {fileID: 29}\n  m_Name: Back.R.002\n  m_IsActive: 1\n"
+            "--- !u!4 &29\nTransform:\n  m_GameObject: {fileID: 30}\n  m_Father: {fileID: 26}\n  m_Children: []\n"
+            "--- !u!1 &50\nGameObject:\n  m_Component:\n  - component: {fileID: 51}\n  - component: {fileID: 52}\n  m_Name: UN_Ribbon\n  m_IsActive: 1\n"
+            "--- !u!4 &51\nTransform:\n  m_GameObject: {fileID: 50}\n  m_Father: {fileID: 21}\n  m_Children:\n  - {fileID: 61}\n  - {fileID: 71}\n"
+            "--- !u!114 &52\nMonoBehaviour:\n  m_GameObject: {fileID: 50}\n  m_Enabled: 1\n"
+            + pb_script_line
+            + "  rootTransform: {fileID: 51}\n"
+            "--- !u!1 &60\nGameObject:\n  m_Component:\n  - component: {fileID: 61}\n  m_Name: UN_Hat_L.001\n  m_IsActive: 1\n"
+            "--- !u!4 &61\nTransform:\n  m_GameObject: {fileID: 60}\n  m_Father: {fileID: 51}\n  m_Children:\n  - {fileID: 63}\n"
+            "--- !u!1 &62\nGameObject:\n  m_Component:\n  - component: {fileID: 63}\n  m_Name: UN_Hat_L.002\n  m_IsActive: 1\n"
+            "--- !u!4 &63\nTransform:\n  m_GameObject: {fileID: 62}\n  m_Father: {fileID: 61}\n  m_Children: []\n"
+            "--- !u!1 &70\nGameObject:\n  m_Component:\n  - component: {fileID: 71}\n  m_Name: UN_Hat_R.001\n  m_IsActive: 1\n"
+            "--- !u!4 &71\nTransform:\n  m_GameObject: {fileID: 70}\n  m_Father: {fileID: 51}\n  m_Children:\n  - {fileID: 73}\n"
+            "--- !u!1 &72\nGameObject:\n  m_Component:\n  - component: {fileID: 73}\n  m_Name: UN_Hat_R.002\n  m_IsActive: 1\n"
+            "--- !u!4 &73\nTransform:\n  m_GameObject: {fileID: 72}\n  m_Father: {fileID: 71}\n  m_Children: []\n"
+            "--- !u!1 &35\nGameObject:\n  m_Component:\n  - component: {fileID: 31}\n  - component: {fileID: 32}\n  m_Name: UN_Ribbon\n  m_IsActive: 1\n"
+            "--- !u!4 &31\nTransform:\n  m_GameObject: {fileID: 35}\n  m_Father: {fileID: 11}\n  m_Children:\n  - {fileID: 33}\n"
+            "--- !u!114 &32\nMonoBehaviour:\n  m_GameObject: {fileID: 35}\n  m_Enabled: 1\n"
+            + pb_script_line
+            + "  rootTransform: {fileID: 31}\n"
+            "--- !u!1 &34\nGameObject:\n  m_Component:\n  - component: {fileID: 33}\n  m_Name: RibbonRoot\n  m_IsActive: 1\n"
+            "--- !u!4 &33\nTransform:\n  m_GameObject: {fileID: 34}\n  m_Father: {fileID: 31}\n  m_Children: []\n"
+            "--- !u!1 &40\nGameObject:\n  m_Component:\n  - component: {fileID: 41}\n  m_Name: UN_Ribbon_L.002\n  m_IsActive: 1\n"
+            "--- !u!4 &41\nTransform:\n  m_GameObject: {fileID: 40}\n  m_Father: {fileID: 11}\n  m_Children: []\n",
+            encoding="utf-8",
+        )
+        fake_fbx = wm_dir / "FakeHair.fbx"
+        fake_fbx.write_bytes(b"Kaydara FBX Binary  \x00")
+        seen_excluded: List[List[str]] = []
+
+        def _fake_inspect(_fbxs: Any, excluded_meshes: Sequence[str] = ()) -> Any:
+            seen_excluded.append(list(excluded_meshes))
+            all_b = {
+                "head", "child", "back.r.001", "back.r.002",
+                "un_ribbon", "un_hatroot", "un_hat_l.001", "un_hat_l.002",
+                "un_hat_r.001", "un_hat_r.002", "un_ribbon_l.002",
+            }
+            weighted_b = {
+                "head", "back.r.001", "back.r.002",
+                "un_ribbon", "un_hat_l.001", "un_hat_l.002",
+                "un_hat_r.001", "un_hat_r.002", "un_ribbon_l.002",
+            }
+            parent_m = {
+                "back.r.001": "head",
+                "back.r.002": "back.r.001",
+                "un_hat_l.001": "un_hatroot",
+                "un_hat_l.002": "un_hat_l.001",
+                "un_hat_r.001": "un_hatroot",
+                "un_hat_r.002": "un_hat_r.001",
+                "un_ribbon_l.002": "un_ribbon",
+            }
+            mesh_m = {
+                fake_fbx: {
+                    "Back": {"back.r.001", "back.r.002"},
+                    "UN2_Beret": {"un_hat_l.001", "un_hat_l.002", "un_hat_r.001", "un_hat_r.002"},
+                    "UN1_ChestRibbon": {"un_ribbon", "un_ribbon_l.002"},
+                }
+            }
+            return all_b, weighted_b, parent_m, mesh_m, True
+
+        with unittest.mock.patch.object(psel, "_inspect_fbx_weights_detailed", side_effect=_fake_inspect):
+            ext_res = psel.extract_unity_scene_physbones(
+                scene_file,
+                avatar_name="TestAvatar",
+                fbx_paths=[fake_fbx],
+                excluded_meshes=["Back", "OldDress"],
+                active_meshes=["Back", "UN2_Beret"],
+                prune_orphaned=True,
+                verbose=False,
+            )
+        roots = [item["root_bone"] for item in ext_res.get("chains", [])]
+        pb_extract_ok = (
+            "back" not in [name_str.lower() for name_str in (seen_excluded[0] if seen_excluded else [])]
+            and "Back.R.001" in roots
+            and "UN_Hat_L.001" in roots
+            and "UN_Hat_R.001" in roots
+            and "Head" not in roots
+            and "UN_Ribbon" not in roots
+        )
+
+    parent_lut = {"back.r.001": "Hair Root", "hair root": "Head", "ribbon": "Hair Root"}
+    rig_ok = (
+        rig_layer._resolve_universal_target_bone("Back.R.001", "Back", {}, src_parent_lookup=parent_lut) == "SKEL_Head"
+        and rig_layer._resolve_universal_target_bone("Head", "Body", {"head": "PB_Auto_Head_0"}) == "SKEL_Head"
+        and rig_layer._resolve_universal_target_bone("Ribbon", "Ribbon", {}, src_parent_lookup=parent_lut) == "SKEL_Head"
+    )
+    return embed_ok and watermark_resize_ok and pb_extract_ok and rig_ok
+
+
 def test_restore_and_multislot_regressions() -> bool:
     """Run all regression checks for scoped MA/Atlas, PhysBones isolation, Restore, and Multi-Slot."""
     print("[Restore/MultiSlot] Validating PRUNING, SCOPED ATLAS, PHYSBONES, RESTORE, MULTI-SLOT...")
@@ -1000,6 +1184,7 @@ def test_restore_and_multislot_regressions() -> bool:
     restore_multi_ok = _test_restore_and_multislot_pipeline()
     unity_trs_ok = _test_unity_transform_and_earring_alignment()
     mat_ovr_ok = _test_mat_overrides_and_non_colliding_atlas()
+    single_tex_pb_ok = _test_single_tex_ytd_and_physbone_unwrap()
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
     cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
@@ -1008,9 +1193,9 @@ def test_restore_and_multislot_regressions() -> bool:
         and all(len(cs_p.read_text(encoding="utf-8").splitlines()) <= 500 for cs_p in cs_files)
     )
 
-    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and cs_ok
+    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and cs_ok
     return print_status_result(
         "Restore-Vanilla & Per-Protagonist Multi-Slot Regression Suite",
         all_ok,
-        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, csharp={cs_ok}",
+        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, csharp={cs_ok}",
     )

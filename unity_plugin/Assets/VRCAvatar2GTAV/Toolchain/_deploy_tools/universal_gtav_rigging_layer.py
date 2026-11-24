@@ -687,73 +687,109 @@ def _resolve_universal_target_bone(
     raw_bone_name: str,
     mesh_name: str,
     pb_bone_mapping_ci: Dict[str, str],
+    src_parent_lookup: Optional[Dict[str, str]] = None,
 ) -> str:
     """Resolve an arbitrary Unity bone weight name onto the GTA V + PhysBone skeleton."""
     import hand_skeleton_helper
     import modular_avatar_helper
     import physbone_helper
 
+    def _resolve_direct_token(cand_name: str) -> Optional[str]:
+        low_tok = str(cand_name or "").strip().lower()
+        if not low_tok:
+            return None
+
+        humanoid_table = {
+            "hips": "SKEL_Pelvis",
+            "spine": "SKEL_Spine1",
+            "chest": "SKEL_Spine2",
+            "upperchest": "SKEL_Spine3",
+            "neck": "SKEL_Neck_1",
+            "head": "SKEL_Head",
+            "eye_l": "SKEL_Head",
+            "eye_r": "SKEL_Head",
+            "jaw": "SKEL_Head",
+            "shoulder_l": "SKEL_L_Clavicle",
+            "shoulder_r": "SKEL_R_Clavicle",
+            "upperarm_l": "SKEL_L_UpperArm",
+            "upperarm_r": "SKEL_R_UpperArm",
+            "arm_l": "SKEL_L_UpperArm",
+            "arm_r": "SKEL_R_UpperArm",
+            "lowerarm_l": "SKEL_L_Forearm",
+            "lowerarm_r": "SKEL_R_Forearm",
+            "hand_l": "SKEL_L_Hand",
+            "hand_r": "SKEL_R_Hand",
+            "upperleg_l": "SKEL_L_Thigh",
+            "upperleg_r": "SKEL_R_Thigh",
+            "leg_l": "SKEL_L_Thigh",
+            "leg_r": "SKEL_R_Thigh",
+            "lowerleg_l": "SKEL_L_Calf",
+            "lowerleg_r": "SKEL_R_Calf",
+            "foot_l": "SKEL_L_Foot",
+            "foot_r": "SKEL_R_Foot",
+            "toe_l": "SKEL_L_Toe0",
+            "toe_r": "SKEL_R_Toe0",
+            "toebase_l": "SKEL_L_Toe0",
+            "toebase_r": "SKEL_R_Toe0",
+        }
+        # Exact structural humanoid trunk/head names must never be hijacked by stray
+        # VRCPhysBone entries like Head -> Child.
+        exact_compact = re.sub(r"[\s_\-]+", "", low_tok)
+        if exact_compact in ("hips", "pelvis", "spine", "chest", "upperchest", "neck", "head"):
+            return humanoid_table["hips" if exact_compact == "pelvis" else exact_compact]
+
+        if low_tok in pb_bone_mapping_ci:
+            return pb_bone_mapping_ci[low_tok]
+        space_tok = re.sub(r"\.(\d{3})$", lambda match_obj: f" {int(match_obj.group(1))}", low_tok)
+        if space_tok in pb_bone_mapping_ci:
+            return pb_bone_mapping_ci[space_tok]
+
+        direct_pb = physbone_helper.resolve_bone_from_mapping(
+            cand_name, bone_mapping_ci=pb_bone_mapping_ci
+        )
+        if direct_pb is not None:
+            return direct_pb
+
+        resolved_arm_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(cand_name)
+        if resolved_arm_finger is not None:
+            return resolved_arm_finger
+
+        norm_key = modular_avatar_helper.normalize_bone_match_key(cand_name)
+        return humanoid_table.get(norm_key)
+
+    direct_hit = _resolve_direct_token(raw_bone_name)
+    if direct_hit is not None:
+        return direct_hit
+
     low_name = str(raw_bone_name or "").strip().lower()
-    if low_name in pb_bone_mapping_ci:
-        return pb_bone_mapping_ci[low_name]
-    space_alias = re.sub(r"\.(\d{3})$", lambda match_obj: f" {int(match_obj.group(1))}", low_name)
-    if space_alias in pb_bone_mapping_ci:
-        return pb_bone_mapping_ci[space_alias]
+    if src_parent_lookup:
+        cur_anc = src_parent_lookup.get(low_name, "")
+        for _step in range(16):
+            if not cur_anc:
+                break
+            anc_hit = _resolve_direct_token(cur_anc)
+            if anc_hit is not None:
+                return anc_hit
+            cur_anc = src_parent_lookup.get(cur_anc.lower(), "")
 
-    direct_pb = physbone_helper.resolve_bone_from_mapping(
-        raw_bone_name, bone_mapping_ci=pb_bone_mapping_ci
-    )
-    if direct_pb is not None:
-        return direct_pb
-
-    resolved_arm_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(raw_bone_name)
-    if resolved_arm_finger is not None:
-        return resolved_arm_finger
-
-    norm_key = modular_avatar_helper.normalize_bone_match_key(raw_bone_name)
-    humanoid_table = {
-        "hips": "SKEL_Pelvis",
-        "spine": "SKEL_Spine1",
-        "chest": "SKEL_Spine2",
-        "upperchest": "SKEL_Spine3",
-        "neck": "SKEL_Neck_1",
-        "head": "SKEL_Head",
-        "eye_l": "SKEL_Head",
-        "eye_r": "SKEL_Head",
-        "jaw": "SKEL_Head",
-        "shoulder_l": "SKEL_L_Clavicle",
-        "shoulder_r": "SKEL_R_Clavicle",
-        "upperarm_l": "SKEL_L_UpperArm",
-        "upperarm_r": "SKEL_R_UpperArm",
-        "arm_l": "SKEL_L_UpperArm",
-        "arm_r": "SKEL_R_UpperArm",
-        "lowerarm_l": "SKEL_L_Forearm",
-        "lowerarm_r": "SKEL_R_Forearm",
-        "hand_l": "SKEL_L_Hand",
-        "hand_r": "SKEL_R_Hand",
-        "upperleg_l": "SKEL_L_Thigh",
-        "upperleg_r": "SKEL_R_Thigh",
-        "leg_l": "SKEL_L_Thigh",
-        "leg_r": "SKEL_R_Thigh",
-        "lowerleg_l": "SKEL_L_Calf",
-        "lowerleg_r": "SKEL_R_Calf",
-        "foot_l": "SKEL_L_Foot",
-        "foot_r": "SKEL_R_Foot",
-        "toe_l": "SKEL_L_Toe0",
-        "toe_r": "SKEL_R_Toe0",
-        "toebase_l": "SKEL_L_Toe0",
-        "toebase_r": "SKEL_R_Toe0",
-    }
-    if norm_key in humanoid_table:
-        return humanoid_table[norm_key]
-
-    if "hair" in low_name or "ear" in low_name or "cheek" in low_name:
+    low_mesh = str(mesh_name or "").strip().lower()
+    if any(
+        tok in low_name
+        for tok in ("hair", "ear", "cheek", "bang", "aho", "halo", "beret", "glasses", "pocky")
+    ) or any(low_name.startswith(pref) for pref in ("back.", "back_", "side.", "side_", "un_hat")):
         return "SKEL_Head"
-    if "breast" in low_name or "oppai" in low_name or "bust" in low_name or "ribbon" in low_name:
+    if "ribbon" in low_name:
+        if "hair" in low_mesh or low_mesh == "ribbon":
+            return "SKEL_Head"
+        return "SKEL_Spine2"
+    if "breast" in low_name or "oppai" in low_name or "bust" in low_name:
         return "SKEL_Spine2"
     if "skirt" in low_name or "tail" in low_name or "coat" in low_name:
         return "SKEL_Pelvis"
-    if any(tok in mesh_name.lower() for tok in ("hair", "kemomimi", "ear", "head")):
+    if any(
+        tok in low_mesh
+        for tok in ("hair", "kemomimi", "ear", "head", "bang", "top back", "under side", "beret", "halo", "glasses", "pocky")
+    ) or low_mesh in ("back", "side"):
         return "SKEL_Head"
     return "SKEL_Pelvis"
 

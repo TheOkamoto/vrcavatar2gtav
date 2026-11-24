@@ -832,20 +832,21 @@ def build_universal_avatar_atlas(
     normal_canvas.save(normal_png_path, format="PNG")
     spec_img.save(spec_png_path, format="PNG")
 
+    # Build single-texture external .ytd matching vanilla GTA V streamed ped layout
+    # so DiffuseSampler (index 0) always binds the diffuse atlas reliably in-game.
+    # Bump/Spec maps remain saved on disk for embedded .ydd shader export.
     build_cmd = npc_registry_helper.build_safe_rage_cmd(
         "textures",
         "build",
         "-o",
         str(ytd_path),
         str(atlas_png_path),
-        str(spec_png_path),
-        str(normal_png_path),
     )
     subprocess.run(build_cmd, stdin=subprocess.DEVNULL, check=True)
     ped_damage_helper.enforce_ytd_rpf7_size_budget(
         project_paths.get_rage_cli(),
         ytd_path,
-        [atlas_png_path, spec_png_path, normal_png_path],
+        [atlas_png_path],
     )
     ped_damage_helper.validate_rpf7_resource_file(ytd_path)
 

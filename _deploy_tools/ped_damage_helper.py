@@ -206,6 +206,7 @@ def configure_ped_shader_material(
     diffuse_image: Any = None,
     bump_image: Any = None,
     spec_image: Any = None,
+    embed_bump_spec: bool = False,
     bumpiness: float = 0.0,
     specular_intensity: float = 0.0,
     specular_falloff: float = 1.0,
@@ -220,12 +221,12 @@ def configure_ped_shader_material(
         return shader_material
 
     sampler_images = (
-        ("DiffuseSampler", diffuse_image),
-        ("BumpSampler", bump_image),
-        ("SpecSampler", spec_image),
-        ("AnisoNoiseSpecSampler", spec_image),
+        ("DiffuseSampler", diffuse_image, False),
+        ("BumpSampler", bump_image, bool(embed_bump_spec)),
+        ("SpecSampler", spec_image, bool(embed_bump_spec)),
+        ("AnisoNoiseSpecSampler", spec_image, bool(embed_bump_spec)),
     )
-    for sampler_name, image_obj in sampler_images:
+    for sampler_name, image_obj, should_embed in sampler_images:
         if image_obj is None:
             continue
         tex_node = node_tree.nodes.get(sampler_name)
@@ -233,7 +234,7 @@ def configure_ped_shader_material(
             tex_node.image = image_obj
             tex_props = getattr(tex_node, "texture_properties", None)
             if tex_props is not None:
-                tex_props.embedded = False
+                tex_props.embedded = should_embed
 
     def _assign_shader_vec4(target_node: Any, vec_vals: Tuple[float, float, float, float]) -> None:
         out_len = len(getattr(target_node, "outputs", ()))
@@ -293,6 +294,7 @@ def create_ped_material(
     diffuse_image: Any = None,
     bump_image: Any = None,
     spec_image: Any = None,
+    embed_bump_spec: bool = False,
     bumpiness: float = 0.0,
     specular_intensity: float = 0.0,
     specular_falloff: float = 1.0,
@@ -310,6 +312,7 @@ def create_ped_material(
         diffuse_image=diffuse_image,
         bump_image=bump_image,
         spec_image=spec_image,
+        embed_bump_spec=embed_bump_spec,
         bumpiness=bumpiness,
         specular_intensity=specular_intensity,
         specular_falloff=specular_falloff,

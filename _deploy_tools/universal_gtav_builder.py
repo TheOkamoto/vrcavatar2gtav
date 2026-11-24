@@ -519,9 +519,19 @@ def run_in_blender_build(manifest_path: Path) -> None:
             for poly_elem in new_obj.data.polygons:
                 poly_elem.material_index = 0
 
+        src_parent_lookup = {
+            bone_item.name.lower(): bone_item.parent.name
+            for bone_item in src_armature.data.bones
+            if bone_item.parent is not None
+        }
         vgroup_names_by_idx = {vgrp.index: vgrp.name for vgrp in src_obj.vertex_groups}
         vgroup_target_names = {
-            vgrp.index: _resolve_universal_target_bone(vgrp.name, src_obj.name, pb_bmap_ci)
+            vgrp.index: _resolve_universal_target_bone(
+                vgrp.name,
+                src_obj.name,
+                pb_bmap_ci,
+                src_parent_lookup=src_parent_lookup,
+            )
             for vgrp in src_obj.vertex_groups
         }
 
@@ -549,7 +559,12 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     vgroup = new_obj.vertex_groups.get(tgt_name) or new_obj.vertex_groups.new(name=tgt_name)
                     vgroup.add([new_idx], weight_val / total_w, "ADD")
             else:
-                def_bone = "SKEL_Head" if src_obj == body_obj or "hair" in src_obj.name.lower() else "SKEL_Pelvis"
+                low_src_nm = src_obj.name.lower()
+                is_head_mesh = src_obj == body_obj or any(
+                    tok in low_src_nm
+                    for tok in ("hair", "back", "side", "bang", "beret", "halo", "ear", "glasses", "pocky")
+                )
+                def_bone = "SKEL_Head" if is_head_mesh else "SKEL_Pelvis"
                 vgroup = new_obj.vertex_groups.get(def_bone) or new_obj.vertex_groups.new(name=def_bone)
                 vgroup.add([new_idx], 1.0, "REPLACE")
 
@@ -629,6 +644,29 @@ def run_in_blender_build(manifest_path: Path) -> None:
             f"[PhysBones] Injected {len(custom_physbones)} bones ({len(physbone_chain_records)} chains) for {ped_name}",
             flush=True,
         )
+
+    # Guarantee no remapped vertex group references a skipped/missing PB_* bone.
+    target_bones_ci = {bname.lower(): bname for bname in target_bones}
+    pb_fallback_parents: Dict[str, str] = {}
+    for _c_key, _c_gtav, _c_src_b, _c_gtav_b in pb_chain_specs:
+        par_cand = pb_parent_map.get(_c_gtav_b[0], "SKEL_Pelvis") if _c_gtav_b else "SKEL_Pelvis"
+        resolved_par = target_bones_ci.get(par_cand.lower(), "SKEL_Pelvis")
+        for gt_bone_nm in _c_gtav_b:
+            pb_fallback_parents[gt_bone_nm.lower()] = resolved_par
+    for proc_obj in processed_objs:
+        missing_vgrps = [
+            vgrp for vgrp in list(proc_obj.vertex_groups)
+            if vgrp.name.lower() not in target_bones_ci and vgrp.name.startswith("PB_")
+        ]
+        for miss_vg in missing_vgrps:
+            fb_bone_name = pb_fallback_parents.get(miss_vg.name.lower(), "SKEL_Pelvis")
+            fb_vg = proc_obj.vertex_groups.get(fb_bone_name) or proc_obj.vertex_groups.new(name=fb_bone_name)
+            miss_idx = miss_vg.index
+            for vert_elem in proc_obj.data.vertices:
+                for grp_elem in vert_elem.groups:
+                    if grp_elem.group == miss_idx and grp_elem.weight > 0.0:
+                        fb_vg.add([vert_elem.index], grp_elem.weight, "ADD")
+            proc_obj.vertex_groups.remove(miss_vg)
 
     custom_blink_bones = []
     blink_profiles_to_merge = []
@@ -773,6 +811,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         diffuse_image=atlas_img,
         bump_image=norm_img,
         spec_image=spec_img,
+        embed_bump_spec=True,
         bumpiness=0.0,
         specular_intensity=0.0,
         specular_falloff=1.0,
@@ -806,6 +845,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     diffuse_image=atlas_img,
                     bump_image=norm_img,
                     spec_image=spec_img,
+                    embed_bump_spec=True,
                 )
             joined_mesh_obj.data.materials[slot_idx] = alpha_shader_mat
         elif alpha_mode == "cutout":
@@ -816,6 +856,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     diffuse_image=atlas_img,
                     bump_image=norm_img,
                     spec_image=spec_img,
+                    embed_bump_spec=True,
                 )
             joined_mesh_obj.data.materials[slot_idx] = cutout_shader_mat
         else:

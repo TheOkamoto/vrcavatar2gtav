@@ -1255,10 +1255,23 @@ def _resize_extracted_png_for_budget(
         )
         return
 
+    try:
+        import vtoon_profile_helper
+    except ImportError:
+        from common_tools import vtoon_profile_helper
+
+    detected_vtoon_id = vtoon_profile_helper.decode_vtoon_watermark_block(rgba_img)
     target_w = min(rgba_img.width, max_diffuse_px)
     target_h = min(rgba_img.height, max_diffuse_px)
     if target_w != rgba_img.width or target_h != rgba_img.height:
         rgba_img = rgba_img.resize((target_w, target_h), lanczos_filter)
+        if detected_vtoon_id > 0 and target_w >= 16 and target_h >= 16:
+            rgba_img = vtoon_profile_helper.stamp_vtoon_watermark_block(
+                rgba_img, detected_vtoon_id
+            )
+        arr_u8 = np_lib.array(rgba_img)
+    elif detected_vtoon_id > 0:
+        rgba_img = vtoon_profile_helper.stamp_vtoon_watermark_block(rgba_img, detected_vtoon_id)
         arr_u8 = np_lib.array(rgba_img)
     alpha_min = int(arr_u8[:, :, 3].min())
     out_img = rgba_img.convert("RGB") if alpha_min >= 254 else rgba_img
