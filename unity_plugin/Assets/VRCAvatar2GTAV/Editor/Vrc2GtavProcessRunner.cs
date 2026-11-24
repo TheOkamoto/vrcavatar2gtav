@@ -19,7 +19,14 @@ namespace Vrc2Gtav.Editor
     internal sealed class Vrc2GtavProcessRunner : IDisposable
     {
         private const int MaxLogLines = 3500;
-        private static readonly Regex StepFractionRegex = new Regex(@"\[(\d+)/(\d+)\]", RegexOptions.Compiled);
+        private static readonly Regex ExplicitProgressRegex = new Regex(@"^\[PROGRESS\s+pct=([0-9]+(?:\.[0-9]+)?)\]\s*(.*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly Regex StageBannerRegex = new Regex(@"^\[(?:STAGE|ETAPA|段階)\s+(\d+)/(\d+)\][^|]*\|\s*(.+)$", RegexOptions.Compiled);
+        private static readonly Regex SubPercentRegex = new Regex(@"(\d{1,3}(?:\.\d+)?)%", RegexOptions.Compiled);
+        private static readonly Regex TopLevelStepRegex = new Regex(@"^\s*\[(\d+)/(\d+)\]\s*(.+)$", RegexOptions.Compiled);
+        private bool _hasExplicitProgress, _hasSeenBuildProgress;
+        private float _deployFloor;
+        private int _deployCurStage, _deployTotalStages;
+        private string _activeDeployLabel = string.Empty;
 
         private readonly ConcurrentQueue<string> _pendingLines = new ConcurrentQueue<string>();
         private readonly List<string> _logLines = new List<string>();
@@ -57,6 +64,12 @@ namespace Vrc2Gtav.Editor
             WasCancelled = false;
             LastExitCode = 0;
             Progress = 0.02f;
+            _hasExplicitProgress = false;
+            _hasSeenBuildProgress = false;
+            _deployFloor = 0.04f;
+            _deployCurStage = 0;
+            _deployTotalStages = 0;
+            _activeDeployLabel = string.Empty;
             IsRunning = true;
 
             EnsureSubscribed();
@@ -254,32 +267,67 @@ namespace Vrc2Gtav.Editor
         private void UpdateProgressFromLogLine(string line)
         {
             if (string.IsNullOrEmpty(line)) return;
-            Match m = StepFractionRegex.Match(line);
-            if (m.Success
-                && int.TryParse(m.Groups[1].Value, out int cur)
-                && int.TryParse(m.Groups[2].Value, out int total)
-                && total > 0)
+            string trimmed = line.Trim();
+
+            Match pm = ExplicitProgressRegex.Match(trimmed);
+            if (pm.Success && float.TryParse(pm.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float rawPct))
             {
-                Progress = Math.Max(Progress, Math.Min(0.96f, (float)cur / total * 0.9f));
-                StatusLine = line.Trim();
+                _hasExplicitProgress = true;
+                if (rawPct < 82.0f) _hasSeenBuildProgress = true;
+                Progress = Math.Max(Progress, Math.Max(0.01f, Math.Min(0.995f, rawPct / 100f)));
+                string statusText = pm.Groups[2].Value.Trim();
+                if (!string.IsNullOrEmpty(statusText)) StatusLine = statusText;
                 return;
             }
 
-            if (line.IndexOf("[RPF]", StringComparison.OrdinalIgnoreCase) >= 0)
+            Match sm = StageBannerRegex.Match(trimmed);
+            if (sm.Success && int.TryParse(sm.Groups[1].Value, out int stCur) && int.TryParse(sm.Groups[2].Value, out int stTotal) && stTotal > 0)
             {
-                Progress = Math.Max(Progress, 0.85f);
-                StatusLine = line.Trim();
+                if (_deployTotalStages != stTotal || _deployCurStage == 0) _deployFloor = _hasSeenBuildProgress ? 0.82f : Math.Max(0.04f, Progress);
+                _deployCurStage = stCur;
+                _deployTotalStages = stTotal;
+                string title = sm.Groups[3].Value.Trim();
+                int pIdx = title.LastIndexOf('(');
+                if (pIdx > 2 && title.EndsWith(")", StringComparison.Ordinal)) title = title.Substring(0, pIdx).Trim();
+                _activeDeployLabel = title;
+                Progress = Math.Max(Progress, Math.Min(0.985f, _deployFloor + ((float)(stCur - 1) / stTotal) * (0.99f - _deployFloor)));
+                StatusLine = title;
+                return;
             }
-            else if (line.IndexOf("[Blender", StringComparison.OrdinalIgnoreCase) >= 0)
+
+            if (trimmed.StartsWith("[PROGRESS", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[PROGRESSO", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[進捗", StringComparison.Ordinal))
             {
-                Progress = Math.Max(Progress, 0.55f);
-                StatusLine = line.Trim();
+                Progress = Math.Max(Progress, 0.99f);
+                StatusLine = trimmed;
+                return;
             }
-            else if (line.IndexOf("[VToon]", StringComparison.OrdinalIgnoreCase) >= 0)
+
+            if (_deployTotalStages > 0)
             {
-                Progress = Math.Max(Progress, 0.40f);
-                StatusLine = line.Trim();
+                Match subM = SubPercentRegex.Match(trimmed);
+                if (subM.Success && float.TryParse(subM.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float subPct))
+                {
+                    float span = 0.99f - _deployFloor;
+                    float s0 = _deployFloor + ((float)(_deployCurStage - 1) / _deployTotalStages) * span;
+                    float s1 = _deployFloor + ((float)_deployCurStage / _deployTotalStages) * span;
+                    Progress = Math.Max(Progress, Math.Min(0.99f, s0 + Math.Max(0f, Math.Min(1f, subPct / 100f)) * (s1 - s0)));
+                    if (!string.IsNullOrEmpty(_activeDeployLabel)) StatusLine = _activeDeployLabel + " (" + ((int)Math.Round(subPct)).ToString(CultureInfo.InvariantCulture) + "%)";
+                    return;
+                }
             }
+
+            Match m = TopLevelStepRegex.Match(trimmed);
+            if (m.Success && int.TryParse(m.Groups[1].Value, out int cur) && int.TryParse(m.Groups[2].Value, out int total) && total > 0)
+            {
+                if (!_hasExplicitProgress) { Progress = Math.Max(Progress, Math.Min(0.96f, (float)cur / total * 0.9f)); StatusLine = trimmed; }
+                return;
+            }
+
+            if (trimmed.IndexOf("[RPF]", StringComparison.OrdinalIgnoreCase) >= 0) { Progress = Math.Max(Progress, _hasSeenBuildProgress ? 0.85f : 0.70f); StatusLine = trimmed; }
+            else if (trimmed.StartsWith("--- ", StringComparison.Ordinal) && trimmed.IndexOf("RPF7", StringComparison.OrdinalIgnoreCase) >= 0) { Progress = Math.Max(Progress, Math.Min(0.98f, Math.Max(_hasSeenBuildProgress ? 0.84f : 0.65f, Progress + 0.02f))); StatusLine = trimmed.Trim('-', ' '); }
+            else if (trimmed.IndexOf("INFO: Starting export", StringComparison.OrdinalIgnoreCase) >= 0) { if (!_hasExplicitProgress) Progress = Math.Max(Progress, 0.72f); if (string.IsNullOrEmpty(StatusLine) || StatusLine.IndexOf("[VToon]", StringComparison.OrdinalIgnoreCase) >= 0 || StatusLine.IndexOf("[4/4]", StringComparison.OrdinalIgnoreCase) >= 0) StatusLine = "Exporting .ydd mesh via Sollumz..."; }
+            else if (trimmed.IndexOf("[YFT]", StringComparison.OrdinalIgnoreCase) >= 0 || (trimmed.IndexOf("[PhysBones]", StringComparison.OrdinalIgnoreCase) >= 0 && trimmed.IndexOf("Merged", StringComparison.OrdinalIgnoreCase) >= 0)) { if (!_hasExplicitProgress) { Progress = Math.Max(Progress, 0.80f); StatusLine = trimmed; } }
+            else if (!_hasExplicitProgress && trimmed.IndexOf("[Blender", StringComparison.OrdinalIgnoreCase) >= 0) { Progress = Math.Max(Progress, 0.55f); StatusLine = trimmed; }
         }
 
         private static void KillProcessTree(Process proc)

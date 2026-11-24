@@ -37,6 +37,10 @@ try:
     _select_main_fbx,
     _pick_default_face_anim,
     prepare_universal_npc_build,
+    compute_overall_progress_pct,
+    emit_progress_status,
+    emit_slot_progress,
+    resolve_progress_text,
     _find_humanoid_bone,
     _compute_target_yft_pose_metrics,
     _pose_avatar_arms_to_gtav_a_pose,
@@ -57,6 +61,10 @@ except ImportError:
     _select_main_fbx,
     _pick_default_face_anim,
     prepare_universal_npc_build,
+    compute_overall_progress_pct,
+    emit_progress_status,
+    emit_slot_progress,
+    resolve_progress_text,
     _find_humanoid_bone,
     _compute_target_yft_pose_metrics,
     _pose_avatar_arms_to_gtav_a_pose,
@@ -123,6 +131,24 @@ def run_in_blender_build(manifest_path: Path) -> None:
     from sollumz.ydr.shader_materials import create_shader
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prog_meta = manifest.get("progress") if isinstance(manifest.get("progress"), dict) else {}
+    prog_slot_idx = int(prog_meta.get("slot_index", 0) or 0)
+    prog_slot_total = max(1, int(prog_meta.get("slot_total", 1) or 1))
+    prog_build_share = float(prog_meta.get("build_share", 0.82 if manifest.get("deploy", True) else 0.98) or 0.82)
+    prog_lang = str(prog_meta.get("lang") or "")
+
+    def _emit_blender(slot_frac: float, stage_key: str, extra: str = "") -> None:
+        emit_slot_progress(
+            slot_frac,
+            stage_key,
+            slot_index=prog_slot_idx,
+            slot_total=prog_slot_total,
+            build_share=prog_build_share,
+            ped_name=ped_name,
+            lang=prog_lang,
+            extra=extra,
+        )
+
     ped_name = str(manifest["ped_name"])
     ped_format = str(manifest["ped_format"])
     skeleton_yft_path = project_paths.to_host_path(manifest["skeleton_yft"])
@@ -274,6 +300,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     if src_armature is None:
         raise RuntimeError(f"Could not find imported avatar armature in {source_fbx}")
 
+    _emit_blender(0.45, "blender_import")
     if ma_plan.get("loaded"):
         modular_avatar_helper.apply_modular_avatar_plan_in_blender(
             bpy,
@@ -771,6 +798,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 mesh_uvs.remove(extra_uv)
         primary_uv.name = "UVMap 0"
 
+    _emit_blender(0.54, "blender_weights")
     conformed_cloth_verts = conform_tight_torso_clothing_weights(
         processed_objs, ped_armature
     )
@@ -977,6 +1005,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     )
 
     # Save debuggable assembled .blend before Sollumz export
+    _emit_blender(0.62, "blender_damage")
     assembled_blend = project_paths.to_host_path(manifest["assembled_blend"])
     assembled_blend.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(assembled_blend))
@@ -996,6 +1025,10 @@ def run_in_blender_build(manifest_path: Path) -> None:
     ) -> None:
         ydd_out = Path(exported_dir) / f"{target_ydd_name}.ydd"
         for attempt_idx in range(3):
+            if attempt_idx == 0:
+                _emit_blender(0.68, "blender_export")
+            else:
+                _emit_blender(min(0.86, 0.72 + 0.06 * attempt_idx), "blender_retry")
             bpy.ops.object.select_all(action="DESELECT")
             dict_empty.select_set(True)
             bpy.context.view_layer.objects.active = dict_empty
@@ -1130,6 +1163,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         custom_child_bones=all_custom_yft_bones or None,
     )
     ped_damage_helper.validate_rpf7_resource_file(yft_output_path)
+    _emit_blender(0.90, "yft_patch")
     print(
         f"[YFT] Exported {yft_output_path.name}: {updated_cnt}/{total_cnt} bones, max delta {max_delta:.6f}m",
         flush=True,
@@ -1197,11 +1231,15 @@ def build_and_deploy_npc_from_source(
     normal_size: int = 0,
     secondary_atlas_size: int = 0,
     texture_overrides: Optional[Dict[str, str]] = None,
+    slot_index: int = 0,
+    slot_total: int = 1,
+    build_share: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Full end-to-end build pipeline: Ingest -> Atlas -> Blender -> Apply -> Deploy."""
     import npc_registry_helper
     import vrc2gtav_paths as project_paths
 
+    eff_build_share = float(build_share) if build_share is not None else (0.82 if deploy else 0.98)
     manifest = prepare_universal_npc_build(
         source_spec=source_spec,
         target_ped=target_ped,
@@ -1225,8 +1263,19 @@ def build_and_deploy_npc_from_source(
         secondary_atlas_size=secondary_atlas_size,
         texture_overrides=texture_overrides,
         deploy=deploy,
+        slot_index=slot_index,
+        slot_total=slot_total,
+        build_share=eff_build_share,
     )
 
+    emit_slot_progress(
+        0.40,
+        "blender_start",
+        slot_index=slot_index,
+        slot_total=slot_total,
+        build_share=eff_build_share,
+        ped_name=manifest["ped_name"],
+    )
     print("[4/4] Running Blender 4.0.2 + Sollumz build...", flush=True)
     blender_bin = str(project_paths.to_host_path(project_paths.get_blender_exe()) or "")
     use_win_paths = blender_bin.lower().endswith(".exe") and os.name != "nt"
@@ -1252,13 +1301,32 @@ def build_and_deploy_npc_from_source(
             manifest["ped_name"], npc_entry
         )
         manifest["apply_summary"] = apply_summary
+        emit_slot_progress(
+            0.98,
+            "slot_done",
+            slot_index=slot_index,
+            slot_total=slot_total,
+            build_share=eff_build_share,
+            ped_name=manifest["ped_name"],
+        )
         if repack_archives:
+            emit_progress_status(82.5, "rpf_deploy")
             deployed_rpfs = npc_registry_helper.repack_and_deploy_npc_entry(
                 manifest["ped_name"],
                 npc_entry,
                 secondary_atlas_size=secondary_atlas_size,
             )
             manifest["deployed_rpfs"] = [str(pth) for pth in deployed_rpfs]
+            emit_progress_status(99.5, "rpf_done")
+    else:
+        emit_slot_progress(
+            0.98,
+            "slot_done",
+            slot_index=slot_index,
+            slot_total=slot_total,
+            build_share=eff_build_share,
+            ped_name=manifest["ped_name"],
+        )
     return manifest
 
 
@@ -1405,6 +1473,8 @@ def _cli_main() -> int:
         raise ValueError("--target-ped must specify at least one target")
 
     built_peds: List[str] = []
+    ped_total = max(1, len(ped_targets))
+    cli_build_share = 0.82 if should_repack else 0.98
     for idx_ped, ped_slot in enumerate(ped_targets):
         result = build_and_deploy_npc_from_source(
             source_spec=parsed.source,
@@ -1430,17 +1500,30 @@ def _cli_main() -> int:
             normal_size=resolved_normal_size,
             secondary_atlas_size=resolved_secondary_atlas_size,
             texture_overrides=resolved_tex_overrides or None,
+            slot_index=idx_ped,
+            slot_total=ped_total,
+            build_share=cli_build_share,
         )
         built_peds.append(str(result["ped_name"]))
         print(f"[DONE] Build complete: {result['ped_name']} -> {result['avatar_name']}", flush=True)
+        emit_slot_progress(
+            0.98,
+            "slot_done",
+            slot_index=idx_ped,
+            slot_total=ped_total,
+            build_share=cli_build_share,
+            ped_name=str(result["ped_name"]),
+        )
 
     if should_repack and built_peds:
         import restore_vanilla_helper
 
+        emit_progress_status(82.5, "rpf_deploy")
         restore_vanilla_helper.repack_and_deploy_built_peds(
             built_peds,
             secondary_atlas_size=resolved_secondary_atlas_size,
         )
+        emit_progress_status(99.5, "rpf_done")
     return 0
 
 

@@ -269,6 +269,13 @@ def repack_and_deploy_built_peds(
         for key_ped, val_entry in registry_entries.items():
             reg_npcs.setdefault(key_ped, val_entry)
 
+    try:
+        import universal_gtav_rigging_layer as rigging_layer_mod
+
+        rigging_layer_mod.emit_progress_status(82.5, "rpf_deploy")
+    except Exception:
+        rigging_layer_mod = None
+
     last_ped = unique_peds[-1]
     deployed_list = npc_registry_helper.repack_and_deploy_npc_entry(
         last_ped,
@@ -329,6 +336,8 @@ def repack_and_deploy_built_peds(
             deployed_list.append(dlc_game)
             deployed_set.add(str(dlc_game.resolve()))
 
+    if rigging_layer_mod is not None:
+        rigging_layer_mod.emit_progress_status(99.5, "rpf_done")
     return deployed_list
 
 
@@ -471,7 +480,17 @@ def run_multi_slot_builds(
                 continue
             merged_defaults[default_key] = default_val
 
+    import inspect
+    import universal_gtav_rigging_layer as rigging_layer_mod
+
     executor = build_fn or universal_gtav_builder.build_and_deploy_npc_from_source
+    exec_params = inspect.signature(executor).parameters
+    accepts_slot_meta = "slot_index" in exec_params or any(
+        param_obj.kind == inspect.Parameter.VAR_KEYWORD for param_obj in exec_params.values()
+    )
+    will_deploy_multi = bool(deploy and repack_and_deploy)
+    multi_build_share = 0.82 if will_deploy_multi else 0.98
+    total_slots = max(1, len(parsed_slots))
     results: List[Dict[str, Any]] = []
     built_peds: List[str] = []
 
@@ -480,6 +499,14 @@ def run_multi_slot_builds(
         source_val = str(slot_item.get("source") or merged_defaults.get("source") or "").strip()
         if not target_ped or not source_val:
             raise ValueError(f"Slot #{slot_idx + 1} missing required target_ped or source")
+        rigging_layer_mod.emit_slot_progress(
+            0.01,
+            "ingest",
+            slot_index=slot_idx,
+            slot_total=total_slots,
+            build_share=multi_build_share,
+            ped_name=target_ped,
+        )
         kwargs = {
             "source_spec": source_val,
             "target_ped": target_ped,
@@ -513,6 +540,10 @@ def run_multi_slot_builds(
             ),
             "texture_overrides": slot_item.get("texture_overrides", merged_defaults.get("texture_overrides")),
         }
+        if accepts_slot_meta:
+            kwargs["slot_index"] = slot_idx
+            kwargs["slot_total"] = total_slots
+            kwargs["build_share"] = multi_build_share
         res_manifest = executor(**kwargs)
         results.append(res_manifest)
         built_peds.append(str(res_manifest.get("ped_name") or target_ped))
@@ -521,6 +552,19 @@ def run_multi_slot_builds(
             f"{res_manifest.get('ped_name', target_ped)} -> {res_manifest.get('avatar_name', '')}",
             flush=True,
         )
+        try:
+            import universal_gtav_rigging_layer as rigging_layer_mod
+
+            rigging_layer_mod.emit_slot_progress(
+                0.98,
+                "slot_done",
+                slot_index=slot_idx,
+                slot_total=len(parsed_slots),
+                build_share=0.82 if (deploy and repack_and_deploy) else 0.98,
+                ped_name=str(res_manifest.get("ped_name") or target_ped),
+            )
+        except Exception:
+            pass
 
     if deploy and repack_and_deploy and built_peds:
         explicit_sec_default = (shared_defaults or {}).get("secondary_atlas_size")

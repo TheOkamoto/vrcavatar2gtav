@@ -173,6 +173,165 @@ PROTAGONIST_VTOON_CHAR_IDS: Dict[str, int] = {
     "player_two": 3,
 }
 
+PROTAGONIST_DISPLAY_NAMES: Dict[str, str] = {
+    "player_zero": "Michael",
+    "player_one": "Franklin",
+    "player_two": "Trevor",
+}
+
+_PROGRESS_STAGE_CATALOG: Dict[str, Dict[str, str]] = {
+    "ingest": {
+        "en": "Ingesting avatar source...",
+        "pt": "Carregando avatar de origem...",
+        "ja": "アバターソースを読み込み中...",
+    },
+    "discover": {
+        "en": "Discovering GTA V archive target...",
+        "pt": "Localizando destino no GTA V...",
+        "ja": "GTA V アーカイブを検索中...",
+    },
+    "atlas": {
+        "en": "Compiling texture atlas & .ytd...",
+        "pt": "Compilando atlas de texturas e .ytd...",
+        "ja": "テクスチャアトラスと .ytd を生成中...",
+    },
+    "rig_resolve": {
+        "en": "Resolving blendshapes & PhysBones...",
+        "pt": "Processando expressões e PhysBones...",
+        "ja": "ブレンドシェイプと PhysBones を解析中...",
+    },
+    "blender_start": {
+        "en": "Starting Blender 4.0.2 + Sollumz...",
+        "pt": "Iniciando Blender 4.0.2 + Sollumz...",
+        "ja": "Blender 4.0.2 + Sollumz を起動中...",
+    },
+    "blender_import": {
+        "en": "Importing FBX & aligning pose...",
+        "pt": "Importando FBX e ajustando pose...",
+        "ja": "FBX 読み込み・ポーズ調整中...",
+    },
+    "blender_weights": {
+        "en": "Rigging clothing, facial jaw & blinking...",
+        "pt": "Configurando pesos, boca e piscar...",
+        "ja": "ウェイト・顎・まばたきを設定中...",
+    },
+    "blender_damage": {
+        "en": "Applying PedDamage & saving .blend...",
+        "pt": "Aplicando PedDamage e salvando .blend...",
+        "ja": "PedDamage 適用・.blend 保存中...",
+    },
+    "blender_export": {
+        "en": "Exporting .ydd mesh via Sollumz...",
+        "pt": "Exportando malha .ydd via Sollumz...",
+        "ja": "Sollumz で .ydd メッシュを出力中...",
+    },
+    "blender_retry": {
+        "en": "Optimizing poly budget & retrying .ydd export...",
+        "pt": "Otimizando malha e reexportando .ydd...",
+        "ja": "ポリゴン最適化後に .ydd を再出力中...",
+    },
+    "yft_patch": {
+        "en": "Patching .yft skeleton & PhysBones...",
+        "pt": "Atualizando esqueleto .yft e PhysBones...",
+        "ja": ".yft スケルトンと PhysBones を反映中...",
+    },
+    "slot_done": {
+        "en": "Slot build finished",
+        "pt": "Slot concluído",
+        "ja": "スロット出力完了",
+    },
+    "rpf_deploy": {
+        "en": "Repacking & deploying GTA V archives...",
+        "pt": "Reempacotando e instalando RPFs no GTA V...",
+        "ja": "GTA V RPF アーカイブを再構築・配置中...",
+    },
+    "rpf_done": {
+        "en": "Deployment verified & complete",
+        "pt": "Instalação verificada e concluída",
+        "ja": "配置と検証が完了しました",
+    },
+}
+
+
+def resolve_progress_text(stage_key_or_text: str, *, lang: str = "") -> str:
+    """Resolve a localized stage string for EN/PT/JA progress banners."""
+    import vrc2gtav_i18n as project_i18n
+
+    active_lang = str(lang or "").strip().lower() or project_i18n.get_active_language()
+    entry = _PROGRESS_STAGE_CATALOG.get(str(stage_key_or_text or "").strip())
+    if entry:
+        return entry.get(active_lang) or entry["en"]
+    return str(stage_key_or_text or "").strip()
+
+
+def compute_overall_progress_pct(
+    slot_fraction: float,
+    *,
+    slot_index: int = 0,
+    slot_total: int = 1,
+    build_share: float = 0.82,
+) -> float:
+    """Map per-slot `[0..1]` completion proportionally into overall `0..99%` progress."""
+    total = max(1, int(slot_total))
+    idx = max(0, min(total - 1, int(slot_index)))
+    clamped = max(0.0, min(1.0, float(slot_fraction)))
+    share = max(0.10, min(0.99, float(build_share)))
+    return min(99.0, ((idx + clamped) / total) * share * 100.0)
+
+
+def emit_progress_status(
+    pct: float,
+    stage_key_or_text: str,
+    *,
+    slot_index: int = 0,
+    slot_total: int = 1,
+    ped_name: str = "",
+    lang: str = "",
+    extra: str = "",
+) -> None:
+    """Emit structured `[PROGRESS pct=..]` status line for Unity & CLI progress bars."""
+    clamped_pct = max(0.0, min(99.9, float(pct)))
+    ped_label = PROTAGONIST_DISPLAY_NAMES.get(str(ped_name or "").lower(), ped_name)
+    prefix = ""
+    if int(slot_total) > 1:
+        tag = f"{int(slot_index) + 1}/{int(slot_total)}"
+        prefix = f"[{tag} {ped_label}] " if ped_label else f"[{tag}] "
+    elif ped_label:
+        prefix = f"[{ped_label}] "
+    base_text = resolve_progress_text(stage_key_or_text, lang=lang)
+    full_text = f"{base_text} {extra}".strip() if extra else base_text
+    clean_text = full_text.replace("\r", " ").replace("\n", " ").strip()
+    print(f"[PROGRESS pct={clamped_pct:.1f}] {prefix}{clean_text}", flush=True)
+
+
+def emit_slot_progress(
+    slot_fraction: float,
+    stage_key_or_text: str,
+    *,
+    slot_index: int = 0,
+    slot_total: int = 1,
+    build_share: float = 0.82,
+    ped_name: str = "",
+    lang: str = "",
+    extra: str = "",
+) -> None:
+    """Emit proportional overall `[PROGRESS pct=..]` update for a slot sub-stage."""
+    pct_val = compute_overall_progress_pct(
+        slot_fraction,
+        slot_index=slot_index,
+        slot_total=slot_total,
+        build_share=build_share,
+    )
+    emit_progress_status(
+        pct_val,
+        stage_key_or_text,
+        slot_index=slot_index,
+        slot_total=slot_total,
+        ped_name=ped_name,
+        lang=lang,
+        extra=extra,
+    )
+
 
 def _pick_default_face_anim(
     scan_info: Dict[str, Any],
@@ -219,6 +378,9 @@ def prepare_universal_npc_build(
     secondary_atlas_size: int = 0,
     texture_overrides: Optional[Dict[str, str]] = None,
     deploy: bool = True,
+    slot_index: int = 0,
+    slot_total: int = 1,
+    build_share: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Ingest Unity avatar archive/folder, discover & extract GTA V NPC staging,
@@ -232,12 +394,26 @@ def prepare_universal_npc_build(
     import npc_registry_helper
     import physbone_helper
     import universal_atlas_builder
+    import vrc2gtav_i18n as project_i18n
     import vrc2gtav_paths as project_paths
 
     project_root = project_paths.get_project_root()
     norm_ped = npc_registry_helper.normalize_ped_model_name(target_ped)
     resolved_src = _resolve_source_path(source_spec, project_root)
+    eff_slot_total = max(1, int(slot_total))
+    eff_slot_index = max(0, min(eff_slot_total - 1, int(slot_index)))
+    eff_build_share = float(build_share) if build_share is not None else (0.82 if deploy else 0.98)
+    active_lang = project_i18n.get_active_language()
 
+    emit_slot_progress(
+        0.04,
+        "ingest",
+        slot_index=eff_slot_index,
+        slot_total=eff_slot_total,
+        build_share=eff_build_share,
+        ped_name=norm_ped,
+        lang=active_lang,
+    )
     print(f"[1/4] Ingesting avatar source: {resolved_src}", flush=True)
     scan_info = avatar_archive_helper.ingest_avatar_source(
         resolved_src,
@@ -284,6 +460,15 @@ def prepare_universal_npc_build(
             extra_fbxs.append(cand_fbx)
     all_fbxs = [main_fbx, *extra_fbxs]
 
+    emit_slot_progress(
+        0.14,
+        "discover",
+        slot_index=eff_slot_index,
+        slot_total=eff_slot_total,
+        build_share=eff_build_share,
+        ped_name=norm_ped,
+        lang=active_lang,
+    )
     print(f"[2/4] Discovering target '{norm_ped}' in GTA V archives...", flush=True)
     reg_existing = npc_registry_helper.load_npc_registry(project_root).get("npcs", {}).get(norm_ped)
     cached_location = reg_existing.get("location") if (not force_reextract and isinstance(reg_existing, dict)) else None
@@ -316,6 +501,15 @@ def prepare_universal_npc_build(
     resolved_atlas_size = max(256, min(4096, int(atlas_size or 2048)))
     resolved_normal_size = int(normal_size or 0)
     resolved_secondary_size = int(secondary_atlas_size or 0)
+    emit_slot_progress(
+        0.22,
+        "atlas",
+        slot_index=eff_slot_index,
+        slot_total=eff_slot_total,
+        build_share=eff_build_share,
+        ped_name=norm_ped,
+        lang=active_lang,
+    )
     print(
         f"[3/4] Compiling {resolved_atlas_size}px GTA V Texture Atlas & .ytd "
         f"(VToon char_id={resolved_vtoon_id})...",
@@ -406,6 +600,15 @@ def prepare_universal_npc_build(
     bs_source_eff = str(blendshapes_source or ("unity" if selected_scene_or_prefab else "auto"))
     bs_cfg_host = str(project_paths.to_host_path(blendshapes_cfg)) if blendshapes_cfg else None
     pb_cfg_host = str(project_paths.to_host_path(physbones_cfg)) if physbones_cfg else None
+    emit_slot_progress(
+        0.36,
+        "rig_resolve",
+        slot_index=eff_slot_index,
+        slot_total=eff_slot_total,
+        build_share=eff_build_share,
+        ped_name=norm_ped,
+        lang=active_lang,
+    )
     blendshape_res = blendshape_helper.resolve_character_blendshapes(
         char_pseudo_cfg,
         fbx_paths=[str(pth) for pth in all_fbxs],
@@ -480,6 +683,12 @@ def prepare_universal_npc_build(
         "secondary_atlas_size": resolved_secondary_size,
         "deploy": bool(deploy),
         "ma_plan_path": str(ma_plan_path),
+        "progress": {
+            "slot_index": eff_slot_index,
+            "slot_total": eff_slot_total,
+            "build_share": eff_build_share,
+            "lang": active_lang,
+        },
         "location": npc_location,
         "staging_info": {key: str(val) for key, val in staging_info.items() if isinstance(val, (str, Path))},
     }

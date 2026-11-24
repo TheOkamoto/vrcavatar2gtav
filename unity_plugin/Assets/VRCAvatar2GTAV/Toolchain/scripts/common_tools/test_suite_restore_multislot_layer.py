@@ -1460,6 +1460,93 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
     return hash_sync_ok and auto_tier_ok and full_sec_ok and mips_vtable_ok
 
 
+def _test_multislot_proportional_progress() -> bool:
+    """Verify proportional multi-slot [PROGRESS pct=..] emission and Runner parsing."""
+    import contextlib
+    import io as io_stream
+    import re
+    import restore_vanilla_helper as rvh_mod
+    import universal_gtav_rigging_layer as rl_mod
+
+    pct_slot0 = rl_mod.compute_overall_progress_pct(0.68, slot_index=0, slot_total=3, build_share=0.82)
+    pct_slot1 = rl_mod.compute_overall_progress_pct(0.68, slot_index=1, slot_total=3, build_share=0.82)
+    pct_slot2 = rl_mod.compute_overall_progress_pct(0.68, slot_index=2, slot_total=3, build_share=0.82)
+    math_ok = (15.0 <= pct_slot0 <= 25.0) and (40.0 <= pct_slot1 <= 50.0) and (68.0 <= pct_slot2 <= 78.0)
+
+    captured = io_stream.StringIO()
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp_path = Path(tmp_str)
+        slots_file = tmp_path / "three_slots.json"
+        slots_file.write_text(
+            json.dumps(
+                {
+                    "slots": [
+                        {"target_ped": "player_zero", "source": str(tmp_path / "a.unity"), "avatar_name": "Mini"},
+                        {"target_ped": "player_one", "source": str(tmp_path / "b.unity"), "avatar_name": "Lounge"},
+                        {"target_ped": "player_two", "source": str(tmp_path / "c.unity"), "avatar_name": "Reunion"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        orig_repack_fn = rvh_mod.repack_and_deploy_built_peds
+
+        def _fake_slot_build(**kwargs: Any) -> Dict[str, Any]:
+            slot_idx = int(kwargs.get("slot_index", 0))
+            slot_tot = int(kwargs.get("slot_total", 1))
+            build_share = float(kwargs.get("build_share", 0.82))
+            ped_id = str(kwargs["target_ped"])
+            rl_mod.emit_slot_progress(
+                0.68,
+                "blender_export",
+                slot_index=slot_idx,
+                slot_total=slot_tot,
+                build_share=build_share,
+                ped_name=ped_id,
+            )
+            return {"ped_name": ped_id, "avatar_name": kwargs["avatar_name"]}
+
+        def _fake_repack(built_peds: Any, *, secondary_atlas_size: int = 0) -> List[Path]:
+            rl_mod.emit_progress_status(82.5, "rpf_deploy")
+            rl_mod.emit_progress_status(99.5, "rpf_done")
+            return []
+
+        rvh_mod.repack_and_deploy_built_peds = _fake_repack
+        try:
+            with contextlib.redirect_stdout(captured):
+                rvh_mod.run_multi_slot_builds(
+                    slots_file,
+                    build_fn=_fake_slot_build,
+                    deploy=True,
+                    repack_and_deploy=True,
+                )
+        finally:
+            rvh_mod.repack_and_deploy_built_peds = orig_repack_fn
+
+    out_text = captured.getvalue()
+    pcts = [float(match_val) for match_val in re.findall(r"\[PROGRESS\s+pct=([0-9.]+)\]", out_text)]
+    monotonic_ok = len(pcts) >= 8 and all(pcts[pct_idx] <= pcts[pct_idx + 1] for pct_idx in range(len(pcts) - 1))
+    slots_labeled_ok = (
+        "[1/3 Michael]" in out_text
+        and "[2/3 Franklin]" in out_text
+        and "[3/3 Trevor]" in out_text
+        and pcts[0] < 5.0
+        and max(pcts) >= 99.0
+    )
+
+    runner_path = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavProcessRunner.cs"
+    builder_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "universal_gtav_builder.py").read_text(encoding="utf-8")
+    runner_src = runner_path.read_text(encoding="utf-8") if runner_path.is_file() else ""
+    cs_runner_ok = (not runner_src) or (
+        "ExplicitProgressRegex" in runner_src
+        and "StageBannerRegex" in runner_src
+        and "!_hasExplicitProgress" in runner_src
+        and 'Progress = Math.Max(Progress, 0.40f)' not in runner_src
+        and '"blender_export"' in builder_src
+    )
+    return math_ok and monotonic_ok and slots_labeled_ok and cs_runner_ok
+
+
 def test_restore_and_multislot_regressions() -> bool:
     """Run all regression checks for scoped MA/Atlas, PhysBones isolation, Restore, and Multi-Slot."""
     print("[Restore/MultiSlot] Validating PRUNING, SCOPED ATLAS, PHYSBONES, RESTORE, MULTI-SLOT...")
@@ -1471,6 +1558,7 @@ def test_restore_and_multislot_regressions() -> bool:
     single_tex_pb_ok = _test_single_tex_ytd_and_physbone_unwrap()
     seam_dds_dec_ok = _test_seam_dds_and_torso_decimate()
     vtoon_budget_ok = _test_vtoon_hash_sync_and_budget_tiers()
+    progress_ok = _test_multislot_proportional_progress()
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
     cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
@@ -1479,9 +1567,9 @@ def test_restore_and_multislot_regressions() -> bool:
         and all(len(cs_p.read_text(encoding="utf-8").splitlines()) <= 500 for cs_p in cs_files)
     )
 
-    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and vtoon_budget_ok and cs_ok
+    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and vtoon_budget_ok and progress_ok and cs_ok
     return print_status_result(
         "Restore-Vanilla & Per-Protagonist Multi-Slot Regression Suite",
         all_ok,
-        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, vtoon_budget={vtoon_budget_ok}, csharp={cs_ok}",
+        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, vtoon_budget={vtoon_budget_ok}, progress={progress_ok}, csharp={cs_ok}",
     )
