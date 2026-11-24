@@ -77,11 +77,70 @@ namespace Vrc2Gtav.Editor
                 "2. Destinos no GTA V (Protagonistas)",
                 "2. GTA V 出力先（主人公スロット）"
             },
+            ["sec.avatar_for"] = new[]
+            {
+                "2. Avatar Source - {0}",
+                "2. Avatar de Origem - {0}",
+                "2. アバター選択 - {0}"
+            },
             ["sec.targets_multi"] = new[]
             {
-                "1 & 2. GTA V Protagonists & Avatar Slots",
-                "1 e 2. Protagonistas do GTA V e Slots de Avatar",
-                "1 & 2. GTA V 主人公とアバター割り当て"
+                "1. GTA V Protagonists & Active Slot",
+                "1. Protagonistas do GTA V e Slot Ativo",
+                "1. GTA V 主人公とアクティブスロット"
+            },
+            ["sec.textures_for"] = new[]
+            {
+                "3. Textures & Resolution - {0}",
+                "3. Texturas e Resolução - {0}",
+                "3. テクスチャ・解像度 - {0}"
+            },
+            ["sec.options_for"] = new[]
+            {
+                "4. Export Options - {0}",
+                "4. Opções de Exportação - {0}",
+                "4. エクスポート設定 - {0}"
+            },
+            ["sec.global"] = new[]
+            {
+                "5. Global Execution & CLI",
+                "5. Execução Global e CLI",
+                "5. 全体ビルド・CLI設定"
+            },
+            ["target.short_michael"] = new[] { "Michael", "Michael", "マイケル" },
+            ["target.short_franklin"] = new[] { "Franklin", "Franklin", "フランクリン" },
+            ["target.short_trevor"] = new[] { "Trevor", "Trevor", "トレバー" },
+            ["tex.secondary_res_shared"] = new[]
+            {
+                "Secondary Outfits (Shared x64v RPF)",
+                "Roupas Secundárias (Compartilhado x64v)",
+                "サブ衣装解像度 (共通 x64v RPF)"
+            },
+            ["slot.editing"] = new[]
+            {
+                "Editing independent avatar and options for {0}",
+                "Editando avatar e opções independentes para {0}",
+                "{0} 用の個別アバターと設定を編集中"
+            },
+            ["slot.copy_from"] = new[] { "Copy From...", "Copiar de...", "他からコピー..." },
+            ["slot.copy_all_item"] = new[]
+            {
+                "{0}: Avatar + Options & Textures",
+                "{0}: Avatar + Opções e Texturas",
+                "{0}: アバターと全設定"
+            },
+            ["slot.copy_opts_item"] = new[]
+            {
+                "{0}: Export Options & Textures Only",
+                "{0}: Apenas Opções e Texturas",
+                "{0}: 設定とテクスチャのみ"
+            },
+            ["slot.tab_empty"] = new[] { "No Avatar", "Sem Avatar", "未設定" },
+            ["slot.missing_list"] = new[]
+            {
+                "Assign an avatar for: {0} (select its tab above).",
+                "Falta definir avatar para: {0} (selecione a aba acima).",
+                "アバター未設定: {0}（上のタブで選択してください）。"
             },
             ["target.michael"] = new[]
             {
@@ -306,9 +365,9 @@ namespace Vrc2Gtav.Editor
 
             ["target.per_slot_toggle"] = new[]
             {
-                "Separate Avatar Slot per Protagonist (+1 Scene/File slot per checked character)",
-                "Um Avatar por Personagem (+1 slot na Scene/Arquivo para cada personagem marcado)",
-                "キャラ別アバタースロット（チェックした主人公ごとに1スロット追加）"
+                "Independent Avatar & Options per Protagonist (+1 tab/config per checked character)",
+                "Avatar e Opções Independentes por Personagem (+1 aba/config por personagem marcado)",
+                "主人公ごとに個別アバター・設定を使う（選択キャラごとにタブ追加）"
             },
             ["slot.header"] = new[] { "Avatar Slot for {0}", "Slot de Avatar: {0}", "{0} 用アバタースロット" },
             ["slot.copy_prev"] = new[] { "Copy Above Slot", "Copiar Slot Acima", "上のスロットをコピー" },

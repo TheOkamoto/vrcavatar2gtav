@@ -6,6 +6,7 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEngine;
 
 namespace Vrc2Gtav.Editor
 {
@@ -306,6 +307,132 @@ namespace Vrc2Gtav.Editor
                 if (!proc.HasExited) proc.Kill();
             }
             catch { }
+        }
+    }
+
+    internal static class Vrc2GtavOptionsUi
+    {
+        public static void DrawRestoreVanillaSection(
+            UiLanguageMode langMode,
+            bool isRunning,
+            Action<string, string> onRestoreRequested)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(Vrc2GtavLocalization.Get(langMode, "restore.header"), EditorStyles.boldLabel);
+            GUILayout.Label(Vrc2GtavLocalization.Get(langMode, "restore.desc"), EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.Space(3f);
+
+            string btnMichael = Vrc2GtavLocalization.Get(langMode, "restore.michael");
+            string btnFranklin = Vrc2GtavLocalization.Get(langMode, "restore.franklin");
+            string btnTrevor = Vrc2GtavLocalization.Get(langMode, "restore.trevor");
+            string btnAll = Vrc2GtavLocalization.Get(langMode, "restore.all");
+
+            using (new EditorGUI.DisabledScope(isRunning))
+            {
+                bool narrow = EditorGUIUtility.currentViewWidth < 580f;
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button(btnMichael, GUILayout.Height(24f))) onRestoreRequested?.Invoke("player_zero", btnMichael);
+                if (GUILayout.Button(btnFranklin, GUILayout.Height(24f))) onRestoreRequested?.Invoke("player_one", btnFranklin);
+                if (narrow)
+                {
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.BeginHorizontal();
+                }
+                if (GUILayout.Button(btnTrevor, GUILayout.Height(24f))) onRestoreRequested?.Invoke("player_two", btnTrevor);
+                if (GUILayout.Button(btnAll, GUILayout.Height(24f))) onRestoreRequested?.Invoke("all", btnAll);
+                EditorGUILayout.EndHorizontal();
+            }
+            EditorGUILayout.EndVertical();
+        }
+
+        public static void DrawBlendshapeAndRigOptions(
+            Vrc2GtavSlotProfile profile,
+            Vrc2GtavExportOptions globalOpts,
+            UiLanguageMode langMode,
+            float baseLabelW,
+            ref bool showAdvanced,
+            ref bool showCliPreview,
+            Vrc2GtavToolPaths paths,
+            BackendExecutionMode currentMode,
+            GUIStyle wrapMiniLabelStyle,
+            Action drawMouthOpenRow,
+            Func<ExecutionCommandSpec> buildPreviewSpec,
+            Action<BackendExecutionMode> onBackendModeChanged)
+        {
+            string T(string k) => Vrc2GtavLocalization.Get(langMode, k);
+            if (!globalOpts.PerProtagonistSlots)
+            {
+                globalOpts.DeployToMods = EditorGUILayout.ToggleLeft(T("opt.deploy"), globalOpts.DeployToMods);
+            }
+            profile.ImportFaceBlendshapes = EditorGUILayout.ToggleLeft(T("opt.face_bs"), profile.ImportFaceBlendshapes);
+            profile.ImportBodyBlendshapes = EditorGUILayout.ToggleLeft(T("opt.body_bs"), profile.ImportBodyBlendshapes);
+            profile.EyeBlink = EditorGUILayout.ToggleLeft(T("opt.eye_blink"), profile.EyeBlink);
+            using (new EditorGUI.DisabledScope(!profile.EyeBlink))
+                profile.EyeBlinkStrength = EditorGUILayout.Slider(T("opt.eye_strength"), profile.EyeBlinkStrength, 0f, 1f);
+            drawMouthOpenRow?.Invoke();
+            profile.BloodDecals = EditorGUILayout.ToggleLeft(T("opt.blood_decals"), profile.BloodDecals);
+
+            showAdvanced = EditorGUILayout.Foldout(showAdvanced, T("opt.advanced"), true);
+            if (!showAdvanced) return;
+            EditorGUI.indentLevel++;
+            EditorGUIUtility.labelWidth = baseLabelW + 18f;
+            profile.AvatarNameOverride = EditorGUILayout.TextField(T("opt.avatar_override"), profile.AvatarNameOverride);
+            profile.BlendshapesSourceIdx = EditorGUILayout.Popup(T("opt.bs_source"), profile.BlendshapesSourceIdx, Vrc2GtavCommandBuilder.SourceModes);
+            profile.BlendshapesCfg = Vrc2GtavLogConsoleWidget.DrawPathBrowseRow("Blendshapes .cfg", profile.BlendshapesCfg, string.Empty, true, false, "cfg", T("tools.browse"), paths.RepoRoot);
+            profile.FaceBlendshapesAnim = Vrc2GtavLogConsoleWidget.DrawAnimClipOverrideRow(
+                T("opt.face_anim"), profile.FaceBlendshapesAnim, ref profile.FaceAnimClip,
+                T("tools.browse"), Vrc2GtavConfigDiscovery.GetDefaultUnityAssetsPath(), wrapMiniLabelStyle);
+            profile.PhysbonesSourceIdx = EditorGUILayout.Popup(T("opt.pb_source"), profile.PhysbonesSourceIdx, Vrc2GtavCommandBuilder.SourceModes);
+            profile.PhysbonesCfg = Vrc2GtavLogConsoleWidget.DrawPathBrowseRow("PhysBones .cfg", profile.PhysbonesCfg, string.Empty, true, false, "cfg", T("tools.browse"), paths.RepoRoot);
+            profile.PhysbonesMarshmallow = EditorGUILayout.ToggleLeft(T("opt.marshmallow"), profile.PhysbonesMarshmallow);
+            profile.ForceReextract = EditorGUILayout.ToggleLeft(T("opt.force_reextract"), profile.ForceReextract);
+            if (!globalOpts.PerProtagonistSlots)
+            {
+                DrawBackendAndCliPreview(langMode, paths, currentMode, ref showCliPreview, buildPreviewSpec, onBackendModeChanged);
+            }
+            EditorGUIUtility.labelWidth = baseLabelW;
+            EditorGUI.indentLevel--;
+        }
+
+        public static void DrawGlobalBatchOptions(
+            Vrc2GtavExportOptions globalOpts,
+            UiLanguageMode langMode,
+            Vrc2GtavToolPaths paths,
+            BackendExecutionMode currentMode,
+            ref bool showCliPreview,
+            Func<ExecutionCommandSpec> buildPreviewSpec,
+            Action<BackendExecutionMode> onBackendModeChanged)
+        {
+            string T(string k) => Vrc2GtavLocalization.Get(langMode, k);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(T("sec.global"), EditorStyles.boldLabel);
+            globalOpts.DeployToMods = EditorGUILayout.ToggleLeft(T("opt.deploy"), globalOpts.DeployToMods);
+            DrawBackendAndCliPreview(langMode, paths, currentMode, ref showCliPreview, buildPreviewSpec, onBackendModeChanged);
+            EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawBackendAndCliPreview(
+            UiLanguageMode langMode,
+            Vrc2GtavToolPaths paths,
+            BackendExecutionMode currentMode,
+            ref bool showCliPreview,
+            Func<ExecutionCommandSpec> buildPreviewSpec,
+            Action<BackendExecutionMode> onBackendModeChanged)
+        {
+            string T(string k) => Vrc2GtavLocalization.Get(langMode, k);
+            string[] backendLabels = { "Auto (Detect Windows / WSL)", "Windows Native", "WSL" };
+            EditorGUILayout.BeginHorizontal();
+            var nextMode = (BackendExecutionMode)EditorGUILayout.Popup(T("opt.backend_mode"), (int)currentMode, backendLabels);
+            Vrc2GtavLogConsoleWidget.DrawStatusBadge(Vrc2GtavConfigDiscovery.DetermineShouldUseWsl(paths, currentMode) ? "WSL" : "Win Native", true);
+            EditorGUILayout.EndHorizontal();
+            if (nextMode != currentMode) onBackendModeChanged?.Invoke(nextMode);
+            showCliPreview = EditorGUILayout.Foldout(showCliPreview, T("opt.cli_preview"), true);
+            if (showCliPreview)
+            {
+                ExecutionCommandSpec previewSpec = buildPreviewSpec();
+                if (previewSpec.HasValidationError) EditorGUILayout.HelpBox(previewSpec.ValidationError, MessageType.Error);
+                else EditorGUILayout.TextArea(previewSpec.PreviewCommand, EditorStyles.wordWrappedLabel);
+            }
         }
     }
 }

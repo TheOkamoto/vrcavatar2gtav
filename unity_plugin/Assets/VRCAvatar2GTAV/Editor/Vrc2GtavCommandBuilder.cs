@@ -16,27 +16,9 @@ namespace Vrc2Gtav.Editor
         public bool PerProtagonistSlots;
         public bool UserDisabledPerSlotForMulti;
         public bool UserEnabledPerSlotForSingle;
-
         public bool DeployToMods = true;
-        public bool ImportFaceBlendshapes = true;
-        public bool ImportBodyBlendshapes = true;
-        public bool EyeBlink = true;
-        public float EyeBlinkStrength;
-        public float MouthOpenStrength = 0.35f;
-        public bool BloodDecals = true;
-
-        public string AvatarNameOverride = string.Empty;
-        public int BlendshapesSourceIdx;
-        public int PhysbonesSourceIdx;
-        public string BlendshapesCfg = string.Empty;
-        public string FaceBlendshapesAnim = string.Empty;
-        public string PhysbonesCfg = string.Empty;
-        public bool PhysbonesMarshmallow;
-        public bool ForceReextract;
-
-        public int AtlasResolutionIdx = 2;
-        public int NormalResolutionIdx = 0;
-        public int SecondaryResolutionIdx = 0;
+        public string LastSingleTargetPed = "player_zero";
+        public readonly Vrc2GtavSlotProfile Shared = new Vrc2GtavSlotProfile();
     }
 
     internal static class Vrc2GtavCommandBuilder
@@ -46,19 +28,22 @@ namespace Vrc2Gtav.Editor
         public static readonly int[] NormalResolutions = { 0, 64, 256, 512, 1024 };
         public static readonly int[] SecondaryResolutions = { 0, 512, 1024, 2048 };
 
-        public static int GetAtlasResolution(Vrc2GtavExportOptions opts)
+        public static int GetAtlasResolution(Vrc2GtavSlotProfile prof)
         {
-            return AtlasResolutions[Mathf.Clamp(opts.AtlasResolutionIdx, 0, AtlasResolutions.Length - 1)];
+            int idx = prof != null ? prof.AtlasResolutionIdx : 2;
+            return AtlasResolutions[Mathf.Clamp(idx, 0, AtlasResolutions.Length - 1)];
         }
 
-        public static int GetNormalResolution(Vrc2GtavExportOptions opts)
+        public static int GetNormalResolution(Vrc2GtavSlotProfile prof)
         {
-            return NormalResolutions[Mathf.Clamp(opts.NormalResolutionIdx, 0, NormalResolutions.Length - 1)];
+            int idx = prof != null ? prof.NormalResolutionIdx : 0;
+            return NormalResolutions[Mathf.Clamp(idx, 0, NormalResolutions.Length - 1)];
         }
 
-        public static int GetSecondaryResolution(Vrc2GtavExportOptions opts)
+        public static int GetSecondaryResolution(Vrc2GtavSlotProfile prof)
         {
-            return SecondaryResolutions[Mathf.Clamp(opts.SecondaryResolutionIdx, 0, SecondaryResolutions.Length - 1)];
+            int idx = prof != null ? prof.SecondaryResolutionIdx : 0;
+            return SecondaryResolutions[Mathf.Clamp(idx, 0, SecondaryResolutions.Length - 1)];
         }
 
         public static string BuildTargetPedCsv(Vrc2GtavExportOptions opts)
@@ -87,32 +72,41 @@ namespace Vrc2Gtav.Editor
             return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "");
         }
 
-        private static void AppendSharedExportFlags(
+        private static string NormalizeBackendPath(string value, bool useWsl)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            return useWsl
+                ? Vrc2GtavIniAndWsl.ToWslPathIfWindows(value)
+                : Vrc2GtavIniAndWsl.SanitizePathForWindows(value);
+        }
+
+        private static void AppendProfileExportFlags(
             List<string> args,
             Vrc2GtavToolPaths paths,
-            Vrc2GtavExportOptions opts,
+            Vrc2GtavSlotProfile prof,
+            bool deployToMods,
             UiLanguageMode langMode,
             IReadOnlyDictionary<string, string> textureOverrides)
         {
             args.Add("--lang");
             args.Add(Vrc2GtavLocalization.ToCliLanguageArg(langMode));
-            args.Add(opts.ImportFaceBlendshapes ? "--import-face-blendshapes" : "--no-import-face-blendshapes");
-            args.Add(opts.ImportBodyBlendshapes ? "--import-body-blendshapes" : "--no-import-body-blendshapes");
-            args.Add(opts.EyeBlink ? "--eye-blink" : "--no-eye-blink");
-            args.Add(opts.BloodDecals ? "--blood-decals" : "--no-blood-decals");
+            args.Add(prof.ImportFaceBlendshapes ? "--import-face-blendshapes" : "--no-import-face-blendshapes");
+            args.Add(prof.ImportBodyBlendshapes ? "--import-body-blendshapes" : "--no-import-body-blendshapes");
+            args.Add(prof.EyeBlink ? "--eye-blink" : "--no-eye-blink");
+            args.Add(prof.BloodDecals ? "--blood-decals" : "--no-blood-decals");
             args.Add("--blendshapes-source");
-            args.Add(SourceModes[Mathf.Clamp(opts.BlendshapesSourceIdx, 0, SourceModes.Length - 1)]);
+            args.Add(SourceModes[Mathf.Clamp(prof.BlendshapesSourceIdx, 0, SourceModes.Length - 1)]);
             args.Add("--physbones-source");
-            args.Add(SourceModes[Mathf.Clamp(opts.PhysbonesSourceIdx, 0, SourceModes.Length - 1)]);
+            args.Add(SourceModes[Mathf.Clamp(prof.PhysbonesSourceIdx, 0, SourceModes.Length - 1)]);
             args.Add("--atlas-size");
-            args.Add(GetAtlasResolution(opts).ToString(CultureInfo.InvariantCulture));
-            int normPx = GetNormalResolution(opts);
+            args.Add(GetAtlasResolution(prof).ToString(CultureInfo.InvariantCulture));
+            int normPx = GetNormalResolution(prof);
             if (normPx > 0)
             {
                 args.Add("--normal-size");
                 args.Add(normPx.ToString(CultureInfo.InvariantCulture));
             }
-            int secPx = GetSecondaryResolution(opts);
+            int secPx = GetSecondaryResolution(prof);
             if (secPx > 0)
             {
                 args.Add("--secondary-atlas-size");
@@ -124,25 +118,23 @@ namespace Vrc2Gtav.Editor
                 foreach (var pair in textureOverrides)
                 {
                     if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) continue;
-                    string texArg = useWsl
-                        ? Vrc2GtavIniAndWsl.ToWslPathIfWindows(pair.Value)
-                        : Vrc2GtavIniAndWsl.SanitizePathForWindows(pair.Value);
+                    string texArg = NormalizeBackendPath(pair.Value, useWsl);
                     args.Add("--texture-override");
                     args.Add(pair.Key + "=" + (string.IsNullOrEmpty(texArg) ? pair.Value : texArg));
                 }
             }
-            if (!opts.DeployToMods) args.Add("--no-deploy");
-            if (opts.EyeBlink && opts.EyeBlinkStrength > 0.01f)
+            if (!deployToMods) args.Add("--no-deploy");
+            if (prof.EyeBlink && prof.EyeBlinkStrength > 0.01f)
             {
                 args.Add("--eye-blink-strength");
-                args.Add(opts.EyeBlinkStrength.ToString("0.00", CultureInfo.InvariantCulture));
+                args.Add(prof.EyeBlinkStrength.ToString("0.00", CultureInfo.InvariantCulture));
             }
             args.Add("--mouth-open-strength");
-            args.Add(Mathf.Clamp01(opts.MouthOpenStrength).ToString("0.00", CultureInfo.InvariantCulture));
-            if (opts.PhysbonesMarshmallow) args.Add("--physbones-marshmallow");
-            if (opts.ForceReextract) args.Add("--force-reextract");
-            if (!string.IsNullOrWhiteSpace(opts.BlendshapesCfg)) { args.Add("--blendshapes-cfg"); args.Add(opts.BlendshapesCfg); }
-            if (!string.IsNullOrWhiteSpace(opts.PhysbonesCfg)) { args.Add("--physbones-cfg"); args.Add(opts.PhysbonesCfg); }
+            args.Add(Mathf.Clamp01(prof.MouthOpenStrength).ToString("0.00", CultureInfo.InvariantCulture));
+            if (prof.PhysbonesMarshmallow) args.Add("--physbones-marshmallow");
+            if (prof.ForceReextract) args.Add("--force-reextract");
+            if (!string.IsNullOrWhiteSpace(prof.BlendshapesCfg)) { args.Add("--blendshapes-cfg"); args.Add(prof.BlendshapesCfg); }
+            if (!string.IsNullOrWhiteSpace(prof.PhysbonesCfg)) { args.Add("--physbones-cfg"); args.Add(prof.PhysbonesCfg); }
         }
 
         public static ExecutionCommandSpec BuildExportCommand(
@@ -152,29 +144,80 @@ namespace Vrc2Gtav.Editor
             UiLanguageMode langMode,
             IReadOnlyDictionary<string, string> textureOverrides = null)
         {
+            Vrc2GtavSlotProfile prof = opts.Shared;
             var args = new List<string>
             {
                 "--source", avatar.SourcePath ?? string.Empty,
                 "--target-ped", BuildTargetPedCsv(opts)
             };
-            AppendSharedExportFlags(args, paths, opts, langMode, textureOverrides);
+            AppendProfileExportFlags(args, paths, prof, opts.DeployToMods, langMode, textureOverrides);
 
-            string chosenName = !string.IsNullOrWhiteSpace(opts.AvatarNameOverride)
-                ? opts.AvatarNameOverride.Trim()
+            string chosenName = !string.IsNullOrWhiteSpace(prof.AvatarNameOverride)
+                ? prof.AvatarNameOverride.Trim()
                 : avatar.AvatarName;
             if (!string.IsNullOrWhiteSpace(chosenName))
             {
                 args.Add("--avatar-name");
                 args.Add(chosenName);
             }
-            if (!string.IsNullOrWhiteSpace(opts.FaceBlendshapesAnim))
+            if (!string.IsNullOrWhiteSpace(prof.FaceBlendshapesAnim))
             {
                 args.Add("--face-anim");
-                args.Add(opts.FaceBlendshapesAnim);
+                args.Add(prof.FaceBlendshapesAnim);
             }
 
             return BuildExecutionSpec(
                 paths, paths.BackendMode, "scripts/common_tools/universal_gtav_builder.py", args);
+        }
+
+        private static string BuildSlotJsonEntry(ProtagonistAvatarSlot slot, int sharedSecPx, bool useWsl)
+        {
+            Vrc2GtavSlotProfile prof = slot.Profile ?? new Vrc2GtavSlotProfile();
+            string normSrc = NormalizeBackendPath(slot.Avatar?.SourcePath, useWsl);
+            string avName = !string.IsNullOrWhiteSpace(prof.AvatarNameOverride)
+                ? prof.AvatarNameOverride.Trim()
+                : (slot.Avatar?.AvatarName ?? string.Empty);
+            string bsMode = SourceModes[Mathf.Clamp(prof.BlendshapesSourceIdx, 0, SourceModes.Length - 1)];
+            string pbMode = SourceModes[Mathf.Clamp(prof.PhysbonesSourceIdx, 0, SourceModes.Length - 1)];
+
+            var fields = new List<string>
+            {
+                "\"target_ped\": \"" + EscapeJson(slot.PedModel) + "\"",
+                "\"source\": \"" + EscapeJson(normSrc) + "\"",
+                "\"avatar_name\": \"" + EscapeJson(avName) + "\"",
+                "\"atlas_size\": " + GetAtlasResolution(prof).ToString(CultureInfo.InvariantCulture),
+                "\"normal_size\": " + GetNormalResolution(prof).ToString(CultureInfo.InvariantCulture),
+                "\"secondary_atlas_size\": " + sharedSecPx.ToString(CultureInfo.InvariantCulture),
+                "\"import_face_blendshapes\": " + (prof.ImportFaceBlendshapes ? "true" : "false"),
+                "\"import_body_blendshapes\": " + (prof.ImportBodyBlendshapes ? "true" : "false"),
+                "\"eye_blink\": " + (prof.EyeBlink ? "true" : "false"),
+                "\"mouth_open_strength\": " + Mathf.Clamp01(prof.MouthOpenStrength).ToString("0.00", CultureInfo.InvariantCulture),
+                "\"blood_decals\": " + (prof.BloodDecals ? "true" : "false"),
+                "\"blendshapes_source\": \"" + bsMode + "\"",
+                "\"physbones_source\": \"" + pbMode + "\"",
+                "\"blendshapes_cfg\": \"" + EscapeJson(NormalizeBackendPath(prof.BlendshapesCfg, useWsl)) + "\"",
+                "\"face_anim\": \"" + EscapeJson(NormalizeBackendPath(prof.FaceBlendshapesAnim, useWsl)) + "\"",
+                "\"physbones_cfg\": \"" + EscapeJson(NormalizeBackendPath(prof.PhysbonesCfg, useWsl)) + "\"",
+                "\"physbones_marshmallow\": " + (prof.PhysbonesMarshmallow ? "true" : "false"),
+                "\"force_reextract\": " + (prof.ForceReextract ? "true" : "false")
+            };
+            if (prof.EyeBlink && prof.EyeBlinkStrength > 0.01f)
+            {
+                fields.Add("\"eye_blink_strength\": " + prof.EyeBlinkStrength.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+            var texOvr = slot.Textures?.BuildTextureOverridesMap();
+            if (texOvr != null && texOvr.Count > 0)
+            {
+                var texItems = new List<string>(texOvr.Count);
+                foreach (var pair in texOvr)
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) continue;
+                    string texArg = NormalizeBackendPath(pair.Value, useWsl);
+                    texItems.Add("\"" + EscapeJson(pair.Key) + "\": \"" + EscapeJson(string.IsNullOrEmpty(texArg) ? pair.Value : texArg) + "\"");
+                }
+                if (texItems.Count > 0) fields.Add("\"texture_overrides\": {" + string.Join(", ", texItems) + "}");
+            }
+            return "    {" + string.Join(", ", fields) + "}";
         }
 
         public static ExecutionCommandSpec BuildMultiSlotExportCommand(
@@ -182,35 +225,36 @@ namespace Vrc2Gtav.Editor
             IList<ProtagonistAvatarSlot> activeSlots,
             Vrc2GtavExportOptions opts,
             UiLanguageMode langMode,
-            IReadOnlyDictionary<string, string> textureOverrides = null,
             bool writeManifest = false)
         {
             bool useWsl = Vrc2GtavConfigDiscovery.DetermineShouldUseWsl(paths, paths.BackendMode);
             string baseRepo = useWsl ? paths.RepoRoot : Vrc2GtavIniAndWsl.SanitizePathForWindows(paths.RepoRoot);
             string cfgDir = string.IsNullOrWhiteSpace(baseRepo) ? Path.GetTempPath() : Path.Combine(baseRepo, "configs");
             string slotsJsonPath = Path.Combine(cfgDir, "active_multi_slots.json");
+            int sharedSecPx = GetSecondaryResolution(opts.Shared);
 
             if (writeManifest && activeSlots != null && activeSlots.Count > 0)
             {
                 var slotRows = new List<string>(activeSlots.Count);
                 for (int i = 0; i < activeSlots.Count; i++)
                 {
-                    ProtagonistAvatarSlot slot = activeSlots[i];
-                    string src = slot.Avatar.SourcePath ?? string.Empty;
-                    string normSrc = useWsl ? Vrc2GtavIniAndWsl.ToWslPathIfWindows(src) : Vrc2GtavIniAndWsl.SanitizePathForWindows(src);
-                    string avName = !string.IsNullOrWhiteSpace(slot.AvatarNameOverride) ? slot.AvatarNameOverride.Trim() : slot.Avatar.AvatarName;
-                    string faceAnim = slot.FaceBlendshapesAnim ?? string.Empty;
-                    string normAnim = string.IsNullOrWhiteSpace(faceAnim) ? string.Empty
-                        : (useWsl ? Vrc2GtavIniAndWsl.ToWslPathIfWindows(faceAnim) : Vrc2GtavIniAndWsl.SanitizePathForWindows(faceAnim));
-                    slotRows.Add("    {\"target_ped\": \"" + EscapeJson(slot.PedModel) + "\", \"source\": \"" + EscapeJson(normSrc)
-                        + "\", \"avatar_name\": \"" + EscapeJson(avName) + "\", \"face_anim\": \"" + EscapeJson(normAnim) + "\"}");
+                    slotRows.Add(BuildSlotJsonEntry(activeSlots[i], sharedSecPx, useWsl));
                 }
                 Directory.CreateDirectory(cfgDir);
                 File.WriteAllText(slotsJsonPath, "{\n  \"slots\": [\n" + string.Join(",\n", slotRows) + "\n  ]\n}\n");
             }
 
-            var args = new List<string> { "--slots-json", slotsJsonPath };
-            AppendSharedExportFlags(args, paths, opts, langMode, textureOverrides);
+            var args = new List<string>
+            {
+                "--slots-json", slotsJsonPath,
+                "--lang", Vrc2GtavLocalization.ToCliLanguageArg(langMode)
+            };
+            if (sharedSecPx > 0)
+            {
+                args.Add("--secondary-atlas-size");
+                args.Add(sharedSecPx.ToString(CultureInfo.InvariantCulture));
+            }
+            if (!opts.DeployToMods) args.Add("--no-deploy");
             return BuildExecutionSpec(paths, paths.BackendMode, "scripts/common_tools/universal_gtav_builder.py", args);
         }
 
@@ -417,12 +461,12 @@ namespace Vrc2Gtav.Editor
             if (opts != null)
             {
                 opts.PerProtagonistSlots = EditorPrefs.GetBool(prefix + "PerProtagonistSlots", false);
-                opts.EyeBlinkStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "EyeBlinkStrength", 0f));
-                opts.MouthOpenStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "MouthOpenStrength", 0.35f));
-                opts.FaceBlendshapesAnim = EditorPrefs.GetString(prefix + "FaceBlendshapesAnim", string.Empty);
-                opts.AtlasResolutionIdx = EditorPrefs.GetInt(prefix + "AtlasResIdx", 2);
-                opts.NormalResolutionIdx = EditorPrefs.GetInt(prefix + "NormalResIdx", 0);
-                opts.SecondaryResolutionIdx = EditorPrefs.GetInt(prefix + "SecondaryResIdx", 0);
+                opts.Shared.EyeBlinkStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "EyeBlinkStrength", 0f));
+                opts.Shared.MouthOpenStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "MouthOpenStrength", 0.35f));
+                opts.Shared.FaceBlendshapesAnim = EditorPrefs.GetString(prefix + "FaceBlendshapesAnim", string.Empty);
+                opts.Shared.AtlasResolutionIdx = EditorPrefs.GetInt(prefix + "AtlasResIdx", 2);
+                opts.Shared.NormalResolutionIdx = EditorPrefs.GetInt(prefix + "NormalResIdx", 0);
+                opts.Shared.SecondaryResolutionIdx = EditorPrefs.GetInt(prefix + "SecondaryResIdx", 0);
             }
         }
 
@@ -441,12 +485,12 @@ namespace Vrc2Gtav.Editor
             if (opts != null)
             {
                 EditorPrefs.SetBool(prefix + "PerProtagonistSlots", opts.PerProtagonistSlots);
-                EditorPrefs.SetFloat(prefix + "EyeBlinkStrength", Mathf.Clamp01(opts.EyeBlinkStrength));
-                EditorPrefs.SetFloat(prefix + "MouthOpenStrength", Mathf.Clamp01(opts.MouthOpenStrength));
-                EditorPrefs.SetString(prefix + "FaceBlendshapesAnim", opts.FaceBlendshapesAnim ?? string.Empty);
-                EditorPrefs.SetInt(prefix + "AtlasResIdx", opts.AtlasResolutionIdx);
-                EditorPrefs.SetInt(prefix + "NormalResIdx", opts.NormalResolutionIdx);
-                EditorPrefs.SetInt(prefix + "SecondaryResIdx", opts.SecondaryResolutionIdx);
+                EditorPrefs.SetFloat(prefix + "EyeBlinkStrength", Mathf.Clamp01(opts.Shared.EyeBlinkStrength));
+                EditorPrefs.SetFloat(prefix + "MouthOpenStrength", Mathf.Clamp01(opts.Shared.MouthOpenStrength));
+                EditorPrefs.SetString(prefix + "FaceBlendshapesAnim", opts.Shared.FaceBlendshapesAnim ?? string.Empty);
+                EditorPrefs.SetInt(prefix + "AtlasResIdx", opts.Shared.AtlasResolutionIdx);
+                EditorPrefs.SetInt(prefix + "NormalResIdx", opts.Shared.NormalResolutionIdx);
+                EditorPrefs.SetInt(prefix + "SecondaryResIdx", opts.Shared.SecondaryResolutionIdx);
             }
         }
     }

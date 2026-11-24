@@ -390,6 +390,8 @@ def prepare_universal_npc_build(
         ),
     )
     bs_source_eff = str(blendshapes_source or ("unity" if selected_scene_or_prefab else "auto"))
+    bs_cfg_host = str(project_paths.to_host_path(blendshapes_cfg)) if blendshapes_cfg else None
+    pb_cfg_host = str(project_paths.to_host_path(physbones_cfg)) if physbones_cfg else None
     blendshape_res = blendshape_helper.resolve_character_blendshapes(
         char_pseudo_cfg,
         fbx_paths=[str(pth) for pth in all_fbxs],
@@ -397,7 +399,7 @@ def prepare_universal_npc_build(
         default_face_mesh=active_face_mesh,
         unity_assets_root=assets_root,
         override_source=bs_source_eff,
-        override_cfg_path=blendshapes_cfg or None,
+        override_cfg_path=bs_cfg_host or None,
         override_unity_scene=selected_scene_or_prefab,
         override_avatar_name=effective_avatar_name,
         override_face_anim=face_anim_path,
@@ -413,7 +415,7 @@ def prepare_universal_npc_build(
         character_hints=hints,
         unity_assets_root=assets_root,
         override_source=pb_source_eff,
-        override_cfg_path=physbones_cfg or None,
+        override_cfg_path=pb_cfg_host or None,
         override_unity_scene=selected_scene_or_prefab,
         override_avatar_name=effective_avatar_name,
         override_marshmallow=physbones_marshmallow,

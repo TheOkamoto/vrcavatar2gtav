@@ -355,65 +355,64 @@ namespace Vrc2Gtav.Editor
             };
         }
 
-        public static void SyncFirstSlotFromMain(
+        public static void SyncMainIntoSlot(
             System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
             Vrc2GtavExportOptions opts,
             ResolvedAvatarSource mainAvatar,
-            AnimationClip mainFaceAnimClip = null)
+            Vrc2GtavTexturesPanel mainTextures,
+            string preferredPed = null)
         {
             var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
-            if (enabled.Count == 0 || mainAvatar == null || !mainAvatar.IsValid) return;
-            ProtagonistAvatarSlot first = enabled[0];
-            if (!first.Avatar.IsValid) first.Avatar = CloneSource(mainAvatar);
-            if (string.IsNullOrWhiteSpace(first.AvatarNameOverride) && !string.IsNullOrWhiteSpace(opts?.AvatarNameOverride))
-                first.AvatarNameOverride = opts.AvatarNameOverride;
-            if (string.IsNullOrWhiteSpace(first.FaceBlendshapesAnim) && !string.IsNullOrWhiteSpace(opts?.FaceBlendshapesAnim))
-            {
-                first.FaceBlendshapesAnim = opts.FaceBlendshapesAnim;
-                first.FaceAnimClip = mainFaceAnimClip;
-            }
+            ProtagonistAvatarSlot target = FindSlotByPed(slots, preferredPed) ?? (enabled.Count > 0 ? enabled[0] : null);
+            if (target == null) return;
+            if (mainAvatar != null && mainAvatar.IsValid) target.Avatar = CloneSource(mainAvatar);
+            if (opts?.Shared != null) target.Profile.CopyFrom(opts.Shared);
+            target.Textures.SyncWithAvatar(target.Avatar);
+            if (mainTextures != null) target.Textures.CopyOverridesFrom(mainTextures);
         }
 
-        public static ResolvedAvatarSource SyncMainFromFirstValidSlot(
-            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
+        public static ResolvedAvatarSource SyncSlotIntoMain(
+            ProtagonistAvatarSlot srcSlot,
             Vrc2GtavExportOptions opts,
             ResolvedAvatarSource mainAvatar,
-            ref AnimationClip mainFaceAnimClip)
+            Vrc2GtavTexturesPanel mainTextures)
+        {
+            if (srcSlot == null) return mainAvatar ?? new ResolvedAvatarSource();
+            if (opts?.Shared != null) opts.Shared.CopyFrom(srcSlot.Profile);
+            ResolvedAvatarSource cloned = srcSlot.Avatar.IsValid ? CloneSource(srcSlot.Avatar) : (mainAvatar ?? new ResolvedAvatarSource());
+            if (mainTextures != null)
+            {
+                mainTextures.SyncWithAvatar(cloned);
+                mainTextures.CopyOverridesFrom(srcSlot.Textures);
+            }
+            return cloned;
+        }
+
+        private static ProtagonistAvatarSlot FindSlotByPed(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots, string pedModel)
+        {
+            if (slots == null || string.IsNullOrEmpty(pedModel)) return null;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (slots[i] != null && string.Equals(slots[i].PedModel, pedModel, System.StringComparison.Ordinal))
+                    return slots[i];
+            }
+            return null;
+        }
+
+        private static ProtagonistAvatarSlot FindFirstValidSlot(
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots, Vrc2GtavExportOptions opts)
         {
             var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
             for (int i = 0; i < enabled.Count; i++)
             {
-                if (!enabled[i].Avatar.IsValid) continue;
-                ProtagonistAvatarSlot slot = enabled[i];
-                if (opts != null)
-                {
-                    if (!string.IsNullOrWhiteSpace(slot.AvatarNameOverride)) opts.AvatarNameOverride = slot.AvatarNameOverride;
-                    if (!string.IsNullOrWhiteSpace(slot.FaceBlendshapesAnim))
-                    {
-                        opts.FaceBlendshapesAnim = slot.FaceBlendshapesAnim;
-                        mainFaceAnimClip = slot.FaceAnimClip;
-                    }
-                }
-                return CloneSource(slot.Avatar);
+                if (enabled[i].Avatar.IsValid) return enabled[i];
             }
-            return mainAvatar ?? new ResolvedAvatarSource();
-        }
-
-        public static ResolvedAvatarSource ResolvePreviewAvatar(
-            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
-            Vrc2GtavExportOptions opts,
-            ResolvedAvatarSource mainAvatar)
-        {
-            if (opts == null || !opts.PerProtagonistSlots) return mainAvatar;
-            var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
-            for (int i = 0; i < enabled.Count; i++)
-                if (enabled[i].Avatar.IsValid) return enabled[i].Avatar;
-            return mainAvatar;
+            return enabled.Count > 0 ? enabled[0] : null;
         }
 
         public static bool HasAnySceneSlot(
-            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
-            Vrc2GtavExportOptions opts)
+            System.Collections.Generic.IList<ProtagonistAvatarSlot> slots, Vrc2GtavExportOptions opts)
         {
             var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
             for (int i = 0; i < enabled.Count; i++)
@@ -426,7 +425,7 @@ namespace Vrc2Gtav.Editor
             Vrc2GtavExportOptions opts,
             System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
             ref ResolvedAvatarSource mainAvatar,
-            ref AnimationClip mainFaceAnimClip)
+            Vrc2GtavTexturesPanel mainTextures)
         {
             if (opts == null) return;
             if (targetCount <= 1)
@@ -434,13 +433,18 @@ namespace Vrc2Gtav.Editor
                 opts.UserDisabledPerSlotForMulti = false;
                 if (opts.PerProtagonistSlots && !opts.UserEnabledPerSlotForSingle)
                 {
-                    mainAvatar = SyncMainFromFirstValidSlot(slots, opts, mainAvatar, ref mainFaceAnimClip);
+                    mainAvatar = SyncSlotIntoMain(FindFirstValidSlot(slots, opts), opts, mainAvatar, mainTextures);
                     opts.PerProtagonistSlots = false;
+                }
+                if (!opts.PerProtagonistSlots)
+                {
+                    var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(slots, opts);
+                    if (enabled.Count == 1) opts.LastSingleTargetPed = enabled[0].PedModel;
                 }
             }
             else if (!opts.PerProtagonistSlots && !opts.UserDisabledPerSlotForMulti)
             {
-                SyncFirstSlotFromMain(slots, opts, mainAvatar, mainFaceAnimClip);
+                SyncMainIntoSlot(slots, opts, mainAvatar, mainTextures, opts.LastSingleTargetPed);
                 opts.PerProtagonistSlots = true;
             }
         }
@@ -451,23 +455,20 @@ namespace Vrc2Gtav.Editor
             Vrc2GtavExportOptions opts,
             System.Collections.Generic.IList<ProtagonistAvatarSlot> slots,
             ref ResolvedAvatarSource mainAvatar,
-            ref AnimationClip mainFaceAnimClip)
+            Vrc2GtavTexturesPanel mainTextures)
         {
-            if (opts == null) return;
-            if (nextPerSlot != opts.PerProtagonistSlots)
+            if (opts == null || nextPerSlot == opts.PerProtagonistSlots) return;
+            if (nextPerSlot)
             {
-                if (nextPerSlot)
-                {
-                    SyncFirstSlotFromMain(slots, opts, mainAvatar, mainFaceAnimClip);
-                    opts.UserDisabledPerSlotForMulti = false;
-                    if (targetCount <= 1) opts.UserEnabledPerSlotForSingle = true;
-                }
-                else
-                {
-                    mainAvatar = SyncMainFromFirstValidSlot(slots, opts, mainAvatar, ref mainFaceAnimClip);
-                    opts.UserEnabledPerSlotForSingle = false;
-                    if (targetCount >= 2) opts.UserDisabledPerSlotForMulti = true;
-                }
+                SyncMainIntoSlot(slots, opts, mainAvatar, mainTextures, opts.LastSingleTargetPed);
+                opts.UserDisabledPerSlotForMulti = false;
+                if (targetCount <= 1) opts.UserEnabledPerSlotForSingle = true;
+            }
+            else
+            {
+                mainAvatar = SyncSlotIntoMain(FindFirstValidSlot(slots, opts), opts, mainAvatar, mainTextures);
+                opts.UserEnabledPerSlotForSingle = false;
+                if (targetCount >= 2) opts.UserDisabledPerSlotForMulti = true;
             }
             opts.PerProtagonistSlots = nextPerSlot;
         }

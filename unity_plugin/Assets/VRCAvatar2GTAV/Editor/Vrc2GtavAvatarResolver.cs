@@ -272,14 +272,15 @@ namespace Vrc2Gtav.Editor
         }
     }
 
+    [Serializable]
     internal sealed class ProtagonistAvatarSlot
     {
         public string PedModel;
         public string LabelKey;
+        public string ShortLabelKey;
         public ResolvedAvatarSource Avatar = new ResolvedAvatarSource();
-        public string AvatarNameOverride = string.Empty;
-        public AnimationClip FaceAnimClip;
-        public string FaceBlendshapesAnim = string.Empty;
+        public readonly Vrc2GtavSlotProfile Profile = new Vrc2GtavSlotProfile();
+        public readonly Vrc2GtavTexturesPanel Textures = new Vrc2GtavTexturesPanel();
     }
 
     internal static class Vrc2GtavMultiSlotUi
@@ -288,9 +289,9 @@ namespace Vrc2Gtav.Editor
         {
             return new List<ProtagonistAvatarSlot>
             {
-                new ProtagonistAvatarSlot { PedModel = "player_zero", LabelKey = "target.michael" },
-                new ProtagonistAvatarSlot { PedModel = "player_one", LabelKey = "target.franklin" },
-                new ProtagonistAvatarSlot { PedModel = "player_two", LabelKey = "target.trevor" }
+                new ProtagonistAvatarSlot { PedModel = "player_zero", LabelKey = "target.michael", ShortLabelKey = "target.short_michael" },
+                new ProtagonistAvatarSlot { PedModel = "player_one", LabelKey = "target.franklin", ShortLabelKey = "target.short_franklin" },
+                new ProtagonistAvatarSlot { PedModel = "player_two", LabelKey = "target.trevor", ShortLabelKey = "target.short_trevor" }
             };
         }
 
@@ -351,110 +352,115 @@ namespace Vrc2Gtav.Editor
             avatar.IsSceneDirty = go.scene.isDirty;
         }
 
-        public static void DrawPerProtagonistSlots(
+        public static ProtagonistAvatarSlot DrawSlotTabStrip(
             UiLanguageMode langMode,
             Vrc2GtavExportOptions opts,
             IList<ProtagonistAvatarSlot> slots,
-            ResolvedAvatarSource mainAvatar,
-            GUIStyle dropStyle,
-            GUIStyle wrapMiniStyle,
-            Action onSaveSceneRequested,
-            Action onRepaintRequested)
+            ref string activePedModel,
+            Action onStateChanged)
         {
             List<ProtagonistAvatarSlot> enabled = GetEnabledSlots(slots, opts);
-            if (enabled.Count == 0) return;
+            if (enabled.Count == 0) return null;
 
-            string emptyLabel = Vrc2GtavLocalization.Get(langMode, "avatar.none");
-            string pickScene = Vrc2GtavLocalization.Get(langMode, "avatar.scene_picker");
-            string pickFile = Vrc2GtavLocalization.Get(langMode, "avatar.browse_file");
-            string copyPrev = Vrc2GtavLocalization.Get(langMode, "slot.copy_prev");
-
+            int activeIdx = 0;
             for (int i = 0; i < enabled.Count; i++)
             {
-                ProtagonistAvatarSlot slot = enabled[i];
-                string pedTitle = Vrc2GtavLocalization.Get(langMode, slot.LabelKey);
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(
-                    Vrc2GtavLocalization.Format(langMode, "slot.header", pedTitle),
-                    EditorStyles.boldLabel);
-                ResolvedAvatarSource prevAv = i > 0 ? enabled[i - 1].Avatar : null;
-                if (prevAv != null && prevAv.IsValid && GUILayout.Button(copyPrev, EditorStyles.miniButton, GUILayout.Width(118f)))
+                if (string.Equals(enabled[i].PedModel, activePedModel, StringComparison.Ordinal))
                 {
-                    slot.Avatar = Vrc2GtavMultiSlotSync.CloneSource(prevAv);
+                    activeIdx = i;
+                    break;
                 }
-                EditorGUILayout.EndHorizontal();
-
-                Rect dropRect = GUILayoutUtility.GetRect(0f, 28f, GUILayout.ExpandWidth(true));
-                GUI.Box(dropRect, Vrc2GtavLocalization.Get(langMode, "avatar.drop_hint"), dropStyle);
-                slot.Avatar = Vrc2GtavAvatarResolver.HandleDragAndDrop(dropRect, slot.Avatar);
-
-                UnityEngine.Object picked = EditorGUILayout.ObjectField(
-                    Vrc2GtavLocalization.Get(langMode, "avatar.object_field"),
-                    slot.Avatar.ObjectRef, typeof(UnityEngine.Object), true);
-                if (picked != slot.Avatar.ObjectRef)
-                {
-                    slot.Avatar = Vrc2GtavAvatarResolver.ResolveObject(picked);
-                }
-
-                EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button(pickScene, GUILayout.ExpandWidth(true)))
-                {
-                    ProtagonistAvatarSlot captured = slot;
-                    Vrc2GtavAvatarResolver.ShowSceneAvatarMenu(emptyLabel, selected =>
-                    {
-                        captured.Avatar = selected;
-                        onRepaintRequested?.Invoke();
-                    });
-                }
-                if (GUILayout.Button(pickFile, GUILayout.ExpandWidth(true)))
-                {
-                    string pickedFile = EditorUtility.OpenFilePanel(
-                        pickFile, Vrc2GtavConfigDiscovery.GetUnityProjectRoot(), "zip,unitypackage,prefab,unity");
-                    if (!string.IsNullOrEmpty(pickedFile))
-                    {
-                        slot.Avatar = Vrc2GtavAvatarResolver.ResolveExternalPath(pickedFile);
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-
-                if (slot.Avatar.Kind == AvatarSourceKind.SceneGameObject && slot.Avatar.ObjectRef is GameObject slotGo)
-                {
-                    slot.Avatar.IsSceneDirty = slotGo.scene.IsValid() && slotGo.scene.isDirty;
-                }
-                if (slot.Avatar.IsValid)
-                {
-                    EditorGUILayout.LabelField(Vrc2GtavLocalization.Get(langMode, "avatar.resolved_name"), slot.Avatar.AvatarName);
-                    GUILayout.Label(slot.Avatar.SourcePath, wrapMiniStyle, GUILayout.ExpandWidth(true));
-                }
-                if (slot.Avatar.Kind == AvatarSourceKind.SceneGameObject && slot.Avatar.IsSceneDirty)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.HelpBox(Vrc2GtavLocalization.Get(langMode, "avatar.dirty_warning"), MessageType.Warning);
-                    if (GUILayout.Button(Vrc2GtavLocalization.Get(langMode, "avatar.save_scene_now"), GUILayout.Width(125f), GUILayout.Height(34f)))
-                    {
-                        onSaveSceneRequested?.Invoke();
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
-
-                slot.AvatarNameOverride = EditorGUILayout.TextField(
-                    Vrc2GtavLocalization.Get(langMode, "opt.avatar_override"),
-                    slot.AvatarNameOverride ?? string.Empty);
-                slot.FaceBlendshapesAnim = Vrc2GtavLogConsoleWidget.DrawAnimClipOverrideRow(
-                    Vrc2GtavLocalization.Get(langMode, "opt.face_anim"),
-                    slot.FaceBlendshapesAnim,
-                    ref slot.FaceAnimClip,
-                    Vrc2GtavLocalization.Get(langMode, "tools.browse"),
-                    Vrc2GtavConfigDiscovery.GetDefaultUnityAssetsPath(),
-                    wrapMiniStyle);
-                EditorGUILayout.EndVertical();
             }
 
-            if (!AreAllEnabledSlotsValid(slots, opts))
+            string emptyTxt = Vrc2GtavLocalization.Get(langMode, "slot.tab_empty");
+            var labels = new string[enabled.Count];
+            for (int i = 0; i < enabled.Count; i++)
             {
-                EditorGUILayout.HelpBox(Vrc2GtavLocalization.Get(langMode, "slot.missing_err"), MessageType.Warning);
+                ProtagonistAvatarSlot sl = enabled[i];
+                string shortPed = Vrc2GtavLocalization.Get(langMode, sl.ShortLabelKey);
+                string avTitle = sl.Avatar.IsValid
+                    ? (!string.IsNullOrWhiteSpace(sl.Profile.AvatarNameOverride) ? sl.Profile.AvatarNameOverride.Trim() : sl.Avatar.AvatarName)
+                    : emptyTxt;
+                if (avTitle.Length > 18) avTitle = avTitle.Substring(0, 16) + "..";
+                labels[i] = (sl.Avatar.IsValid ? "[OK] " : "[!] ") + shortPed + ": " + avTitle;
             }
+
+            int nextIdx = GUILayout.Toolbar(activeIdx, labels, GUILayout.Height(26f));
+            ProtagonistAvatarSlot activeSlot = enabled[Mathf.Clamp(nextIdx, 0, enabled.Count - 1)];
+            activePedModel = activeSlot.PedModel;
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(
+                Vrc2GtavLocalization.Format(langMode, "slot.editing", Vrc2GtavLocalization.Get(langMode, activeSlot.LabelKey)),
+                EditorStyles.miniBoldLabel);
+            bool hasCopySource = HasOtherConfiguredSlot(enabled, activeSlot);
+            using (new EditorGUI.DisabledScope(!hasCopySource))
+            {
+                if (GUILayout.Button(Vrc2GtavLocalization.Get(langMode, "slot.copy_from"), EditorStyles.miniButton, GUILayout.Width(108f)))
+                {
+                    ShowCopySlotMenu(langMode, enabled, activeSlot, onStateChanged);
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            var missing = new List<string>();
+            for (int i = 0; i < enabled.Count; i++)
+            {
+                if (!enabled[i].Avatar.IsValid) missing.Add(Vrc2GtavLocalization.Get(langMode, enabled[i].ShortLabelKey));
+            }
+            if (missing.Count > 0)
+            {
+                EditorGUILayout.HelpBox(
+                    Vrc2GtavLocalization.Format(langMode, "slot.missing_list", string.Join(", ", missing)),
+                    MessageType.Warning);
+            }
+            return activeSlot;
+        }
+
+        private static bool HasOtherConfiguredSlot(IList<ProtagonistAvatarSlot> enabled, ProtagonistAvatarSlot current)
+        {
+            for (int i = 0; i < enabled.Count; i++)
+            {
+                if (enabled[i] != current && enabled[i].Avatar.IsValid) return true;
+            }
+            return false;
+        }
+
+        private static void ShowCopySlotMenu(
+            UiLanguageMode langMode,
+            IList<ProtagonistAvatarSlot> enabled,
+            ProtagonistAvatarSlot target,
+            Action onStateChanged)
+        {
+            var menu = new GenericMenu();
+            for (int i = 0; i < enabled.Count; i++)
+            {
+                ProtagonistAvatarSlot src = enabled[i];
+                if (src == target || !src.Avatar.IsValid) continue;
+                string shortPed = Vrc2GtavLocalization.Get(langMode, src.ShortLabelKey);
+                ProtagonistAvatarSlot captured = src;
+                menu.AddItem(
+                    new GUIContent(Vrc2GtavLocalization.Format(langMode, "slot.copy_all_item", shortPed)),
+                    false,
+                    () =>
+                    {
+                        target.Avatar = Vrc2GtavMultiSlotSync.CloneSource(captured.Avatar);
+                        target.Profile.CopyFrom(captured.Profile);
+                        target.Textures.SyncWithAvatar(target.Avatar);
+                        target.Textures.CopyOverridesFrom(captured.Textures);
+                        onStateChanged?.Invoke();
+                    });
+                menu.AddItem(
+                    new GUIContent(Vrc2GtavLocalization.Format(langMode, "slot.copy_opts_item", shortPed)),
+                    false,
+                    () =>
+                    {
+                        target.Profile.CopyFrom(captured.Profile);
+                        target.Textures.CopyOverridesFrom(captured.Textures);
+                        onStateChanged?.Invoke();
+                    });
+            }
+            menu.ShowAsContext();
         }
     }
 }

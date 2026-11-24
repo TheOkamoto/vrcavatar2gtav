@@ -31,7 +31,7 @@ namespace Vrc2Gtav.Editor
         private GUIStyle _dropBoxStyle;
         private GUIStyle _wrapMiniLabelStyle;
         private GUIStyle _wrapTitleStyle;
-        private AnimationClip _faceAnimClip;
+        private string _activeSlotPed = "player_zero";
 
         [MenuItem("Tools/VRCAvatar2GTAV/Export Avatar to GTA V")]
         public static void ShowWindow()
@@ -90,24 +90,55 @@ namespace Vrc2Gtav.Editor
             }
 
             _mainScroll = EditorGUILayout.BeginScrollView(_mainScroll);
-            if (!_options.PerProtagonistSlots)
-            {
-                DrawAvatarSection();
-                EditorGUILayout.Space(6f);
-            }
-            DrawTargetsSection();
-            EditorGUILayout.Space(6f);
             float prevLabelWidth = EditorGUIUtility.labelWidth;
             float baseLabelW = Mathf.Clamp(Mathf.Max(340f, position.width - 36f) * 0.44f, 185f, 250f);
             EditorGUIUtility.labelWidth = baseLabelW;
-            ResolvedAvatarSource previewAvatar = Vrc2GtavMultiSlotSync.ResolvePreviewAvatar(_protagonistSlots, _options, _avatar);
-            _texturesPanel.DrawSection(_options, _langMode, previewAvatar);
-            EditorGUILayout.Space(6f);
-            DrawOptionsSection(baseLabelW);
+
+            if (!_options.PerProtagonistSlots)
+            {
+                _avatar = DrawAvatarSourceCard(_avatar, T("sec.avatar"), false, selected => { _avatar = selected; Repaint(); });
+                EditorGUILayout.Space(6f);
+                DrawTargetsSection();
+                EditorGUILayout.Space(6f);
+                _texturesPanel.DrawSection(_options.Shared, _options, _langMode, _avatar, _protagonistSlots);
+                EditorGUILayout.Space(6f);
+                DrawOptionsSection(_options.Shared, T("sec.options"));
+            }
+            else
+            {
+                ProtagonistAvatarSlot activeSlot = DrawTargetsSection();
+                if (activeSlot != null)
+                {
+                    string shortPed = T(activeSlot.ShortLabelKey);
+                    EditorGUILayout.Space(6f);
+                    activeSlot.Avatar = DrawAvatarSourceCard(
+                        activeSlot.Avatar,
+                        Vrc2GtavLocalization.Format(_langMode, "sec.avatar_for", shortPed),
+                        true,
+                        selected => { activeSlot.Avatar = selected; Repaint(); });
+                    EditorGUILayout.Space(6f);
+                    activeSlot.Textures.DrawSection(
+                        activeSlot.Profile,
+                        _options,
+                        _langMode,
+                        activeSlot.Avatar,
+                        _protagonistSlots,
+                        Vrc2GtavLocalization.Format(_langMode, "sec.textures_for", shortPed));
+                    EditorGUILayout.Space(6f);
+                    DrawOptionsSection(
+                        activeSlot.Profile,
+                        Vrc2GtavLocalization.Format(_langMode, "sec.options_for", shortPed));
+                }
+                EditorGUILayout.Space(6f);
+                Vrc2GtavOptionsUi.DrawGlobalBatchOptions(
+                    _options, _langMode, _paths, _paths.BackendMode, ref _showCliPreview,
+                    () => BuildCurrentExportSpec(false), OnBackendModeChanged);
+            }
+
             EditorGUILayout.Space(6f);
             DrawToolsSection(baseLabelW);
             EditorGUILayout.Space(4f);
-            Vrc2GtavTexturesPanel.DrawRestoreVanillaSection(_langMode, _runner.IsRunning, StartRestoreVanilla);
+            Vrc2GtavOptionsUi.DrawRestoreVanillaSection(_langMode, _runner.IsRunning, StartRestoreVanilla);
             EditorGUIUtility.labelWidth = prevLabelWidth;
             EditorGUILayout.EndScrollView();
 
@@ -126,121 +157,113 @@ namespace Vrc2Gtav.Editor
                 && Vrc2GtavConfigDiscovery.IsValidPython(_paths.PythonExe, _paths.BackendMode, out _);
 
             _logWidget.Draw(
-                _runner,
-                _langMode,
-                _paths.RepoRoot,
-                _statusMessage,
-                _statusSeverity,
-                canStart,
-                StartAvatarExport,
-                position.height,
-                Repaint);
+                _runner, _langMode, _paths.RepoRoot, _statusMessage, _statusSeverity, canStart, StartAvatarExport, position.height, Repaint);
         }
 
-        private void DrawAvatarSection()
+        private ResolvedAvatarSource DrawAvatarSourceCard(
+            ResolvedAvatarSource current,
+            string sectionTitle,
+            bool isMultiSlot,
+            System.Action<ResolvedAvatarSource> onScenePicked)
         {
+            ResolvedAvatarSource av = current ?? new ResolvedAvatarSource();
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(T("sec.avatar"), EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(sectionTitle, EditorStyles.boldLabel);
 
-            Rect dropRect = GUILayoutUtility.GetRect(0f, 44f, GUILayout.ExpandWidth(true));
+            Rect dropRect = GUILayoutUtility.GetRect(0f, 38f, GUILayout.ExpandWidth(true));
             GUI.Box(dropRect, T("avatar.drop_hint"), _dropBoxStyle);
-            _avatar = Vrc2GtavAvatarResolver.HandleDragAndDrop(dropRect, _avatar);
+            av = Vrc2GtavAvatarResolver.HandleDragAndDrop(dropRect, av);
 
             UnityEngine.Object picked = EditorGUILayout.ObjectField(
-                T("avatar.object_field"), _avatar.ObjectRef, typeof(UnityEngine.Object), true);
-            if (picked != _avatar.ObjectRef)
-            {
-                _avatar = Vrc2GtavAvatarResolver.ResolveObject(picked);
-            }
+                T("avatar.object_field"), av.ObjectRef, typeof(UnityEngine.Object), true);
+            if (picked != av.ObjectRef) av = Vrc2GtavAvatarResolver.ResolveObject(picked);
+
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(T("avatar.scene_picker"), GUILayout.ExpandWidth(true)))
             {
-                Vrc2GtavAvatarResolver.ShowSceneAvatarMenu(T("avatar.none"), selected =>
-                {
-                    _avatar = selected;
-                    Repaint();
-                });
+                Vrc2GtavAvatarResolver.ShowSceneAvatarMenu(T("avatar.none"), onScenePicked);
             }
             if (GUILayout.Button(T("avatar.browse_file"), GUILayout.ExpandWidth(true)))
             {
                 string pickedFile = EditorUtility.OpenFilePanel(
                     T("avatar.browse_file"), Vrc2GtavConfigDiscovery.GetUnityProjectRoot(), "zip,unitypackage,prefab,unity");
-                if (!string.IsNullOrEmpty(pickedFile)) _avatar = Vrc2GtavAvatarResolver.ResolveExternalPath(pickedFile);
+                if (!string.IsNullOrEmpty(pickedFile)) av = Vrc2GtavAvatarResolver.ResolveExternalPath(pickedFile);
             }
             EditorGUILayout.EndHorizontal();
 
-            if (_avatar.Kind == AvatarSourceKind.SceneGameObject && _avatar.ObjectRef is GameObject go)
-            {
-                _avatar.IsSceneDirty = go.scene.IsValid() && go.scene.isDirty;
-            }
+            if (av.Kind == AvatarSourceKind.SceneGameObject && av.ObjectRef is GameObject go)
+                av.IsSceneDirty = go.scene.IsValid() && go.scene.isDirty;
 
-            if (_avatar.IsValid)
+            if (av.IsValid)
             {
-                EditorGUILayout.LabelField(T("avatar.resolved_name"), _avatar.AvatarName);
-                GUILayout.Label(T("avatar.resolved_source") + ": " + _avatar.SourcePath, _wrapMiniLabelStyle, GUILayout.ExpandWidth(true));
+                EditorGUILayout.LabelField(T("avatar.resolved_name"), av.AvatarName);
+                GUILayout.Label(T("avatar.resolved_source") + ": " + av.SourcePath, _wrapMiniLabelStyle, GUILayout.ExpandWidth(true));
             }
             else
             {
                 EditorGUILayout.HelpBox(T("avatar.none"), MessageType.None);
             }
 
-            if (_avatar.Kind == AvatarSourceKind.SceneGameObject)
+            bool showAutoSave = isMultiSlot
+                ? Vrc2GtavMultiSlotSync.HasAnySceneSlot(_protagonistSlots, _options)
+                : av.Kind == AvatarSourceKind.SceneGameObject;
+            if (showAutoSave) _autoSaveScene = EditorGUILayout.ToggleLeft(T("avatar.autosave_scene"), _autoSaveScene);
+            if (av.Kind == AvatarSourceKind.SceneGameObject && av.IsSceneDirty)
             {
-                _autoSaveScene = EditorGUILayout.ToggleLeft(T("avatar.autosave_scene"), _autoSaveScene);
-                if (_avatar.IsSceneDirty)
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.HelpBox(T("avatar.dirty_warning"), MessageType.Warning);
+                if (GUILayout.Button(T("avatar.save_scene_now"), GUILayout.Width(135f), GUILayout.Height(36f)))
                 {
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.HelpBox(T("avatar.dirty_warning"), MessageType.Warning);
-                    if (GUILayout.Button(T("avatar.save_scene_now"), GUILayout.Width(135f), GUILayout.Height(36f)))
-                    {
-                        Vrc2GtavMultiSlotUi.SaveAllDirtyAvatarScenes(_avatar, _protagonistSlots, true);
-                    }
-                    EditorGUILayout.EndHorizontal();
+                    Vrc2GtavMultiSlotUi.SaveAllDirtyAvatarScenes(_avatar, _protagonistSlots, true);
                 }
+                EditorGUILayout.EndHorizontal();
             }
             EditorGUILayout.EndVertical();
+            return av;
         }
 
-        private void DrawTargetsSection()
+        private ProtagonistAvatarSlot DrawTargetsSection()
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(T(_options.PerProtagonistSlots ? "sec.targets_multi" : "sec.targets"), EditorStyles.boldLabel);
+            bool prevM = _options.TargetMichael, prevF = _options.TargetFranklin, prevT = _options.TargetTrevor;
             _options.TargetMichael = EditorGUILayout.ToggleLeft(T("target.michael"), _options.TargetMichael);
             _options.TargetFranklin = EditorGUILayout.ToggleLeft(T("target.franklin"), _options.TargetFranklin);
             _options.TargetTrevor = EditorGUILayout.ToggleLeft(T("target.trevor"), _options.TargetTrevor);
             int targetCount = Vrc2GtavCommandBuilder.CountSelectedTargets(_options);
-            Vrc2GtavMultiSlotSync.SyncTargetModeAuto(targetCount, _options, _protagonistSlots, ref _avatar, ref _faceAnimClip);
+            Vrc2GtavMultiSlotSync.SyncTargetModeAuto(targetCount, _options, _protagonistSlots, ref _avatar, _texturesPanel);
             bool nextPerSlot = EditorGUILayout.ToggleLeft(T("target.per_slot_toggle"), _options.PerProtagonistSlots);
-            Vrc2GtavMultiSlotSync.ApplyPerSlotToggle(nextPerSlot, targetCount, _options, _protagonistSlots, ref _avatar, ref _faceAnimClip);
-            if (_options.PerProtagonistSlots)
+            Vrc2GtavMultiSlotSync.ApplyPerSlotToggle(nextPerSlot, targetCount, _options, _protagonistSlots, ref _avatar, _texturesPanel);
+            if (targetCount >= 2 && _options.PerProtagonistSlots)
             {
-                Vrc2GtavMultiSlotUi.DrawPerProtagonistSlots(
-                    _langMode, _options, _protagonistSlots, _avatar, _dropBoxStyle, _wrapMiniLabelStyle,
-                    () => Vrc2GtavMultiSlotUi.SaveAllDirtyAvatarScenes(_avatar, _protagonistSlots, true), Repaint);
-                if (Vrc2GtavMultiSlotSync.HasAnySceneSlot(_protagonistSlots, _options))
-                    _autoSaveScene = EditorGUILayout.ToggleLeft(T("avatar.autosave_scene"), _autoSaveScene);
+                if (!prevM && _options.TargetMichael) _activeSlotPed = "player_zero";
+                else if (!prevF && _options.TargetFranklin) _activeSlotPed = "player_one";
+                else if (!prevT && _options.TargetTrevor) _activeSlotPed = "player_two";
             }
-            if (!Vrc2GtavCommandBuilder.HasAnyTarget(_options))
-                EditorGUILayout.HelpBox(T("target.none_err"), MessageType.Error);
+            ProtagonistAvatarSlot activeSlot = _options.PerProtagonistSlots
+                ? Vrc2GtavMultiSlotUi.DrawSlotTabStrip(_langMode, _options, _protagonistSlots, ref _activeSlotPed, Repaint)
+                : null;
+            if (!Vrc2GtavCommandBuilder.HasAnyTarget(_options)) EditorGUILayout.HelpBox(T("target.none_err"), MessageType.Error);
             EditorGUILayout.EndVertical();
+            return activeSlot;
         }
 
-        private void DrawOptionsSection(float baseLabelW)
+        private void DrawOptionsSection(Vrc2GtavSlotProfile profile, string title)
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(T("sec.options"), EditorStyles.boldLabel);
-            Vrc2GtavTexturesPanel.DrawBlendshapeAndRigOptions(
-                _options, _langMode, baseLabelW, ref _showAdvanced, ref _faceAnimClip, ref _showCliPreview,
-                _paths, _paths.BackendMode, _wrapMiniLabelStyle, DrawMouthOpenRow, () => BuildCurrentExportSpec(false), OnBackendModeChanged);
+            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+            Vrc2GtavOptionsUi.DrawBlendshapeAndRigOptions(
+                profile, _options, _langMode, EditorGUIUtility.labelWidth, ref _showAdvanced, ref _showCliPreview,
+                _paths, _paths.BackendMode, _wrapMiniLabelStyle, () => DrawMouthOpenRow(profile), () => BuildCurrentExportSpec(false), OnBackendModeChanged);
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawMouthOpenRow()
+        private void DrawMouthOpenRow(Vrc2GtavSlotProfile profile)
         {
             EditorGUILayout.BeginHorizontal();
-            float nextMouthOpen = EditorGUILayout.Slider(T("opt.mouth_open"), _options.MouthOpenStrength, 0f, 1f);
-            _options.MouthOpenStrength = Mathf.Round(Mathf.Clamp01(nextMouthOpen) * 100f) / 100f;
-            if (GUILayout.Button("0.35", GUILayout.Width(44f))) _options.MouthOpenStrength = 0.35f;
+            float nextMouthOpen = EditorGUILayout.Slider(T("opt.mouth_open"), profile.MouthOpenStrength, 0f, 1f);
+            profile.MouthOpenStrength = Mathf.Round(Mathf.Clamp01(nextMouthOpen) * 100f) / 100f;
+            if (GUILayout.Button("0.35", GUILayout.Width(44f))) profile.MouthOpenStrength = 0.35f;
             EditorGUILayout.EndHorizontal();
         }
 
@@ -296,32 +319,26 @@ namespace Vrc2Gtav.Editor
                 EditorGUI.indentLevel--;
             }
 
-            Vrc2GtavLogConsoleWidget.DrawToolActionBar(
-                _runner.IsRunning,
-                _langMode,
-                () =>
-                {
-                    Vrc2GtavConfigDiscovery.ClearValidationCache();
-                    _paths = Vrc2GtavConfigDiscovery.AutoDetectAll(new Vrc2GtavToolPaths
-                    {
-                        BackendMode = _paths.BackendMode
-                    });
-                    SavePrefs();
-                    UpdateToolDetailsVisibility();
-                },
-                StartDownloadAndSetup,
-                StartCheckEnv);
+            Vrc2GtavLogConsoleWidget.DrawToolActionBar(_runner.IsRunning, _langMode, AutoDetectTools, StartDownloadAndSetup, StartCheckEnv);
             EditorGUILayout.EndVertical();
+        }
+
+        private void AutoDetectTools()
+        {
+            Vrc2GtavConfigDiscovery.ClearValidationCache();
+            _paths = Vrc2GtavConfigDiscovery.AutoDetectAll(new Vrc2GtavToolPaths { BackendMode = _paths.BackendMode });
+            SavePrefs();
+            UpdateToolDetailsVisibility();
         }
 
         private ExecutionCommandSpec BuildCurrentExportSpec(bool writeManifest)
         {
-            var texOverrides = _texturesPanel.BuildTextureOverridesMap();
             if (_options.PerProtagonistSlots)
             {
                 var enabled = Vrc2GtavMultiSlotUi.GetEnabledSlots(_protagonistSlots, _options);
-                return Vrc2GtavCommandBuilder.BuildMultiSlotExportCommand(_paths, enabled, _options, _langMode, texOverrides, writeManifest);
+                return Vrc2GtavCommandBuilder.BuildMultiSlotExportCommand(_paths, enabled, _options, _langMode, writeManifest);
             }
+            var texOverrides = _texturesPanel.BuildTextureOverridesMap();
             return Vrc2GtavCommandBuilder.BuildExportCommand(_paths, _avatar, _options, _langMode, texOverrides);
         }
 
@@ -437,9 +454,8 @@ namespace Vrc2Gtav.Editor
             Vrc2GtavConfigDiscovery.SanitizeToolPathsForMode(_paths);
             if (nextMode == BackendExecutionMode.WindowsNative)
             {
-                _options.BlendshapesCfg = Vrc2GtavIniAndWsl.SanitizePathForWindows(_options.BlendshapesCfg);
-                _options.FaceBlendshapesAnim = Vrc2GtavIniAndWsl.SanitizePathForWindows(_options.FaceBlendshapesAnim);
-                _options.PhysbonesCfg = Vrc2GtavIniAndWsl.SanitizePathForWindows(_options.PhysbonesCfg);
+                _options.Shared.SanitizePathsForWindows();
+                for (int i = 0; i < _protagonistSlots.Count; i++) _protagonistSlots[i].Profile.SanitizePathsForWindows();
             }
             _paths = Vrc2GtavConfigDiscovery.AutoDetectAll(_paths);
             SavePrefs();
@@ -463,11 +479,7 @@ namespace Vrc2Gtav.Editor
             if (!allReady) _showToolDetails = true;
         }
 
-        private void SetStatus(string msg, MessageType severity)
-        {
-            _statusMessage = msg;
-            _statusSeverity = severity;
-        }
+        private void SetStatus(string msg, MessageType severity) { _statusMessage = msg; _statusSeverity = severity; }
 
         private string T(string key) => Vrc2GtavLocalization.Get(_langMode, key);
 

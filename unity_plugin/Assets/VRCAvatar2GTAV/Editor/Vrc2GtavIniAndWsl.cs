@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using UnityEngine;
 
 namespace Vrc2Gtav.Editor
 {
@@ -325,6 +326,61 @@ namespace Vrc2Gtav.Editor
             lines.InsertRange(insertAt, toInsert);
             cursorIndex += toInsert.Count;
             rem.Clear();
+        }
+    }
+
+    [Serializable]
+    internal sealed class Vrc2GtavSlotProfile
+    {
+        public bool ImportFaceBlendshapes = true;
+        public bool ImportBodyBlendshapes = true;
+        public bool EyeBlink = true;
+        public float EyeBlinkStrength;
+        public float MouthOpenStrength = 0.35f;
+        public bool BloodDecals = true;
+
+        public string AvatarNameOverride = string.Empty;
+        public int BlendshapesSourceIdx;
+        public int PhysbonesSourceIdx;
+        public string BlendshapesCfg = string.Empty;
+        public string FaceBlendshapesAnim = string.Empty;
+        public AnimationClip FaceAnimClip;
+        public string PhysbonesCfg = string.Empty;
+        public bool PhysbonesMarshmallow;
+        public bool ForceReextract;
+
+        public int AtlasResolutionIdx = 2;
+        public int NormalResolutionIdx;
+        public int SecondaryResolutionIdx;
+
+        public void CopyFrom(Vrc2GtavSlotProfile src)
+        {
+            if (src == null) return;
+            ImportFaceBlendshapes = src.ImportFaceBlendshapes;
+            ImportBodyBlendshapes = src.ImportBodyBlendshapes;
+            EyeBlink = src.EyeBlink;
+            EyeBlinkStrength = src.EyeBlinkStrength;
+            MouthOpenStrength = src.MouthOpenStrength;
+            BloodDecals = src.BloodDecals;
+            AvatarNameOverride = src.AvatarNameOverride ?? string.Empty;
+            BlendshapesSourceIdx = src.BlendshapesSourceIdx;
+            PhysbonesSourceIdx = src.PhysbonesSourceIdx;
+            BlendshapesCfg = src.BlendshapesCfg ?? string.Empty;
+            FaceBlendshapesAnim = src.FaceBlendshapesAnim ?? string.Empty;
+            FaceAnimClip = src.FaceAnimClip;
+            PhysbonesCfg = src.PhysbonesCfg ?? string.Empty;
+            PhysbonesMarshmallow = src.PhysbonesMarshmallow;
+            ForceReextract = src.ForceReextract;
+            AtlasResolutionIdx = src.AtlasResolutionIdx;
+            NormalResolutionIdx = src.NormalResolutionIdx;
+            SecondaryResolutionIdx = src.SecondaryResolutionIdx;
+        }
+
+        public void SanitizePathsForWindows()
+        {
+            BlendshapesCfg = Vrc2GtavIniAndWsl.SanitizePathForWindows(BlendshapesCfg);
+            FaceBlendshapesAnim = Vrc2GtavIniAndWsl.SanitizePathForWindows(FaceBlendshapesAnim);
+            PhysbonesCfg = Vrc2GtavIniAndWsl.SanitizePathForWindows(PhysbonesCfg);
         }
     }
 }

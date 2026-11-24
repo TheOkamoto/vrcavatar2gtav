@@ -452,11 +452,13 @@ def _test_restore_and_multislot_pipeline() -> bool:
             and repack_calls == [["player_zero"]]
         )
 
-        # Verify multi-slot batch execution runs each slot without repack then repacks once
+        # Verify multi-slot batch execution forwards independent options per slot without cross-slot leaks
         slot_calls: List[tuple[str, bool]] = []
+        slot_kwargs: List[Dict[str, Any]] = []
 
         def _fake_build(**kwargs: Any) -> Dict[str, Any]:
             slot_calls.append((str(kwargs["target_ped"]), bool(kwargs["repack_archives"])))
+            slot_kwargs.append(dict(kwargs))
             return {"ped_name": kwargs["target_ped"], "avatar_name": kwargs.get("avatar_name", "")}
 
         multislot_repack: List[List[str]] = []
@@ -467,14 +469,61 @@ def _test_restore_and_multislot_pipeline() -> bool:
         ):
             restore_vanilla_helper.run_multi_slot_builds(
                 [
-                    {"target_ped": "player_zero", "source": "A.unity", "avatar_name": "ShinanoA"},
-                    {"target_ped": "player_one", "source": "B.prefab", "avatar_name": "ShinanoB"},
+                    {
+                        "target_ped": "player_zero",
+                        "source": "A.unity",
+                        "avatar_name": "ShinanoA",
+                        "atlas_size": 4096,
+                        "normal_size": 512,
+                        "eye_blink": True,
+                        "eye_blink_strength": 0.7,
+                        "mouth_open_strength": 0.6,
+                        "blood_decals": False,
+                        "import_face_blendshapes": True,
+                        "physbones_marshmallow": True,
+                        "face_anim": "A_face.anim",
+                        "texture_overrides": {"Hair": "hair_a.png"},
+                    },
+                    {
+                        "target_ped": "player_one",
+                        "source": "B.prefab",
+                        "avatar_name": "ShinanoB",
+                        "atlas_size": 1024,
+                        "normal_size": 256,
+                        "eye_blink": False,
+                        "mouth_open_strength": 0.25,
+                        "blood_decals": True,
+                        "import_face_blendshapes": False,
+                        "physbones_marshmallow": False,
+                        "texture_overrides": {"Body": "body_b.png"},
+                    },
                 ],
                 build_fn=_fake_build,
             )
         multislot_ok = (
             slot_calls == [("player_zero", False), ("player_one", False)]
             and multislot_repack == [["player_zero", "player_one"]]
+            and len(slot_kwargs) == 2
+            and slot_kwargs[0]["atlas_size"] == 4096
+            and slot_kwargs[0]["normal_size"] == 512
+            and slot_kwargs[0]["eye_blink"] is True
+            and abs(float(slot_kwargs[0]["eye_blink_strength"]) - 0.7) < 1e-6
+            and abs(float(slot_kwargs[0]["mouth_open_strength"]) - 0.6) < 1e-6
+            and slot_kwargs[0]["blood_decals"] is False
+            and slot_kwargs[0]["import_face_blendshapes"] is True
+            and slot_kwargs[0]["physbones_marshmallow"] is True
+            and slot_kwargs[0]["face_anim"] == "A_face.anim"
+            and slot_kwargs[0]["texture_overrides"] == {"Hair": "hair_a.png"}
+            and slot_kwargs[1]["atlas_size"] == 1024
+            and slot_kwargs[1]["normal_size"] == 256
+            and slot_kwargs[1]["eye_blink"] is False
+            and slot_kwargs[1]["eye_blink_strength"] is None
+            and abs(float(slot_kwargs[1]["mouth_open_strength"]) - 0.25) < 1e-6
+            and slot_kwargs[1]["blood_decals"] is True
+            and slot_kwargs[1]["import_face_blendshapes"] is False
+            and slot_kwargs[1]["physbones_marshmallow"] is False
+            and slot_kwargs[1]["face_anim"] is None
+            and slot_kwargs[1]["texture_overrides"] == {"Body": "body_b.png"}
         )
         return mods_seed_ok and non_clobber_ok and restore_ok and multislot_ok
 
