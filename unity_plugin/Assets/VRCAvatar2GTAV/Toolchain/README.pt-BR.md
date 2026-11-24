@@ -2,10 +2,11 @@
 
 # `vrcavatar2gtav`
 
-**Pipeline automatizado para converter avatares Unity/FBX do VRChat em protagonistas, NPCs de história/cutscene e pedestres do GTA V Legacy**
+**Pipeline automatizado via Plugin do Unity Editor e CLI para converter avatares Unity/FBX do VRChat em protagonistas, NPCs de história/cutscene e pedestres do GTA V Legacy — com shader `GTAVVToon.asi` em tempo real e física `GTAVPhysBones.asi`**
 
 [![Licença: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Jogo: GTA V Legacy](https://img.shields.io/badge/Game-GTA%20V%20Legacy-2ea44f.svg)](docs/DEPLOYMENT_GUIDE.pt-BR.md)
+[![Unity Plugin: VRCAvatar2GTAV](https://img.shields.io/badge/Unity%20Plugin-Tools%20%E2%86%92%20VRCAvatar2GTAV-5865F2.svg)](docs/DEPLOYMENT_GUIDE.pt-BR.md)
 [![Blender: 4.0.2 + Sollumz v2.9.0](https://img.shields.io/badge/Blender-4.0.2%20%2B%20Sollumz%20v2.9.0-orange.svg)](https://docs.sollumz.org/)
 [![rage--cli: 0.28.1](https://img.shields.io/badge/rage--cli-0.28.1-blue.svg)](https://github.com/VIRUXE/rage-cli)
 [![i18n: EN | JA | PT](https://img.shields.io/badge/i18n-EN%20%7C%20JA%20%7C%20PT-lightgrey.svg)](docs/DEPLOYMENT_GUIDE.pt-BR.md)
@@ -21,17 +22,17 @@
 > [!IMPORTANT]
 > **Aviso de Direitos Autorais e Redistribuição de Assets**
 >
-> Este repositório **não** contém modelos de avatar/roupa da BOOTH, pacotes do Unity nem binários proprietários da Rockstar Games / GTA V. Todos os arquivos `.fbx`, `.unity`, `.ydd`, `.ytd`, `.yft`, `.ymt`, `.rpf`, diretórios locais de NPC (`npcs/`) e arquivos de configuração local (`vrc2gtav.cfg`, `configs/npc_registry.json`) ficam bloqueados no [`.gitignore`](.gitignore).
+> Este repositório **não** contém modelos de avatar/roupa da BOOTH, pacotes do Unity nem binários proprietários da Rockstar Games / GTA V. Todos os arquivos `.fbx`, `.unity`, `.ydd`, `.ytd`, `.yft`, `.ymt`, `.rpf`, diretórios locais de NPC (`npcs/`) e arquivos de configuração local (`vrc2gtav.cfg`, `configs/npc_registry.json`, `configs/active_multi_slots.json`) ficam bloqueados no [`.gitignore`](.gitignore) (e fora do [`VRCAvatar2GTAV.unitypackage`](VRCAvatar2GTAV.unitypackage)).
 >
-> O usuário deve fornecer seus próprios assets legalmente adquiridos na BOOTH e sua instalação legal do **GTA V Legacy**, executando o assistente interativo de **First-Run** para validar caminhos e configurar o ambiente.
+> O usuário deve fornecer seus próprios assets legalmente adquiridos na BOOTH e sua instalação legal do **GTA V Legacy**, utilizando o **Plugin do Unity Editor** (`Tools > VRCAvatar2GTAV > Export Avatar to GTA V`) ou o assistente interativo **First-Run** para validar caminhos e configurar o ambiente.
 
 ---
 
 ## Visão Geral
 
-O `vrcavatar2gtav` automatiza a conversão de avatares anime **VRChat (Unity / FBX)** em personagens jogáveis para o **GTA V Legacy**, substituindo **Michael De Santa (`player_zero`)**, **Franklin Clinton (`player_one`)** e **Trevor Philips (`player_two`)**, bem como qualquer **NPC de história/cutscene ou pedestre de rua do GTA V** (`ig_*`, `cs_*`, `a_f_*`, `a_m_*`, etc., direto de pacotes `.zip` / `.unitypackage` / `.prefab`).
+O `vrcavatar2gtav` automatiza a conversão de avatares anime **VRChat (Unity / FBX)** em personagens jogáveis para o **GTA V Legacy**, substituindo **Michael De Santa (`player_zero`)**, **Franklin Clinton (`player_one`)** e **Trevor Philips (`player_two`)**, bem como qualquer **NPC de história/cutscene ou pedestre de rua do GTA V** (`ig_*`, `cs_*`, `a_f_*`, `a_m_*`, etc., direto de GameObjects da cena, `.prefab`, `.unity`, `.zip` ou `.unitypackage`).
 
-Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **Sollumz v2.9.0** e **`rage-cli` 0.28.1** de ponta a ponta — executando remapeamento de esqueleto, alinhamento de mãos e dedos, pesos de *lip sync*, calibração de texturas e materiais, escala padrão `1.0` (com extração opcional de escalas em cenas `.unity`), empacotamento universal de *slots* e implantação segura em RPF7 (`mods/x64v.rpf`).
+Além da automação completa via **Blender 4.0.2**, **Sollumz v2.9.0** e **`rage-cli` 0.28.1**, a branch `unity-ui` traz um **Exportador nativo dentro do Unity Editor** ([`VRCAvatar2GTAV.unitypackage`](VRCAvatar2GTAV.unitypackage)) com perfis em abas por protagonista, shader D3D11 lilToon em tempo real (**`GTAVVToon.asi`**), **VRChat PhysBones multi-ped (`GTAVPhysBones.asi`)**, trava de mip único em `2048px` nos `.ytd`s, **Restauração Seletiva ao Original (Restore Vanilla)** e controle de orçamento RPF7 abaixo de `4.00 GiB`.
 
 ### Vídeos de Exemplo
 
@@ -68,23 +69,23 @@ Em vez de ajustes manuais demorados, o pipeline coordena **Blender 4.0.2**, **So
 
 ### Principais Recursos
 
-- **Assistente First-Run, Ingestão de `.zip`/Unity e Download do Blender 4.0.2**: Comece de um repositório limpo ou projeto Unity com apenas VRChat + Shinano usando `--avatar-zip` (`.zip` / `.unitypackage`) ou `--unity-project`. O módulo [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) extrai pacotes com proteção *Zip-Slip*, baixa o Blender `4.0.2` portátil + `Sollumz` (`--download-blender`) quando ausentes e exibe um **menu paginado de avatares (`10` opções/página + botão `Next`/`Prev`)**.
-- **Motor Nativo Modular Avatar (NDMF)**: [`scripts/common_tools/modular_avatar_helper.py`](scripts/common_tools/modular_avatar_helper.py) e [`scripts/common_tools/build_universal_avatar.py`](scripts/common_tools/build_universal_avatar.py) fazem o bake nativo de qualquer vestido ou roupa contendo `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, `VRCPhysBone`s e materiais lilToon para qualquer protagonista (`michael`, `franklin`, `trevor`).
-- **Blendshapes de Rosto e Corpo Separados + `.cfg` Zerado (Incluindo Vestido Customizado)**: Pergunta separadamente se deseja importar *blendshapes* do **rosto** (`--import-face-blendshapes`) e do **corpo** (`--import-body-blendshapes`) do Unity para o `.cfg`, ou gera um `.cfg` completo com todas as chaves zeradas (`0.0`) extraídas do FBX do avatar e dos vestidos customizados.
-- **Módulo Dedicado de Erros e Logs com `--verbose`**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) oferece exceções tipadas, escrita atômica, prevenção de zumbis, saída limpa por padrão e `--verbose` gravando log com data, hora e avatar em `logs/`.
-- **Suporte Trilíngue (`en` / `ja` / `pt`)**: Detecção automática do idioma do sistema operacional com sobrescrita explícita via `--lang`.
-- **Padrão de Escala `1.0` + Leitor de `.unity`**: Mantém escalas em `1.0` por padrão e extrai escalas customizadas da cena `.unity` quando fornecida.
-- **Porte Universal de Cabelo Customizado, PhysBones e Intercambiabilidade**: Suporta cabelos `.prefab`/`PrefabVariant`/`.fbx`, `79` cadeias `VRCPhysBone` padrão (+ cadeias por NPC com rigidez `Advanced` `integrationType == 1` relativa ao pai e `--physbones-marshmallow` opcional) e troca livre entre protagonistas (`[7]`, `--avatar`).
-- **Pipeline Universal de NPCs e Pedestres do GTA V**: [`scripts/common_tools/npc_registry_helper.py`](scripts/common_tools/npc_registry_helper.py), [`scripts/common_tools/universal_atlas_builder.py`](scripts/common_tools/universal_atlas_builder.py) e [`scripts/common_tools/universal_gtav_builder.py`](scripts/common_tools/universal_gtav_builder.py) convertem qualquer avatar `.zip` / `.unitypackage` / `.prefab` / Unity diretamente para qualquer NPC de história/cutscene (`streamed`, ex.: `ig_lamardavis`, `cs_lamardavis`) ou pedestre de rua (`componentpeds`, ex.: `a_f_m_beach_01`) pelo menu `[11]` ou CLI `--npc` / `--all-npcs` / `--target-ped`. Inclui ajuste automático de altura e A-Pose, detecção de mandíbula nativa (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), casamento de sufixos `.001` vs `" 1"` (`0` vértices sem grupo), limpeza de props `*_p` / `p_*.ydd`, extração segura `--keys` sem tocar no `GTA5.exe` e suporte do `GTAVPhysBones.asi` para até **32 peds simultâneos (`kMaxTrackedPeds = 32`)** com isolamento por `model` / `modelHash`.
-- **Decals de Sangue e Ferimentos do GTA V (`ped.sps` + `UVMap 1` em 6 Zonas)**: O módulo [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) habilita perfurações de bala, cortes e manchas de sangue nativas em tronco/saia, cabeça, braços e pernas (`--blood-decals`, ativo por padrão), excluindo caudas e cabelos longos abaixo do pescoço.
-- **Piscar Natural dos Olhos Opcional (`GTAVPhysBones.asi`)**: O módulo [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) anima piscadas naturais assimétricas (intervalos de `2.6–6.0s`, piscadas duplas ocasionais, pausa ao morrer, com filtro descendente em cílios curvados e teto protetor para não deformar nem sumir com a sobrancelha) usando os 4 ossos nativos `FACIAL_*_eyelidUpper*` sem gastar nenhum slot dos 63 PhysBones. Detecta e desativa automaticamente em avatares com expressões customizadas de olhos fechados/sorrindo/piscadela (`eye_blink = auto`), podendo ser alternado por `--eye-blink` / `--no-eye-blink`, menu interativo, `vrc2gtav.cfg` (`eye_blink = auto | true | false`) ou `[Blink_*] enabled = 0` no `GTAVPhysBones.ini`.
-- **Testes Automatizados**: Validação de código-fonte (`9` suítes, incluindo pipeline universal de NPCs e i18n/AST) e validação completa pós-deploy (`12` suítes).
+- **Plugin Exportador no Unity Editor (`VRCAvatar2GTAV.unitypackage`)**: Abra `Tools > VRCAvatar2GTAV > Export Avatar to GTA V` direto no Unity ([`unity_plugin/Assets/VRCAvatar2GTAV/Editor/`](unity_plugin/Assets/VRCAvatar2GTAV/Editor/)). Suporta **Modo Compartilhado** e **Abas Individuais por Protagonista** (`configs/active_multi_slots.json` + `--slots-json`), arrastar e soltar GameObjects da cena, `.prefab`, `.unitypackage` ou `.zip`, sobrescrita de `_MainTex` por material, seletor de resolução do atlas (`512`–`4096`), normal (`Auto`/`Off`/`256`–`1024`) e roupas secundárias (`Auto <3.7 GiB` / `512` / `1024` / `2048`) com estimativa de RPF7 ao vivo, slider de **Abertura da Boca (`0.70` padrão + botão de reset)** e força de piscar, `.anim` facial opcional (`--face-anim`), pílulas de status runtime do GTA V (`dinput8.dll`, `PhysBones.asi`, `VToon.asi`, `ScriptHookV.dll`, `OpenIV.asi` / RageOpenV), seletor **Auto / Windows Native / WSL**, console redimensionável e botões de **Restaurar Original (Restore Vanilla)**.
+- **Shader lilToon D3D11 em Tempo Real (`GTAVVToon.asi`)**: [`scripts/vtoon_asi/`](scripts/vtoon_asi/gtav_vtoon.cpp) e [`scripts/common_tools/vtoon_profile_helper.py`](scripts/common_tools/vtoon_profile_helper.py) extraem parâmetros `.mat` do lilToon (inclusive herança `m_Parent`), LUTs por região UV, MatCaps assados e marcas d'água mip0 alinhadas em bloco `8×4` (`char_id` `1..15`, IDs de protagonistas `1..3`) em `GTAVVToon.ini` + `vtoon_profiles/`. Interceptam `D3D11CreateDevice*`, `ID3D11Device`, `ID3D11DeviceContext` imediato/diferido, `ID3D11DeviceContext1` e callbacks seguros para overlays via `ScriptHookV`, aplicando *cel shading* Half-Lambert de dupla borda, terminador SSS quente, luz de contorno (*rim light*), alpha forward para fios finos e lentes transparentes (`kVToonForwardAlphaHlsl`), bypass do pass borrado de pele do GTA V, hot-reload na tecla **`F10`** e checagem SHA-256 na implantação dos ASIs.
+- **`.ytd`s de Textura Única Travados em `--mips 1` (`2048px`) & Orçamento RPF7**: O [`scripts/common_tools/universal_atlas_builder.py`](scripts/common_tools/universal_atlas_builder.py) gera dicionários `.ytd` externos com textura única e `--mips 1`, impedindo quedas de qualidade por *texture streaming* quando múltiplos peds customizados estão na mesma cena/cutscene, usa mapas neutros `A8R8G8B8` válidos para bump/spec embutidos e aplica `--secondary-atlas-size` (`auto <3.7 GiB`, `512`, `1024`, `2048`) nos slots `uppr_diff_001+`, mantendo o `uppr_000` em `2048×2048` abaixo de `4.00 GiB`.
+- **Restauração Seletiva ao Original (`--restore-peds` / `--restore-all`)**: O módulo [`scripts/common_tools/restore_vanilla_helper.py`](scripts/common_tools/restore_vanilla_helper.py) extrai dos RPFs originais da Rockstar apenas os arquivos do ped escolhido sem remover os demais protagonistas/NPCs modificados, além de limpar automaticamente suas seções no `GTAVPhysBones.ini`, `GTAVVToon.ini` e `configs/npc_registry.json`.
+- **Motor Nativo Modular Avatar (NDMF) & Ordem de Submeshes**: [`scripts/common_tools/modular_avatar_helper.py`](scripts/common_tools/modular_avatar_helper.py) e [`scripts/common_tools/build_universal_avatar.py`](scripts/common_tools/build_universal_avatar.py) executam o bake de `ModularAvatarMergeArmature`, `BoneProxy`, `ScaleAdjuster`, `MeshSettings`, `ObjectToggle`/`Activator`, `ReplaceObject`, `ShapeChanger`, `BlendshapeSync`, sobrescritas `m_Materials`, `VRCPhysBone`s e materiais lilToon, preservam o alpha de lentes/óculos e alinham a ordem de slots do Blender à ordem de submeshes do Unity (`map_blender_slots_to_unity_submeshes`).
+- **Blendshapes Separados (Rosto/Corpo) & Preservação de `.anim` Facial**: Pergunta separadamente por rosto (`--import-face-blendshapes`) e corpo (`--import-body-blendshapes`), aceita `--face-anim` dedicado, preserva *blendshapes* faciais da cena Unity quando o `face_anim` está vazio ou zerado, aplica `--mouth-open-strength` (`0.70` padrão no `FACIAL_jaw`) ou gera `.cfg` completo zerado incluindo vestidos customizados.
+- **Assistente First-Run, Ingestão de `.zip`/Unity e Download do Blender 4.0.2**: [`scripts/common_tools/avatar_archive_helper.py`](scripts/common_tools/avatar_archive_helper.py) extrai pacotes com proteção *Zip-Slip*, baixa o Blender `4.0.2` + `Sollumz` (`--download-blender`) e `rage-cli` (`--download-rage`) quando ausentes e exibe **menu paginado de avatares (`10`/página + `Next`/`Prev`)**.
+- **Porte Universal de Cabelo, PhysBones & Troca entre Protagonistas**: Suporta cabelos `.prefab`/`PrefabVariant`/`.fbx` com divisão por bandas Z, `VRCPhysBone`s (`79` cadeias padrão + cadeias por NPC, modo `Advanced` `integrationType == 1` relativo ao pai, desembrulho de fios inferiores/laços, remoção de órfãos, priorização `<= 63` ossos, `--physbones-marshmallow` opcional) e troca livre de slots (`[7]`, `--avatar`).
+- **Pipeline Universal de NPCs e Pedestres do GTA V**: [`scripts/common_tools/npc_registry_helper.py`](scripts/common_tools/npc_registry_helper.py) e [`scripts/common_tools/universal_gtav_builder.py`](scripts/common_tools/universal_gtav_builder.py) convertem qualquer avatar direto para qualquer NPC de história/cutscene (`ig_*`, `cs_*`) ou pedestre (`a_f_*`, `a_m_*`) via `--npc` / `--all-npcs` / `--target-ped`, com mapeamento de mandíbula (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), casamento `.001` vs `" 1"`, limpeza de props `*_p`/`p_*.ydd` e rastreio de até **32 peds simultâneos (`kMaxTrackedPeds = 32`)** no `GTAVPhysBones.asi`.
+- **Decals de Sangue (`ped.sps` + `UVMap 1` 6 Zonas) & Piscar Natural dos Olhos**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) (`--blood-decals` padrão / `--no-blood-decals`) e [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) (`--eye-blink` `auto` / `--eye-blink-strength` / `--no-eye-blink`).
+- **Logs `--verbose`, Suporte Trilíngue (`en`/`ja`/`pt`) e Testes Automatizados**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) grava logs detalhados em `logs/`; [`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) valida **10** suítes de código-fonte (`--source-only`) e **13** suítes completas pós-deploy.
 
 ---
 
 ## Protagonistas e Avatares
 
-Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares VRChat são totalmente intercambiáveis entre os slots de `michael`, `franklin` e `trevor`:
+Por padrão cada protagonista começa com o visual abaixo, mas qualquer preset ou avatar Unity/BOOTH pode ser atribuído livremente aos slots de `michael` (`player_zero`), `franklin` (`player_one`) e `trevor` (`player_two`):
 
 | Slot Padrão | Protagonista | Avatar VRChat Padrão (`avatar` ID) | Visual Configurado | Pasta de Trabalho |
 | :--- | :--- | :--- | :--- | :--- |
@@ -97,43 +98,51 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 ## Pré-requisitos
 
 - **Grand Theft Auto V (Legacy)** instalado localmente
-- **[Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)** + **[RageOpenV](https://github.com/Chiheb-Bacha/RageOpenV)** instalados na pasta do GTA V (para carregar a pasta `mods/`)
-- **[Blender 4.0.2](https://www.blender.org/)** com **[Sollumz v2.9.0](https://github.com/Sollumz/Sollumz)**
-- **`rage-cli` `0.28.1`** ([GitHub](https://github.com/VIRUXE/rage-cli)) para reempacotamento RPF7
-- Ambiente **Python 3.10+** com as dependências de [`requirements.txt`](requirements.txt) (`numpy`, `Pillow`) instaladas para executar [`run_mod_manager.py`](run_mod_manager.py) e os scripts de validação
-- Seus **arquivos de avatar e roupas da BOOTH** legalmente adquiridos (além do projeto Unity / cena `.unity`, caso queira herdar customizações)
+- **[Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)** (`dinput8.dll`) + **[RageOpenV](https://github.com/Chiheb-Bacha/RageOpenV)** (ou `OpenIV.asi`) na pasta do GTA V para carregar a pasta `mods/`
+- **[ScriptHookV](https://www.dev-c.com/gtav/scripthookv/)** (`ScriptHookV.dll`, recomendado para hooks de frame/tecla `F10` do `GTAVVToon.asi` e rastreamento de peds no `GTAVPhysBones.asi`)
+- **[Blender 4.0.2](https://www.blender.org/)** com **[Sollumz v2.9.0](https://github.com/Sollumz/Sollumz)** *(baixado automaticamente via `--download-blender` ou botão Setup no Unity)*
+- **`rage-cli` `0.28.1`** ([GitHub](https://github.com/VIRUXE/rage-cli)) para empacotamento RPF7 *(baixado automaticamente via `--download-rage` ou UI do Unity)*
+- Ambiente **Python 3.10+** com [`requirements.txt`](requirements.txt) (`numpy`, `Pillow`)
+- *(Opcional, para fluxo visual no Unity)* **Unity Editor 2022.3+** (projeto VRChat Creator Companion com pasta `Assets/`)
+- Seus **arquivos de avatar e roupas da BOOTH** legalmente adquiridos
 
 ---
 
 ## Início Rápido
 
-1. **Clone o repositório**
+### Opção A — Plugin do Unity Editor (Recomendado para projetos Unity / VCC)
+
+1. Dê um duplo clique em [`VRCAvatar2GTAV.unitypackage`](VRCAvatar2GTAV.unitypackage) para importar no seu projeto Unity (ou execute o instalador não destrutivo via CLI):
+   ```bash
+   python unity_plugin/install_unity_plugin.py --unity-project "/caminho/MeuProjetoUnity"
+   ```
+2. No Unity, acesse **`Tools > VRCAvatar2GTAV > Export Avatar to GTA V`**.
+3. Escolha o modo **Compartilhado** ou ative **Abas por Protagonista** (`Michael`, `Franklin`, `Trevor`), arraste seus avatares da cena, `.prefab`, `.zip` ou `.unitypackage`, ajuste resolução / abertura da boca (`0.70` padrão) / piscar, confira as pílulas de runtime do GTA V (use **Baixar e Configurar** se faltar Blender/rage-cli) e clique em **Iniciar Exportação**.
+
+### Opção B — CLI e Menu Interativo no Terminal
+
+1. **Clone o repositório e instale as dependências Python (`numpy`, `Pillow`)**
    ```bash
    git clone https://github.com/TheOkamoto/vrcavatar2gtav.git
    cd vrcavatar2gtav
-   ```
-
-2. **Instale as dependências Python (`numpy`, `Pillow`)** *(recomendado em um ambiente virtual)*
-   ```bash
    pip install -r requirements.txt
    ```
 
-3. **Valide o repositório limpo** *(opcional)*
+2. **Valide o repositório limpo** *(opcional)*
    ```bash
    python scripts/common_tools/test_mod_suite.py --source-only
    ```
 
-4. **Execute a configuração inicial (First-Run)**
-   Abra [`EXECUTAR_GERENCIADOR.bat`](EXECUTAR_GERENCIADOR.bat) (ou [`RUN_MANAGER.bat`](RUN_MANAGER.bat)) no Windows, ou execute diretamente via CLI:
+3. **Execute o First-Run** — abra [`EXECUTAR_GERENCIADOR.bat`](EXECUTAR_GERENCIADOR.bat) (ou [`RUN_MANAGER.bat`](RUN_MANAGER.bat)) no Windows, ou via CLI:
    ```bash
    python run_mod_manager.py --setup
    ```
-   O assistente verifica o diretório do GTA V Legacy, Blender `4.0.2`, `rage-cli` e os assets locais, gerando o arquivo `vrc2gtav.cfg` (ignorado pelo Git) a partir de [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example). Para apenas auditar o ambiente sem alterar arquivos:
+   Para apenas auditar o ambiente sem alterar arquivos:
    ```bash
    python scripts/common_tools/setup_first_run.py --check-only
    ```
 
-5. **Construa e implante todos os protagonistas**
+4. **Construa e implante todos os protagonistas**
    ```bash
    python run_mod_manager.py --character all
    ```
@@ -142,15 +151,15 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 
 ## Configuração e Comportamento de Fallback
 
-- **Configuração Externa (`vrc2gtav.cfg`)**: Copie [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) para `vrc2gtav.cfg` (ou crie via `--setup`) para definir os caminhos do GTA V Legacy, Blender, `rage-cli` e dos arquivos FBX/Unity sem editar o código-fonte.
-- **Escalas Corporais (`1.0` + Leitor de `.unity`)**: As proporções assumem `[1.0, 1.0, 1.0]` por padrão. Quando uma cena `.unity` é informada, os scripts leem a hierarquia de `Transform` do arquivo e aplicam as escalas customizadas automaticamente.
-- **Predefinições de Blendshapes (`Unity` e `configs/*_blendshapes.cfg`)**: Cada *blendshape* de rosto, encolhimento de corpo (*shrink*), roupa, acessório e cabelo é carregado via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) diretamente do seu projeto Unity (`.unity` + `.prefab` + `.anim`) ou de predefinições portáteis em [`configs/`](configs/) (`shinano_blendshapes.cfg`, `shinano_er_blendshapes.cfg`, `miltina_blendshapes.cfg`), controlados por `blendshapes_source = auto | unity | cfg` e `blendshapes_cfg`.
-- **Importador Automático & Lista de Priorização de VRChat PhysBones (`Unity` e `configs/*_physbones.cfg`)**: O módulo [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) importa componentes `VRCPhysBone` padrão ativos (incluindo sobrescritas de `PrefabInstance`), empacota dentro do limite de `<= 63` ossos customizados / `<= 128` totais do `.ydd` na RAGE (`0` colisões de hash ELF) e lê/grava arquivos portáteis `.cfg` (`michael_neko_mimi_physbones.cfg`: `30` cadeias / `62` ossos; `shinano_casual_physbones.cfg`: `24` cadeias / `62` ossos; `miltina_maid_physbones.cfg`: `25` cadeias / `58` ossos — `79` cadeias / `182` ossos customizados no total, **todos dentro do limite RAGE com `0` cadeias descartadas**). Sobrescritas opcionais de `marshmallow_PB` ficam desativadas por padrão e podem ser ativadas via `physbones_marshmallow = true` ou `--physbones-marshmallow` (`81` cadeias / `186` ossos). Quando um **avatar customizado** ultrapassa `63` ossos customizados, a lista `PHYSBONE_PRIORITY_TIERS` ranqueia as cadeias dos **Tiers 1–3 essenciais** (`Ear.L/.R`, franja/cabelo frontal/lateral/traseiro, maria-chiquinha, `Tail`, `Wing`, `Skirt`, `Coat`, `Scarf`, `Sleeve`, peito principal) até **Tier 4** (`Ribbon`, `Bow`, `Frill`, `Veil`) e **Tiers 5–7 não essenciais** (`Belt`, `Strap`, `Cheek`, `Earring`, `HairPin`, `Keychain`, `Backpack/Bag`, `Pouch`, `Plushie`, `PocketWatch`, `Badge`): os 3 presets e qualquer avatar customizado dentro do limite mantêm **100%** das cadeias (`0` descartes), enquanto avatares acima do limite descartam simetricamente os itens não essenciais de menor prioridade e reassociam seus vértices de forma rígida ao `parent_bone` (`SKEL_Head`, `SKEL_Pelvis`, etc.) sem herdar balanço indevido; além disso, na importação, `extract_unity_scene_physbones` e `prune_orphaned_physbone_chains` detectam e excluem automaticamente **PhysBones órfãos de vestidos antigos** (malhas desativadas/`EditorOnly`/`m_RemovedGameObjects`/`m_RemovedComponents`, alternadas pelo Modular Avatar ou deletadas sem pesos ativos nos FBXs, e `rootTransform`s quebrados/inativos) antes de preencher o limite da RAGE. Gerenciado via `physbones_source = auto | unity | cfg`, `physbones_cfg`, `--physbones-marshmallow` e opção `[10]` do menu interativo.
+- **Configuração Externa (`vrc2gtav.cfg`) & Toolchain Embutido**: Copie [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) para `vrc2gtav.cfg` (ou gere via `--setup` / UI do Unity). Quando instalado via `.unitypackage`, o `Vrc2GtavConfigDiscovery` usa prioritariamente `Assets/VRCAvatar2GTAV/Toolchain` e redireciona os arquivos de trabalho para `<RaizDoProjeto>/VRCAvatar2GTAV_Work`.
+- **Escalas Corporais (`1.0` + Leitor de `.unity`)**: Proporções assumem `[1.0, 1.0, 1.0]` por padrão e leem escalas customizadas da hierarquia `Transform` quando uma cena `.unity` é fornecida.
+- **Blendshapes (`Unity` e `configs/*_blendshapes.cfg`) & Fallback `.anim`**: Resolvidos via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) (`blendshapes_source = auto | unity | cfg`). Caso `--face-anim` não seja informado ou o `.anim` esteja zerado, os *blendshapes* faciais configurados na cena Unity ou `.cfg` são preservados.
+- **PhysBones (`Unity` e `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) importa `VRCPhysBone`s ativos (`PrefabInstance`, desembrulho de fios inferiores/laços, exclusão automática de órfãos de vestidos antigos) dentro do teto `<= 63` ossos customizados / `<= 128` totais (`79` cadeias / `182` ossos padrão nos 3 protagonistas sem descartes; `--physbones-marshmallow` habilita `81` cadeias / `186` ossos) e prioriza via `PHYSBONE_PRIORITY_TIERS` para avatares customizados acima do teto.
 - **Cabelo Customizado Universal e Fallbacks**:
-  - **Qualquer Avatar Preset**: Suporta `custom_hair = auto | default | none | <caminho .prefab ou .fbx>` (junto de `hair_mat`, `hair_tex`, `hair_scale`, `hair_offset`) no `vrc2gtav.cfg`, opção `[8]` do menu interativo ou flags `--hair` na CLI em `shinano_casual`, `shinano_er` e `miltina_maid`. O módulo [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) resolve cadeias de `PrefabVariant`, estruturas *Modular Avatar*, mapas de materiais `.fbx.meta` e cores/HSV lilToon em `custom_hair_manifest.json`, enquanto [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py) ajusta o encaixe no crânio, remapeia UVs e preserva orelhas animais base.
-  - **Shinano**: Usa `custom_hair` / *Neko Tied Bob Hair* quando disponível; caso contrário, retorna automaticamente ao cabelo padrão (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim` e texturas base de olhos.
-  - **Miltina**: Suporta qualquer `custom_hair` (ou `fbx_hair` legado); se ausente, usa automaticamente a maria-chiquinha padrão (`Milltina_hair_*`), `Miltina_close eyes_Base_adult.anim` e texturas base de olhos.
-- **Idioma Automático**: Os scripts detectam o idioma do sistema (`en`, `ja`, `pt`) automaticamente e aceitam `--lang en|ja|pt`.
+  - **Qualquer Preset**: Suporta `custom_hair = auto | default | none | <caminho .prefab ou .fbx>` (`[8]` / `--hair`, `--hair-mat`, `--hair-tex`, `--hair-scale`, `--hair-offset`) via [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) e [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py).
+  - **Shinano**: Usa `custom_hair` / *Neko Tied Bob Hair* quando configurado; caso contrário retorna ao cabelo padrão (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim` e olhos base.
+  - **Miltina**: Aceita `custom_hair` / `fbx_hair`; caso ausente, usa a maria-chiquinha padrão (`Milltina_hair_*`), `Miltina_close eyes_Base_adult.anim` e olhos base.
+- **Idioma Automático**: Detecta o idioma do sistema (`en`, `ja`, `pt`) automaticamente ou via `--lang en|ja|pt`.
 
 ---
 
@@ -159,27 +168,24 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 | Comando | Finalidade |
 | :--- | :--- |
 | `EXECUTAR_GERENCIADOR.bat` / `RUN_MANAGER.bat` | Menu interativo no Windows para First-Run, build e deploy |
+| `python unity_plugin/install_unity_plugin.py --unity-project "/caminho/Projeto"` | Instala de forma não destrutiva `Assets/VRCAvatar2GTAV/` no projeto Unity |
+| `python unity_plugin/build_unitypackage.py` | Prepara `Assets/VRCAvatar2GTAV/Toolchain/` e recompila o `VRCAvatar2GTAV.unitypackage` |
 | `python run_mod_manager.py --setup` | Assistente interativo de First-Run e geração de `vrc2gtav.cfg` |
-| `python run_mod_manager.py --setup --avatar-zip "/caminho/Shinano.zip" --download-blender --verbose` | Extrai `.zip`/`.unitypackage`, baixa Blender `4.0.2` + Sollumz se necessário, abre seleção paginada (`10`/página + `Next`), configura MA/Face/Body `.cfg` e grava log em `logs/` |
-| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/caminho/Shinano.zip" --interactive --verbose` | Construtor universal de avatares/roupas Modular Avatar com menu de 10 opções + `Next`, seleção de Rosto/Corpo e log detalhado |
-| `python run_mod_manager.py --check-env` | Valida GTA V, Blender, `rage-cli` e caminhos de assets |
-| `python scripts/common_tools/setup_first_run.py --check-only` | Auditoria não destrutiva de ambiente e arquivos de origem |
-| `python run_mod_manager.py --character all` | Reconstrói tudo no Blender, exporta YDD/YTD e implanta no `x64v.rpf` |
-| `python run_mod_manager.py --character {michael,franklin,trevor} --lang {en,ja,pt}` | Executa build/deploy de um único protagonista no idioma escolhido |
-| `python run_mod_manager.py --character franklin --avatar miltina_maid` | Compila e aplica qualquer avatar VRChat (`shinano_casual`, `shinano_er`, `miltina_maid`) em qualquer protagonista (`--save-assignment` salva no `vrc2gtav.cfg`) |
-| `python run_mod_manager.py --character michael --hair "/caminho/Hair.prefab" --save-hair` | Porta qualquer cabelo customizado `.prefab` / `PrefabVariant` / `.fbx` para um protagonista (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
-| `python run_mod_manager.py --export-blendshapes` | Exporta blendshapes das cenas `.unity` para `configs/*_blendshapes.cfg` |
-| `python run_mod_manager.py --character all --blendshapes-source cfg` | Compila usando os presets `.cfg` de blendshapes em vez das cenas Unity |
-| `python run_mod_manager.py --export-physbones` | Importa VRCPhysBones padrão das cenas `.unity` para `configs/*_physbones.cfg` (`--physbones-marshmallow` inclui Marshmallow PB; `--overwrite-physbones-from-unity` sobrescreve edições) |
-| `python run_mod_manager.py --character all --physbones-source cfg` | Compila usando os presets `.cfg` de PhysBones em vez de extrair das cenas Unity (adicione `--physbones-marshmallow` para ativar Marshmallow PB) |
-| `python run_mod_manager.py --character all --blood-decals` | Compila com decals de sangue/ferimentos do GTA V habilitados (padrão; use `--no-blood-decals` para retornar a `ped_default.sps`) |
-| `python run_mod_manager.py --character all --eye-blink` | Compila com piscar natural ativado (`auto` pula expressões de olho fechado; pico padrão `max_blink = 0.50` na Shinano e `0.60` na Miltina sem afetar outros blendshapes da face; ajuste via `--eye-blink-strength` ou desative com `--no-eye-blink`) |
-| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/caminho/Karin.zip"` | Converte e implanta qualquer NPC ou pedestre do GTA V (`streamed` / `componentpeds`) direto de um `.zip` / `.unitypackage` / projeto Unity (também pelo menu `[11]`) |
-| `python run_mod_manager.py --all-npcs` | Reaplica e reimplanta todos os NPCs registrados em `configs/npc_registry.json` junto aos protagonistas |
-| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/caminho/Karin.zip" --target-ped cs_lamardavis --deploy-npc` | Converte diretamente um `.zip`/`.prefab`/`.unitypackage` para qualquer modelo ped alvo (inclusive `cs_*` de cutscene) e instala em `mods/` |
-| `python run_mod_manager.py --deploy-only` | Reempacota e implanta pastas de personagens e NPCs já compilados em `mods/` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa as `9` suítes de código/config/i18n/First-Run/Modular-Avatar/NPC (clone limpo) |
-| `python scripts/common_tools/test_mod_suite.py` | Executa todas as `12` suítes de ponta a ponta (requer build e deploy concluídos) |
+| `python run_mod_manager.py --setup --avatar-zip "/caminho/Shinano.zip" --download-blender --verbose` | Extrai `.zip`/`.unitypackage`, baixa Blender `4.0.2` + Sollumz, pagina avatares (`10`/página), gera `.cfg` e salva log em `logs/` |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/caminho/Shinano.zip" --interactive --verbose` | Construtor universal Modular Avatar com seletor paginado e logs detalhados |
+| `python scripts/common_tools/universal_gtav_builder.py --slots-json "configs/active_multi_slots.json"` | Constrói múltiplos protagonistas em sequência (`PerProtagonistSlots`) com empacotamento RPF7 único (`--secondary-atlas-size`, `--atlas-size`, `--mouth-open-strength`, `--face-anim`) |
+| `python scripts/common_tools/universal_gtav_builder.py --restore-peds player_zero` | Restaura seletivamente um protagonista/NPC ao padrão Rockstar (`--restore-all` para todos) sem afetar outros peds modificados |
+| `python run_mod_manager.py --check-env` / `setup_first_run.py --check-only` | Valida GTA V, Blender, `rage-cli` e caminhos de assets |
+| `python run_mod_manager.py --character {all,michael,franklin,trevor} --lang {en,ja,pt}` | Reconstrói no Blender, exporta YDD/YTD (`--mips 1`), sincroniza ASIs/perfis e implanta em `mods/` |
+| `python run_mod_manager.py --character franklin --avatar miltina_maid` | Compila qualquer avatar VRChat (`shinano_casual`, `shinano_er`, `miltina_maid`) em qualquer protagonista (`--save-assignment`) |
+| `python run_mod_manager.py --character michael --hair "/caminho/Hair.prefab" --save-hair` | Porta cabelo customizado `.prefab` / `PrefabVariant` / `.fbx` (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
+| `python run_mod_manager.py --export-blendshapes` / `--blendshapes-source cfg` | Exporta blendshapes das cenas `.unity` ou usa `.cfg` portáteis |
+| `python run_mod_manager.py --export-physbones` / `--physbones-source cfg` | Importa VRCPhysBones (`--physbones-marshmallow`, `--overwrite-physbones-from-unity`) |
+| `python run_mod_manager.py --character all --blood-decals --eye-blink` | Controla decals de sangue (`--no-blood-decals`), piscar natural (`--eye-blink-strength`, `--no-eye-blink`) e `--mouth-open-strength` (`0.70` padrão) |
+| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/caminho/Karin.zip"` | Converte e implanta qualquer NPC (`ig_*`, `cs_*`) ou pedestre (`a_f_*`, `a_m_*`) direto (`--all-npcs` / `--target-ped ... --deploy-npc`) |
+| `python run_mod_manager.py --deploy-only` | Reempacota e instala personagens, NPCs registrados e plugins ASI em `mods/` |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Executa todas as **10** suítes de código-fonte/Unity/VToon/Restore/i18n/AST (clone limpo) |
+| `python scripts/common_tools/test_mod_suite.py` | Executa todas as **13** suítes completas de ponta a ponta (requer build e deploy concluídos) |
 
 ---
 
@@ -187,15 +193,23 @@ Por padrão cada protagonista começa com o visual abaixo, mas todos os avatares
 
 ```text
 vrcavatar2gtav/
-├── configs/                         # Predefinições de blendshapes (*_blendshapes.cfg), PhysBones (*_physbones.cfg) e npc_registry.json local (.gitignore)
+├── VRCAvatar2GTAV.unitypackage      # Pacote Unity pronto para importar com UI + Toolchain embutido (ignorado no Git / gerado via build_unitypackage.py)
+├── unity_plugin/
+│   ├── Assets/VRCAvatar2GTAV/
+│   │   ├── Editor/                  # 9 scripts C# do Unity Editor (VRCAvatar2GTAV.Editor.asmdef)
+│   │   └── Toolchain/               # Espelho empacotado dos scripts e docs limpos
+│   ├── build_unitypackage.py        # Gerador autocontido do .unitypackage
+│   └── install_unity_plugin.py      # Instalador não destrutivo para projetos Unity
+├── configs/                         # Predefinições de blendshapes (*_blendshapes.cfg), PhysBones (*_physbones.cfg), npc_registry.json e active_multi_slots.json (.gitignore)
 ├── npcs/                            # Workspaces locais e modelos compilados de NPCs e pedestres (.gitignore)
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # Guia técnico completo (EN)
-│   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Arquitetura, rigging, Sollumz, shaders e RPF7 (PT-BR)
+│   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Arquitetura, Unity UI, VToon, rigging, Sollumz e RPF7 (PT-BR)
 │   └── DEPLOYMENT_GUIDE.ja.md       # Guia técnico completo (JA)
 ├── scripts/
-│   ├── common_tools/                # First-run, leitores de .unity/cabelo/blendshapes/PhysBones/NPCs, i18n, test_mod_suite.py
+│   ├── common_tools/                # First-run, .unity/cabelo/blendshapes/PhysBones/VToon/Restore/NPCs, i18n, test_mod_suite.py
 │   ├── physbones_asi/               # Plugin ASI de PhysBones VRChat em tempo real (GTAVPhysBones.asi / .ini)
+│   ├── vtoon_asi/                   # Plugin ASI de shader lilToon D3D11 em tempo real (GTAVVToon.asi / .ini / vtoon_profiles)
 │   ├── Shinano_Casual_Franklin/     # Scripts de build do Franklin (player_one)
 │   ├── Shinano_EternalReunion_Michael/ # Scripts de build do Michael (player_zero)
 │   └── Miltina_Maid_Trevor/         # Scripts de build do Trevor (player_two)
@@ -205,13 +219,14 @@ vrcavatar2gtav/
 ├── 3_Trevor_Miltina_Maid/           # Saída intermediária para player_two
 ├── requirements.txt                 # Dependências Python 3.10+ (numpy, Pillow)
 ├── run_mod_manager.py               # Orquestrador principal via CLI e menu interativo
+├── setup_first_run.py               # Ponto de entrada da configuração inicial (First-Run)
 ├── RUN_MANAGER.bat                  # Atalho interativo no Windows (EN/JA/PT)
 ├── EXECUTAR_GERENCIADOR.bat         # Atalho interativo no Windows (PT-BR)
 ├── vrc2gtav.cfg.example             # Modelo externo de configuração de caminhos
 └── LICENSE                          # Licença MIT
 ```
 
-Para detalhes completos sobre alinhamento de ossos, calibração das mãos, síntese de *lip sync*, hashes JOAAT de texturas, shaders no `Sollumz`, substituição universal de *slots* (prevenção de `ERR_GEN_ZLIB_2`) e solução de problemas, consulte o **[Guia Técnico e de Implantação](docs/DEPLOYMENT_GUIDE.pt-BR.md)**.
+Para detalhes completos sobre alinhamento de ossos, calibração das mãos, síntese de *lip sync* (padrão `0.70`), shader cel D3D11 `GTAVVToon.asi`, `.ytd`s de mip único, controles da interface no Unity, Restore Vanilla seletivo e segurança RPF7 de `4.00 GiB`, consulte o **[Guia Técnico e de Implantação](docs/DEPLOYMENT_GUIDE.pt-BR.md)**.
 
 ---
 
@@ -261,10 +276,11 @@ Todos os modelos 3D, roupas, cabelos, texturas oculares, pacotes Unity e ferrame
 | **lilToon** | `v2.4.1` | `lilxyzw` | [GitHub](https://github.com/lilxyzw/lilToon) · [Site](https://lilxyzw.github.io/lilToon/) |
 | **FaceEmo** | `v1.7.0` | `suzuryg` | [GitHub](https://github.com/suzuryg/face-emo) · [Site](https://suzuryg.github.io/face-emo/) |
 | **Modular Avatar** | `v1.18.7` | `bd_` (Nadena) | [GitHub](https://github.com/bdunderscore/modular-avatar) · [Site](https://modular-avatar.nadena.dev/) |
-| **Blender** | `4.0.2` | Blender Foundation | [Site](https://www.blender.org/) |
+| **Blender** | `4.0.2` | Blender Foundation | [Site Oficial](https://www.blender.org/) |
 | **Sollumz** | `v2.9.0` | `Skylumz`, `Colton`, `alexguirre` | [GitHub](https://github.com/Sollumz/Sollumz) · [Docs](https://docs.sollumz.org/) |
 | **rage-cli** | `0.28.1` | `VIRUXE` | [GitHub](https://github.com/VIRUXE/rage-cli) |
 | **RageOpenV** | — | `Chiheb-Bacha` | [GitHub](https://github.com/Chiheb-Bacha/RageOpenV) |
+| **ScriptHookV** | — | `Alexander Blade` | [Site](https://www.dev-c.com/gtav/scripthookv/) |
 | **Ultimate ASI Loader** | — | `ThirteenAG` | [GitHub](https://github.com/ThirteenAG/Ultimate-ASI-Loader) |
 
 ---
