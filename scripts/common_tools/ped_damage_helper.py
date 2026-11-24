@@ -1548,14 +1548,7 @@ def enforce_ytd_rpf7_size_budget(
                 flush=True,
             )
             subprocess.run(
-                [
-                    str(rage_cli),
-                    "textures",
-                    "build",
-                    "-o",
-                    str(target_ytd),
-                    *[str(item_p) for item_p in cur_inputs],
-                ],
+                [str(rage_cli), "textures", "build", "--mips", "1", "-o", str(target_ytd), *[str(item_p) for item_p in cur_inputs]],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,

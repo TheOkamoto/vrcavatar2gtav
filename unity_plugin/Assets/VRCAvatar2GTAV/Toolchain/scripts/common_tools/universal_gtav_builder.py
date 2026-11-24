@@ -1287,7 +1287,7 @@ def _cli_main() -> int:
     parser.add_argument("--no-deploy", action="store_true")
     parser.add_argument("--no-repack", action="store_true")
     parser.add_argument("--force-reextract", action="store_true")
-    parser.add_argument("--blood-decals", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--blood-decals", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--eye-blink", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--eye-blink-strength", type=float, default=None)
     parser.add_argument("--mouth-open-strength", type=float, default=None)
@@ -1300,9 +1300,9 @@ def _cli_main() -> int:
     parser.add_argument("--face-anim", default=None)
     parser.add_argument("--physbones-cfg", default=None)
     parser.add_argument("--vtoon-char-id", type=int, default=None)
-    parser.add_argument("--atlas-size", type=int, default=2048)
-    parser.add_argument("--normal-size", type=int, default=0)
-    parser.add_argument("--secondary-atlas-size", type=int, default=0)
+    parser.add_argument("--atlas-size", type=int, default=None)
+    parser.add_argument("--normal-size", type=int, default=None)
+    parser.add_argument("--secondary-atlas-size", type=int, default=None)
     parser.add_argument("--texture-overrides", default=None)
     parser.add_argument("--texture-override", action="append", default=[])
     parser.add_argument("--slots-json", default=None, help="JSON file/payload defining multiple ped->avatar slots")
@@ -1338,6 +1338,13 @@ def _cli_main() -> int:
     except Exception:
         pass
 
+    resolved_blood_decals = True if parsed.blood_decals is None else bool(parsed.blood_decals)
+    resolved_atlas_size = 2048 if parsed.atlas_size is None else int(parsed.atlas_size)
+    resolved_normal_size = 0 if parsed.normal_size is None else int(parsed.normal_size)
+    resolved_secondary_atlas_size = (
+        0 if parsed.secondary_atlas_size is None else int(parsed.secondary_atlas_size)
+    )
+
     should_deploy = not parsed.no_deploy
     should_repack = should_deploy and (not parsed.no_repack)
 
@@ -1361,7 +1368,7 @@ def _cli_main() -> int:
         slots_path = project_paths_cfg.to_host_path(parsed.slots_json)
         shared_defaults = {
             "source": parsed.source,
-            "force_reextract": parsed.force_reextract,
+            "force_reextract": True if parsed.force_reextract else None,
             "blood_decals": parsed.blood_decals,
             "eye_blink": parsed.eye_blink,
             "eye_blink_strength": parsed.eye_blink_strength,
@@ -1384,7 +1391,7 @@ def _cli_main() -> int:
             shared_defaults=shared_defaults,
             deploy=should_deploy,
             repack_and_deploy=should_repack,
-            secondary_atlas_size=parsed.secondary_atlas_size,
+            secondary_atlas_size=resolved_secondary_atlas_size,
         )
         return 0
 
@@ -1406,7 +1413,7 @@ def _cli_main() -> int:
             deploy=should_deploy,
             repack_archives=False,
             force_reextract=(parsed.force_reextract if idx_ped == 0 else False),
-            blood_decals=parsed.blood_decals,
+            blood_decals=resolved_blood_decals,
             eye_blink=parsed.eye_blink,
             eye_blink_strength=parsed.eye_blink_strength,
             mouth_open_strength=parsed.mouth_open_strength,
@@ -1419,9 +1426,9 @@ def _cli_main() -> int:
             face_anim=parsed.face_anim,
             physbones_cfg=parsed.physbones_cfg,
             vtoon_char_id=parsed.vtoon_char_id if len(ped_targets) == 1 else None,
-            atlas_size=parsed.atlas_size,
-            normal_size=parsed.normal_size,
-            secondary_atlas_size=parsed.secondary_atlas_size,
+            atlas_size=resolved_atlas_size,
+            normal_size=resolved_normal_size,
+            secondary_atlas_size=resolved_secondary_atlas_size,
             texture_overrides=resolved_tex_overrides or None,
         )
         built_peds.append(str(result["ped_name"]))
@@ -1432,7 +1439,7 @@ def _cli_main() -> int:
 
         restore_vanilla_helper.repack_and_deploy_built_peds(
             built_peds,
-            secondary_atlas_size=parsed.secondary_atlas_size,
+            secondary_atlas_size=resolved_secondary_atlas_size,
         )
     return 0
 

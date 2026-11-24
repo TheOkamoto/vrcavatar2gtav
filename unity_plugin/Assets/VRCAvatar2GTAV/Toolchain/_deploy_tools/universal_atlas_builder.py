@@ -836,11 +836,7 @@ def build_universal_avatar_atlas(
     # so DiffuseSampler (index 0) always binds the diffuse atlas reliably in-game.
     # Bump/Spec maps remain saved on disk for embedded .ydd shader export.
     build_cmd = npc_registry_helper.build_safe_rage_cmd(
-        "textures",
-        "build",
-        "-o",
-        str(ytd_path),
-        str(atlas_png_path),
+        "textures", "build", "--mips", "1", "-o", str(ytd_path), str(atlas_png_path),
     )
     subprocess.run(build_cmd, stdin=subprocess.DEVNULL, check=True)
     ped_damage_helper.enforce_ytd_rpf7_size_budget(

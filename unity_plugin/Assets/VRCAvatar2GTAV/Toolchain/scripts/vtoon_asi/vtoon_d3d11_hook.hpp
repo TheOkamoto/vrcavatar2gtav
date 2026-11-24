@@ -643,7 +643,7 @@ public:
             d3dCtx->PSSetShaderResources(16, 3, srvs);
             invokeOriginalDraw();
         }
-        LogMilestoneOnce(1u << 4, "Executed VToon deferred directional shading overlay");
+        LogMilestoneOnce(1u << 11, "Executed VToon deferred directional shading overlay");
 
         d3dCtx->OMSetBlendState(origBlend, origBlendFactor, origSampleMask);
         if (origBlend) origBlend->Release();
@@ -681,14 +681,15 @@ public:
     bool IsEnabled() const { return configEnabled_.load(std::memory_order_acquire); }
 
     void LogFirstTrackedPedDraw() {
-        LogMilestoneOnce(1u << 2, "Intercepted first tracked Ped GBuffer/Forward draw");
+        LogMilestoneOnce(1u << 5, "Intercepted first tracked Ped GBuffer/Forward draw");
     }
 
-private:
     void LogMilestoneOnce(uint32_t flagBit, const std::string& msgText) {
         uint32_t prevFlags = loggedMilestones_.fetch_or(flagBit, std::memory_order_relaxed);
         if ((prevFlags & flagBit) == 0u) LogVToonMessage(msgText);
     }
+
+private:
 
     void ReloadConfigUnlocked() {
         std::string iniPath = GetModuleDirectoryA() + "\\GTAVVToon.ini";

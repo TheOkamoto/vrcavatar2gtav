@@ -1307,7 +1307,7 @@ def _build_compacted_ytd_via_rage(
             _resize_extracted_png_for_budget(png_file, max_diffuse_px, max_normal_px)
         subprocess.run(
             npc_registry_helper.build_safe_rage_cmd(
-                "textures", "build", "-o", str(dest_ytd), *[str(item) for item in png_files]
+                "textures", "build", "--mips", "1", "-o", str(dest_ytd), *[str(item) for item in png_files]
             ),
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -1329,7 +1329,7 @@ def _build_tiny_dummy_ytd_via_rage(dest_ytd: Path) -> Path:
         Image.new("RGB", (16, 16), (0, 0, 0)).save(dummy_png, format="PNG")
         subprocess.run(
             npc_registry_helper.build_safe_rage_cmd(
-                "textures", "build", "-o", str(dest_ytd), str(dummy_png)
+                "textures", "build", "--mips", "1", "-o", str(dest_ytd), str(dummy_png)
             ),
             stdin=subprocess.DEVNULL,
             capture_output=True,

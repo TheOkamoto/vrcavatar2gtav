@@ -1403,7 +1403,61 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
             and (ped_full / "uppr_diff_001_a_uni.ytd").stat().st_size == 1_100_000
             and (ped_full / "accs_diff_000_a_uni.ytd").stat().st_size == 512
         )
-    return hash_sync_ok and auto_tier_ok and full_sec_ok
+
+        # Verify run_multi_slot_builds preserves slot secondary_atlas_size=2048 & single-mip lock
+        import restore_vanilla_helper as rvh_mod
+
+        slots_file = tmp_path / "slots_2k.json"
+        slots_file.write_text(
+            json.dumps(
+                {
+                    "slots": [
+                        {
+                            "target_ped": "player_zero",
+                            "source": str(tmp_path / "dummy.unity"),
+                            "avatar_name": "DummyA",
+                            "secondary_atlas_size": 2048,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        captured_slot_sec: List[int] = []
+        captured_repack_sec: List[int] = []
+        orig_repack_fn = rvh_mod.repack_and_deploy_built_peds
+
+        def _fake_build_fn(**kwargs: Any) -> Dict[str, Any]:
+            captured_slot_sec.append(int(kwargs.get("secondary_atlas_size", -1)))
+            return {"ped_name": kwargs["target_ped"], "avatar_name": kwargs["avatar_name"]}
+
+        def _fake_repack_fn(built_peds: Any, *, secondary_atlas_size: int = 0) -> List[Path]:
+            captured_repack_sec.append(int(secondary_atlas_size))
+            return []
+
+        rvh_mod.repack_and_deploy_built_peds = _fake_repack_fn
+        try:
+            rvh_mod.run_multi_slot_builds(
+                slots_file,
+                shared_defaults={"secondary_atlas_size": None, "atlas_size": None},
+                build_fn=_fake_build_fn,
+                deploy=True,
+                repack_and_deploy=True,
+                secondary_atlas_size=0,
+            )
+        finally:
+            rvh_mod.repack_and_deploy_built_peds = orig_repack_fn
+
+        atlas_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "universal_atlas_builder.py").read_text(encoding="utf-8")
+        detour_src = (PROJECT_ROOT_DIR / "scripts" / "vtoon_asi" / "vtoon_detour.hpp").read_text(encoding="utf-8")
+        mips_vtable_ok = (
+            captured_slot_sec == [2048]
+            and captured_repack_sec == [2048]
+            and '"--mips", "1"' in atlas_src
+            and "FnCreateDeferredContext1" in detour_src
+            and "seenTable" in detour_src
+        )
+    return hash_sync_ok and auto_tier_ok and full_sec_ok and mips_vtable_ok
 
 
 def test_restore_and_multislot_regressions() -> bool:

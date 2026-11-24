@@ -10,6 +10,7 @@
 
 #include "vtoon_d3d11_hook.hpp"
 
+#include <d3d11_1.h>
 #include <cstring>
 #include <shared_mutex>
 #include <vector>
@@ -18,8 +19,12 @@ namespace gtav_vtoon {
 
 using FnClearState = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*);
 using FnDrawIndexedInstanced = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
+using FnDrawIndexedInstancedIndirect = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11Buffer*, UINT);
+using FnDrawInstancedIndirect = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11Buffer*, UINT);
 using FnPresent = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
 using FnGetImmediateContext = void(STDMETHODCALLTYPE*)(ID3D11Device*, ID3D11DeviceContext**);
+using FnGetImmediateContext1 = void(STDMETHODCALLTYPE*)(ID3D11Device1*, ID3D11DeviceContext1**);
+using FnCreateDeferredContext1 = HRESULT(STDMETHODCALLTYPE*)(ID3D11Device1*, UINT, ID3D11DeviceContext1**);
 using FnScriptHookPresentCallback = void(*)(void*);
 using FnPresentCallbackRegister = void(*)(FnScriptHookPresentCallback);
 using FnPresentCallbackUnregister = void(*)(FnScriptHookPresentCallback);
@@ -64,6 +69,8 @@ struct OrigDeviceVTable {
     FnCreatePixelShader origCreatePixelShader = nullptr;
     FnCreateDeferredContext origCreateDeferredContext = nullptr;
     FnGetImmediateContext origGetImmediateContext = nullptr;
+    FnGetImmediateContext1 origGetImmediateContext1 = nullptr;
+    FnCreateDeferredContext1 origCreateDeferredContext1 = nullptr;
 };
 
 struct OrigContextVTable {
@@ -73,6 +80,8 @@ struct OrigContextVTable {
     FnDraw origDraw = nullptr;
     FnDrawInstanced origDrawInstanced = nullptr;
     FnDrawIndexedInstanced origDrawIndexedInstanced = nullptr;
+    FnDrawIndexedInstancedIndirect origDrawIndexedInstancedIndirect = nullptr;
+    FnDrawInstancedIndirect origDrawInstancedIndirect = nullptr;
     FnClearState origClearState = nullptr;
 };
 
@@ -213,7 +222,10 @@ public:
         void** devVtbl,
         FnCreatePixelShader hookPs,
         FnCreateDeferredContext hookDefCtx,
-        FnGetImmediateContext hookGetImm
+        FnGetImmediateContext hookGetImm,
+        bool isDevice1 = false,
+        FnGetImmediateContext1 hookGetImm1 = nullptr,
+        FnCreateDeferredContext1 hookDefCtx1 = nullptr
     ) {
         if (!devVtbl) return;
         std::unique_lock<std::shared_mutex> writeLock(registryMutex_);
@@ -232,6 +244,10 @@ public:
         PatchSlotIfNeeded(devVtbl, 15, hookPs, targetEntry->origCreatePixelShader, fallbackDevice_.origCreatePixelShader, d3d11Range_);
         PatchSlotIfNeeded(devVtbl, 27, hookDefCtx, targetEntry->origCreateDeferredContext, fallbackDevice_.origCreateDeferredContext, d3d11Range_);
         PatchSlotIfNeeded(devVtbl, 40, hookGetImm, targetEntry->origGetImmediateContext, fallbackDevice_.origGetImmediateContext, d3d11Range_);
+        if (isDevice1 && hookGetImm1 && hookDefCtx1) {
+            PatchSlotIfNeeded(devVtbl, 43, hookGetImm1, targetEntry->origGetImmediateContext1, fallbackDevice_.origGetImmediateContext1, d3d11Range_);
+            PatchSlotIfNeeded(devVtbl, 44, hookDefCtx1, targetEntry->origCreateDeferredContext1, fallbackDevice_.origCreateDeferredContext1, d3d11Range_);
+        }
     }
 
     void InstallOrUpdateContext(
@@ -241,6 +257,8 @@ public:
         FnDraw hookDraw,
         FnDrawIndexedInstanced hookDrawIdxInst,
         FnDrawInstanced hookDrawInst,
+        FnDrawIndexedInstancedIndirect hookDrawIdxInd,
+        FnDrawInstancedIndirect hookDrawInd,
         FnClearState hookClear
     ) {
         if (!ctxVtbl) return;
@@ -262,6 +280,8 @@ public:
         PatchSlotIfNeeded(ctxVtbl, 13, hookDraw, targetEntry->origDraw, fallbackContext_.origDraw, d3d11Range_);
         PatchSlotIfNeeded(ctxVtbl, 20, hookDrawIdxInst, targetEntry->origDrawIndexedInstanced, fallbackContext_.origDrawIndexedInstanced, d3d11Range_);
         PatchSlotIfNeeded(ctxVtbl, 21, hookDrawInst, targetEntry->origDrawInstanced, fallbackContext_.origDrawInstanced, d3d11Range_);
+        PatchSlotIfNeeded(ctxVtbl, 39, hookDrawIdxInd, targetEntry->origDrawIndexedInstancedIndirect, fallbackContext_.origDrawIndexedInstancedIndirect, d3d11Range_);
+        PatchSlotIfNeeded(ctxVtbl, 40, hookDrawInd, targetEntry->origDrawInstancedIndirect, fallbackContext_.origDrawInstancedIndirect, d3d11Range_);
         PatchSlotIfNeeded(ctxVtbl, 110, hookClear, targetEntry->origClearState, fallbackContext_.origClearState, d3d11Range_);
     }
 
@@ -306,13 +326,31 @@ public:
         void** devVtbl,
         FnCreatePixelShader hookPs,
         FnCreateDeferredContext hookDefCtx,
-        FnGetImmediateContext hookGetImm
-    ) const {
+        FnGetImmediateContext hookGetImm,
+        bool isDevice1 = false,
+        FnGetImmediateContext1 hookGetImm1 = nullptr,
+        FnCreateDeferredContext1 hookDefCtx1 = nullptr
+    ) {
         if (!devVtbl) return false;
+        {
+            std::shared_lock<std::shared_mutex> readLock(registryMutex_);
+            bool seenTable = false;
+            for (const OrigDeviceVTable& item : deviceTables_) {
+                if (item.vtablePtr == devVtbl) {
+                    seenTable = true;
+                    break;
+                }
+            }
+            if (!seenTable) return true;
+        }
         if (!d3d11Range_.valid) return true;
-        return IsRawD3D11Slot(devVtbl[15], reinterpret_cast<const void*>(hookPs)) ||
-               IsRawD3D11Slot(devVtbl[27], reinterpret_cast<const void*>(hookDefCtx)) ||
-               IsRawD3D11Slot(devVtbl[40], reinterpret_cast<const void*>(hookGetImm));
+        bool needBase = IsRawD3D11Slot(devVtbl[15], reinterpret_cast<const void*>(hookPs)) ||
+                        IsRawD3D11Slot(devVtbl[27], reinterpret_cast<const void*>(hookDefCtx)) ||
+                        IsRawD3D11Slot(devVtbl[40], reinterpret_cast<const void*>(hookGetImm));
+        bool needDev1 = isDevice1 && hookGetImm1 && hookDefCtx1 &&
+                        (IsRawD3D11Slot(devVtbl[43], reinterpret_cast<const void*>(hookGetImm1)) ||
+                         IsRawD3D11Slot(devVtbl[44], reinterpret_cast<const void*>(hookDefCtx1)));
+        return needBase || needDev1;
     }
 
     bool ShouldSyncContextVTable(
@@ -322,15 +360,30 @@ public:
         FnDraw hookDraw,
         FnDrawIndexedInstanced hookDrawIdxInst,
         FnDrawInstanced hookDrawInst,
+        FnDrawIndexedInstancedIndirect hookDrawIdxInd,
+        FnDrawInstancedIndirect hookDrawInd,
         FnClearState hookClear
-    ) const {
+    ) {
         if (!ctxVtbl) return false;
+        {
+            std::shared_lock<std::shared_mutex> readLock(registryMutex_);
+            bool seenTable = false;
+            for (const OrigContextVTable& item : contextTables_) {
+                if (item.vtablePtr == ctxVtbl) {
+                    seenTable = true;
+                    break;
+                }
+            }
+            if (!seenTable) return true;
+        }
         if (!d3d11Range_.valid) return true;
         return IsRawD3D11Slot(ctxVtbl[9], reinterpret_cast<const void*>(hookPs)) ||
                IsRawD3D11Slot(ctxVtbl[12], reinterpret_cast<const void*>(hookDrawIdx)) ||
                IsRawD3D11Slot(ctxVtbl[13], reinterpret_cast<const void*>(hookDraw)) ||
                IsRawD3D11Slot(ctxVtbl[20], reinterpret_cast<const void*>(hookDrawIdxInst)) ||
                IsRawD3D11Slot(ctxVtbl[21], reinterpret_cast<const void*>(hookDrawInst)) ||
+               IsRawD3D11Slot(ctxVtbl[39], reinterpret_cast<const void*>(hookDrawIdxInd)) ||
+               IsRawD3D11Slot(ctxVtbl[40], reinterpret_cast<const void*>(hookDrawInd)) ||
                IsRawD3D11Slot(ctxVtbl[110], reinterpret_cast<const void*>(hookClear));
     }
 

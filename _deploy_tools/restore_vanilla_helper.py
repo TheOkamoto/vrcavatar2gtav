@@ -464,7 +464,12 @@ def run_multi_slot_builds(
 
     merged_defaults: Dict[str, Any] = dict(file_defaults)
     if shared_defaults:
-        merged_defaults.update(shared_defaults)
+        for default_key, default_val in shared_defaults.items():
+            if default_val is None:
+                continue
+            if default_key == "source" and not str(default_val).strip():
+                continue
+            merged_defaults[default_key] = default_val
 
     executor = build_fn or universal_gtav_builder.build_and_deploy_npc_from_source
     results: List[Dict[str, Any]] = []
@@ -501,7 +506,10 @@ def run_multi_slot_builds(
             "atlas_size": int(slot_item.get("atlas_size", merged_defaults.get("atlas_size", 2048))),
             "normal_size": int(slot_item.get("normal_size", merged_defaults.get("normal_size", 0))),
             "secondary_atlas_size": int(
-                slot_item.get("secondary_atlas_size", merged_defaults.get("secondary_atlas_size", secondary_atlas_size))
+                slot_item.get(
+                    "secondary_atlas_size",
+                    merged_defaults.get("secondary_atlas_size", secondary_atlas_size),
+                )
             ),
             "texture_overrides": slot_item.get("texture_overrides", merged_defaults.get("texture_overrides")),
         }
@@ -515,9 +523,23 @@ def run_multi_slot_builds(
         )
 
     if deploy and repack_and_deploy and built_peds:
+        explicit_sec_default = (shared_defaults or {}).get("secondary_atlas_size")
+        if explicit_sec_default is not None:
+            resolved_repack_sec = int(explicit_sec_default)
+        elif int(secondary_atlas_size or 0) > 0:
+            resolved_repack_sec = int(secondary_atlas_size)
+        elif merged_defaults.get("secondary_atlas_size") is not None:
+            resolved_repack_sec = int(merged_defaults["secondary_atlas_size"])
+        else:
+            slot_sec_sizes = [
+                int(slot_item["secondary_atlas_size"])
+                for slot_item in parsed_slots
+                if slot_item.get("secondary_atlas_size") is not None
+            ]
+            resolved_repack_sec = max(slot_sec_sizes) if slot_sec_sizes else 0
         repack_and_deploy_built_peds(
             built_peds,
-            secondary_atlas_size=int(merged_defaults.get("secondary_atlas_size", secondary_atlas_size)),
+            secondary_atlas_size=resolved_repack_sec,
         )
 
     return results

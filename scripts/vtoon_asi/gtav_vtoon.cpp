@@ -210,6 +210,12 @@ void DispatchTrackedDraw(ID3D11DeviceContext* d3dCtx, FnInvokeOrig&& invokeOrig)
     const gtav_vtoon::ShaderClassification shaderClass = ctxState->shaderClass;
     const gtav_vtoon::GtaShaderKind kind = shaderClass.kind;
 
+    const bool isImmediateCtx = (d3dCtx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE);
+    engine.LogMilestoneOnce(
+        1u << 12,
+        std::string("Entered first DispatchTrackedDraw (") + (isImmediateCtx ? "imm" : "def") +
+            ", kind=" + std::to_string(static_cast<int>(kind)) + ")"
+    );
     if (kind == gtav_vtoon::GtaShaderKind::None) {
         invokeOrig();
         return;
@@ -218,6 +224,7 @@ void DispatchTrackedDraw(ID3D11DeviceContext* d3dCtx, FnInvokeOrig&& invokeOrig)
     const bool isImmediate = (d3dCtx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE);
     if (kind == gtav_vtoon::GtaShaderKind::DirectionalLighting ||
         kind == gtav_vtoon::GtaShaderKind::DirectionalLightingMsaa) {
+        engine.LogMilestoneOnce(1u << 8, "Intercepted first DirectionalLighting draw call");
         if (!isImmediate) {
             invokeOrig();
             return;
@@ -246,6 +253,11 @@ void DispatchTrackedDraw(ID3D11DeviceContext* d3dCtx, FnInvokeOrig&& invokeOrig)
         invokeOrig();
         return;
     }
+    engine.LogMilestoneOnce(
+        1u << 10,
+        "Resolved tracked Ped char_id=" + std::to_string(resolvedCharId) +
+            (isImmediate ? " (imm)" : " (def)")
+    );
 
     if (!ctxState->cbGlobal || !ctxState->cbDraw) {
         engine.CreateContextConstantBuffers(&ctxState->cbGlobal, &ctxState->cbDraw);
@@ -290,9 +302,8 @@ HRESULT STDMETHODCALLTYPE HookCreatePixelShader(
     }
     HRESULT createRes = origTable.origCreatePixelShader(
         d3dDevice, bytecodePtr, bytecodeLen, classLinkage, outPixelShader);
-    ID3D11Device* primaryDev = gPrimaryGameDevice.load(std::memory_order_acquire);
     if (!gShuttingDown.load(std::memory_order_acquire) && SUCCEEDED(createRes) &&
-        outPixelShader && *outPixelShader && (!primaryDev || primaryDev == d3dDevice)) {
+        outPixelShader && *outPixelShader) {
         if (!gLoggedFirstCreatePs.exchange(true)) {
             gtav_vtoon::LogVToonMessage("Intercepted first live CreatePixelShader call");
         }
@@ -312,9 +323,8 @@ HRESULT STDMETHODCALLTYPE HookCreateDeferredContext(
         return E_FAIL;
     }
     HRESULT createRes = origTable.origCreateDeferredContext(d3dDevice, contextFlags, outDeferredCtx);
-    ID3D11Device* primaryDev = gPrimaryGameDevice.load(std::memory_order_acquire);
     if (!gShuttingDown.load(std::memory_order_acquire) && SUCCEEDED(createRes) &&
-        outDeferredCtx && *outDeferredCtx && (!primaryDev || primaryDev == d3dDevice)) {
+        outDeferredCtx && *outDeferredCtx) {
         static std::atomic<bool> loggedDeferredHook{false};
         if (!loggedDeferredHook.exchange(true)) {
             gtav_vtoon::LogVToonMessage("Hooked live ID3D11DeviceContext deferred context");
@@ -335,11 +345,46 @@ void STDMETHODCALLTYPE HookGetImmediateContext(
         return;
     }
     origTable.origGetImmediateContext(d3dDevice, outImmCtx);
-    ID3D11Device* primaryDev = gPrimaryGameDevice.load(std::memory_order_acquire);
-    if (!gShuttingDown.load(std::memory_order_acquire) && outImmCtx && *outImmCtx &&
-        (!primaryDev || primaryDev == d3dDevice)) {
+    if (!gShuttingDown.load(std::memory_order_acquire) && outImmCtx && *outImmCtx) {
         InstallContextVTableHooks(*outImmCtx);
     }
+}
+
+void STDMETHODCALLTYPE HookGetImmediateContext1(
+    ID3D11Device1* d3dDevice1,
+    ID3D11DeviceContext1** outImmCtx1
+) {
+    gtav_vtoon::OrigDeviceVTable origTable = gVTableRegistry.FindDevice(*reinterpret_cast<void***>(d3dDevice1));
+    if (!origTable.origGetImmediateContext1) {
+        return;
+    }
+    origTable.origGetImmediateContext1(d3dDevice1, outImmCtx1);
+    if (!gShuttingDown.load(std::memory_order_acquire) && outImmCtx1 && *outImmCtx1) {
+        InstallContextVTableHooks(*outImmCtx1);
+    }
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateDeferredContext1(
+    ID3D11Device1* d3dDevice1,
+    UINT contextFlags,
+    ID3D11DeviceContext1** outDeferredCtx1
+) {
+    gtav_vtoon::OrigDeviceVTable origTable = gVTableRegistry.FindDevice(*reinterpret_cast<void***>(d3dDevice1));
+    if (!origTable.origCreateDeferredContext1) {
+        return E_FAIL;
+    }
+    HRESULT createRes = origTable.origCreateDeferredContext1(d3dDevice1, contextFlags, outDeferredCtx1);
+    if (!gShuttingDown.load(std::memory_order_acquire) && SUCCEEDED(createRes) &&
+        outDeferredCtx1 && *outDeferredCtx1) {
+        gtav_vtoon::VToonHookEngine::Instance().LogMilestoneOnce(
+            1u << 9,
+            "Hooked live ID3D11Device1::CreateDeferredContext1"
+        );
+        ContextDrawState* ctxState = AcquireContextState(*outDeferredCtx1);
+        ctxState->shaderClass = {};
+        InstallContextVTableHooks(*outDeferredCtx1);
+    }
+    return createRes;
 }
 
 void STDMETHODCALLTYPE HookPSSetShader(
@@ -356,10 +401,22 @@ void STDMETHODCALLTYPE HookPSSetShader(
     if (!gHooksInstalled.load(std::memory_order_acquire) || gtav_vtoon::gVToonBypassDrawHook) {
         return;
     }
+    gtav_vtoon::VToonHookEngine& engine = gtav_vtoon::VToonHookEngine::Instance();
+    const bool isImmCtx = (d3dCtx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE);
+    engine.LogMilestoneOnce(
+        1u << 6,
+        std::string("Entered first live PSSetShader call (") + (isImmCtx ? "imm" : "def") + ")"
+    );
     ContextDrawState* ctxState = AcquireContextState(d3dCtx);
-    ctxState->shaderClass = pixelShader
-                                ? gtav_vtoon::VToonHookEngine::Instance().LookupShader(pixelShader)
-                                : gtav_vtoon::ShaderClassification{};
+    ctxState->shaderClass = pixelShader ? engine.LookupShader(pixelShader) : gtav_vtoon::ShaderClassification{};
+    if (ctxState->shaderClass.kind != gtav_vtoon::GtaShaderKind::None) {
+        engine.LogMilestoneOnce(
+            1u << 7,
+            "Bound first tracked GTA shader in PSSetShader (kind=" +
+                std::to_string(static_cast<int>(ctxState->shaderClass.kind)) +
+                (isImmCtx ? ", imm)" : ", def)")
+        );
+    }
 }
 
 void STDMETHODCALLTYPE HookClearState(ID3D11DeviceContext* d3dCtx) {
@@ -437,6 +494,30 @@ void STDMETHODCALLTYPE HookDrawIndexedInstanced(
     });
 }
 
+void STDMETHODCALLTYPE HookDrawIndexedInstancedIndirect(
+    ID3D11DeviceContext* d3dCtx,
+    ID3D11Buffer* argsBuffer,
+    UINT alignedByteOffset
+) {
+    gtav_vtoon::OrigContextVTable origTable = gVTableRegistry.FindContext(*reinterpret_cast<void***>(d3dCtx));
+    if (!origTable.origDrawIndexedInstancedIndirect) return;
+    DispatchTrackedDraw(d3dCtx, [&]() {
+        origTable.origDrawIndexedInstancedIndirect(d3dCtx, argsBuffer, alignedByteOffset);
+    });
+}
+
+void STDMETHODCALLTYPE HookDrawInstancedIndirect(
+    ID3D11DeviceContext* d3dCtx,
+    ID3D11Buffer* argsBuffer,
+    UINT alignedByteOffset
+) {
+    gtav_vtoon::OrigContextVTable origTable = gVTableRegistry.FindContext(*reinterpret_cast<void***>(d3dCtx));
+    if (!origTable.origDrawInstancedIndirect) return;
+    DispatchTrackedDraw(d3dCtx, [&]() {
+        origTable.origDrawInstancedIndirect(d3dCtx, argsBuffer, alignedByteOffset);
+    });
+}
+
 void ProcessFrameBoundary(IDXGISwapChain* swapChain) {
     if (!swapChain || !gHooksInstalled.load(std::memory_order_acquire)) {
         return;
@@ -509,16 +590,33 @@ void OnScriptHookVPresent(void* swapPtr) {
 void InstallDeviceVTableHooks(ID3D11Device* d3dDevice) {
     if (!d3dDevice) return;
     void** devVtbl = *reinterpret_cast<void***>(d3dDevice);
-    if (!gVTableRegistry.ShouldSyncDeviceVTable(
+    if (gVTableRegistry.ShouldSyncDeviceVTable(
             devVtbl, HookCreatePixelShader, HookCreateDeferredContext, HookGetImmediateContext)) {
-        return;
+        gVTableRegistry.InstallOrUpdateDevice(
+            devVtbl,
+            HookCreatePixelShader,
+            HookCreateDeferredContext,
+            HookGetImmediateContext
+        );
     }
-    gVTableRegistry.InstallOrUpdateDevice(
-        devVtbl,
-        HookCreatePixelShader,
-        HookCreateDeferredContext,
-        HookGetImmediateContext
-    );
+    ID3D11Device1* devOne = nullptr;
+    if (SUCCEEDED(d3dDevice->QueryInterface(__uuidof(ID3D11Device1), reinterpret_cast<void**>(&devOne))) && devOne) {
+        void** devOneVtbl = *reinterpret_cast<void***>(devOne);
+        if (gVTableRegistry.ShouldSyncDeviceVTable(
+                devOneVtbl, HookCreatePixelShader, HookCreateDeferredContext, HookGetImmediateContext,
+                true, HookGetImmediateContext1, HookCreateDeferredContext1)) {
+            gVTableRegistry.InstallOrUpdateDevice(
+                devOneVtbl,
+                HookCreatePixelShader,
+                HookCreateDeferredContext,
+                HookGetImmediateContext,
+                true,
+                HookGetImmediateContext1,
+                HookCreateDeferredContext1
+            );
+        }
+        devOne->Release();
+    }
 }
 
 void InstallContextVTableHooks(ID3D11DeviceContext* d3dCtx) {
@@ -526,7 +624,8 @@ void InstallContextVTableHooks(ID3D11DeviceContext* d3dCtx) {
     void** ctxVtbl = *reinterpret_cast<void***>(d3dCtx);
     if (!gVTableRegistry.ShouldSyncContextVTable(
             ctxVtbl, HookPSSetShader, HookDrawIndexed, HookDraw,
-            HookDrawIndexedInstanced, HookDrawInstanced, HookClearState)) {
+            HookDrawIndexedInstanced, HookDrawInstanced,
+            HookDrawIndexedInstancedIndirect, HookDrawInstancedIndirect, HookClearState)) {
         return;
     }
     gVTableRegistry.InstallOrUpdateContext(
@@ -536,6 +635,8 @@ void InstallContextVTableHooks(ID3D11DeviceContext* d3dCtx) {
         HookDraw,
         HookDrawIndexedInstanced,
         HookDrawInstanced,
+        HookDrawIndexedInstancedIndirect,
+        HookDrawInstancedIndirect,
         HookClearState
     );
 }
