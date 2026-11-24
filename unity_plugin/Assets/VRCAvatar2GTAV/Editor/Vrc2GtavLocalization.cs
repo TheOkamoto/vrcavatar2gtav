@@ -365,9 +365,15 @@ namespace Vrc2Gtav.Editor
 
             ["target.per_slot_toggle"] = new[]
             {
-                "Independent Avatar & Options per Protagonist (+1 tab/config per checked character)",
-                "Avatar e Opções Independentes por Personagem (+1 aba/config por personagem marcado)",
-                "主人公ごとに個別アバター・設定を使う（選択キャラごとにタブ追加）"
+                "Per-Protagonist Tabs (Batch export 2-3 different avatars at once)",
+                "Abas por Personagem (Exportar 2 ou 3 avatares diferentes de uma vez)",
+                "主人公ごとに別タブ設定（2〜3人を別アバターで同時に一括出力する時用）"
+            },
+            ["target.per_slot_hint"] = new[]
+            {
+                "Tip: To replace ONLY 1 protagonist and keep your other existing GTA V mods intact, check only that character above and leave this 4th option unchecked.",
+                "Dica: Para trocar APENAS 1 personagem e manter os outros mods já instalados intactos, marque só ele acima e deixe esta 4ª opção desmarcada.",
+                "ヒント：1人だけ差し替えて他の既存 Mod をそのまま残す場合は、上でその1人だけチェックし、この4番目はオフのままにしてください。"
             },
             ["slot.header"] = new[] { "Avatar Slot for {0}", "Slot de Avatar: {0}", "{0} 用アバタースロット" },
             ["slot.copy_prev"] = new[] { "Copy Above Slot", "Copiar Slot Acima", "上のスロットをコピー" },

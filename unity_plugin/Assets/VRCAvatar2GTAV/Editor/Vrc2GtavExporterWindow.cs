@@ -232,8 +232,9 @@ namespace Vrc2Gtav.Editor
             _options.TargetTrevor = EditorGUILayout.ToggleLeft(T("target.trevor"), _options.TargetTrevor);
             int targetCount = Vrc2GtavCommandBuilder.CountSelectedTargets(_options);
             Vrc2GtavMultiSlotSync.SyncTargetModeAuto(targetCount, _options, _protagonistSlots, ref _avatar, _texturesPanel);
-            bool nextPerSlot = EditorGUILayout.ToggleLeft(T("target.per_slot_toggle"), _options.PerProtagonistSlots);
+            bool nextPerSlot = EditorGUILayout.ToggleLeft(new GUIContent(T("target.per_slot_toggle"), T("target.per_slot_hint")), _options.PerProtagonistSlots);
             Vrc2GtavMultiSlotSync.ApplyPerSlotToggle(nextPerSlot, targetCount, _options, _protagonistSlots, ref _avatar, _texturesPanel);
+            GUILayout.Label(T("target.per_slot_hint"), _wrapMiniLabelStyle);
             if (targetCount >= 2 && _options.PerProtagonistSlots)
             {
                 if (!prevM && _options.TargetMichael) _activeSlotPed = "player_zero";
