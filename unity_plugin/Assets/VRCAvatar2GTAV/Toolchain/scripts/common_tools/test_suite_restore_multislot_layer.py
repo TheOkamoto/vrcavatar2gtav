@@ -918,7 +918,65 @@ def _test_mat_overrides_and_non_colliding_atlas() -> bool:
         )
     nipple_ok = nipple_tokens_ok and nipple_cfg_ok
 
-    return override_ok and matcap_ok and atlas_disambig_ok and nipple_ok
+    glass_trans_ok = False
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_glass_alpha_") as glass_tmp:
+        glass_dir = Path(glass_tmp)
+        lenses_mat = glass_dir / "Glass_Lenses.mat"
+        lenses_mat.write_text(
+            "m_Name: Glass_Lenses\n"
+            "m_Shader: {fileID: 4800000, guid: 165365ab7100a044ca85fc8c33548a62, type: 3}\n"
+            "m_CustomRenderQueue: 2461\n"
+            "m_SavedProperties:\n"
+            "  m_Floats:\n"
+            "  - _AlphaMaskMode: 1\n"
+            "  - _AlphaMaskScale: 1\n"
+            "  - _AlphaMaskValue: -0.878\n"
+            "  - _TransparentMode: 0\n"
+            "  m_Colors:\n"
+            "  - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+            encoding="utf-8",
+        )
+        watch_mat = glass_dir / "Watch_Refract.mat"
+        watch_mat.write_text(
+            "m_Name: Watch_Refract\n"
+            "m_Shader: {fileID: 4800000, guid: dce3f3e248acc7b4daeda00daf616b4d, type: 3}\n"
+            "m_CustomRenderQueue: -1\n"
+            "m_SavedProperties:\n"
+            "  m_Floats:\n"
+            "  - _AlphaMaskMode: 1\n"
+            "  - _AlphaMaskScale: 1\n"
+            "  - _AlphaMaskValue: -1\n"
+            "  - _TransparentMode: 0\n"
+            "  m_Colors:\n"
+            "  - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+            encoding="utf-8",
+        )
+        parsed_lenses = uab.parse_unity_material_file(lenses_mat, {})
+        parsed_watch = uab.parse_unity_material_file(watch_mat, {})
+        import unity_hair_bake_layer
+
+        baked_lenses = unity_hair_bake_layer.bake_liltoon_mat_to_image(
+            lenses_mat, tile_size=(64, 64), preserve_alpha=True, unity_assets_root=glass_dir
+        )
+        baked_watch = unity_hair_bake_layer.bake_liltoon_mat_to_image(
+            watch_mat, tile_size=(64, 64), preserve_alpha=True, unity_assets_root=glass_dir
+        )
+        lens_alpha = int(baked_lenses[0].getpixel((32, 32))[3]) if baked_lenses else -1
+        watch_alpha = int(baked_watch[0].getpixel((32, 32))[3]) if baked_watch else -1
+        import universal_gtav_builder
+
+        slot_map_test = universal_gtav_builder.map_blender_slots_to_unity_submeshes(
+            [1, 1, 2, 0, 0, 3], 4
+        )
+        glass_trans_ok = (
+            parsed_lenses.get("alpha_mode") == "transparent"
+            and parsed_watch.get("alpha_mode") == "transparent"
+            and 25 <= lens_alpha <= 38
+            and 15 <= watch_alpha <= 28
+            and slot_map_test == {1: 0, 2: 1, 0: 2, 3: 3}
+        )
+
+    return override_ok and matcap_ok and atlas_disambig_ok and nipple_ok and glass_trans_ok
 
 
 def test_restore_and_multislot_regressions() -> bool:

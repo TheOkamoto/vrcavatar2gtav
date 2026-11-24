@@ -67,6 +67,34 @@ except ImportError:
     _inspect_componentped_drawable_keys,
     )
 
+def map_blender_slots_to_unity_submeshes(
+    poly_material_indices: Sequence[int],
+    slot_count: int,
+) -> Dict[int, int]:
+    """
+    Map Blender FBX material slot indices onto Unity Mesh submesh order.
+
+    Unity's FBX importer orders `Mesh` submeshes and `m_Materials` entries by
+    first-polygon encounter order, whereas Blender `io_scene_fbx` preserves
+    FBX `Model->Material` link order.
+    """
+    first_poly_order: List[int] = []
+    seen_slots = set()
+    for poly_mat_idx in poly_material_indices:
+        slot_val = int(poly_mat_idx)
+        if 0 <= slot_val < slot_count and slot_val not in seen_slots:
+            seen_slots.add(slot_val)
+            first_poly_order.append(slot_val)
+    for slot_val in range(max(0, int(slot_count))):
+        if slot_val not in seen_slots:
+            seen_slots.add(slot_val)
+            first_poly_order.append(slot_val)
+    return {
+        blender_slot: unity_submesh_idx
+        for unity_submesh_idx, blender_slot in enumerate(first_poly_order)
+    }
+
+
 def run_in_blender_build(manifest_path: Path) -> None:
     """Execute the full Sollumz `.ydd` / `.yft` / `GTAVPhysBones.ini` build inside Blender."""
     import addon_utils
@@ -405,9 +433,14 @@ def run_in_blender_build(manifest_path: Path) -> None:
         for vert_counter, vert_elem in enumerate(bm_data.verts):
             vert_elem[orig_vert_layer] = vert_counter
 
+        blender_to_unity_slot = map_blender_slots_to_unity_submeshes(
+            [poly_elem.material_index for poly_elem in bm_data.faces],
+            len(src_obj.data.materials),
+        )
         strip_indices = []
         for mat_idx, mat_slot in enumerate(src_obj.data.materials):
-            u_spec = unity_mats_list[mat_idx] if mat_idx < len(unity_mats_list) else {}
+            unity_slot_idx = blender_to_unity_slot.get(mat_idx, mat_idx)
+            u_spec = unity_mats_list[unity_slot_idx] if unity_slot_idx < len(unity_mats_list) else {}
             u_path_norm = str(u_spec.get("mat_path", "") or "").replace("\\", "/").lower()
             u_name = str(u_spec.get("name", "") or "").strip()
             mat_name_check = u_name or (mat_slot.name if mat_slot is not None else "")
@@ -464,6 +497,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
         # Preserve Unity material assignments so every mesh/slot maps to its exact atlas tile
         kept_slots_map: Dict[int, int] = {}
+        orig_poly_mats = [poly_elem.material_index for poly_elem in new_obj.data.polygons]
         if src_obj.data.materials:
             new_obj.data.materials.clear()
             for old_idx, mat_item in enumerate(src_obj.data.materials):
@@ -471,20 +505,19 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     continue
                 kept_slots_map[old_idx] = len(new_obj.data.materials)
                 if unity_mats_list:
-                    u_spec = unity_mats_list[min(old_idx, len(unity_mats_list) - 1)]
+                    unity_slot_idx = blender_to_unity_slot.get(old_idx, old_idx)
+                    u_spec = unity_mats_list[min(unity_slot_idx, len(unity_mats_list) - 1)]
                     fb_label = mat_item.name if mat_item is not None else src_obj.name
                     new_obj.data.materials.append(_get_tagged_unity_mat(u_spec, fb_label))
                 else:
                     new_obj.data.materials.append(mat_item)
+            for poly_elem, old_slot_idx in zip(new_obj.data.polygons, orig_poly_mats):
+                poly_elem.material_index = kept_slots_map.get(old_slot_idx, 0)
         elif unity_mats_list:
             new_obj.data.materials.clear()
             new_obj.data.materials.append(_get_tagged_unity_mat(unity_mats_list[0], src_obj.name))
             for poly_elem in new_obj.data.polygons:
                 poly_elem.material_index = 0
-
-        if strip_indices and new_obj.data.polygons:
-            for poly_elem in new_obj.data.polygons:
-                poly_elem.material_index = kept_slots_map.get(poly_elem.material_index, 0)
 
         vgroup_names_by_idx = {vgrp.index: vgrp.name for vgrp in src_obj.vertex_groups}
         vgroup_target_names = {
@@ -761,10 +794,10 @@ def run_in_blender_build(manifest_path: Path) -> None:
         resolved_reg = _resolve_mat_region(mat_item)
         slot_regions[slot_idx] = resolved_reg
         slot_is_face[slot_idx] = "face" in low_mat_name
-        if resolved_reg.get("is_double_sided"):
+        alpha_mode = str(resolved_reg.get("alpha_mode", "opaque"))
+        if resolved_reg.get("is_double_sided") and (alpha_mode != "transparent" or "hair" in low_mat_name):
             double_sided_slots.append(slot_idx)
 
-        alpha_mode = str(resolved_reg.get("alpha_mode", "opaque"))
         if alpha_mode == "transparent":
             if alpha_shader_mat is None:
                 alpha_shader_mat = ped_damage_helper.create_ped_alpha_material(
@@ -811,6 +844,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     uv_layer = joined_mesh_obj.data.uv_layers[0]
     uv_layer.name = "UVMap 0"
     poly_is_face = [False] * len(joined_mesh_obj.data.polygons)
+    remapped_poly_mats: List[int] = [0] * len(joined_mesh_obj.data.polygons)
     for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
         orig_slot = poly_item.material_index
         reg_spec = slot_regions.get(orig_slot, default_region)
@@ -825,11 +859,13 @@ def run_in_blender_build(manifest_path: Path) -> None:
             local_v = max(0.001, min(0.999, uv_coord.y % 1.0 if (uv_coord.y < 0.0 or uv_coord.y > 1.0) else uv_coord.y))
             uv_coord.x = local_u * scl_u + off_u
             uv_coord.y = local_v * scl_v + off_v
-        poly_item.material_index = slot_remap.get(orig_slot, 0)
+        remapped_poly_mats[poly_seq_idx] = slot_remap.get(orig_slot, 0)
 
     joined_mesh_obj.data.materials.clear()
     for unique_mat in unique_mats:
         joined_mesh_obj.data.materials.append(unique_mat)
+    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
+        poly_item.material_index = remapped_poly_mats[poly_seq_idx]
 
     ped_damage_res = ped_damage_helper.apply_ped_damage_attributes_in_blender(
         bpy,

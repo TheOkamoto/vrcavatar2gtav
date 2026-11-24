@@ -33,11 +33,13 @@ try:
     import modular_avatar_helper
     import npc_registry_helper
     import ped_damage_helper
+    import unity_hair_bake_layer as hair_bake_layer
     import vrc2gtav_paths as project_paths
 except ImportError:
     from common_tools import modular_avatar_helper
     from common_tools import npc_registry_helper
     from common_tools import ped_damage_helper
+    from common_tools import unity_hair_bake_layer as hair_bake_layer
     from common_tools import vrc2gtav_paths as project_paths
 
 
@@ -159,9 +161,17 @@ def parse_unity_material_file(
         "_TransparentMode",
         float(parent_info.get("transparent_mode", -1.0)),
     )
-    if transparent_mode == 0.0:
-        # In lilToon, _AlphaMask is ignored when _TransparentMode is Opaque (0)
-        alpha_mask_tex = None
+    alpha_mask_mode = int(
+        round(_float_prop("_AlphaMaskMode", float(parent_info.get("alpha_mask_mode", 0.0))))
+    )
+    alpha_mask_scale = _float_prop(
+        "_AlphaMaskScale",
+        float(parent_info.get("alpha_mask_scale", 1.0)),
+    )
+    alpha_mask_val = _float_prop(
+        "_AlphaMaskValue",
+        float(parent_info.get("alpha_mask_val", 0.0)),
+    )
     shader_match = re.search(r"m_Shader:\s*\{[^}]*guid:\s*([0-9a-fA-F]{32})", mat_text)
     shader_guid = shader_match.group(1).lower() if shader_match else str(parent_info.get("shader_guid", ""))
     kw_match = re.search(r"m_ShaderKeywords:\s*(.*)$", mat_text, re.MULTILINE)
@@ -175,17 +185,26 @@ def parse_unity_material_file(
     # only when named as explicit alpha overlays and not hair transparency masks.
     low_name = mat_name.lower()
     is_body_alpha_overlay = ("alpha" in low_name and "hair" not in low_name)
-    trans_shader_guids = {
-        "3c79b10c7e0b2784aaa4c2f8dd17d55e",
-        "165365ab7100a044ca85fc8c33548a62",
-        "0c762f24b85918a49812fc5690619178",
-        "b269573b9937b8340b3e9e191a3ba5a8",
-        "7171688840c632447b22ec14e2bdef7e",
-        "6a77405f7dfdc1447af58854c7f43f39",
-        "9cf054060007d784394b8b0bb703e441",
-    }
+    shader_is_refract = shader_guid in hair_bake_layer.LILTOON_REFRACTION_SHADER_GUIDS
+    shader_is_trans = shader_guid in hair_bake_layer.LILTOON_TRANSPARENT_SHADER_GUIDS
+    shader_is_cutout = shader_guid in hair_bake_layer.LILTOON_CUTOUT_SHADER_GUIDS
+    if (transparent_mode == 0.0 and not shader_is_trans and not shader_is_cutout) or alpha_mask_mode == 0:
+        # In lilToon, _AlphaMask is ignored when shader & _TransparentMode are Opaque, or _AlphaMaskMode is None (0)
+        alpha_mask_tex = None
+
+    unbound_alpha_eff = max(0.0, min(1.0, 1.0 * alpha_mask_scale + alpha_mask_val))
+    has_unbound_alpha_fade = (
+        shader_is_trans
+        and (alpha_mask_mode in (1, 2))
+        and (not alpha_mask_tex)
+        and (unbound_alpha_eff < 0.96)
+    )
+    has_trans_color_alpha = shader_is_trans and (float(color_rgba[3]) < 0.96)
+
     if is_body_alpha_overlay:
         alpha_mode = "opaque"
+    elif shader_is_refract or has_unbound_alpha_fade or has_trans_color_alpha:
+        alpha_mode = "transparent"
     elif transparent_mode >= 0.0:
         if transparent_mode >= 2.0 or "_ALPHABLEND_ON" in shader_keywords:
             alpha_mode = "transparent"
@@ -194,7 +213,7 @@ def parse_unity_material_file(
         else:
             alpha_mode = "opaque"
     elif (
-        shader_guid in trans_shader_guids
+        shader_is_trans
         or render_queue >= 2900
         or "_ALPHABLEND_ON" in shader_keywords
         or ("hair" in low_name and ("trans" in low_name or "alpha" in low_name or "bang" in low_name or "front" in low_name))
@@ -213,8 +232,9 @@ def parse_unity_material_file(
         "bump_tex": bump_tex,
         "emission_tex": emission_tex,
         "alpha_mask_tex": alpha_mask_tex,
-        "alpha_mask_scale": _float_prop("_AlphaMaskScale", float(parent_info.get("alpha_mask_scale", 1.0))),
-        "alpha_mask_val": _float_prop("_AlphaMaskValue", float(parent_info.get("alpha_mask_val", 0.0))),
+        "alpha_mask_mode": alpha_mask_mode,
+        "alpha_mask_scale": alpha_mask_scale,
+        "alpha_mask_val": alpha_mask_val,
         "color_rgba": list(color_rgba),
         "emission_rgba": list(emission_rgba),
         "hsvg_rgba": list(hsvg_rgba),

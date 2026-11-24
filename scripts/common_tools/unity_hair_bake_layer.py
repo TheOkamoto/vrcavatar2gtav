@@ -27,39 +27,32 @@ MA_BONE_PROXY_GUID = "42581d8044b64899834d3d515ab3a144"
 MA_MESH_SETTINGS_GUID = "560fdafd46c74b2db6422fdf0e7f2363"
 MA_BLENDSHAPE_SYNC_GUID = "6fd7cab7d93b403280f2f9da978d8a4f"
 VRC_PHYSBONE_GUID = "2a2c05204084d904aa4945ccff20d8e5"
+LILTOON_REFRACTION_SHADER_GUIDS = frozenset({
+    "dce3f3e248acc7b4daeda00daf616b4d", "3fb94a39b2685ee4d9817dcaf6542d99", "d7af54cdd86902d41b8c240e06b93009",
+})
+LILTOON_CUTOUT_SHADER_GUIDS = frozenset({
+    "85d6126cae43b6847aff4b13f4adb8ec", "3b4aa19949601f046a20ca8bdaee929f",
+    "544c75f56e9af8048b29a6ace5f52091", "ad219df2a46e841488aee6a013e84e36",
+})
+LILTOON_TRANSPARENT_SHADER_GUIDS = frozenset({
+    "3c79b10c7e0b2784aaa4c2f8dd17d55e", "165365ab7100a044ca85fc8c33548a62", "0c762f24b85918a49812fc5690619178",
+    "b269573b9937b8340b3e9e191a3ba5a8", "7171688840c632447b22ec14e2bdef7e", "6a77405f7dfdc1447af58854c7f43f39",
+    "9cf054060007d784394b8b0bb703e441", "0e3ece1bd59542743bccadb21f68318e", "82226adb1a0b8c4418f574cfdcf523da",
+    "62df797f407281640a224388953448cc", "34c2907eba944ed45a43970e0c11bcfd", "701268c07d37f5441b25b2cb99fae4b3",
+    "afa1a194f5a2fd243bda3a17bca1b36e", "9b0c2630b12933248922527d4507cfa9", "90f83c35b0769a748abba5d0880f36d5",
+    "67ed0252d63362a4ab23707a720508b7", "7e398ea50f9b70045b1774e05b46a39f", "7e61dbad981ad4f43a03722155db1c6a",
+    "2683fad669f20ec49b8e9656954a33a8", "bdf24b2e925ce8a4fb0e903889a52e0e", "a8d94439709469942bc7dcc9156ba110",
+    "69f861c14129e724096c0955f8079012",
+}) | LILTOON_REFRACTION_SHADER_GUIDS
 
 CUSTOM_HAIR_MANIFEST_FILENAME = "custom_hair_manifest.json"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff", ".bmp", ".webp")
-SKIP_WALK_DIRS = frozenset(
-    {
-        "library",
-        "temp",
-        "logs",
-        "obj",
-        ".git",
-        "node_modules",
-        "__pycache__",
-        "animation",
-        "animations",
-        "anim",
-        "shader",
-        "shaders",
-        "audio",
-        "sounds",
-        "sfx",
-        "bgm",
-        "staging",
-        "vrchat",
-        "vrcsdk",
-        "vrchat examples",
-        "liltoon",
-        "poiyomi",
-        "modular-avatar",
-        "modularavatar",
-        "vrcfury",
-        "textmesh pro",
-    }
-)
+SKIP_WALK_DIRS = frozenset({
+    "library", "temp", "logs", "obj", ".git", "node_modules", "__pycache__",
+    "animation", "animations", "anim", "shader", "shaders", "audio", "sounds",
+    "sfx", "bgm", "staging", "vrchat", "vrcsdk", "vrchat examples",
+    "liltoon", "poiyomi", "modular-avatar", "modularavatar", "vrcfury", "textmesh pro",
+})
 _USED_MATERIAL_TEX_PROPS = frozenset(
     {
         "_MainTex",
@@ -603,15 +596,7 @@ def parse_unity_material(
     shader_keywords = kw_match.group(1) if kw_match else ""
     cull_mode = float(floats_dict.get("_Cull", 2.0))
     is_double_sided = cull_mode < 0.5
-    trans_shader_guids = {
-        "3c79b10c7e0b2784aaa4c2f8dd17d55e",
-        "165365ab7100a044ca85fc8c33548a62",
-        "0c762f24b85918a49812fc5690619178",
-        "b269573b9937b8340b3e9e191a3ba5a8",
-        "7171688840c632447b22ec14e2bdef7e",
-        "6a77405f7dfdc1447af58854c7f43f39",
-        "9cf054060007d784394b8b0bb703e441",
-    }
+    trans_shader_guids = LILTOON_TRANSPARENT_SHADER_GUIDS
     has_alpha_mask = bool(tex_envs.get("_AlphaMask", {}).get("path"))
     if (
         shader_guid.lower() in trans_shader_guids
@@ -1068,24 +1053,34 @@ def composite_unity_material_textures(
         255.0,
     )
 
-    # Apply _AlphaMask and _Color.a cleanly while preserving cutout/translucent alpha channels
+    # Apply _AlphaMask (texture or unbound uniform opacity) and _Color.a cleanly while preserving cutout/translucent alpha channels
     base_col = colors.get("_Color", [1.0, 1.0, 1.0, 1.0])
     color_alpha = max(0.0, min(1.0, float(base_col[3]) if len(base_col) >= 4 else 1.0))
     alpha_channel = alpha_channel * color_alpha
 
+    alpha_mode = str(mat_info.get("alpha_mode", "cutout"))
     alpha_mask_entry = tex_envs.get("_AlphaMask")
-    if alpha_mask_entry and alpha_mask_entry.get("path") and os.path.isfile(alpha_mask_entry["path"]):
-        am_img, am_scale, am_off = _load_slot_rgba(("_AlphaMask",), (255, 255, 255, 255))
-        am_img = _apply_uv_tile_transform(am_img, am_scale, am_off)
-        am_val = float(floats.get("_AlphaMaskValue", 0.0))
-        am_scale_f = float(floats.get("_AlphaMaskScale", 1.0))
-        am_r = numpy_mod.array(am_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
-        eff_mask = numpy_mod.clip(am_r * am_scale_f + am_val, 0.0, 1.0)
+    has_mask_file = bool(
+        alpha_mask_entry and alpha_mask_entry.get("path") and os.path.isfile(alpha_mask_entry["path"])
+    )
+    alpha_mask_mode = int(round(float(floats.get("_AlphaMaskMode", 1.0 if has_mask_file else 0.0))))
+    shader_low = str(mat_info.get("shader_guid", "") or "").lower()
+    if preserve_alpha and alpha_mode != "opaque" and (has_mask_file or alpha_mask_mode in (1, 2)):
+        alpha_mask_val = float(floats.get("_AlphaMaskValue", 0.0))
+        alpha_mask_scale = float(floats.get("_AlphaMaskScale", 1.0))
+        if has_mask_file:
+            mask_img, mask_uv_scale, mask_uv_off = _load_slot_rgba(("_AlphaMask",), (255, 255, 255, 255))
+            mask_img = _apply_uv_tile_transform(mask_img, mask_uv_scale, mask_uv_off)
+            mask_val_arr = numpy_mod.array(mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+        else:
+            mask_val_arr = 1.0
+        eff_mask = numpy_mod.clip(mask_val_arr * alpha_mask_scale + alpha_mask_val, 0.0, 1.0)
+        if shader_low in LILTOON_REFRACTION_SHADER_GUIDS:
+            eff_mask = numpy_mod.maximum(eff_mask, 0.08)
         alpha_channel = alpha_channel * eff_mask
 
     rgba_work = numpy_mod.concatenate([base_rgb, alpha_channel], axis=-1).astype(numpy_mod.uint8)
     rgba_dilated = _dilate_rgba_transparent_edges(rgba_work, passes=10)
-    alpha_mode = str(mat_info.get("alpha_mode", "cutout"))
     if not preserve_alpha or alpha_mode == "opaque":
         rgba_dilated[..., 3] = 255
     diffuse_out = pil_image.fromarray(rgba_dilated, mode="RGBA")
