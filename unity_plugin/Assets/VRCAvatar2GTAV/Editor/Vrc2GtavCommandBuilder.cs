@@ -462,7 +462,7 @@ namespace Vrc2Gtav.Editor
             {
                 opts.PerProtagonistSlots = EditorPrefs.GetBool(prefix + "PerProtagonistSlots", false);
                 opts.Shared.EyeBlinkStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "EyeBlinkStrength", 0f));
-                opts.Shared.MouthOpenStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "MouthOpenStrength", 0.35f));
+                opts.Shared.MouthOpenStrength = Mathf.Clamp01(EditorPrefs.GetFloat(prefix + "MouthOpenStrength", 0.70f));
                 opts.Shared.FaceBlendshapesAnim = EditorPrefs.GetString(prefix + "FaceBlendshapesAnim", string.Empty);
                 opts.Shared.AtlasResolutionIdx = EditorPrefs.GetInt(prefix + "AtlasResIdx", 2);
                 opts.Shared.NormalResolutionIdx = EditorPrefs.GetInt(prefix + "NormalResIdx", 0);

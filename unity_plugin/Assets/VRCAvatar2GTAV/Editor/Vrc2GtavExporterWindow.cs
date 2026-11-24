@@ -263,7 +263,7 @@ namespace Vrc2Gtav.Editor
             EditorGUILayout.BeginHorizontal();
             float nextMouthOpen = EditorGUILayout.Slider(T("opt.mouth_open"), profile.MouthOpenStrength, 0f, 1f);
             profile.MouthOpenStrength = Mathf.Round(Mathf.Clamp01(nextMouthOpen) * 100f) / 100f;
-            if (GUILayout.Button("0.35", GUILayout.Width(44f))) profile.MouthOpenStrength = 0.35f;
+            if (GUILayout.Button("0.70", GUILayout.Width(44f))) profile.MouthOpenStrength = 0.70f;
             EditorGUILayout.EndHorizontal();
         }
 

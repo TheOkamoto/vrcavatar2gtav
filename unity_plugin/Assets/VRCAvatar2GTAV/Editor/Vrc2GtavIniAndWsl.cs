@@ -336,7 +336,7 @@ namespace Vrc2Gtav.Editor
         public bool ImportBodyBlendshapes = true;
         public bool EyeBlink = true;
         public float EyeBlinkStrength;
-        public float MouthOpenStrength = 0.35f;
+        public float MouthOpenStrength = 0.70f;
         public bool BloodDecals = true;
 
         public string AvatarNameOverride = string.Empty;

@@ -113,7 +113,7 @@ To animate mouths cleanly during cutscenes, dialogue, and phone calls, all three
 ```mermaid
 flowchart TD
     FaceMesh["Face Mesh (Body)"] --> ShapeKey["1. Measure vrc.v_aa shape key displacement (abs(delta_z))"]
-    ShapeKey --> JawFormula["2. Jaw weight = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))"]
+    ShapeKey --> JawFormula["2. Jaw weight = min(0.70, max(0.0, (abs(delta_z) / 0.0075) * 0.70))"]
     JawFormula --> HeadSplit["3. Complementary SKEL_Head weight (1.0 - jaw_weight)"]
     HeadSplit --> PreBMesh["4. Create FACIAL_jaw & SKEL_Head vertex groups BEFORE BMesh edits"]
     PreBMesh --> CleanAlpha["5. Strip unwanted shadow/blush decals via BMesh keeping weights"]
@@ -121,10 +121,10 @@ flowchart TD
 ```
 
 ### Vertical Decay Formula
-$$\text{weight}_{\text{jaw}} = \min\left(0.35, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.35\right)\right)$$
+$$\text{weight}_{\text{jaw}} = \min\left(0.70, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.70\right)\right)$$
 $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 
-- **Why clamp at `0.35`?** GTA V jaw rotations assume realistic human jaw depth; a full `1.0` weight overstretches compact anime faces. Capping at `0.35` produces clean, anime-accurate mouth articulation.
+- **Why clamp at `0.70` by default?** GTA V jaw rotations assume realistic human jaw depth; scaling with `0.70` (configurable from `0.00` to `1.00` in Unity) gives expressive yet clean anime mouth articulation.
 
 ---
 

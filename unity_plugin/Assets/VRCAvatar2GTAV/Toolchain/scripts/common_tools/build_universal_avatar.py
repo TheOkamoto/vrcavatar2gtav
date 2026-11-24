@@ -663,7 +663,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--mouth-open-strength",
         type=float,
         default=None,
-        help="Optional mouth opening / FACIAL_jaw weight scale in [0.0, 1.0] (default: 0.35)",
+        help="Optional mouth opening / FACIAL_jaw weight scale in [0.0, 1.0] (default: 0.70)",
     )
     parser.add_argument(
         "--face-anim",

@@ -113,7 +113,7 @@ Para que as personagens movimentem a boca em cutscenes, diálogos e ligações t
 ```mermaid
 flowchart TD
     FaceMesh["Malha Facial (Body)"] --> ShapeKey["1. Ler deslocamento do shape key vrc.v_aa (abs(delta_z))"]
-    ShapeKey --> JawFormula["2. Peso jaw = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))"]
+    ShapeKey --> JawFormula["2. Peso jaw = min(0.70, max(0.0, (abs(delta_z) / 0.0075) * 0.70))"]
     JawFormula --> HeadSplit["3. Peso SKEL_Head complementar (1.0 - peso_jaw)"]
     HeadSplit --> PreBMesh["4. Criar Vertex Groups FACIAL_jaw e SKEL_Head ANTES do BMesh"]
     PreBMesh --> CleanAlpha["5. Limpar decals/materiais auxiliares via BMesh preservando pesos"]
@@ -121,10 +121,10 @@ flowchart TD
 ```
 
 ### Fórmula de Decaimento Vertical
-$$\text{peso}_{\text{jaw}} = \min\left(0.35, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.35\right)\right)$$
+$$\text{peso}_{\text{jaw}} = \min\left(0.70, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.70\right)\right)$$
 $$\text{peso}_{\text{head}} = 1.0 - \text{peso}_{\text{jaw}}$$
 
-- **Por que limitar o máximo em `0.35`?** As animações faciais do GTA V foram calibradas para mandíbulas humanas realistas; aplicar peso `1.0` em rostos estilizados de anime estica excessivamente o queixo e abre buracos na boca. O teto de `0.35` mantém a abertura labial natural e proporcional.
+- **Por que limitar o padrão em `0.70`?** As animações faciais do GTA V foram calibradas para mandíbulas humanas realistas; usar `0.70` como padrão (ajustável de `0.00` a `1.00` no Unity) entrega abertura labial natural e expressiva em rostos de anime.
 
 ---
 

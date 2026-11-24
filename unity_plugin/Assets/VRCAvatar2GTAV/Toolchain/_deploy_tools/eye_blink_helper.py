@@ -203,7 +203,7 @@ def resolve_eye_blink_strength(
     return float(default)
 
 
-DEFAULT_MOUTH_OPEN_STRENGTH = 0.35
+DEFAULT_MOUTH_OPEN_STRENGTH = 0.70
 MOUTH_OPEN_SHAPE_KEYS = (
     "vrc.v_aa",
     "vrc.aa",

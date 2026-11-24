@@ -113,7 +113,7 @@ GTA V の純正 `.yft` にはアニメ調アバターの姿勢を崩す補助ボ
 ```mermaid
 flowchart TD
     FaceMesh["顔メッシュ (Body)"] --> ShapeKey["1. vrc.v_aa シェイプキーの変位 abs(delta_z) を計測"]
-    ShapeKey --> JawFormula["2. 顎ウェイト = min(0.35, max(0.0, (abs(delta_z) / 0.0075) * 0.35))"]
+    ShapeKey --> JawFormula["2. 顎ウェイト = min(0.70, max(0.0, (abs(delta_z) / 0.0075) * 0.70))"]
     JawFormula --> HeadSplit["3. 補完ウェイト SKEL_Head = 1.0 - jaw_weight"]
     HeadSplit --> PreBMesh["4. BMesh 編集前に FACIAL_jaw と SKEL_Head を作成"]
     PreBMesh --> CleanAlpha["5. ウェイトを保持したまま不要な影/透過デカール面を除去"]
@@ -121,10 +121,10 @@ flowchart TD
 ```
 
 ### 垂直減衰式
-$$\text{weight}_{\text{jaw}} = \min\left(0.35, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.35\right)\right)$$
+$$\text{weight}_{\text{jaw}} = \min\left(0.70, \max\left(0.0, \frac{|\Delta z|}{0.0075} \times 0.70\right)\right)$$
 $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 
-- **なぜ `0.35` で上限クランプするのか？** GTA V の顎ボーン回転量は実写の人間骨格を前提としているため、`1.0` のままだとアニメ調の小さな顔が過度に伸びて破綻します。`0.35` に制限することで自然な発話アニメになります。
+- **なぜ既定値を `0.70` にするのか？** GTA V の顎ボーン回転量は実写の人間骨格を前提としているため、`1.0` のままだとアニメ調の小さな顔が過度に伸びることがあります。既定値 `0.70`（Unity で `0.00`〜`1.00` 調整可能）により表情豊かな自然な発話アニメになります。
 
 ---
 

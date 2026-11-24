@@ -1436,25 +1436,29 @@ def test_unity_scene_and_fallbacks() -> bool:
         jaw_shut = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.0)
         jaw_def = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=None)
         jaw_wide = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.85)
-        cs_win_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavExporterWindow.cs"
-        cs_cmd_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavCommandBuilder.cs"
+        cs_editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
+        cs_win_file = cs_editor_dir / "Vrc2GtavExporterWindow.cs"
+        cs_cmd_file = cs_editor_dir / "Vrc2GtavCommandBuilder.cs"
+        cs_ini_file = cs_editor_dir / "Vrc2GtavIniAndWsl.cs"
         mouth_ok = (
-            abs(blink_mod.resolve_mouth_open_strength(None) - 0.35) < 1e-6
+            abs(blink_mod.resolve_mouth_open_strength(None) - 0.70) < 1e-6
             and abs(blink_mod.resolve_mouth_open_strength(0.0, {"mouth_open_strength": "0.60"}) - 0.0) < 1e-6
             and abs(blink_mod.resolve_mouth_open_strength(None, {"mouth_open_strength": "0.75"}) - 0.75) < 1e-6
             and abs(blink_mod.parse_mouth_open_strength(1.8) - 1.0) < 1e-6
             and jaw_shut == {}
-            and abs(jaw_def.get(1, 0.0) - 0.35) < 1e-6
+            and abs(jaw_def.get(1, 0.0) - 0.70) < 1e-6
             and 2 not in jaw_def
             and abs(jaw_wide.get(1, 0.0) - 0.85) < 1e-6
             and jaw_def.get(0, 0.0) < jaw_wide.get(0, 0.0)
             and cs_win_file.is_file()
-            and "MouthOpenStrength" in cs_win_file.read_text(encoding="utf-8")
+            and 'GUILayout.Button("0.70"' in cs_win_file.read_text(encoding="utf-8")
             and cs_cmd_file.is_file()
-            and "--mouth-open-strength" in cs_cmd_file.read_text(encoding="utf-8")
+            and '"MouthOpenStrength", 0.70f' in cs_cmd_file.read_text(encoding="utf-8")
+            and cs_ini_file.is_file()
+            and "MouthOpenStrength = 0.70f;" in cs_ini_file.read_text(encoding="utf-8")
         )
         suite_passed &= print_status_result(
-            "Mouth opening slider & FACIAL_jaw weight scale (0.00..1.00, default=0.35)",
+            "Mouth opening slider & FACIAL_jaw weight scale (0.00..1.00, default=0.70)",
             mouth_ok,
             f"def={jaw_def.get(1, 0.0):.2f} wide={jaw_wide.get(1, 0.0):.2f} shut={len(jaw_shut)}",
         )
