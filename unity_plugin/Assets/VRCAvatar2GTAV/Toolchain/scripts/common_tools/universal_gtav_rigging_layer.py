@@ -179,13 +179,18 @@ def _pick_default_face_anim(
     avatar_hints: Sequence[str],
     fallback_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Locate a `default` resting facial `.anim` file without walking huge Unity trees."""
+    """Locate a non-zero default facial `.anim` fallback when no Unity scene is available."""
+    import blendshape_helper
+
     anim_candidates = sorted(Path(pth) for pth in (scan_info.get("anim_files") or ()))
     if not anim_candidates and fallback_dir is not None and fallback_dir.is_dir():
         anim_candidates = sorted(fallback_dir.rglob("*.anim"))
     for anim_file in anim_candidates:
         low_name = anim_file.stem.lower()
-        if "default" in low_name or "idle" in low_name:
+        if "default" not in low_name and "idle" not in low_name:
+            continue
+        non_zero_keys = blendshape_helper.load_unity_anim_blendshapes(anim_file, include_zero=False)
+        if non_zero_keys:
             return anim_file
     return None
 
@@ -339,15 +344,24 @@ def prepare_universal_npc_build(
         else main_fbx.parent
     )
     explicit_face_anim = project_paths.to_host_path(face_anim) if face_anim else None
-    face_anim_path = (
-        explicit_face_anim
-        if (explicit_face_anim is not None and explicit_face_anim.is_file())
-        else _pick_default_face_anim(scan_info, hints, fallback_dir=anim_search_dir)
-    )
-    if explicit_face_anim is not None and not explicit_face_anim.is_file():
-        print(f"[Blendshapes] Requested --face-anim not found: {explicit_face_anim}", flush=True)
-    elif explicit_face_anim is not None:
-        print(f"[Blendshapes] Applying Face .anim override: {explicit_face_anim}", flush=True)
+    if explicit_face_anim is not None and explicit_face_anim.is_file():
+        face_anim_path: Optional[Path] = explicit_face_anim
+        print(f"[Blendshapes] Applying Face .anim override: {face_anim_path}", flush=True)
+    else:
+        if explicit_face_anim is not None:
+            print(f"[Blendshapes] Requested --face-anim not found: {explicit_face_anim}", flush=True)
+        # Preserve facial blendshapes already configured on the avatar in the Unity scene/prefab
+        # whenever no explicit Facial Anim Override was selected.
+        face_anim_path = (
+            None
+            if selected_scene_or_prefab
+            else _pick_default_face_anim(scan_info, hints, fallback_dir=anim_search_dir)
+        )
+        if face_anim_path is None and selected_scene_or_prefab and import_face_blendshapes:
+            print(
+                f"[Blendshapes] Using avatar facial blendshapes directly from Unity scene/prefab ({Path(selected_scene_or_prefab).name})",
+                flush=True,
+            )
     char_pseudo_cfg: Dict[str, Any] = {
         "protagonist": norm_ped,
         "avatar_id": effective_avatar_name.lower(),

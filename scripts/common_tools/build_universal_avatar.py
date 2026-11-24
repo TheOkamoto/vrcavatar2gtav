@@ -300,17 +300,19 @@ def prepare_universal_avatar_job(
     primary_fbx = _choose_primary_fbx(all_fbx_paths, chosen_avatar_name, ma_plan)
     extra_outfit_fbxs = [fbx_item for fbx_item in all_fbx_paths if fbx_item != primary_fbx]
 
-    # Pick face .anim if explicit override provided or default matching the avatar
+    # Only pick fallback default facial .anim when no Unity scene exists and clip has non-zero keys
     face_anim_path: Optional[Path] = (
         Path(project_paths.to_host_path(face_anim)) if face_anim else None
     )
     if (face_anim_path is None or not face_anim_path.is_file()) and use_face:
         face_anim_path = None
-        anim_files: List[Path] = list(ingested.get("anim_files", ()))
-        for anim_cand in anim_files:
-            if anim_cand.name.lower() in ("default_face.anim", "default.anim"):
-                face_anim_path = anim_cand
-                break
+        if not selected_scene:
+            anim_files: List[Path] = list(ingested.get("anim_files", ()))
+            for anim_cand in anim_files:
+                if anim_cand.name.lower() in ("default_face.anim", "default.anim"):
+                    if blendshape_helper.load_unity_anim_blendshapes(anim_cand, include_zero=False):
+                        face_anim_path = anim_cand
+                        break
 
     preset_avatar_id = _infer_preset_or_custom_avatar_id(chosen_avatar_name, chosen_target_char)
     char_cfg: Dict[str, Any] = {

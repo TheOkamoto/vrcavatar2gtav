@@ -964,7 +964,19 @@ def _test_mat_overrides_and_non_colliding_atlas() -> bool:
         lens_alpha = int(baked_lenses[0].getpixel((32, 32))[3]) if baked_lenses else -1
         watch_alpha = int(baked_watch[0].getpixel((32, 32))[3]) if baked_watch else -1
         import universal_gtav_builder
+        import universal_gtav_rigging_layer
 
+        zero_anim = glass_dir / "Default_face.anim"
+        zero_anim.write_text(
+            "%YAML 1.1\n--- !u!74 &7400000\nAnimationClip:\n  m_Name: Default_face\n"
+            "  m_FloatCurves:\n  - serializedVersion: 2\n    curve:\n      m_Curve:\n"
+            "      - time: 0\n        value: 0\n"
+            "    attribute: blendShape.eye_pleasure\n    path: Body\n",
+            encoding="utf-8",
+        )
+        picked_zero = universal_gtav_rigging_layer._pick_default_face_anim(
+            {"anim_files": [str(zero_anim)]}, ["Shinano"]
+        )
         slot_map_test = universal_gtav_builder.map_blender_slots_to_unity_submeshes(
             [1, 1, 2, 0, 0, 3], 4
         )
@@ -974,6 +986,7 @@ def _test_mat_overrides_and_non_colliding_atlas() -> bool:
             and 25 <= lens_alpha <= 38
             and 15 <= watch_alpha <= 28
             and slot_map_test == {1: 0, 2: 1, 0: 2, 3: 3}
+            and picked_zero is None
         )
 
     return override_ok and matcap_ok and atlas_disambig_ok and nipple_ok and glass_trans_ok
