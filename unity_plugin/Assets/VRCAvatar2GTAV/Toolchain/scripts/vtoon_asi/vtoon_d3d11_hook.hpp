@@ -680,6 +680,10 @@ public:
 
     bool IsEnabled() const { return configEnabled_.load(std::memory_order_acquire); }
 
+    void LogFirstTrackedPedDraw() {
+        LogMilestoneOnce(1u << 2, "Intercepted first tracked Ped GBuffer/Forward draw");
+    }
+
 private:
     void LogMilestoneOnce(uint32_t flagBit, const std::string& msgText) {
         uint32_t prevFlags = loggedMilestones_.fetch_or(flagBit, std::memory_order_relaxed);

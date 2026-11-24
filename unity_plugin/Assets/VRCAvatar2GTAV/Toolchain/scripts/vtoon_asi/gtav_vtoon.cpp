@@ -230,6 +230,7 @@ void DispatchTrackedDraw(ID3D11DeviceContext* d3dCtx, FnInvokeOrig&& invokeOrig)
         return;
     }
 
+    engine.LogFirstTrackedPedDraw();
     ID3D11ShaderResourceView* curSrv0 = nullptr;
     {
         gtav_vtoon::ScopedDrawHookBypass srvQueryGuard;
@@ -314,6 +315,10 @@ HRESULT STDMETHODCALLTYPE HookCreateDeferredContext(
     ID3D11Device* primaryDev = gPrimaryGameDevice.load(std::memory_order_acquire);
     if (!gShuttingDown.load(std::memory_order_acquire) && SUCCEEDED(createRes) &&
         outDeferredCtx && *outDeferredCtx && (!primaryDev || primaryDev == d3dDevice)) {
+        static std::atomic<bool> loggedDeferredHook{false};
+        if (!loggedDeferredHook.exchange(true)) {
+            gtav_vtoon::LogVToonMessage("Hooked live ID3D11DeviceContext deferred context");
+        }
         ContextDrawState* ctxState = AcquireContextState(*outDeferredCtx);
         ctxState->shaderClass = {};
         InstallContextVTableHooks(*outDeferredCtx);

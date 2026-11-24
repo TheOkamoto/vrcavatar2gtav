@@ -268,6 +268,15 @@ public:
                     outCharId = decoded;
                     LogVToonMessage("Detected VToon texture watermark char_id=" + std::to_string(outCharId));
                 }
+            } else if (blk0R >= 210 && blk0G <= 45 && blk0B >= 210) {
+                static std::atomic<bool> loggedBlkMismatch{false};
+                if (!loggedBlkMismatch.exchange(true)) {
+                    LogVToonMessage(
+                        "Probe saw magenta blk0 without valid blk1 (w=" + std::to_string(desc.Width) +
+                        ", fmt=" + std::to_string(static_cast<int>(srvDesc.Format)) +
+                        ", blk1=" + std::to_string(blk1R) + "/" + std::to_string(blk1G) + "/" + std::to_string(blk1B) + ")"
+                    );
+                }
             }
             d3dCtx->Unmap(probeStagingTex_, 0);
         }

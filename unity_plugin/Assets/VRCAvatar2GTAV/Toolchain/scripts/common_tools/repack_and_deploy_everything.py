@@ -1092,7 +1092,7 @@ def sync_gtav_runtime_mods(
             dst_bin = gtav_root / bin_name
             if src_bin.is_file() and (
                 not dst_bin.is_file()
-                or src_bin.stat().st_size != dst_bin.stat().st_size
+                or _compute_file_sha256(src_bin) != _compute_file_sha256(dst_bin)
             ):
                 shutil.copy2(src_bin, dst_bin)
                 installed_files.append(bin_name)
@@ -1169,7 +1169,8 @@ def _sync_vtoon_runtime_to_game(project_root: Path, gtav_root: Path) -> None:
 
 RPF7_STREAMING_THRESHOLD_BYTES = 850_000_000
 SAFE_X64V_ARCHIVE_BYTES = 2_800_000_000
-SECONDARY_YTD_MIN_COMPACT_BYTES = 750_000
+SAFE_X64V_FULL_SECONDARY_BYTES = 3_950_000_000
+SECONDARY_YTD_MIN_COMPACT_BYTES = 480_000
 TIER2_YTD_MIN_COMPACT_BYTES = 300_000
 DUMMY_SLOT_YDD_MAX_BYTES = 2048
 DUMMY_SLOT_YTD_MIN_BYTES = 8192
@@ -1502,6 +1503,15 @@ def ensure_x64v_streamed_budget(
         streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
         projected_bytes = other_x64v_bytes + streamed_bytes
 
+    if secondary_atlas_size == 2048:
+        if projected_bytes > safe_max_bytes:
+            total_replaced += _compact_unused_dummy_component_ytds(
+                streamedpeds_extracted_dir, dummy_builder=resolved_dummy
+            )
+            streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
+            projected_bytes = other_x64v_bytes + streamed_bytes
+        safe_max_bytes = max(int(safe_max_bytes), SAFE_X64V_FULL_SECONDARY_BYTES)
+
     if projected_bytes <= safe_max_bytes:
         return {
             "compacted": total_replaced > 0,
@@ -1517,28 +1527,33 @@ def ensure_x64v_streamed_budget(
         flush=True,
     )
 
-    tier_specs = (
-        (1024, 512, SECONDARY_YTD_MIN_COMPACT_BYTES, False),
-        (512, 256, TIER2_YTD_MIN_COMPACT_BYTES, True),
+    total_replaced += _compact_protagonist_uppr_ytds(
+        streamedpeds_extracted_dir,
+        max_diffuse_px=1024,
+        max_normal_px=512,
+        min_size_bytes=SECONDARY_YTD_MIN_COMPACT_BYTES,
+        include_000_non_a=False,
+        compact_builder=resolved_compact,
     )
-    for max_diff_px, max_norm_px, min_sz_b, inc_000_non_a in tier_specs:
-        if projected_bytes <= safe_max_bytes:
-            break
-        total_replaced += _compact_protagonist_uppr_ytds(
-            streamedpeds_extracted_dir,
-            max_diffuse_px=max_diff_px,
-            max_normal_px=max_norm_px,
-            min_size_bytes=min_sz_b,
-            include_000_non_a=inc_000_non_a,
-            compact_builder=resolved_compact,
-        )
-        streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
-        projected_bytes = other_x64v_bytes + streamed_bytes
+    streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
+    projected_bytes = other_x64v_bytes + streamed_bytes
 
     if projected_bytes > safe_max_bytes:
         total_replaced += _compact_unused_dummy_component_ytds(
             streamedpeds_extracted_dir,
             dummy_builder=resolved_dummy,
+        )
+        streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
+        projected_bytes = other_x64v_bytes + streamed_bytes
+
+    if projected_bytes > safe_max_bytes:
+        total_replaced += _compact_protagonist_uppr_ytds(
+            streamedpeds_extracted_dir,
+            max_diffuse_px=512,
+            max_normal_px=256,
+            min_size_bytes=TIER2_YTD_MIN_COMPACT_BYTES,
+            include_000_non_a=True,
+            compact_builder=resolved_compact,
         )
         streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
         projected_bytes = other_x64v_bytes + streamed_bytes

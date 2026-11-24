@@ -1310,6 +1310,102 @@ def _test_seam_dds_and_torso_decimate() -> bool:
     return split_ok and dds_ok and decimate_ok
 
 
+def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
+    import tempfile
+
+    try:
+        import repack_and_deploy_everything as rpk_mod
+    except ImportError:
+        import common_tools.repack_and_deploy_everything as rpk_mod
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        proj_root = tmp_path / "proj"
+        pkg_dir = proj_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package"
+        gtav_dir = tmp_path / "gtav"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        gtav_dir.mkdir(parents=True, exist_ok=True)
+
+        # Verify sync_gtav_runtime_mods overwrites same-size binaries when SHA-256 differs
+        (pkg_dir / "GTAVVToon.asi").write_bytes(b"NEW_VTOON_BIN_01")
+        (gtav_dir / "GTAVVToon.asi").write_bytes(b"OLD_VTOON_BIN_99")
+        sync_res = rpk_mod.sync_gtav_runtime_mods(proj_root, gtav_dir, overwrite_inis=False)
+        hash_sync_ok = (
+            "GTAVVToon.asi" in sync_res.get("copied", [])
+            and (gtav_dir / "GTAVVToon.asi").read_bytes() == b"NEW_VTOON_BIN_01"
+        )
+
+        # Verify 736KB DXT1 secondary slot compacts to 1024px (not skipped straight to 512px)
+        players_auto = tmp_path / "players_auto"
+        x64v_auto = tmp_path / "x64v_auto"
+        ped_auto = players_auto / "player_one"
+        (x64v_auto / "models" / "cdimages").mkdir(parents=True, exist_ok=True)
+        ped_auto.mkdir(parents=True, exist_ok=True)
+        (ped_auto / "accs_000_u.ydd").write_bytes(b"D" * 629)
+        (ped_auto / "accs_diff_000_a_uni.ytd").write_bytes(b"D" * 400_000)
+        (ped_auto / "uppr_diff_000_a_uni.ytd").write_bytes(b"A" * 736_310)
+        (ped_auto / "uppr_diff_001_a_uni.ytd").write_bytes(b"B" * 736_310)
+
+        seen_px: List[int] = []
+
+        def _fake_compact(src_p: Path, dst_p: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
+            seen_px.append(max_diffuse_px)
+            dst_p.write_bytes(b"C" * (200_000 if max_diffuse_px >= 1024 else 80_000))
+            return dst_p
+
+        def _fake_dummy(dst_p: Path) -> Path:
+            dst_p.write_bytes(b"M" * 512)
+            return dst_p
+
+        res_auto = rpk_mod.ensure_x64v_streamed_budget(
+            x64v_auto,
+            players_auto,
+            safe_max_bytes=1_000_000,
+            secondary_atlas_size=0,
+            compact_builder=_fake_compact,
+            dummy_builder=_fake_dummy,
+        )
+        auto_tier_ok = (
+            res_auto["compacted"]
+            and seen_px == [1024]
+            and (ped_auto / "uppr_diff_000_a_uni.ytd").stat().st_size == 736_310
+            and (ped_auto / "uppr_diff_001_a_uni.ytd").stat().st_size == 200_000
+            and (ped_auto / "accs_diff_000_a_uni.ytd").stat().st_size == 512
+        )
+
+        # Verify secondary_atlas_size=2048 keeps 2048px secondary slots while pruning unused dummies
+        players_full = tmp_path / "players_full"
+        x64v_full = tmp_path / "x64v_full"
+        ped_full = players_full / "player_two"
+        (x64v_full / "models" / "cdimages").mkdir(parents=True, exist_ok=True)
+        ped_full.mkdir(parents=True, exist_ok=True)
+        (ped_full / "accs_000_u.ydd").write_bytes(b"D" * 629)
+        (ped_full / "accs_diff_000_a_uni.ytd").write_bytes(b"D" * 500_000)
+        (ped_full / "uppr_diff_000_a_uni.ytd").write_bytes(b"A" * 1_100_000)
+        (ped_full / "uppr_diff_001_a_uni.ytd").write_bytes(b"B" * 1_100_000)
+        seen_full_px: List[int] = []
+
+        def _track_full_compact(src_p: Path, dst_p: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
+            seen_full_px.append(max_diffuse_px)
+            dst_p.write_bytes(b"C" * 100_000)
+            return dst_p
+
+        rpk_mod.ensure_x64v_streamed_budget(
+            x64v_full,
+            players_full,
+            safe_max_bytes=2_300_000,
+            secondary_atlas_size=2048,
+            compact_builder=_track_full_compact,
+            dummy_builder=_fake_dummy,
+        )
+        full_sec_ok = (
+            seen_full_px == []
+            and (ped_full / "uppr_diff_001_a_uni.ytd").stat().st_size == 1_100_000
+            and (ped_full / "accs_diff_000_a_uni.ytd").stat().st_size == 512
+        )
+    return hash_sync_ok and auto_tier_ok and full_sec_ok
+
+
 def test_restore_and_multislot_regressions() -> bool:
     """Run all regression checks for scoped MA/Atlas, PhysBones isolation, Restore, and Multi-Slot."""
     print("[Restore/MultiSlot] Validating PRUNING, SCOPED ATLAS, PHYSBONES, RESTORE, MULTI-SLOT...")
@@ -1320,6 +1416,7 @@ def test_restore_and_multislot_regressions() -> bool:
     mat_ovr_ok = _test_mat_overrides_and_non_colliding_atlas()
     single_tex_pb_ok = _test_single_tex_ytd_and_physbone_unwrap()
     seam_dds_dec_ok = _test_seam_dds_and_torso_decimate()
+    vtoon_budget_ok = _test_vtoon_hash_sync_and_budget_tiers()
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
     cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
@@ -1328,9 +1425,9 @@ def test_restore_and_multislot_regressions() -> bool:
         and all(len(cs_p.read_text(encoding="utf-8").splitlines()) <= 500 for cs_p in cs_files)
     )
 
-    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and cs_ok
+    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and vtoon_budget_ok and cs_ok
     return print_status_result(
         "Restore-Vanilla & Per-Protagonist Multi-Slot Regression Suite",
         all_ok,
-        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, csharp={cs_ok}",
+        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, vtoon_budget={vtoon_budget_ok}, csharp={cs_ok}",
     )
