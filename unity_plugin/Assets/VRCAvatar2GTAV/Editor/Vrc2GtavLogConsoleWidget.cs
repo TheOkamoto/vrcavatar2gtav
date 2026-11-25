@@ -233,6 +233,24 @@ namespace Vrc2Gtav.Editor
             return currentPath ?? string.Empty;
         }
 
+        private static string _cachedPluginVersion;
+
+        public static string GetPluginVersionSuffix()
+        {
+            if (_cachedPluginVersion != null) return _cachedPluginVersion;
+            try
+            {
+                string versionPath = Path.Combine(Directory.GetCurrentDirectory(), "Assets", "VRCAvatar2GTAV", "VERSION.txt");
+                string rawVersion = File.Exists(versionPath) ? File.ReadAllText(versionPath).Trim() : string.Empty;
+                _cachedPluginVersion = string.IsNullOrEmpty(rawVersion) ? string.Empty : (" v" + rawVersion.TrimStart('v', 'V'));
+            }
+            catch
+            {
+                _cachedPluginVersion = string.Empty;
+            }
+            return _cachedPluginVersion;
+        }
+
         public static UiLanguageMode DrawHeaderBox(
             UiLanguageMode langMode,
             GUIStyle wrapTitleStyle,
@@ -241,7 +259,7 @@ namespace Vrc2Gtav.Editor
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
-            GUILayout.Label(Vrc2GtavLocalization.Get(langMode, "window.title"), wrapTitleStyle, GUILayout.ExpandWidth(true));
+            GUILayout.Label(Vrc2GtavLocalization.Get(langMode, "window.title") + GetPluginVersionSuffix(), wrapTitleStyle, GUILayout.ExpandWidth(true));
             GUILayout.Label(Vrc2GtavLocalization.Get(langMode, "window.subtitle"), wrapMiniStyle, GUILayout.ExpandWidth(true));
             EditorGUILayout.EndVertical();
 

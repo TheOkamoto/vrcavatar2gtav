@@ -1559,9 +1559,13 @@ def test_unity_scene_and_fallbacks() -> bool:
             exe_name = "rage.exe" if os.name == "nt" else "rage"
             fake_rage = rage_workspace / exe_name
             fake_rage.write_bytes(b"FAKE_RAGE_BIN")
+            cfg_src = (
+                paths_mod2.find_project_config_file()
+                if paths_mod2.has_project_config_file()
+                else (PROJECT_ROOT_DIR / "vrc2gtav.cfg.example")
+            )
             fake_cfg = Path(rage_tmp) / "vrc2gtav.cfg"
-            if paths_mod2.has_project_config_file():
-                fake_cfg.write_text(paths_mod2.find_project_config_file().read_text(encoding="utf-8"), encoding="utf-8")
+            fake_cfg.write_text(cfg_src.read_text(encoding="utf-8"), encoding="utf-8")
             orig_get, orig_root, orig_stg = paths_mod2.get_rage_cli, paths_mod2.get_project_root, paths_mod2.get_staging_dir
             orig_cfg_func, orig_download = paths_mod2.find_project_config_file, arch_mod.download_and_install_rage
             try:
@@ -1569,8 +1573,8 @@ def test_unity_scene_and_fallbacks() -> bool:
                 fake_proj.mkdir(parents=True, exist_ok=True)
                 paths_mod2.get_rage_cli, paths_mod2.get_project_root = (lambda: ""), (lambda: fake_proj)
                 paths_mod2.get_staging_dir = lambda: Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "staging"
-                if fake_cfg.is_file():
-                    paths_mod2.find_project_config_file = lambda _cfg_path=None: fake_cfg
+                paths_mod2.find_project_config_file = lambda _cfg_path=None: fake_cfg
+                paths_mod2.invalidate_config_cache()
                 resolved_workspace_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
                 fake_rage.unlink()
                 arch_mod.download_and_install_rage = lambda _proj: (fake_rage.write_bytes(b"DL_RAGE") and None) or fake_rage
@@ -1583,7 +1587,7 @@ def test_unity_scene_and_fallbacks() -> bool:
             finally:
                 paths_mod2.get_rage_cli, paths_mod2.get_project_root, paths_mod2.get_staging_dir = orig_get, orig_root, orig_stg
                 paths_mod2.find_project_config_file, arch_mod.download_and_install_rage = orig_cfg_func, orig_download
-                paths_mod2.load_project_config(force_reload=True)
+                paths_mod2.invalidate_config_cache()
             suite_passed &= print_status_result(
                 "Empty rage= fallback & auto-download guard (prevents WinError 87)",
                 rage_guard_ok,

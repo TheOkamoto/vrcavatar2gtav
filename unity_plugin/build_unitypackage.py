@@ -17,8 +17,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
+import sys
 import tarfile
-from typing import Dict, Iterable, List, Optional, Tuple
+import time
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -178,6 +181,36 @@ def _should_bundle_repo_file(rel_path: Path) -> bool:
     return rel_path.suffix.lower() in ALLOWED_EXTENSIONS
 
 
+def _clear_readonly_and_retry(
+    remove_func: Callable[..., None],
+    target_path: str,
+    *_extra_args: object,
+) -> None:
+    """Clear read-only attributes and retry filesystem unlink/rmdir once."""
+    try:
+        os.chmod(target_path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        pass
+    remove_func(target_path)
+
+
+def _remove_directory_tree(target_dir: Path, max_attempts: int = 8) -> None:
+    """Remove a directory tree, tolerating transient Windows/sync locks cleanly."""
+    for attempt_index in range(max_attempts):
+        if not target_dir.exists():
+            return
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(target_dir, onexc=_clear_readonly_and_retry)
+            else:
+                shutil.rmtree(target_dir, onerror=_clear_readonly_and_retry)
+            return
+        except OSError:
+            if attempt_index + 1 >= max_attempts:
+                raise
+            time.sleep(0.2 * (attempt_index + 1))
+
+
 def sync_toolchain_bundle(
     repo_root: Path = DEFAULT_REPO_ROOT,
     plugin_root: Optional[Path] = None,
@@ -190,8 +223,7 @@ def sync_toolchain_bundle(
         else Path(__file__).resolve().parent / "Assets" / "VRCAvatar2GTAV"
     )
     toolchain_dir = target_plugin / "Toolchain"
-    if toolchain_dir.exists():
-        shutil.rmtree(toolchain_dir)
+    _remove_directory_tree(toolchain_dir)
     toolchain_dir.mkdir(parents=True, exist_ok=True)
 
     for top_name in ALLOWED_TOP_FILES:
@@ -229,12 +261,27 @@ def _add_tar_bytes(tar_handle: tarfile.TarFile, arcname: str, payload: bytes) ->
     tar_handle.addfile(tar_info, io_stream.BytesIO(payload))
 
 
+def _normalize_semver_version(raw_version: Optional[str]) -> Optional[str]:
+    """Validate and normalize a SemVer 2.0.0 string (stripping optional leading 'v')."""
+    if raw_version is None:
+        return None
+    cleaned = str(raw_version).strip()
+    if cleaned.lower().startswith("v"):
+        cleaned = cleaned[1:]
+    if not cleaned:
+        return None
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", cleaned):
+        raise ValueError(f"Invalid SemVer version string: {raw_version!r}")
+    return cleaned
+
+
 def create_unitypackage(
     *,
     repo_root: Path = DEFAULT_REPO_ROOT,
     plugin_root: Optional[Path] = None,
     output_path: Optional[Path] = None,
     existing_meta_dirs: Tuple[Path, ...] = (),
+    version: Optional[str] = None,
 ) -> Path:
     """
     Build a complete `.unitypackage` archive for `Assets/VRCAvatar2GTAV/`
@@ -246,13 +293,15 @@ def create_unitypackage(
         if plugin_root is not None
         else Path(__file__).resolve().parent / "Assets" / "VRCAvatar2GTAV"
     )
+    normalized_version = _normalize_semver_version(version)
     sync_toolchain_bundle(resolved_repo, resolved_plugin)
 
-    pkg_out = (
-        output_path.resolve()
-        if output_path is not None
-        else resolved_repo / "VRCAvatar2GTAV.unitypackage"
-    )
+    if output_path is not None:
+        pkg_out = output_path.resolve()
+    elif normalized_version is not None:
+        pkg_out = resolved_repo / f"VRCAvatar2GTAV-v{normalized_version}.unitypackage"
+    else:
+        pkg_out = resolved_repo / "VRCAvatar2GTAV.unitypackage"
     pkg_out.parent.mkdir(parents=True, exist_ok=True)
 
     meta_sources = tuple(plugin_dir for plugin_dir in existing_meta_dirs if plugin_dir.is_dir())
@@ -283,14 +332,66 @@ def create_unitypackage(
             entries.append((asset_rel, False, file_obj, meta_txt))
 
     with tarfile.open(pkg_out, "w:gz") as tar_out:
+        has_version_entry = False
         for asset_rel, is_dir, file_obj, meta_txt in entries:
+            if asset_rel == f"{root_rel}/VERSION.txt":
+                has_version_entry = True
             guid_hex = _extract_guid_from_meta(meta_txt, asset_rel)
             _add_tar_bytes(tar_out, f"{guid_hex}/pathname", asset_rel.encode("utf-8"))
             _add_tar_bytes(tar_out, f"{guid_hex}/asset.meta", meta_txt.encode("utf-8"))
             if not is_dir and file_obj is not None:
                 _add_tar_bytes(tar_out, f"{guid_hex}/asset", file_obj.read_bytes())
+        if normalized_version is not None and not has_version_entry:
+            ver_rel = f"{root_rel}/VERSION.txt"
+            ver_meta = _build_default_meta_text(ver_rel, False)
+            ver_guid = _extract_guid_from_meta(ver_meta, ver_rel)
+            _add_tar_bytes(tar_out, f"{ver_guid}/pathname", ver_rel.encode("utf-8"))
+            _add_tar_bytes(tar_out, f"{ver_guid}/asset.meta", ver_meta.encode("utf-8"))
+            _add_tar_bytes(tar_out, f"{ver_guid}/asset", f"{normalized_version}\n".encode("utf-8"))
 
     return pkg_out
+
+
+def verify_unitypackage(
+    package_path: Path,
+    *,
+    expected_version: Optional[str] = None,
+) -> Dict[str, object]:
+    """Verify Editor C# scripts, Toolchain scripts, and optional VERSION.txt inside a `.unitypackage`."""
+    normalized_expected = _normalize_semver_version(expected_version)
+    entries_by_guid: Dict[str, str] = {}
+    version_text: Optional[str] = None
+    with tarfile.open(package_path, "r:gz") as tar_obj:
+        for member in tar_obj.getmembers():
+            if member.isfile() and member.name.endswith("/pathname"):
+                guid_key = member.name.split("/", 1)[0]
+                handle = tar_obj.extractfile(member)
+                if handle is not None:
+                    entries_by_guid[guid_key] = handle.read().decode("utf-8").strip()
+        for guid_key, asset_rel in entries_by_guid.items():
+            if asset_rel == "Assets/VRCAvatar2GTAV/VERSION.txt":
+                asset_handle = tar_obj.extractfile(f"{guid_key}/asset")
+                if asset_handle is not None:
+                    version_text = asset_handle.read().decode("utf-8").strip()
+                break
+
+    packed_paths = set(entries_by_guid.values())
+    has_editor = "Assets/VRCAvatar2GTAV/Editor/Vrc2GtavExporterWindow.cs" in packed_paths
+    has_toolchain = "Assets/VRCAvatar2GTAV/Toolchain/run_mod_manager.py" in packed_paths
+    if not (has_editor and has_toolchain):
+        raise RuntimeError(
+            f"Incomplete .unitypackage payload in {package_path}: editor={has_editor}, toolchain={has_toolchain}"
+        )
+    if normalized_expected is not None and version_text != normalized_expected:
+        raise RuntimeError(
+            f"VERSION.txt mismatch in {package_path}: got {version_text!r}, expected {normalized_expected!r}"
+        )
+    return {
+        "entry_count": len(packed_paths),
+        "version": version_text or "",
+        "has_editor": has_editor,
+        "has_toolchain": has_toolchain,
+    }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -299,6 +400,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         description="Bundle project into Assets/VRCAvatar2GTAV/Toolchain and generate VRCAvatar2GTAV.unitypackage."
     )
     parser.add_argument("--output", default=None, help="Output .unitypackage file path")
+    parser.add_argument("--version", default=None, help="Optional SemVer string (e.g. 1.0.0) to embed and name artifact")
+    parser.add_argument("--verify", action="store_true", help="Verify generated archive payload and VERSION.txt")
     parser.add_argument("--unity-project", default=None, help="Optional Unity project root to also install into")
     args = parser.parse_args(argv)
 
@@ -312,8 +415,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         repo_root=DEFAULT_REPO_ROOT,
         output_path=Path(args.output) if args.output else None,
         existing_meta_dirs=tuple(meta_dirs),
+        version=args.version,
     )
     print(f"[OK] Built self-contained Unity package: {out_pkg} ({out_pkg.stat().st_size:,} bytes)")
+    if args.verify:
+        summary = verify_unitypackage(out_pkg, expected_version=args.version)
+        print(
+            f"[OK] Verified package payload: entries={summary['entry_count']}, version={summary['version'] or 'unversioned'}"
+        )
 
     if args.unity_project:
         import install_unity_plugin

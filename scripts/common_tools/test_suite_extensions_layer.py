@@ -1184,7 +1184,11 @@ def test_universal_npc_pipeline() -> bool:
         )
 
         # 5. Protagonist wearable prop patch replaces p_head/p_eyes/p_ears & backs up vanilla
-        dummy_prop_path = project_paths.get_prop_dummy_ydd_path()
+        dummy_prop_path = (
+            project_paths.get_prop_dummy_ydd_path()
+            if project_paths.has_project_config_file()
+            else (PROJECT_ROOT_DIR / "_deploy_tools" / "p_eyes_dummy.ydd")
+        )
         sample_props_dir = tmp_root / "player_one_p"
         sample_backup_dir = tmp_root / "backup_props"
         sample_props_dir.mkdir(parents=True, exist_ok=True)
@@ -1430,7 +1434,19 @@ def test_universal_npc_pipeline() -> bool:
                 Path(cmd_args[out_idx]).write_bytes(b"RSC7MOCK")
             return subprocess.CompletedProcess(cmd_args, 0, "", "")
 
-        with unittest.mock.patch.object(universal_atlas_builder.subprocess, "run", side_effect=_fake_rage_run):
+        with (
+            unittest.mock.patch.object(universal_atlas_builder.subprocess, "run", side_effect=_fake_rage_run),
+            unittest.mock.patch.object(
+                universal_atlas_builder.npc_registry_helper,
+                "build_safe_rage_cmd",
+                side_effect=lambda *cmd_args, **_unused: ["rage", *cmd_args],
+            ),
+            unittest.mock.patch.object(
+                universal_atlas_builder.project_paths,
+                "get_rage_cli",
+                return_value="rage",
+            ),
+        ):
             with unittest.mock.patch.object(
                 universal_atlas_builder,
                 "collect_avatar_materials",

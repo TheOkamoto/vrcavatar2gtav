@@ -212,7 +212,11 @@ def _test_ma_fbx_pruning_and_scoped_atlas() -> tuple[bool, bool]:
                 Path(cmd_args[out_idx]).write_bytes(b"RSC7MOCK")
             return subprocess.CompletedProcess(cmd_args, 0, "", "")
 
-        with unittest.mock.patch.object(universal_atlas_builder.subprocess, "run", side_effect=_fake_rage_run):
+        with (
+            unittest.mock.patch.object(universal_atlas_builder.subprocess, "run", side_effect=_fake_rage_run),
+            unittest.mock.patch.object(universal_atlas_builder.npc_registry_helper, "build_safe_rage_cmd", side_effect=lambda *cmd_args, **_unused: ["rage", *cmd_args]),
+            unittest.mock.patch.object(universal_atlas_builder.project_paths, "get_rage_cli", return_value="rage"),
+        ):
             atlas_res = universal_atlas_builder.build_universal_avatar_atlas(
                 ped_name="player_zero",
                 project_dir=tmp_dir,
@@ -400,6 +404,9 @@ def _test_restore_and_multislot_pipeline() -> bool:
         with (
             unittest.mock.patch.object(npc_registry_helper, "get_npc_staging_paths", return_value=fake_paths),
             unittest.mock.patch.object(npc_registry_helper, "_extract_archive", side_effect=_fake_extract),
+            unittest.mock.patch.object(npc_registry_helper.project_paths, "get_gtav_root_dir", return_value=tmp_dir),
+            unittest.mock.patch.object(npc_registry_helper.project_paths, "get_staging_dir", return_value=tmp_dir),
+            unittest.mock.patch.object(npc_registry_helper.project_paths, "get_project_root", return_value=tmp_dir),
         ):
             npc_registry_helper.ensure_npc_staging_extracted("player_zero", {"ped_format": "streamed"})
 
@@ -857,10 +864,9 @@ def _test_mat_overrides_and_non_colliding_atlas() -> bool:
         )
         out_atlas = tmp_root / "atlas_out"
         with (
-            unittest.mock.patch(
-                "subprocess.run",
-                return_value=subprocess.CompletedProcess(args=[], returncode=0),
-            ),
+            unittest.mock.patch("subprocess.run", return_value=subprocess.CompletedProcess(args=[], returncode=0)),
+            unittest.mock.patch.object(uab.npc_registry_helper, "build_safe_rage_cmd", side_effect=lambda *cmd_args, **_unused: ["rage", *cmd_args]),
+            unittest.mock.patch.object(uab.project_paths, "get_rage_cli", return_value="rage"),
             unittest.mock.patch.object(uab.ped_damage_helper, "enforce_ytd_rpf7_size_budget"),
             unittest.mock.patch.object(uab.ped_damage_helper, "validate_rpf7_resource_file"),
         ):

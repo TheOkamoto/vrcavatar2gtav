@@ -62,6 +62,7 @@ imported_unity_projects/
 npcs/
 *.zip
 *.unitypackage
+dist/
 1_Franklin_Shinano_Casual/3_textures_gtav/textures/
 1_Franklin_Shinano_Casual/4_exported_models/
 1_Franklin_Shinano_Casual/5_rpf_package/

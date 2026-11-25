@@ -789,7 +789,11 @@ def build_universal_avatar_atlas(
                     albedo_color_already_baked=True,
                 )
         pkg_dir = output_dir.parent / "5_rpf_package" if (output_dir.parent / "5_rpf_package").is_dir() else output_dir
-        gtav_dir = project_paths.get_gtav_root_dir()
+        gtav_dir = (
+            project_paths.get_gtav_root_dir()
+            if (sync_to_game and project_paths.has_project_config_file())
+            else None
+        )
         sync_targets = [gtav_dir] if (sync_to_game and gtav_dir is not None and gtav_dir.is_dir()) else []
         vtoon_profile_helper.generate_character_vtoon_assets(
             char_id=vtoon_char_id,
