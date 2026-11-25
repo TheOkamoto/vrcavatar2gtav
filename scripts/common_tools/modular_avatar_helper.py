@@ -820,7 +820,14 @@ def build_modular_avatar_bake_plan(
         is_outfit = any(
             keyword_tok in cur_label.lower()
             or keyword_tok in cur_prefab.stem.lower()
-            for keyword_tok in ("dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket", "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair", "ribbon")
+            for keyword_tok in (
+                "dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket",
+                "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair",
+                "ribbon", "casquette", "megane", "glass", "ring", "earring",
+                "pierce", "pin", "nail", "circle", "radio", "eeg", "watch",
+                "bag", "necklace", "choker", "collar", "wing", "horn", "tail",
+                "accessory", "prop",
+            )
         ) or bool(pref_doc["merge_armatures"] or pref_doc["bone_proxies"])
         prefab_transform_map = _ingest_doc_ma_components(
             pref_doc,

@@ -90,7 +90,7 @@ def _extract_optional_patterns(
         gtav_root=gtav_root,
         staging_dir=staging_dir,
     )
-    subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
+    subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     return any(target_dir.rglob("*"))
 
 

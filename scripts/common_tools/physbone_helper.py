@@ -299,14 +299,15 @@ def pack_physbone_chains_to_gtav_budget(
     within `<= max_custom_bones` with `>= 2` bones per chain and zero ELF tag collisions.
     """
     marsh_only_set = set(marshmallow_only_chains or ())
-    if template_chain_specs and template_root_parents and template_bone_map:
+    if template_chain_specs and template_root_parents and template_bone_map and str(gtav_prefix or "") != "PB_Auto":
         extracted_bone_lows = {
             bone_str.strip().lower()
             for rec in extracted_spokes
             for bone_str in ([rec["root_bone"]] + list(rec.get("spoke_bones", ())) + list(rec.get("all_descendants", ())))
         }
         overlap_count = sum(1 for key_name in template_bone_map if key_name in extracted_bone_lows)
-        if overlap_count >= 4:
+        min_required_overlap = max(8, len(template_bone_map) // 2)
+        if overlap_count >= min_required_overlap:
             chains_out: Dict[str, Dict[str, object]] = {}
             included_gtav_bones: List[str] = []
             excluded_gtav_bones: Set[str] = set()

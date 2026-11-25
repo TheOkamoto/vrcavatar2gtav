@@ -129,42 +129,75 @@ def _select_scene_or_prefab(
     return best_prefab, best_prefab.stem
 
 
+def select_primary_avatar_fbx(
+    fbx_files: Sequence[Path],
+    avatar_name: str = "",
+    ma_plan: Optional[Dict[str, Any]] = None,
+    fallback_root: Optional[Path] = None,
+) -> Optional[Path]:
+    """Select the primary humanoid avatar FBX across arbitrary Booth scenes/archives."""
+    import blendshape_helper
+
+    candidates = [Path(item) for item in (fbx_files or ()) if Path(item).is_file()]
+    if not candidates:
+        return None
+    plan = ma_plan or {}
+    active_by_fbx = {
+        str(Path(fbx_key).resolve()): list(mesh_names or ())
+        for fbx_key, mesh_names in (plan.get("active_meshes_by_fbx") or {}).items()
+        if fbx_key
+    }
+    anchor_tokens = [tok.lower() for tok in re.split(r"[^A-Za-z0-9]+", str(avatar_name or "")) if len(tok) >= 3]
+    scene_str = str(plan.get("scene_path") or "").strip()
+    if scene_str:
+        anchor_tokens.append(Path(scene_str).stem.lower())
+    if fallback_root is not None:
+        anchor_tokens.append(Path(fallback_root).name.lower())
+    accessory_tokens = (
+        "_for_", "wear", "dress", "outfit", "hair", "nail", "earring", "cloth",
+        "casquette", "megane", "glass", "ring", "pin", "circle", "radio", "eeg",
+        "ribbon", "watch", "bag", "shoe", "sock", "collar", "choker", "wing", "horn",
+    )
+
+    def _score_primary(fbx_file: Path) -> Tuple[int, int, int, int, int, int]:
+        resolved_str = str(fbx_file.resolve())
+        stem_low = fbx_file.stem.lower()
+        owned_meshes = active_by_fbx.get(resolved_str, ())
+        owns_skin = 0 if any(blendshape_helper.is_body_or_face_skin_mesh(mesh_name) for mesh_name in owned_meshes) else 1
+        in_loose = 1 if "_ziploosefbx" in str(fbx_file).lower() else 0
+        is_accessory = 1 if any(tok in stem_low for tok in accessory_tokens) else 0
+        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest", "kisekae")) else 0
+        matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
+        return (owns_skin, in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
+
+    return sorted(candidates, key=_score_primary)[0]
+
+
 def _select_main_fbx(
     scan_info: Dict[str, Any],
     ma_plan: Dict[str, Any],
     selected_prefab_or_scene: Optional[Path],
 ) -> Path:
     """Resolve the primary humanoid character FBX from MA plan or ingested files."""
-    anchor_tokens: List[str] = []
-    if selected_prefab_or_scene is not None:
-        anchor_tokens.append(selected_prefab_or_scene.stem.lower())
-    avatar_plan_name = str(ma_plan.get("avatar_name") or "").strip().lower()
-    if avatar_plan_name:
-        anchor_tokens.extend(tok for tok in avatar_plan_name.split() if len(tok) >= 3)
-    anchor_tokens.append(Path(scan_info["unity_project_root"]).name.lower())
-
-    def _score_fbx(fbx_file: Path) -> Tuple[int, int, int, int, int]:
-        stem_low = fbx_file.stem.lower()
-        in_loose = 1 if "_ziploosefbx" in str(fbx_file).lower() else 0
-        is_accessory = 1 if any(
-            tok in stem_low for tok in ("_for_", "wear", "dress", "outfit", "hair", "nail", "earring", "cloth")
-        ) else 0
-        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest")) else 0
-        matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
-        return (in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
-
     plan_base_fbxs = [
         Path(fbx_item)
         for fbx_item in (ma_plan.get("base_fbx_paths") or ())
         if Path(fbx_item).is_file()
     ]
+    avatar_plan_name = str(ma_plan.get("avatar_name") or "").strip()
+    if not avatar_plan_name and selected_prefab_or_scene is not None:
+        avatar_plan_name = selected_prefab_or_scene.stem
+    fallback_root = Path(scan_info["unity_project_root"]) if scan_info.get("unity_project_root") else None
     if plan_base_fbxs:
-        return sorted(plan_base_fbxs, key=_score_fbx)[0]
+        picked = select_primary_avatar_fbx(plan_base_fbxs, avatar_plan_name, ma_plan, fallback_root=fallback_root)
+        if picked is not None:
+            return picked
 
     fbx_candidates = [Path(item) for item in (scan_info.get("fbx_files") or ()) if Path(item).is_file()]
-    if not fbx_candidates:
+    picked = select_primary_avatar_fbx(fbx_candidates, avatar_plan_name, ma_plan, fallback_root=fallback_root)
+    if picked is None:
         raise FileNotFoundError("No FBX models found inside avatar workspace.")
-    return sorted(fbx_candidates, key=_score_fbx)[0]
+    return picked
 
 
 PROTAGONIST_VTOON_CHAR_IDS: Dict[str, int] = {
@@ -982,22 +1015,39 @@ def _resolve_universal_target_bone(
             cur_anc = src_parent_lookup.get(cur_anc.lower(), "")
 
     low_mesh = str(mesh_name or "").strip().lower()
+    side_tag = hand_skeleton_helper.detect_bone_side_code(raw_bone_name)
     if any(
         tok in low_name
-        for tok in ("hair", "ear", "cheek", "bang", "aho", "halo", "beret", "glasses", "pocky")
+        for tok in ("hair", "ear", "cheek", "bang", "aho", "halo", "beret", "glasses", "pocky", "horn", "kemomimi", "mimi", "eyebrow", "eyelash")
     ) or any(low_name.startswith(pref) for pref in ("back.", "back_", "side.", "side_", "un_hat")):
         return "SKEL_Head"
     if "ribbon" in low_name:
         if "hair" in low_mesh or low_mesh == "ribbon":
             return "SKEL_Head"
+        if side_tag and any(tok in low_name for tok in ("hand", "wrist", "sleeve", "cuff")):
+            return f"SKEL_{side_tag}_Hand" if "hand" in low_name or "wrist" in low_name else f"SKEL_{side_tag}_Forearm"
         return "SKEL_Spine2"
     if "breast" in low_name or "oppai" in low_name or "bust" in low_name:
         return "SKEL_Spine2"
+    if "wing" in low_name or "collar" in low_name:
+        return "SKEL_Neck_1" if "collar" in low_name else "SKEL_Spine2"
+    if side_tag and any(tok in low_name for tok in ("foot", "shoe", "heel", "toe")):
+        return f"SKEL_{side_tag}_Foot"
+    if side_tag and any(tok in low_name for tok in ("calf", "shin", "knee", "sock", "stocking")):
+        return f"SKEL_{side_tag}_Calf"
+    if side_tag and any(tok in low_name for tok in ("thigh", "leg")):
+        return f"SKEL_{side_tag}_Thigh"
+    if side_tag and any(tok in low_name for tok in ("hand", "wrist", "finger")):
+        return f"SKEL_{side_tag}_Hand"
+    if side_tag and any(tok in low_name for tok in ("forearm", "lower_arm", "sleeve", "cuff")):
+        return f"SKEL_{side_tag}_Forearm"
+    if side_tag and any(tok in low_name for tok in ("shoulder", "upperarm", "upper_arm")):
+        return f"SKEL_{side_tag}_UpperArm"
     if "skirt" in low_name or "tail" in low_name or "coat" in low_name:
         return "SKEL_Pelvis"
     if any(
         tok in low_mesh
-        for tok in ("hair", "kemomimi", "ear", "head", "bang", "top back", "under side", "beret", "halo", "glasses", "pocky")
+        for tok in ("hair", "kemomimi", "ear", "head", "bang", "top back", "under side", "beret", "halo", "glasses", "pocky", "horn")
     ) or low_mesh in ("back", "side"):
         return "SKEL_Head"
     return "SKEL_Pelvis"

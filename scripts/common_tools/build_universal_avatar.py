@@ -33,6 +33,7 @@ import blendshape_helper
 import eye_blink_helper
 import ped_damage_helper
 import physbone_helper
+import universal_gtav_rigging_layer
 import vrc2gtav_paths as project_paths
 
 VALID_TARGET_CHARACTERS: Tuple[str, ...] = ("michael", "franklin", "trevor")
@@ -314,7 +315,11 @@ def prepare_universal_avatar_job(
                         face_anim_path = anim_cand
                         break
 
-    preset_avatar_id = _infer_preset_or_custom_avatar_id(chosen_avatar_name, chosen_target_char)
+    preset_avatar_id = _infer_preset_or_custom_avatar_id(
+        chosen_avatar_name,
+        chosen_target_char,
+        has_unity_scene=bool(selected_scene and selected_scene.is_file()),
+    )
     char_cfg: Dict[str, Any] = {
         "avatar_id": preset_avatar_id,
         "ped_name": {"michael": "player_zero", "franklin": "player_one", "trevor": "player_two"}.get(
@@ -489,16 +494,22 @@ def prepare_universal_avatar_job(
     }
 
 
-def _infer_preset_or_custom_avatar_id(avatar_name: str, target_char: str) -> str:
-    """Resolve explicit built-in preset IDs only when clearly matching; otherwise mark custom."""
+def _infer_preset_or_custom_avatar_id(
+    avatar_name: str,
+    target_char: str,
+    *,
+    has_unity_scene: bool = False,
+) -> str:
+    """Resolve built-in preset keys only for standalone fallback without a live Unity scene."""
     low_name = str(avatar_name or "").strip().lower()
-    tokens = set(re.split(r"[^a-z0-9]+", low_name))
-    if "shinano" in tokens and ("reunion" in tokens or "er" in tokens or "eternal" in tokens):
-        return "shinano_er"
-    if "shinano" in tokens and "casual" in tokens:
-        return "shinano_casual"
-    if "miltina" in tokens or "milltina" in tokens:
-        return "miltina_maid"
+    if not has_unity_scene:
+        tokens = set(re.split(r"[^a-z0-9]+", low_name))
+        if "shinano" in tokens and ("reunion" in tokens or "er" in tokens or "eternal" in tokens):
+            return "shinano_er"
+        if "shinano" in tokens and "casual" in tokens:
+            return "shinano_casual"
+        if "miltina" in tokens or "milltina" in tokens:
+            return "miltina_maid"
     safe_slug = re.sub(r"[^a-z0-9_]+", "_", low_name).strip("_") or "avatar"
     return f"custom_{target_char}_{safe_slug}"
 
@@ -511,16 +522,14 @@ def _choose_primary_fbx(
     """Select the primary avatar body FBX among discovered FBX files."""
     base_list = [Path(item) for item in ma_plan.get("base_fbx_paths", ()) if Path(item).is_file()]
     if base_list:
-        return base_list[0]
-    if not fbx_files:
-        return None
-    name_tokens = [tok.lower() for tok in re.split(r"[^A-Za-z0-9]+", avatar_name) if len(tok) >= 3]
-    for fbx_item in fbx_files:
-        stem_low = fbx_item.stem.lower()
-        if any(tok in stem_low for tok in name_tokens) and "kisekae" not in stem_low:
-            return fbx_item
-    non_kisekae = [fbx_item for fbx_item in fbx_files if "kisekae" not in fbx_item.stem.lower()]
-    return non_kisekae[0] if non_kisekae else fbx_files[0]
+        picked = universal_gtav_rigging_layer.select_primary_avatar_fbx(
+            base_list, avatar_name, ma_plan
+        )
+        if picked is not None:
+            return picked
+    return universal_gtav_rigging_layer.select_primary_avatar_fbx(
+        fbx_files, avatar_name, ma_plan
+    )
 
 
 def _run_in_blender_bake(manifest_path: Union[str, Path], ma_plan_path: Optional[Union[str, Path]] = None) -> int:

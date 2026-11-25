@@ -347,9 +347,8 @@ def run_in_blender_build(manifest_path: Path) -> None:
         flush=True,
     )
 
-    body_obj = next(
-        (obj_item for obj_item in active_meshes if _strip_object_base_name(obj_item.name).lower() == "body"),
-        active_meshes[0],
+    body_obj, blink_candidates = eye_blink_helper.select_jaw_and_blink_candidates(
+        active_meshes
     )
     body_jaw_mask = _extract_case_insensitive_jaw_weights(body_obj)
     body_jaw_weights = (
@@ -359,17 +358,6 @@ def run_in_blender_build(manifest_path: Path) -> None:
             body_obj, mouth_open_strength=mouth_open_strength
         )
     )
-
-    blink_candidates = [
-        obj_item
-        for obj_item in active_meshes
-        if _strip_object_base_name(obj_item.name).lower() in ("body", "face", "head", "body_base")
-    ]
-    seen_blink_names = {item.name for item in blink_candidates}
-    for obj_item in active_meshes:
-        if obj_item.name not in seen_blink_names:
-            blink_candidates.append(obj_item)
-            seen_blink_names.add(obj_item.name)
 
     blink_body_obj = body_obj
     blink_rig_data: Dict[str, Any] = {"enabled": False, "reason": "no_candidates"}

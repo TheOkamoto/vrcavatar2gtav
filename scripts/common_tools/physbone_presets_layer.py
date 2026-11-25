@@ -272,10 +272,12 @@ def score_physbone_chain_priority(
     anatomy (`Ear.L/.R`, `Tail`, `Front_Hair`, `Skirt`).
     """
     raw_candidates = [chain_name, object_name, *list(spoke_bones)[:3]]
+    root_candidates = [chain_name, *list(spoke_bones)[:1]]
     _JEWELRY_OVERRIDES = frozenset(
         {"earring", "earpiece", "pierce", "piercing", "eyelash", "matsuge", "necklace", "pendant"}
     )
     _JEWELRY_BIGRAMS = (("ear", "ring"), ("ear", "piece"))
+    root_tokens, root_token_set = _tokenize_physbone_name(root_candidates)
     ordered_tokens, token_set = _tokenize_physbone_name(raw_candidates)
     matched_tier: Optional[Dict[str, Any]] = None
     matched_rule = ""
@@ -304,6 +306,36 @@ def score_physbone_chain_priority(
         if jewelry_hit:
             matched_tier = _PHYSBONE_TIER_BY_KEY["optional_micro_jiggle_and_jewelry"]
             matched_rule = jewelry_hit
+
+    if matched_tier is None:
+        core_tiers = (
+            "essential_ears_and_primary_hair",
+            "essential_hair_strands",
+            "essential_anatomy_breasts",
+            "essential_tails_wings_and_skirts",
+            "essential_tails_and_wings",
+        )
+        modifier_tiers = (
+            "medium_ribbons_and_frills",
+            "optional_straps_chains_and_belts",
+        )
+        # Keep Tier 1-2 root bones (e.g. Skirt_4 -> sub-spoke Skirt_belt) from being demoted by child/object words
+        root_has_modifier = any(
+            _match_tier_tokens(_PHYSBONE_TIER_BY_KEY[mod_key], root_tokens, root_token_set)
+            for mod_key in modifier_tiers
+        )
+        if not root_has_modifier:
+            for tier_key in core_tiers:
+                tier_cfg = _PHYSBONE_TIER_BY_KEY[tier_key]
+                hit_rule = _match_tier_tokens(tier_cfg, root_tokens, root_token_set)
+                if hit_rule and not (
+                    tier_key == "essential_anatomy_breasts"
+                    and hit_rule == "chest"
+                    and (root_token_set & _CHEST_GARMENT_TOKENS)
+                ):
+                    matched_tier = tier_cfg
+                    matched_rule = hit_rule
+                    break
 
     if matched_tier is None:
         check_order = (

@@ -1328,3 +1328,40 @@ def build_blink_profile_for_ped(
         "max_blink": clamped_max_blink,
         "bones": bone_entries,
     }
+
+
+def select_jaw_and_blink_candidates(
+    active_meshes: Sequence[Any],
+) -> Tuple[Any, List[Any]]:
+    """Select the mesh owning mouth/jaw shape keys and ordered eyelid blink candidates cleanly."""
+    import blendshape_helper
+
+    jaw_shape_keys = {tok.lower() for tok in MOUTH_OPEN_SHAPE_KEYS}
+
+    def _strip_num_suffix(raw_name: str) -> str:
+        return re.sub(r"\.\d{3}$", "", str(raw_name or "").strip()).lower()
+
+    def _has_mouth_keys(mesh_item: Any) -> bool:
+        key_blocks = getattr(getattr(mesh_item.data, "shape_keys", None), "key_blocks", ())
+        return any(key_block.name.strip().lower() in jaw_shape_keys for key_block in key_blocks)
+
+    jaw_body_obj = (
+        next((item for item in active_meshes if _strip_num_suffix(item.name) == "body" and _has_mouth_keys(item)), None)
+        or next((item for item in active_meshes if _has_mouth_keys(item)), None)
+        or next((item for item in active_meshes if _strip_num_suffix(item.name) == "body"), active_meshes[0])
+    )
+    blink_mesh_list = [
+        item
+        for item in active_meshes
+        if blendshape_helper.is_body_or_face_skin_mesh(item)
+        or any(
+            "blink" in key_block.name.lower() or "eye_close" in key_block.name.lower()
+            for key_block in getattr(getattr(item.data, "shape_keys", None), "key_blocks", ())
+        )
+    ]
+    seen_mesh_names = {item.name for item in blink_mesh_list}
+    for item in active_meshes:
+        if item.name not in seen_mesh_names:
+            blink_mesh_list.append(item)
+            seen_mesh_names.add(item.name)
+    return jaw_body_obj, blink_mesh_list

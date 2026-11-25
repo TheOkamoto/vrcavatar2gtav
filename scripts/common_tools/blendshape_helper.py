@@ -752,6 +752,48 @@ def _strip_blender_numeric_suffix(raw_name: str) -> str:
     return trimmed.lower()
 
 
+_SKIN_MESH_INCLUDE_TOKENS = frozenset({"body", "face", "head", "skin", "atama"})
+_SKIN_MESH_EXCLUDE_TOKENS = frozenset(
+    {
+        "dress", "cloth", "outfit", "shirt", "sweat", "sweater", "pullover",
+        "skirt", "skrit", "pant", "pants", "panty", "panties", "short", "shorts",
+        "bra", "underwear", "sock", "socks", "stocking", "stockings", "shoe",
+        "shoes", "boot", "boots", "heel", "heels", "hair", "kami", "ahoge",
+        "ribbon", "bow", "belt", "collar", "choker", "tie", "apron", "coat",
+        "jacket", "cardigan", "hoodie", "cape", "cloak", "glove", "gloves",
+        "nail", "nails", "ear", "ears", "tail", "wing", "wings", "horn",
+        "horns", "halo", "earring", "earrings", "ring", "pin", "glasses",
+        "megane", "hat", "beret", "casquette", "corset", "bag", "watch",
+        "lash", "lashes", "eye", "eyes", "brow", "teeth", "tongue", "band",
+        "headband", "suit", "bodysuit", "harness", "acc", "accessory",
+    }
+)
+_MANUAL_SHRINK_PREFIXES = ("shrink_", "kisekae_", "kesu_", "hide_", "erase_", "del_")
+
+
+def is_body_or_face_skin_mesh(mesh_or_name: Any) -> bool:
+    """Return True when `mesh_or_name` is an avatar skin/body/head/face mesh."""
+    raw_name = str(getattr(mesh_or_name, "name", mesh_or_name) or "").strip()
+    clean_low = _strip_blender_numeric_suffix(raw_name).lower()
+    if clean_low in ("body", "proc_body", "face", "head", "body_base", "skin"):
+        return True
+    if clean_low.startswith("body_baked"):
+        return True
+    tokens = [tok for tok in re.split(r"[^a-z0-9]+", clean_low) if tok]
+    if not tokens:
+        return False
+    token_set = set(tokens)
+    if token_set & _SKIN_MESH_EXCLUDE_TOKENS:
+        return False
+    return bool(token_set & _SKIN_MESH_INCLUDE_TOKENS)
+
+
+def is_manual_shrink_shape_key(key_name: str) -> bool:
+    """Return True when a blendshape key follows common Booth cloth-shrink prefixes."""
+    low_key = str(key_name or "").strip().lower()
+    return any(low_key.startswith(pref) for pref in _MANUAL_SHRINK_PREFIXES)
+
+
 def apply_ma_shape_changers_and_syncs(
     bpy_module: Any,
     ma_plan: Dict[str, Any],
@@ -790,12 +832,11 @@ def apply_ma_shape_changers_and_syncs(
         dst_key = str(sync_item.get("target_shape", "") or "")
         if not src_key or not dst_key:
             continue
-        src_candidates = (
-            meshes_by_low.get(str(sync_item.get("source_mesh", "")).lower())
-            or meshes_by_low.get("body")
-            or meshes_by_low.get("body_base")
-            or []
-        )
+        src_candidates = list(meshes_by_low.get(str(sync_item.get("source_mesh", "")).lower()) or ())
+        if not src_candidates:
+            for cand_key, cand_list in meshes_by_low.items():
+                if is_body_or_face_skin_mesh(cand_key):
+                    src_candidates.extend(cand_list)
         src_val: Optional[float] = None
         for src_obj in src_candidates:
             if getattr(src_obj.data, "shape_keys", None) and src_key in src_obj.data.shape_keys.key_blocks:
@@ -848,9 +889,9 @@ def collect_shape_deleted_vertex_rules(
                 if (key_block.data[idx].co - basis.data[idx].co).length > thr:
                     any_verts.add(idx)
 
-    if base_low in ("body_base", "body"):
+    if is_body_or_face_skin_mesh(base_low):
         for key_block in kblocks[1:]:
-            if not key_block.name.lower().startswith("shrink_") or float(key_block.value) <= manual_shrink_min_weight:
+            if not is_manual_shrink_shape_key(key_block.name) or float(key_block.value) <= manual_shrink_min_weight:
                 continue
             if len(key_block.data) != vert_count:
                 continue

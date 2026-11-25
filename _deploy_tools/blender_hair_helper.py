@@ -97,6 +97,14 @@ def strip_blender_numeric_suffix(object_name: str) -> str:
     return re.sub(r"\.\d{3}$", "", object_name.strip())
 
 
+_GENERIC_HAIR_MESH_TOKENS = frozenset(
+    {"hair", "kami", "ahoge", "baasehair", "hairfront", "hairback", "hairside", "twintail", "ponytail", "bang", "bangs"}
+)
+_GENERIC_HAIR_BLOCK_TOKENS = frozenset(
+    {"body", "face", "skin", "cloth", "dress", "shirt", "skirt", "pant", "panty", "bra", "shoe", "boot", "sock", "earring", "pin", "ribbon", "hat", "cap", "collar", "choker", "tail"}
+)
+
+
 def is_default_hair_mesh_name(mesh_name: str, avatar_kind: str = "") -> bool:
     """Return True when mesh_name belongs to an avatar's stock built-in hair."""
     lower_name = strip_blender_numeric_suffix(mesh_name).lower()
@@ -105,7 +113,12 @@ def is_default_hair_mesh_name(mesh_name: str, avatar_kind: str = "") -> bool:
         return lower_name in MILTINA_DEFAULT_HAIR_MESHES
     if "shinano" in lower_avatar:
         return lower_name in SHINANO_DEFAULT_HAIR_MESHES
-    return lower_name in SHINANO_DEFAULT_HAIR_MESHES or lower_name in MILTINA_DEFAULT_HAIR_MESHES
+    if lower_name in SHINANO_DEFAULT_HAIR_MESHES or lower_name in MILTINA_DEFAULT_HAIR_MESHES:
+        return True
+    name_tokens = set(tok for tok in re.split(r"[^a-z0-9]+", lower_name) if tok)
+    if name_tokens & _GENERIC_HAIR_BLOCK_TOKENS:
+        return False
+    return bool(name_tokens & _GENERIC_HAIR_MESH_TOKENS) or lower_name in ("front", "back", "side", "baasehair")
 
 
 def remove_default_hair_meshes(
@@ -119,14 +132,16 @@ def remove_default_hair_meshes(
     """Remove stock avatar hair objects from Blender scene when custom or 'none' hair is active."""
     removed_names: List[str] = []
     imported_lower_blob = " ".join(name.lower() for name in imported_hair_names)
+    lower_avatar = avatar_kind.strip().lower()
+    use_named_table = ("miltina" in lower_avatar or "milltina" in lower_avatar or "shinano" in lower_avatar)
     targets = set(
         MILTINA_DEFAULT_HAIR_MESHES
-        if "miltina" in avatar_kind.lower() or "milltina" in avatar_kind.lower()
+        if ("miltina" in lower_avatar or "milltina" in lower_avatar)
         else SHINANO_DEFAULT_HAIR_MESHES
     )
     if (
         remove_shinano_ears_if_replaced
-        and "shinano" in avatar_kind.lower()
+        and "shinano" in lower_avatar
         and any(tok in imported_lower_blob for tok in ("ear", "neko"))
     ):
         targets.add("other_ear")
@@ -135,7 +150,8 @@ def remove_default_hair_meshes(
         if obj_item.type != "MESH":
             continue
         clean_lower = strip_blender_numeric_suffix(obj_item.name).lower()
-        if clean_lower not in targets:
+        is_match = (clean_lower in targets) if use_named_table else is_default_hair_mesh_name(obj_item.name, avatar_kind)
+        if not is_match:
             continue
         removed_names.append(obj_item.name)
         if mesh_list_to_prune is not None and obj_item in mesh_list_to_prune:

@@ -280,6 +280,8 @@ def inspect_blender_installation(
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15.0,
             check=False,
         )

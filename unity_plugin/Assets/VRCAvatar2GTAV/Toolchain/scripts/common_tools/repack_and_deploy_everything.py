@@ -854,6 +854,8 @@ def run_repack_and_deploy() -> None:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120.0,
             check=True,
         ).stdout
@@ -874,6 +876,8 @@ def run_repack_and_deploy() -> None:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120.0,
             check=True,
         ).stdout
@@ -902,6 +906,8 @@ def run_repack_and_deploy() -> None:
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=120.0,
                 check=True,
             ).stdout

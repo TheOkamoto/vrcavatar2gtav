@@ -1030,12 +1030,9 @@ def enforce_ped_rpf7_poly_budget(
         }
 
     def _is_protected_face_or_body(obj_item: Any) -> bool:
-        low_name = str(getattr(obj_item, "name", "")).strip().lower()
-        return (
-            low_name in ("body", "proc_body")
-            or low_name.startswith("body_baked")
-            or "body_base" in low_name
-        )
+        import blendshape_helper as bshape_helper
+
+        return bshape_helper.is_body_or_face_skin_mesh(obj_item)
 
     def _decimate_single_object(obj_item: Any, ratio_val: float) -> Tuple[int, int]:
         orig_tris = len(obj_item.data.polygons)
@@ -1552,6 +1549,8 @@ def enforce_ytd_rpf7_size_budget(
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
             cur_bytes = target_ytd.stat().st_size
