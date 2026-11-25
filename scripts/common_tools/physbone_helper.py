@@ -501,7 +501,7 @@ def pack_physbone_chains_to_gtav_budget(
         )
         is_long_essential = (
             cur_entry["score_info"]["essential"]
-            and int(cur_entry["pair_tier"]) <= 2
+            and int(cur_entry["pair_tier"]) <= 1
             and int(cur_entry["pair_spoke_len"]) >= 5
         )
         preferred_slots = 3 if is_long_essential else 2

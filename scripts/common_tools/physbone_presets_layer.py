@@ -76,6 +76,17 @@ PHYSBONE_PRIORITY_TIERS: Tuple[Dict[str, Any], ...] = (
     },
     {
         "tier": 2,
+        "key": "essential_anatomy_breasts",
+        "priority": 92,
+        "essential": True,
+        "label": "Tier 2 - Core Anatomy Soft-Body (breasts / chest)",
+        "keywords": (
+            "breast", "oppai", "bust", "mune", "boob", "marshmallow", "chest",
+        ),
+        "bigrams": (),
+    },
+    {
+        "tier": 2,
         "key": "essential_tails_wings_and_skirts",
         "priority": 85,
         "essential": True,
@@ -95,12 +106,11 @@ PHYSBONE_PRIORITY_TIERS: Tuple[Dict[str, Any], ...] = (
         "key": "important_hair_and_major_garments",
         "priority": 70,
         "essential": True,
-        "label": "Tier 3 - Secondary Hair, Sleeves, Scarves & Main Chest",
+        "label": "Tier 3 - Secondary Hair, Sleeves, Scarves & Garments",
         "keywords": (
             "hair", "kami", "ahoge", "aho",
             "sleeve", "sode", "cuff", "scarf", "muffler", "shawl", "stole",
             "necktie", "tie", "apron",
-            "breast", "oppai", "bust", "mune", "boob", "chest", "marshmallow",
         ),
         "bigrams": (
             ("neck", "tie"), ("collar", "flap"),
@@ -176,6 +186,9 @@ _PHYSBONE_TIER_BY_KEY: Dict[str, Dict[str, Any]] = {
 }
 _GARMENT_MODIFIER_TOKENS: Set[str] = {
     "skirt", "dress", "coat", "cape", "cloak", "mantle", "onepiece", "hakama", "kimono"
+}
+_CHEST_GARMENT_TOKENS: Set[str] = {
+    "scarf", "apron", "tie", "necktie", "cape", "coat", "armor", "pocket", "flap"
 }
 _KEEP_FINAL_S_TOKENS: Set[str] = {"dress", "hips", "bangs", "glasses"}
 
@@ -273,6 +286,7 @@ def score_physbone_chain_priority(
             "optional_straps_chains_and_belts",
             "optional_micro_jiggle_and_jewelry",
             "essential_ears_and_primary_hair",
+            "essential_anatomy_breasts",
             "essential_tails_wings_and_skirts",
             "important_hair_and_major_garments",
         )
@@ -280,6 +294,12 @@ def score_physbone_chain_priority(
             tier_cfg = _PHYSBONE_TIER_BY_KEY[tier_key]
             hit_rule = _match_tier_tokens(tier_cfg, ordered_tokens, token_set)
             if hit_rule:
+                if (
+                    tier_key == "essential_anatomy_breasts"
+                    and hit_rule == "chest"
+                    and (token_set & _CHEST_GARMENT_TOKENS)
+                ):
+                    continue
                 matched_tier = tier_cfg
                 matched_rule = hit_rule
                 break

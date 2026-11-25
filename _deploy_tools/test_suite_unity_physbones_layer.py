@@ -1053,9 +1053,15 @@ def test_unity_scene_and_fallbacks() -> bool:
             and heavy_bmap.get("backpack_bag_0") == "SKEL_Spine2"
             and heavy_bmap.get("keychain_cat_0") == "SKEL_Pelvis"
         )
+        packed_skirt_breast = physbone_helper.pack_physbone_chains_to_gtav_budget(
+            heavy_custom_spokes[:9] + [_make_spoke("Breast_1.L", "SKEL_Spine2", 2), _make_spoke("Breast_1.R", "SKEL_Spine2", 2)] + [_make_spoke(f"Skirt_{sk_i}", "SKEL_Pelvis", 5) for sk_i in range(18)] + [_make_spoke("Aho", "SKEL_Head", 3)],
+            gtav_prefix="PB_SkB",
+            max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
+        )
+        breast_skirt_ok = {"breast_1_l", "breast_1_r", "aho"} <= set(packed_skirt_breast.get("chains", {})) and len(packed_skirt_breast.get("custom_bones", [])) <= physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED
         suite_passed &= print_status_result(
             i18n.translate("tests.physbones_priority_pack"),
-            bool(builtin_zero_drops_ok and light_keeps_all_ok and priority_heavy_ok),
+            bool(builtin_zero_drops_ok and light_keeps_all_ok and priority_heavy_ok and breast_skirt_ok),
             (
                 f"builtin_drops=0, light_kept={len(packed_light_custom.get('chains', {}))}/{len(light_custom_spokes)}, "
                 f"heavy_kept={len(heavy_chains)}/{len(heavy_custom_spokes)} ({len(heavy_bones)}/63 bones, "
