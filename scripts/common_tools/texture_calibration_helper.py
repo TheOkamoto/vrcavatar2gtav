@@ -560,3 +560,20 @@ def composite_miltina_eyes_with_fallback(
         eye_spec_mask = ((numpy_lib.array(spec_gray, dtype=numpy_lib.float32) / 255.0) > 0.25) & iris_region_mask
 
     return working_face, eye_spec_mask, True
+
+
+def synthesize_translucent_glass_srgb(
+    height_pix: int,
+    width_pix: int,
+) -> numpy_lib.ndarray:
+    """Generate a soft optical glass specular reflection field (RGB 0..255) for untextured lenses."""
+    row_norm = numpy_lib.linspace(-1.0, 1.0, max(1, int(height_pix)), dtype=numpy_lib.float32)[:, None]
+    col_norm = numpy_lib.linspace(-1.0, 1.0, max(1, int(width_pix)), dtype=numpy_lib.float32)[None, :]
+    diag_primary = numpy_lib.exp(-numpy_lib.square((col_norm + row_norm + 0.35) * 2.8))
+    diag_secondary = numpy_lib.exp(-numpy_lib.square((col_norm + row_norm - 0.55) * 4.2)) * 0.45
+    rim_glow = numpy_lib.clip((row_norm * row_norm + col_norm * col_norm) * 0.35, 0.0, 0.45)
+    highlight = numpy_lib.clip(diag_primary * 0.85 + diag_secondary + rim_glow * 0.28, 0.0, 1.0)
+    red_chan = 188.0 + highlight * 58.0
+    green_chan = 206.0 + highlight * 45.0
+    blue_chan = 228.0 + highlight * 27.0
+    return numpy_lib.stack([red_chan, green_chan, blue_chan], axis=-1).astype(numpy_lib.float32)

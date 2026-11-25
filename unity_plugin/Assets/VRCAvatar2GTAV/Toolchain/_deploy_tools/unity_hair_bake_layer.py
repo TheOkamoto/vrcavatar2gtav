@@ -85,6 +85,7 @@ _PRIMARY_MATERIAL_TEX_PROPS = frozenset(
         "_EmissionMap",
         "_Emission2ndMap",
         "_AlphaMask",
+        "_MatCapTex",
     }
 )
 HAIR_KEYWORD_TOKENS = (
@@ -1078,6 +1079,12 @@ def composite_unity_material_textures(
         if shader_low in LILTOON_REFRACTION_SHADER_GUIDS:
             eff_mask = numpy_mod.maximum(eff_mask, 0.08)
         alpha_channel = alpha_channel * eff_mask
+
+    if alpha_mode == "transparent" and not has_main_tex and float(base_rgb.max()) < 36.0:
+        if float(alpha_channel.mean()) < 170.0 or shader_low in LILTOON_REFRACTION_SHADER_GUIDS:
+            base_rgb = calibration_helper.synthesize_translucent_glass_srgb(target_height, target_width)
+        if shader_low in LILTOON_REFRACTION_SHADER_GUIDS and float(alpha_channel.min()) >= 250.0 and not has_mask_file and color_alpha >= 0.99:
+            alpha_channel = alpha_channel * 0.15
 
     rgba_work = numpy_mod.concatenate([base_rgb, alpha_channel], axis=-1).astype(numpy_mod.uint8)
     rgba_dilated = _dilate_rgba_transparent_edges(rgba_work, passes=10)

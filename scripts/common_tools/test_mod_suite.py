@@ -620,11 +620,13 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
                 encoding="utf-8",
             )
         orig_rage_cmd = npc_registry_helper.build_safe_rage_cmd
+        orig_get_rage = universal_atlas_builder.project_paths.get_rage_cli
         orig_subproc_run = subprocess.run
         orig_enforce_ytd = ped_damage_helper.enforce_ytd_rpf7_size_budget
         orig_val_rpf7 = ped_damage_helper.validate_rpf7_resource_file
         try:
             npc_registry_helper.build_safe_rage_cmd = lambda *args, **kwargs: ["mock_rage", *args]
+            universal_atlas_builder.project_paths.get_rage_cli = lambda: "mock_rage"
             subprocess.run = lambda *args, **kwargs: (out_atlas_dir / "test_npc_atlas.ytd").write_bytes(b"RSC7")
             ped_damage_helper.enforce_ytd_rpf7_size_budget = lambda *_args, **_kwargs: None
             ped_damage_helper.validate_rpf7_resource_file = lambda *_args, **_kwargs: None
@@ -646,9 +648,74 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
             )
         finally:
             npc_registry_helper.build_safe_rage_cmd = orig_rage_cmd
+            universal_atlas_builder.project_paths.get_rage_cli = orig_get_rage
             subprocess.run = orig_subproc_run
             ped_damage_helper.enforce_ytd_rpf7_size_budget = orig_enforce_ytd
             ped_damage_helper.validate_rpf7_resource_file = orig_val_rpf7
+
+    glass_lens_passed = False
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_dark_lens_") as lens_tmp_dir:
+        import numpy as numpy_mod
+        import unity_hair_bake_layer
+        import vtoon_profile_helper
+
+        lens_root = Path(lens_tmp_dir)
+        dark_lens_mat = lens_root / "Custom_Lens.mat"
+        dark_lens_mat.write_text(
+            "m_Name: Custom_Lens\n"
+            "m_Shader: {fileID: 4800000, guid: 6a77405f7dfdc1447af58854c7f43f39, type: 3}\n"
+            "m_CustomRenderQueue: 3500\n"
+            "m_SavedProperties:\n"
+            "  m_Floats:\n"
+            "  - _AlphaMaskMode: 1\n"
+            "  - _AlphaMaskScale: -1\n"
+            "  - _AlphaMaskValue: 1.117\n"
+            "  - _UseMatCap: 1\n"
+            "  - _MatCapBlendMode: 1\n"
+            "  m_Colors:\n"
+            "  - _Color: {r: 0, g: 0, b: 0, a: 1}\n",
+            encoding="utf-8",
+        )
+        dark_tex_guid = "abcd1234abcd1234abcd1234abcd1234"
+        dark_cloth_tex = lens_root / "dark_cloth.png"
+        pil_image.new("RGBA", (32, 32), (10, 10, 12, 255)).save(dark_cloth_tex)
+        (lens_root / "dark_cloth.png.meta").write_text(f"fileFormatVersion: 2\nguid: {dark_tex_guid}\n", encoding="utf-8")
+        dark_cloth_mat = lens_root / "Opaque_Cloth.mat"
+        dark_cloth_mat.write_text(
+            "m_Name: Opaque_Cloth\n"
+            "m_CustomRenderQueue: 2000\n"
+            "m_SavedProperties:\n"
+            "  m_TexEnvs:\n"
+            "  - _MainTex:\n"
+            f"      m_Texture: {{fileID: 2800000, guid: {dark_tex_guid}, type: 3}}\n"
+            "      m_Scale: {x: 1, y: 1}\n"
+            "      m_Offset: {x: 0, y: 0}\n"
+            "  m_Colors:\n"
+            "  - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+            encoding="utf-8",
+        )
+        lens_bake_res = unity_hair_bake_layer.bake_liltoon_mat_to_image(
+            dark_lens_mat, tile_size=(64, 64), preserve_alpha=True, unity_assets_root=lens_root
+        )
+        cloth_bake_res = unity_hair_bake_layer.bake_liltoon_mat_to_image(
+            dark_cloth_mat, tile_size=(64, 64), preserve_alpha=False, unity_assets_root=lens_root
+        )
+        glass_slot_cfg = vtoon_profile_helper.build_vtoon_slot_from_mat(
+            vtoon_profile_helper.parse_liltoon_mat_file(dark_lens_mat),
+            slot_type=vtoon_profile_helper.SLOT_TRANSPARENT,
+        )
+        if lens_bake_res is not None and cloth_bake_res is not None:
+            lens_arr = numpy_mod.array(lens_bake_res[0].convert("RGBA"))
+            cloth_arr = numpy_mod.array(cloth_bake_res[0].convert("RGBA"))
+            glass_lens_passed = (
+                25 <= int(lens_arr[32, 32, 3]) <= 38
+                and float(lens_arr[:, :, :3].mean()) >= 150.0
+                and int(cloth_arr[32, 32, 3]) == 255
+                and float(cloth_arr[:, :, :3].mean()) <= 30.0
+                and glass_slot_cfg.get("use_matcap") == 1.0
+                and float(glass_slot_cfg.get("specular_intensity", 0.0)) >= 0.75
+                and float(glass_slot_cfg.get("shadow_strength", 1.0)) <= 0.16
+            )
 
     shinano_checks_passed = True
     shinano_scene = Path("E:/waifuv4/Assets/Shinano.unity") if sys.platform.startswith("win") else Path("/mnt/e/waifuv4/Assets/Shinano.unity")
@@ -680,6 +747,7 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
         and contour_passed
         and bone_unit_scale_passed
         and atlas_grid_passed
+        and glass_lens_passed
         and shinano_checks_passed
     )
 

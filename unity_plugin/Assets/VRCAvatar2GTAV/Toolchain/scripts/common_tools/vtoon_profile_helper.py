@@ -26,6 +26,7 @@ SLOT_HAIR = 4
 SLOT_HAIR_ALPHA = 5
 SLOT_NAILS = 6
 SLOT_METAL = 7
+SLOT_TRANSPARENT = 8
 
 
 def _clamp_unit(value: float) -> float:
@@ -219,6 +220,12 @@ def build_vtoon_slot_from_mat(
         if raw_matcap_col == (1.0, 1.0, 1.0):
             raw_matcap_col = (0.80, 0.72, 0.68)
         matcap_raw_alpha = max(matcap_raw_alpha, 0.58)
+    elif slot_type == SLOT_TRANSPARENT:
+        shadow_strength = min(shadow_strength, 0.15)
+        light_min = max(floats.get("_LightMinLimit", 0.30), 0.50)
+        light_max = floats.get("_LightMaxLimit", 1.0)
+        use_rim_default = 1.0 if floats.get("_UseRim", 0.0) >= 0.5 else 0.55
+        use_matcap_default = 1.0
     else:
         light_min = max(floats.get("_LightMinLimit", 0.06), 0.14)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.92)
@@ -227,7 +234,7 @@ def build_vtoon_slot_from_mat(
 
     cull_mode = floats.get("_Cull", 2.0)
     double_sided = 1.0 if cull_mode < 0.5 else 0.0
-    spec_val = 0.75 if slot_type == SLOT_METAL else (0.65 if slot_type in (SLOT_HAIR, SLOT_NAILS, SLOT_EYES) else 0.0)
+    spec_val = 0.80 if slot_type == SLOT_TRANSPARENT else (0.75 if slot_type == SLOT_METAL else (0.65 if slot_type in (SLOT_HAIR, SLOT_NAILS, SLOT_EYES) else 0.0))
     rim_blur_val = floats.get("_RimBlur", 0.18)
     rim_fresnel_val = floats.get("_RimFresnelPower", 3.0)
     if slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA):

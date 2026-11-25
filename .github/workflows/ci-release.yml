@@ -96,15 +96,25 @@ jobs:
           PKG="dist/VRCAvatar2GTAV-${TAG}.unitypackage"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" "${{ github.sha }}" -m "Release ${TAG}"
-          git push origin "refs/tags/${TAG}"
-          gh release create "${TAG}" \
-            "${PKG}" \
-            "${PKG}.sha256" \
-            "dist/SHA256SUMS.txt" \
-            --verify-tag \
-            --title "VRCAvatar2GTAV ${TAG}" \
-            --notes-file "dist/release_notes.md"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git tag -a "${TAG}" "${{ github.sha }}" -m "Release ${TAG}"
+            git push origin "refs/tags/${TAG}"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              "${PKG}" \
+              "${PKG}.sha256" \
+              "dist/SHA256SUMS.txt" \
+              --clobber
+          else
+            gh release create "${TAG}" \
+              "${PKG}" \
+              "${PKG}.sha256" \
+              "dist/SHA256SUMS.txt" \
+              --verify-tag \
+              --title "VRCAvatar2GTAV ${TAG}" \
+              --notes-file "dist/release_notes.md"
+          fi
 
       - name: Upload built UnityPackage workflow artifact
         if: steps.semver.outputs.should_release == 'true'

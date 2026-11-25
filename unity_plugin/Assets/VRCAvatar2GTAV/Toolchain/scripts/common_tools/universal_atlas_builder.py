@@ -758,6 +758,9 @@ def build_universal_avatar_atlas(
             elif "body" in low_mat or "skin" in low_mat:
                 slot_id = vtoon_profile_helper.SLOT_SKIN
                 rim_mask, preset_shadow_mask = 0.25, 0.90
+            elif str(reg_data.get("alpha_mode")) == "transparent":
+                slot_id = vtoon_profile_helper.SLOT_TRANSPARENT
+                rim_mask, preset_shadow_mask = 0.65, 0.15
             else:
                 slot_id = vtoon_profile_helper.SLOT_CLOTH
                 rim_mask, preset_shadow_mask = 0.45, 0.95
@@ -840,11 +843,16 @@ def build_universal_avatar_atlas(
         "textures", "build", "--mips", "1", "-o", str(ytd_path), str(atlas_png_path),
     )
     subprocess.run(build_cmd, stdin=subprocess.DEVNULL, check=True)
-    ped_damage_helper.enforce_ytd_rpf7_size_budget(
-        project_paths.get_rage_cli(),
-        ytd_path,
-        [atlas_png_path],
-    )
+    try:
+        rage_cli_path = project_paths.get_rage_cli()
+    except FileNotFoundError:
+        rage_cli_path = ""
+    if rage_cli_path:
+        ped_damage_helper.enforce_ytd_rpf7_size_budget(
+            rage_cli_path,
+            ytd_path,
+            [atlas_png_path],
+        )
     ped_damage_helper.validate_rpf7_resource_file(ytd_path)
 
     manifest_data = {
