@@ -1310,6 +1310,8 @@ def test_universal_npc_pipeline() -> bool:
         legacy_plugin_dir = mock_unity_root / "Assets" / "VRC2GTAV"
         legacy_plugin_dir.mkdir(parents=True, exist_ok=True)
         (legacy_plugin_dir / "old.txt").write_text("stale", encoding="utf-8")
+        slots_cfg = mock_unity_root / "Assets" / "VRCAvatar2GTAV" / "Toolchain" / "configs" / "active_multi_slots.json"
+        slots_cfg.parent.mkdir(parents=True, exist_ok=True); slots_cfg.write_text('{"slots":[]}', encoding="utf-8")
 
         sys.path.insert(0, str(plugin_dir))
         try:
@@ -1333,6 +1335,7 @@ def test_universal_npc_pipeline() -> bool:
             and runtime_status["mods_loader_ok"]
             and runtime_status["physbones_asi_ok"]
             and runtime_status["vtoon_asi_ok"]
+            and slots_cfg.is_file()
             and (mock_gtav / "GTAVVToon.ini").read_text(encoding="utf-8") == "; custom\n"
         )
 
@@ -1579,6 +1582,18 @@ def test_universal_npc_pipeline() -> bool:
             unity_plugin_ok and budget_ok and workspace_redirect_ok and atlas_res_ok and sec_budget_ok and pkg_paths_ok and bundled_first_ok and len(editor_csharp_files) == 9,
             f"kind={ingested_prefab.get('source_kind')} cs_files={len(editor_csharp_files)} pkg_entries={len(packed_asset_paths)} bundled_first={bundled_first_ok} mismatches={len(toolchain_mismatches)}",
         )
+        from types import SimpleNamespace as _SimpleNamespace
+        import blendshape_helper as _bshape_mod
+        import eye_blink_helper as _blink_mod
+
+        mock_meshes = [
+            _SimpleNamespace(name="Dress_Skirt", data=_SimpleNamespace(shape_keys=None)),
+            _SimpleNamespace(name="Face.001", data=_SimpleNamespace(shape_keys=_SimpleNamespace(key_blocks=[_SimpleNamespace(name="vrc.v_aa"), _SimpleNamespace(name="Eyes_blink")]))),
+            _SimpleNamespace(name="Body_base", data=_SimpleNamespace(shape_keys=None)),
+        ]
+        jaw_obj, blink_list = _blink_mod.select_jaw_and_blink_candidates(mock_meshes)
+        booth_helpers_ok = (jaw_obj.name == "Face.001" and blink_list[0].name == "Face.001" and _bshape_mod.is_body_or_face_skin_mesh("Body all") and not _bshape_mod.is_body_or_face_skin_mesh("Lolly_Dolly_Bodycon") and _bshape_mod.is_manual_shrink_shape_key("kisekae_Shoulder"))
+        suite_passed &= print_status_result("Booth universal skin, shrink & jaw/blink helper regression", booth_helpers_ok, f"jaw={jaw_obj.name} blink0={blink_list[0].name}")
 
     return suite_passed
 

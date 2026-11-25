@@ -39,10 +39,12 @@ def install_plugin(unity_project: Path, plugin_source_root: Path | None = None) 
     dest_toolchain = destination_root / "Toolchain"
     if (source_root / "Toolchain").is_dir() and dest_toolchain.is_dir():
         for existing_item in list(dest_toolchain.rglob("*")):
+            rel_existing = existing_item.relative_to(dest_toolchain)
             if (
                 existing_item.is_file()
                 and not existing_item.name.endswith(".meta")
                 and existing_item.name != "vrc2gtav.cfg"
+                and "configs" not in rel_existing.parts
             ):
                 existing_item.unlink()
 

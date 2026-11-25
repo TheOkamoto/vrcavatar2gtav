@@ -22,6 +22,7 @@ do not get glitched eyelids unless the user explicitly overrides with `--eye-bli
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
