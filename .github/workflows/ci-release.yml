@@ -9,6 +9,11 @@ on:
       - unity-ui
   workflow_dispatch:
     inputs:
+      release_blocker:
+        description: "Hotfix / GTA V deployment blocker fix: release immediately bypassing the 3-commit rule"
+        required: false
+        type: boolean
+        default: false
       force_release:
         description: "Force a new SemVer release even if fewer than 3 commits exist since the last release tag"
         required: false
@@ -21,7 +26,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate Source, AST Rules & UnityPackage
+    name: Validate Source, GTA Deploy Blocker Gate & UnityPackage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository with full history and tags
@@ -63,10 +68,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Evaluate 3-commit SemVer release cadence
+      - name: Evaluate 3-commit SemVer & GTA V release-blocker cadence
         id: semver
         env:
           FORCE_RELEASE: ${{ inputs.force_release || 'false' }}
+          RELEASE_BLOCKER: ${{ inputs.release_blocker || 'false' }}
+          DEPLOY_CHECK_PASSED: ${{ needs.validate.result == 'success' && 'true' || 'false' }}
         run: python .github/scripts/compute_release_version.py --notes-out dist/release_notes.md
 
       - name: Build & verify versioned VRCAvatar2GTAV.unitypackage
@@ -111,8 +118,10 @@ jobs:
         run: |
           {
             echo "### VRCAvatar2GTAV CI/CD Release Cadence"
-            if [ "${{ steps.semver.outputs.should_release }}" = "true" ]; then
-              echo "- **Status**: Released \`${{ steps.semver.outputs.tag }}\` (\`${{ steps.semver.outputs.bump_level }}\` bump from \`${{ steps.semver.outputs.prev_tag || 'initial' }}\` after \`${{ steps.semver.outputs.commit_count }}\` commit(s))"
+            if [ "${{ steps.semver.outputs.release_blocked }}" = "true" ]; then
+              echo "- **Status**: **RELEASE BLOCKED** (\`${{ steps.semver.outputs.release_reason }}\`) — GTA V deployment validation must pass cleanly."
+            elif [ "${{ steps.semver.outputs.should_release }}" = "true" ]; then
+              echo "- **Status**: Released \`${{ steps.semver.outputs.tag }}\` (\`${{ steps.semver.outputs.bump_level }}\` bump via \`${{ steps.semver.outputs.release_reason }}\` from \`${{ steps.semver.outputs.prev_tag || 'initial' }}\` after \`${{ steps.semver.outputs.commit_count }}\` commit(s))"
               echo "- **UnityPackage**: \`VRCAvatar2GTAV-${{ steps.semver.outputs.tag }}.unitypackage\`"
             else
               echo "- **Status**: Validation passed — waiting for next release (${{ steps.semver.outputs.commit_count }}/${{ steps.semver.outputs.commits_required }} commits since \`${{ steps.semver.outputs.prev_tag || 'start' }}\`, \`${{ steps.semver.outputs.commits_remaining }}\` remaining)"

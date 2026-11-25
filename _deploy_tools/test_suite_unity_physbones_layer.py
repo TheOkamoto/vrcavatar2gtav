@@ -13,7 +13,7 @@ import os
 import struct
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_DIR = (

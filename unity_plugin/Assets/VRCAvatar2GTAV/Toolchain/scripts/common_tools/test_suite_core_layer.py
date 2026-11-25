@@ -13,6 +13,7 @@ meshes, deployed RPF headers, code quality rules, and mirror synchronization.
 
 import argparse
 import ast
+import builtins
 import filecmp
 import io as io_stream
 import json
@@ -21,6 +22,7 @@ import py_compile
 import re as regex_module
 import string
 import struct
+import symtable
 import sys
 import tarfile
 import tempfile
@@ -747,6 +749,16 @@ def test_code_quality_and_mirror_sync() -> bool:
                 False,
                 i18n.translate("tests.found_short_vars", items=invalid_short_names),
             )
+        sym_tbl = symtable.symtable(file_content, str(python_file), "exec")
+        top_syms = {sym.get_name() for sym in sym_tbl.get_symbols() if sym.is_assigned() or sym.is_imported() or sym.is_namespace()} | set(dir(builtins)) | {"__name__", "__file__", "__doc__", "__package__", "__spec__", "__cached__"}
+        undef_syms: List[str] = []
+        pending_tbls = list(sym_tbl.get_children())
+        while pending_tbls:
+            cur_tbl = pending_tbls.pop()
+            pending_tbls.extend(cur_tbl.get_children())
+            undef_syms.extend(sym.get_name() for sym in cur_tbl.get_symbols() if sym.is_global() and not sym.is_assigned() and sym.get_name() not in top_syms)
+        if undef_syms:
+            quality_passed &= print_status_result(f"Undefined global symbol ({python_file.relative_to(root_dir)})", False, ", ".join(sorted(set(undef_syms))))
 
     quality_passed &= print_status_result(
         i18n.translate("tests.ast_emoji_scan"),

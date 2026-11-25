@@ -247,6 +247,11 @@ python scripts/common_tools/test_mod_suite.py --lang en
 python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ```
 
+- **Release Blocker & SemVer Policy ([`.github/workflows/ci-release.yml`](../.github/workflows/ci-release.yml))**:
+  - Any failure that prevents building or deploying into GTA V (missing imports/undefined globals detected by AST/`symtable`, broken installer preservation, or deploy/RPF validation failures) is a **hard release blocker** regardless of commit count.
+  - Before tagging/publishing releases after 3D/shader/PhysBone changes, run local **Blender + RAGE** visual screenshot verification cleanly (keeping screenshots local in `renders/`/artifacts — **never commit or push screenshot images to GitHub**); any rigging/shader/PhysBone visual defect is also a **release blocker**.
+  - Standard SemVer `.unitypackage` releases ship automatically every **3 commits** on `unity-ui`, while fixes for GTA V deployment blockers (`hotfix:` / `[release-blocker]` / `Release-Blocker: true`, or `workflow_dispatch` `release_blocker`) cut an immediate release bypassing the 3-commit rule.
+
 ---
 
 ## 9. Manual Step-by-Step Reference

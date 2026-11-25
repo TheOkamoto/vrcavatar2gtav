@@ -18,7 +18,7 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Sequence, Tuple
+from typing import Any, List, Sequence, Tuple
 
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_DIR = (
