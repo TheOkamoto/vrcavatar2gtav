@@ -172,6 +172,13 @@ def _should_bundle_repo_file(rel_path: Path) -> bool:
     name_low = rel_path.name.lower()
     if name_low in ("vrc2gtav.cfg", "npc_registry.json"):
         return False
+    if (
+        len(parts_low) >= 3
+        and parts_low[0] in ("1_franklin_shinano_casual", "3_trevor_miltina_maid")
+        and parts_low[1] == "5_rpf_package"
+        and not name_low.endswith(".py")
+    ):
+        return False
     if name_low in ALLOWED_DUMMY_YDD_NAMES:
         return True
     if name_low.endswith((".pyc", ".pyo", ".meta", ".rpf", ".ytd", ".yft", ".ydd", ".dds", ".dll", ".exe")):
