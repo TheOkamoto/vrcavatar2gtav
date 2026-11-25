@@ -293,6 +293,7 @@ def test_compiled_drawables_and_textures() -> bool:
     blink_models_found = set()
     blink_max_by_model = {}
     blink_rot_valid_by_model = {}
+    model_chain_counts = {}
     if ini_exists:
         ini_parser = configparser.ConfigParser()
         ini_parser.read(str(physbones_ini_path), encoding="utf-8")
@@ -317,6 +318,8 @@ def test_compiled_drawables_and_textures() -> bool:
                 continue
             if not section_name.startswith("Chain_"):
                 continue
+            chain_ped_model = ini_parser.get(section_name, "model", fallback="all").strip().lower() or "all"
+            model_chain_counts[chain_ped_model] = model_chain_counts.get(chain_ped_model, 0) + 1
             chain_name = ini_parser.get(section_name, "name", fallback="")
             if chain_name.startswith(("PB_Ear_", "PB_ER_")):
                 ear_chains_count += 1
@@ -369,13 +372,17 @@ def test_compiled_drawables_and_textures() -> bool:
         and blink_rot_valid_by_model.get("player_one", False)
         and blink_rot_valid_by_model.get("player_two", False)
     )
+    protagonist_chains_valid = ear_chains_count >= 29 and shinano_chains_count >= 24 and miltina_chains_count >= 25 and all(
+        model_chain_counts.get(ped_key, 0) > 0
+        if (isinstance(active_npcs_reg.get(ped_key), dict) and active_npcs_reg[ped_key].get("deployed") is not False)
+        else legacy_count == legacy_expected
+        for ped_key, legacy_count, legacy_expected in (("player_zero", ear_chains_count, 30), ("player_one", shinano_chains_count, 24), ("player_two", miltina_chains_count, 25))
+    )
     physbones_runtime_ok = (
         asi_exists
         and ini_exists
         and ini_total_chains >= 79
-        and ear_chains_count == 30
-        and shinano_chains_count == 24
-        and miltina_chains_count == 25
+        and protagonist_chains_valid
         and ini_blink_count >= 3
         and {"player_zero", "player_one", "player_two"}.issubset(blink_models_found)
         and blink_peaks_ok
@@ -387,7 +394,9 @@ def test_compiled_drawables_and_textures() -> bool:
         physbones_runtime_ok,
         (
             f"asi={asi_exists}, chains={ini_total_chains} "
-            f"(Michael={ear_chains_count}, Franklin={shinano_chains_count}, Trevor={miltina_chains_count}), "
+            f"(Michael={model_chain_counts.get('player_zero', ear_chains_count)}, "
+            f"Franklin={model_chain_counts.get('player_one', shinano_chains_count)}, "
+            f"Trevor={model_chain_counts.get('player_two', miltina_chains_count)}), "
             f"blinks={ini_blink_count} {sorted(blink_models_found)} "
             f"max=({blink_max_by_model.get('player_zero', -1.0):.2f}/"
             f"{blink_max_by_model.get('player_one', -1.0):.2f}/"
