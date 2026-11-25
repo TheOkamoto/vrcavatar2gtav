@@ -306,6 +306,7 @@ def extract_unity_scene_physbones(
     }
     active_mesh_fbx_guids: Set[str] = set()
     opaque_fbx_pi_guids: Set[str] = set()
+    ma_active_by_fbx_norm: Dict[str, Set[str]] = {}
     ma_discovered_fbxs: List[Path] = []
     orphaned_physbones: List[Dict[str, Any]] = []
     orphaned_seen_keys: Set[Tuple[str, str]] = set()
@@ -355,6 +356,10 @@ def extract_unity_scene_physbones(
                         fbx_obj = Path(raw_ma_fbx)
                         if fbx_obj.is_file() and fbx_obj not in ma_discovered_fbxs:
                             ma_discovered_fbxs.append(fbx_obj)
+                for fbx_key, m_names in (ma_plan.get("active_meshes_by_fbx") or {}).items():
+                    low_m_set = {str(item_n).strip().lower() for item_n in (m_names or ()) if str(item_n).strip()}
+                    if low_m_set:
+                        ma_active_by_fbx_norm[str(fbx_key).replace("\\", "/").strip().lower()] = low_m_set
         except Exception:
             pass
 
@@ -535,11 +540,17 @@ def extract_unity_scene_physbones(
         _inspect_fbx_weights_detailed(effective_fbxs, excluded_meshes=sorted(excluded_meshes_ci))
     )
 
-    # For YAML-expanded FBXs (e.g. inside avatar .prefab), any FBX mesh deleted from the active hierarchy
-    # is also excluded so deleted old dresses do not keep their bones alive in weighted_fbx_bones.
+    # For YAML-expanded FBXs (or MA-enumerated FBXs), exclude any mesh deleted from the active hierarchy
+    # so leftover old-dress bones cannot keep their skin weights alive in weighted_fbx_bones.
     for fbx_item_p, file_mesh_map in mesh_weights_by_file.items():
         fbx_guid = _read_unity_meta_guid(fbx_item_p)
-        if fbx_guid and fbx_guid in active_mesh_fbx_guids and fbx_guid not in opaque_fbx_pi_guids:
+        norm_fbx_p = str(fbx_item_p).replace("\\", "/").strip().lower()
+        ma_fbx_set = ma_active_by_fbx_norm.get(norm_fbx_p)
+        if ma_fbx_set is not None:
+            for mesh_low in file_mesh_map:
+                if mesh_low not in ma_fbx_set and mesh_low not in active_scene_meshes_ci and not _is_fallback_hair_protected(mesh_low):
+                    excluded_meshes_ci.add(mesh_low)
+        elif fbx_guid and fbx_guid in active_mesh_fbx_guids and fbx_guid not in opaque_fbx_pi_guids:
             for mesh_low in file_mesh_map:
                 if mesh_low not in active_scene_meshes_ci and not _is_fallback_hair_protected(mesh_low):
                     excluded_meshes_ci.add(mesh_low)
@@ -1010,7 +1021,19 @@ def extract_unity_scene_physbones(
                 aname = _resolve_tf_name(fb_doc, cur_anc)
                 if aname:
                     anc_names.append(aname)
+            fb_parent_diag, _fb_ptag_diag = resolve_parent_bone_from_unity_chain(anc_names)
             for spoke_bones in spokes:
+                if allowed_bones_ci is not None and not any(
+                    bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
+                ):
+                    spoke_rt = spoke_bones[0] if spoke_bones else rt_name
+                    reason_fb = (
+                        "disabled_old_outfit_mesh"
+                        if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in spoke_bones)
+                        else "no_active_mesh_weights"
+                    )
+                    _record_orphan(spoke_rt, reason_fb, fb_parent_diag)
+                    continue
                 eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
                 seen_root_bones_ci.add(eff_rt_name.strip().lower())
                 extracted_spokes.append(_pb_to_record(pb_raw, eff_rt_name, spoke_bones, all_desc, anc_names))

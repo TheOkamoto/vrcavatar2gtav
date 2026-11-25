@@ -651,6 +651,37 @@ def run_in_blender_build(manifest_path: Path) -> None:
             return None
         return _map_world_mat(src_armature.matrix_world @ pose_item.matrix)
 
+    # Prune any PhysBone chain whose mapped GTAV bones deform 0 vertices on the active Blender meshes
+    # (catches forgotten loose dress PhysBones or outfits removed via alpha/transparent mesh strips).
+    active_pb_vgrps_ci: set = set()
+    for proc_obj in processed_objs:
+        vg_names_by_i = {vgrp_obj.index: vgrp_obj.name.lower() for vgrp_obj in proc_obj.vertex_groups}
+        for vert_item in proc_obj.data.vertices:
+            for grp_elem in vert_item.groups:
+                if grp_elem.weight > 0.001:
+                    vg_nm = vg_names_by_i.get(grp_elem.group, "")
+                    if vg_nm.startswith("pb_"):
+                        active_pb_vgrps_ci.add(vg_nm)
+    kept_pb_specs = []
+    skipped_unweighted_chains: List[str] = []
+    for spec_item in pb_chain_specs:
+        if any(bone_nm.lower() in active_pb_vgrps_ci for bone_nm in spec_item[3]):
+            kept_pb_specs.append(spec_item)
+        else:
+            skipped_unweighted_chains.append(spec_item[0])
+    if skipped_unweighted_chains:
+        pb_chain_specs = kept_pb_specs
+        skip_ci = {tok.lower() for tok in skipped_unweighted_chains}
+        pb_cfg["chains"] = {
+            ch_k: ch_v for ch_k, ch_v in pb_cfg.get("chains", {}).items() if ch_k.lower() not in skip_ci
+        }
+        print(
+            f"[PhysBones] Pruned {len(skipped_unweighted_chains)} unweighted/loose chain(s) in Blender: "
+            + ", ".join(skipped_unweighted_chains[:10])
+            + (f", +{len(skipped_unweighted_chains) - 10} more" if len(skipped_unweighted_chains) > 10 else ""),
+            flush=True,
+        )
+
     custom_physbones, physbone_chain_records = physbone_helper.build_dynamic_physbone_chains(
         ped_armature=ped_armature,
         chain_specs=pb_chain_specs,

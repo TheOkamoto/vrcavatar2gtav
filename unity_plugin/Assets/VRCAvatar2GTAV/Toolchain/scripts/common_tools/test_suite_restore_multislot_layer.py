@@ -1544,7 +1544,19 @@ def _test_multislot_proportional_progress() -> bool:
         and 'Progress = Math.Max(Progress, 0.40f)' not in runner_src
         and '"blender_export"' in builder_src
     )
-    return math_ok and monotonic_ok and slots_labeled_ok and cs_runner_ok
+    max_prio_ok = (
+        score_info := (
+            lambda raw_name, parent_nm: __import__("physbone_helper").score_physbone_chain_priority(raw_name, parent_nm)["priority"]
+        )
+    ) and (
+        score_info("Dog_Ear.L", "SKEL_Head") == 100
+        and score_info("Hair_Main", "SKEL_Head") >= 95
+        and score_info("Ahoge", "SKEL_Head") >= 95
+        and score_info("Breast.L", "SKEL_Spine2") > score_info("Skirt_F", "SKEL_Pelvis")
+        and score_info("Skirt_F", "SKEL_Pelvis") > score_info("Coat_Hem", "SKEL_Pelvis")
+        and score_info("Coat_Hem", "SKEL_Pelvis") > score_info("Ribbon", "SKEL_Head")
+    )
+    return math_ok and monotonic_ok and slots_labeled_ok and cs_runner_ok and max_prio_ok
 
 
 def test_restore_and_multislot_regressions() -> bool:
@@ -1559,6 +1571,9 @@ def test_restore_and_multislot_regressions() -> bool:
     seam_dds_dec_ok = _test_seam_dds_and_torso_decimate()
     vtoon_budget_ok = _test_vtoon_hash_sync_and_budget_tiers()
     progress_ok = _test_multislot_proportional_progress()
+    extractor_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "physbone_scene_extractor_layer.py").read_text(encoding="utf-8")
+    builder_src2 = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "universal_gtav_builder.py").read_text(encoding="utf-8")
+    progress_ok = progress_ok and ("active_meshes_by_fbx" in extractor_src) and ("unweighted/loose chain(s)" in builder_src2)
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
     cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
