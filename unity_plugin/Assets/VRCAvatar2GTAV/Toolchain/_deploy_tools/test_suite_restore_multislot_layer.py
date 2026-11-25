@@ -227,8 +227,8 @@ def _test_ma_fbx_pruning_and_scoped_atlas() -> tuple[bool, bool]:
                 vtoon_char_id=0,
                 sync_to_game=False,
             )
-        spec_sz = Image.open(atlas_res["spec_png"]).size
-        norm_sz = Image.open(atlas_res["normal_png"]).size
+        spec_size = Image.open(atlas_res["spec_png"]).size
+        normal_file_size = Image.open(atlas_res["normal_png"]).size
         diff_mode = Image.open(atlas_res["atlas_png"]).mode
         rage_png_inputs = [
             tok for cmd_list in captured_build_cmds for tok in cmd_list
@@ -237,8 +237,8 @@ def _test_ma_fbx_pruning_and_scoped_atlas() -> tuple[bool, bool]:
         atlas_ok = (
             list(collected.keys()) == ["VariantSkin"]
             and collected["VariantSkin"]["alpha_mode"] == "opaque"
-            and spec_sz == (512, 512)
-            and norm_sz == (512, 512)
+            and spec_size == (512, 512)
+            and normal_file_size == (512, 512)
             and diff_mode == "RGB"
             and rage_png_inputs == [str(atlas_res["atlas_png"])]
         )
@@ -297,23 +297,23 @@ def _test_physbones_collision_and_ini_cleanup() -> bool:
         physbone_cfg_ini_layer.remove_ped_from_physbone_ini(pb_ini, "player_zero")
         pb_after = pb_ini.read_text(encoding="utf-8")
 
-        vt_ini = tmp_dir / "GTAVVToon.ini"
+        vtoon_ini = tmp_dir / "GTAVVToon.ini"
         vtoon_profile_helper.upsert_vtoon_ini_character(
-            [vt_ini], 1, "player_zero", "a.png", "b.png", {0: {"rim_strength": 0.5}}
+            [vtoon_ini], 1, "player_zero", "a.png", "b.png", {0: {"rim_strength": 0.5}}
         )
         vtoon_profile_helper.upsert_vtoon_ini_character(
-            [vt_ini], 2, "player_one", "c.png", "d.png", {0: {"rim_strength": 0.7}}
+            [vtoon_ini], 2, "player_one", "c.png", "d.png", {0: {"rim_strength": 0.7}}
         )
-        vtoon_profile_helper.remove_vtoon_ini_character([vt_ini], char_ids=(1,), char_names=("player_zero",))
-        vt_after = vt_ini.read_text(encoding="utf-8")
+        vtoon_profile_helper.remove_vtoon_ini_character([vtoon_ini], char_ids=(1,), char_names=("player_zero",))
+        vtoon_after = vtoon_ini.read_text(encoding="utf-8")
 
         ini_ok = (
             "player_zero" not in pb_after
             and "Chain_player_one_Hair" in pb_after
             and "model = player_one" in pb_after
             and "blink_count = 1" in pb_after
-            and "[Char_1]" not in vt_after
-            and "[Char_2]" in vt_after
+            and "[Char_1]" not in vtoon_after
+            and "[Char_2]" in vtoon_after
         )
     return len(vanilla_tags) >= 400 and no_collision and cpp_ok and ini_ok
 
@@ -379,13 +379,13 @@ def _test_restore_and_multislot_pipeline() -> bool:
             seen_extract_srcs.append(archive_path.name)
             target_dir.mkdir(parents=True, exist_ok=True)
             if archive_path == mods_rpf:
-                inner_p = target_dir / "models" / "cdimages" / "streamedpeds_players.rpf"
-                inner_p.parent.mkdir(parents=True, exist_ok=True)
-                inner_p.write_bytes(b"MOD_INNER")
+                inner_path = target_dir / "models" / "cdimages" / "streamedpeds_players.rpf"
+                inner_path.parent.mkdir(parents=True, exist_ok=True)
+                inner_path.write_bytes(b"MOD_INNER")
             elif archive_path == van_rpf:
-                inner_p = target_dir / "models" / "cdimages" / "streamedpeds_players.rpf"
-                inner_p.parent.mkdir(parents=True, exist_ok=True)
-                inner_p.write_bytes(b"VAN_INNER")
+                inner_path = target_dir / "models" / "cdimages" / "streamedpeds_players.rpf"
+                inner_path.parent.mkdir(parents=True, exist_ok=True)
+                inner_path.write_bytes(b"VAN_INNER")
             elif archive_path == dlc_mod:
                 dlc_in = target_dir / "x64" / "models" / "cdimages" / "patchday3ng.rpf"
                 dlc_in.parent.mkdir(parents=True, exist_ok=True)
@@ -506,7 +506,7 @@ def _test_restore_and_multislot_pipeline() -> bool:
                         "texture_overrides": {"Body": "body_b.png"},
                     },
                 ],
-                build_fn=_fake_build,
+                build_func=_fake_build,
             )
         multislot_ok = (
             slot_calls == [("player_zero", False), ("player_one", False)]
@@ -686,7 +686,7 @@ def _test_unity_transform_and_earring_alignment() -> bool:
         ear_insts = [item for item in instances if "SideEarring.fbx" in item.get("fbx_path", "")]
         hair_mat = (hair_inst or {}).get("bone_matrices", {}).get("Hair Root")
         hair_z = hair_mat[2][3] if hair_mat else 0.0
-        ear_xs = sorted(
+        ear_x_values = sorted(
             item["bone_matrices"]["Earring"][0][3]
             for item in ear_insts
             if "Earring" in item.get("bone_matrices", {})
@@ -697,9 +697,9 @@ def _test_unity_transform_and_earring_alignment() -> bool:
             and abs(hair_z - 1.224) < 0.03
             and len(ear_insts) == 2
             and all(item.get("attach_parent_bone") == "Head" for item in ear_insts)
-            and len(ear_xs) == 2
-            and ear_xs[0] < -0.04
-            and ear_xs[1] > 0.04
+            and len(ear_x_values) == 2
+            and ear_x_values[0] < -0.04
+            and ear_x_values[1] > 0.04
         )
 
 
@@ -1034,7 +1034,7 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
             self.node_tree = _FakeNodeTree(node_map)
 
     fake_mat = ped_damage_helper.create_ped_material(
-        lambda _shader_fn: _FakeShaderMat(),
+        lambda _shader_func: _FakeShaderMat(),
         "vrc_embed_test",
         diffuse_image="diff_img",
         bump_image="bump_img",
@@ -1049,19 +1049,19 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
         and embed_nodes["AnisoNoiseSpecSampler"].texture_properties.embedded is True
     )
 
-    with tempfile.TemporaryDirectory(prefix="vrc2gtav_wm_resize_") as tmp_wm:
-        wm_dir = Path(tmp_wm)
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_wm_resize_") as tmp_watermark:
+        watermark_dir = Path(tmp_watermark)
         stamped = vtoon_profile_helper.stamp_vtoon_watermark_block(
             Image.new("RGB", (1024, 1024), (80, 120, 200)),
             char_id=2,
         )
-        wm_png = wm_dir / "player_two_atlas_2k.png"
-        stamped.save(wm_png)
-        repack_helper._resize_extracted_png_for_budget(wm_png, 512, 256)
-        with Image.open(wm_png) as resized_im:
+        watermark_png = watermark_dir / "player_two_atlas_2k.png"
+        stamped.save(watermark_png)
+        repack_helper._resize_extracted_png_for_budget(watermark_png, 512, 256)
+        with Image.open(watermark_png) as resized_img:
             watermark_resize_ok = (
-                resized_im.size == (512, 512)
-                and vtoon_profile_helper.decode_vtoon_watermark_block(resized_im) == 2
+                resized_img.size == (512, 512)
+                and vtoon_profile_helper.decode_vtoon_watermark_block(resized_img) == 2
             )
 
         import physbone_helper
@@ -1070,7 +1070,7 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
             f"  m_Script: {{fileID: {physbone_helper.VRCHAT_PHYSBONE_CLASS_FILE_ID}, "
             f"guid: {physbone_helper.VRCHAT_PHYSBONE_SCRIPT_GUID}, type: 3}}\n"
         )
-        scene_file = wm_dir / "HairBow.unity"
+        scene_file = watermark_dir / "HairBow.unity"
         scene_file.write_text(
             "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
             "--- !u!1 &10\nGameObject:\n  m_Component:\n  - component: {fileID: 11}\n  m_Name: TestAvatar\n  m_IsActive: 1\n"
@@ -1113,23 +1113,23 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
             "--- !u!4 &41\nTransform:\n  m_GameObject: {fileID: 40}\n  m_Father: {fileID: 11}\n  m_Children: []\n",
             encoding="utf-8",
         )
-        fake_fbx = wm_dir / "FakeHair.fbx"
+        fake_fbx = watermark_dir / "FakeHair.fbx"
         fake_fbx.write_bytes(b"Kaydara FBX Binary  \x00")
         seen_excluded: List[List[str]] = []
 
         def _fake_inspect(_fbxs: Any, excluded_meshes: Sequence[str] = ()) -> Any:
             seen_excluded.append(list(excluded_meshes))
-            all_b = {
+            all_bones = {
                 "head", "child", "back.r.001", "back.r.002",
                 "un_ribbon", "un_hatroot", "un_hat_l.001", "un_hat_l.002",
                 "un_hat_r.001", "un_hat_r.002", "un_ribbon_l.002",
             }
-            weighted_b = {
+            weighted_bones = {
                 "head", "back.r.001", "back.r.002",
                 "un_ribbon", "un_hat_l.001", "un_hat_l.002",
                 "un_hat_r.001", "un_hat_r.002", "un_ribbon_l.002",
             }
-            parent_m = {
+            parent_match = {
                 "back.r.001": "head",
                 "back.r.002": "back.r.001",
                 "un_hat_l.001": "un_hatroot",
@@ -1138,14 +1138,14 @@ def _test_single_tex_ytd_and_physbone_unwrap() -> bool:
                 "un_hat_r.002": "un_hat_r.001",
                 "un_ribbon_l.002": "un_ribbon",
             }
-            mesh_m = {
+            mesh_match = {
                 fake_fbx: {
                     "Back": {"back.r.001", "back.r.002"},
                     "UN2_Beret": {"un_hat_l.001", "un_hat_l.002", "un_hat_r.001", "un_hat_r.002"},
                     "UN1_ChestRibbon": {"un_ribbon", "un_ribbon_l.002"},
                 }
             }
-            return all_b, weighted_b, parent_m, mesh_m, True
+            return all_bones, weighted_bones, parent_match, mesh_match, True
 
         with unittest.mock.patch.object(psel, "_inspect_fbx_weights_detailed", side_effect=_fake_inspect):
             ext_res = psel.extract_unity_scene_physbones(
@@ -1216,13 +1216,13 @@ def _test_seam_dds_and_torso_decimate() -> bool:
             verts_seq.append(types.SimpleNamespace(co=(0.10, -0.05, z_coord)))
             ring_verts.append((idx_left, idx_mid, idx_right))
         for ring_idx in range(ring_count):
-            row_a = ring_verts[ring_idx]
-            row_b = ring_verts[ring_idx + 1]
+            row_first = ring_verts[ring_idx]
+            row_second = ring_verts[ring_idx + 1]
             for tri_verts in (
-                (row_a[0], row_a[1], row_b[1]),
-                (row_a[0], row_b[1], row_b[0]),
-                (row_a[1], row_a[2], row_b[2]),
-                (row_a[1], row_b[2], row_b[1]),
+                (row_first[0], row_first[1], row_second[1]),
+                (row_first[0], row_second[1], row_second[0]),
+                (row_first[1], row_first[2], row_second[2]),
+                (row_first[1], row_second[2], row_second[1]),
             ):
                 poly_id = len(polys_seq)
                 polys_seq.append(
@@ -1348,14 +1348,14 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
 
         seen_px: List[int] = []
 
-        def _fake_compact(src_p: Path, dst_p: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
+        def _fake_compact(src_path: Path, dst_path: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
             seen_px.append(max_diffuse_px)
-            dst_p.write_bytes(b"C" * (200_000 if max_diffuse_px >= 1024 else 80_000))
-            return dst_p
+            dst_path.write_bytes(b"C" * (200_000 if max_diffuse_px >= 1024 else 80_000))
+            return dst_path
 
-        def _fake_dummy(dst_p: Path) -> Path:
-            dst_p.write_bytes(b"M" * 512)
-            return dst_p
+        def _fake_dummy(dst_path: Path) -> Path:
+            dst_path.write_bytes(b"M" * 512)
+            return dst_path
 
         res_auto = rpk_mod.ensure_x64v_streamed_budget(
             x64v_auto,
@@ -1385,10 +1385,10 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
         (ped_full / "uppr_diff_001_a_uni.ytd").write_bytes(b"B" * 1_100_000)
         seen_full_px: List[int] = []
 
-        def _track_full_compact(src_p: Path, dst_p: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
+        def _track_full_compact(src_path: Path, dst_path: Path, *, max_diffuse_px: int, max_normal_px: int) -> Path:
             seen_full_px.append(max_diffuse_px)
-            dst_p.write_bytes(b"C" * 100_000)
-            return dst_p
+            dst_path.write_bytes(b"C" * 100_000)
+            return dst_path
 
         rpk_mod.ensure_x64v_streamed_budget(
             x64v_full,
@@ -1425,28 +1425,28 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
         )
         captured_slot_sec: List[int] = []
         captured_repack_sec: List[int] = []
-        orig_repack_fn = rvh_mod.repack_and_deploy_built_peds
+        orig_repack_func = rvh_mod.repack_and_deploy_built_peds
 
-        def _fake_build_fn(**kwargs: Any) -> Dict[str, Any]:
+        def _fake_build_func(**kwargs: Any) -> Dict[str, Any]:
             captured_slot_sec.append(int(kwargs.get("secondary_atlas_size", -1)))
             return {"ped_name": kwargs["target_ped"], "avatar_name": kwargs["avatar_name"]}
 
-        def _fake_repack_fn(built_peds: Any, *, secondary_atlas_size: int = 0) -> List[Path]:
+        def _fake_repack_func(built_peds: Any, *, secondary_atlas_size: int = 0) -> List[Path]:
             captured_repack_sec.append(int(secondary_atlas_size))
             return []
 
-        rvh_mod.repack_and_deploy_built_peds = _fake_repack_fn
+        rvh_mod.repack_and_deploy_built_peds = _fake_repack_func
         try:
             rvh_mod.run_multi_slot_builds(
                 slots_file,
                 shared_defaults={"secondary_atlas_size": None, "atlas_size": None},
-                build_fn=_fake_build_fn,
+                build_func=_fake_build_func,
                 deploy=True,
                 repack_and_deploy=True,
                 secondary_atlas_size=0,
             )
         finally:
-            rvh_mod.repack_and_deploy_built_peds = orig_repack_fn
+            rvh_mod.repack_and_deploy_built_peds = orig_repack_func
 
         atlas_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "universal_atlas_builder.py").read_text(encoding="utf-8")
         detour_src = (PROJECT_ROOT_DIR / "scripts" / "vtoon_asi" / "vtoon_detour.hpp").read_text(encoding="utf-8")
@@ -1466,11 +1466,11 @@ def _test_multislot_proportional_progress() -> bool:
     import io as io_stream
     import re
     import restore_vanilla_helper as rvh_mod
-    import universal_gtav_rigging_layer as rl_mod
+    import universal_gtav_rigging_layer as repack_mod
 
-    pct_slot0 = rl_mod.compute_overall_progress_pct(0.68, slot_index=0, slot_total=3, build_share=0.82)
-    pct_slot1 = rl_mod.compute_overall_progress_pct(0.68, slot_index=1, slot_total=3, build_share=0.82)
-    pct_slot2 = rl_mod.compute_overall_progress_pct(0.68, slot_index=2, slot_total=3, build_share=0.82)
+    pct_slot0 = repack_mod.compute_overall_progress_pct(0.68, slot_index=0, slot_total=3, build_share=0.82)
+    pct_slot1 = repack_mod.compute_overall_progress_pct(0.68, slot_index=1, slot_total=3, build_share=0.82)
+    pct_slot2 = repack_mod.compute_overall_progress_pct(0.68, slot_index=2, slot_total=3, build_share=0.82)
     math_ok = (15.0 <= pct_slot0 <= 25.0) and (40.0 <= pct_slot1 <= 50.0) and (68.0 <= pct_slot2 <= 78.0)
 
     captured = io_stream.StringIO()
@@ -1489,14 +1489,14 @@ def _test_multislot_proportional_progress() -> bool:
             ),
             encoding="utf-8",
         )
-        orig_repack_fn = rvh_mod.repack_and_deploy_built_peds
+        orig_repack_func = rvh_mod.repack_and_deploy_built_peds
 
         def _fake_slot_build(**kwargs: Any) -> Dict[str, Any]:
             slot_idx = int(kwargs.get("slot_index", 0))
             slot_tot = int(kwargs.get("slot_total", 1))
             build_share = float(kwargs.get("build_share", 0.82))
             ped_id = str(kwargs["target_ped"])
-            rl_mod.emit_slot_progress(
+            repack_mod.emit_slot_progress(
                 0.68,
                 "blender_export",
                 slot_index=slot_idx,
@@ -1507,8 +1507,8 @@ def _test_multislot_proportional_progress() -> bool:
             return {"ped_name": ped_id, "avatar_name": kwargs["avatar_name"]}
 
         def _fake_repack(built_peds: Any, *, secondary_atlas_size: int = 0) -> List[Path]:
-            rl_mod.emit_progress_status(82.5, "rpf_deploy")
-            rl_mod.emit_progress_status(99.5, "rpf_done")
+            repack_mod.emit_progress_status(82.5, "rpf_deploy")
+            repack_mod.emit_progress_status(99.5, "rpf_done")
             return []
 
         rvh_mod.repack_and_deploy_built_peds = _fake_repack
@@ -1516,12 +1516,12 @@ def _test_multislot_proportional_progress() -> bool:
             with contextlib.redirect_stdout(captured):
                 rvh_mod.run_multi_slot_builds(
                     slots_file,
-                    build_fn=_fake_slot_build,
+                    build_func=_fake_slot_build,
                     deploy=True,
                     repack_and_deploy=True,
                 )
         finally:
-            rvh_mod.repack_and_deploy_built_peds = orig_repack_fn
+            rvh_mod.repack_and_deploy_built_peds = orig_repack_func
 
     out_text = captured.getvalue()
     pcts = [float(match_val) for match_val in re.findall(r"\[PROGRESS\s+pct=([0-9.]+)\]", out_text)]
@@ -1537,7 +1537,7 @@ def _test_multislot_proportional_progress() -> bool:
     runner_path = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavProcessRunner.cs"
     builder_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "universal_gtav_builder.py").read_text(encoding="utf-8")
     runner_src = runner_path.read_text(encoding="utf-8") if runner_path.is_file() else ""
-    cs_runner_ok = (not runner_src) or (
+    csharp_runner_ok = (not runner_src) or (
         "ExplicitProgressRegex" in runner_src
         and "StageBannerRegex" in runner_src
         and "!_hasExplicitProgress" in runner_src
@@ -1546,7 +1546,7 @@ def _test_multislot_proportional_progress() -> bool:
     )
     max_prio_ok = (
         score_info := (
-            lambda raw_name, parent_nm: __import__("physbone_helper").score_physbone_chain_priority(raw_name, parent_nm)["priority"]
+            lambda raw_name, parent_name: __import__("physbone_helper").score_physbone_chain_priority(raw_name, parent_name)["priority"]
         )
     ) and (
         score_info("Dog_Ear.L", "SKEL_Head") == 100
@@ -1556,7 +1556,7 @@ def _test_multislot_proportional_progress() -> bool:
         and score_info("Skirt_F", "SKEL_Pelvis") > score_info("Coat_Hem", "SKEL_Pelvis")
         and score_info("Coat_Hem", "SKEL_Pelvis") > score_info("Ribbon", "SKEL_Head")
     )
-    return math_ok and monotonic_ok and slots_labeled_ok and cs_runner_ok and max_prio_ok
+    return math_ok and monotonic_ok and slots_labeled_ok and csharp_runner_ok and max_prio_ok
 
 
 def test_restore_and_multislot_regressions() -> bool:
@@ -1576,15 +1576,15 @@ def test_restore_and_multislot_regressions() -> bool:
     progress_ok = progress_ok and ("active_meshes_by_fbx" in extractor_src) and ("unweighted/loose chain(s)" in builder_src2)
 
     editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
-    cs_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
-    cs_ok = (not cs_files) or (
-        len(cs_files) == 9
-        and all(len(cs_p.read_text(encoding="utf-8").splitlines()) <= 500 for cs_p in cs_files)
+    csharp_files = sorted(editor_dir.glob("*.cs")) if editor_dir.is_dir() else []
+    csharp_ok = (not csharp_files) or (
+        len(csharp_files) == 9
+        and all(len(csharp_path.read_text(encoding="utf-8").splitlines()) <= 500 for csharp_path in csharp_files)
     )
 
-    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and vtoon_budget_ok and progress_ok and cs_ok
+    all_ok = pruning_ok and atlas_ok and pb_ok and restore_multi_ok and unity_trs_ok and mat_ovr_ok and single_tex_pb_ok and seam_dds_dec_ok and vtoon_budget_ok and progress_ok and csharp_ok
     return print_status_result(
         "Restore-Vanilla & Per-Protagonist Multi-Slot Regression Suite",
         all_ok,
-        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, vtoon_budget={vtoon_budget_ok}, progress={progress_ok}, csharp={cs_ok}",
+        f"pruning={pruning_ok}, atlas={atlas_ok}, physbones={pb_ok}, restore_multi={restore_multi_ok}, unity_trs={unity_trs_ok}, mat_ovr={mat_ovr_ok}, single_tex_pb={single_tex_pb_ok}, seam_dds_dec={seam_dds_dec_ok}, vtoon_budget={vtoon_budget_ok}, progress={progress_ok}, csharp={csharp_ok}",
     )

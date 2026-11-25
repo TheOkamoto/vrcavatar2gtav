@@ -292,9 +292,9 @@ def _parse_unity_quat(
 
 def _extract_inline_ref(field_snippet: str) -> Tuple[str, str]:
     """Extract `(fileID, guid)` from a Unity object reference `{fileID: ..., guid: ...}`."""
-    fid_m = re.search(r"fileID:\s*(-?\d+)", field_snippet)
-    guid_m = re.search(r"guid:\s*([0-9a-fA-F]{32})", field_snippet)
-    return (fid_m.group(1) if fid_m else "0", guid_m.group(1).lower() if guid_m else "")
+    file_id_match = re.search(r"fileID:\s*(-?\d+)", field_snippet)
+    guid_match = re.search(r"guid:\s*([0-9a-fA-F]{32})", field_snippet)
+    return (file_id_match.group(1) if file_id_match else "0", guid_match.group(1).lower() if guid_match else "")
 
 
 _MA_PARSED_YAML_CACHE: Dict[Tuple[str, int], Dict[str, Any]] = {}
@@ -345,7 +345,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
     blocks = raw_text.split("\n--- !u!")
     gameobjects: Dict[str, Dict[str, Any]] = {}
     transforms: Dict[str, Dict[str, Any]] = {}
-    go_to_tr: Dict[str, str] = {}
+    game_object_to_transform: Dict[str, str] = {}
     renderers: Dict[str, Dict[str, Any]] = {}
     mesh_filters: Dict[str, str] = {}
     prefab_instances: Dict[str, Dict[str, Any]] = {}
@@ -361,10 +361,10 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
     physbones: List[Dict[str, Any]] = []
 
     for block in blocks[1:]:
-        nl_idx = block.find("\n")
-        if nl_idx <= 0:
+        newline_idx = block.find("\n")
+        if newline_idx <= 0:
             continue
-        header_line = block[:nl_idx].strip()
+        header_line = block[:newline_idx].strip()
         is_stripped = header_line.endswith("stripped")
         if " &" not in header_line:
             continue
@@ -373,39 +373,39 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
         file_id = fid_part.split()[0].strip()
 
         if class_id == "1":
-            name_m = re.search(r"^\s*m_Name:[ \t]*(.+)$", block, re.MULTILINE)
-            act_m = re.search(r"^\s*m_IsActive:[ \t]*(\d+)", block, re.MULTILINE)
-            pi_m = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", block)
+            name_match = re.search(r"^\s*m_Name:[ \t]*(.+)$", block, re.MULTILINE)
+            active_match = re.search(r"^\s*m_IsActive:[ \t]*(\d+)", block, re.MULTILINE)
+            prefab_instance_match = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", block)
             gameobjects[file_id] = {
-                "name": _decode_scalar(name_m.group(1)) if name_m else "",
-                "active": (int(act_m.group(1)) != 0) if act_m else True,
-                "pi_fid": pi_m.group(1) if pi_m else "0",
+                "name": _decode_scalar(name_match.group(1)) if name_match else "",
+                "active": (int(active_match.group(1)) != 0) if active_match else True,
+                "pi_fid": prefab_instance_match.group(1) if prefab_instance_match else "0",
             }
         elif class_id == "4":
             if is_stripped:
                 continue
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
-            father_m = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", block)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
+            father_match = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", block)
             child_fids: List[str] = []
             if "m_Children:" in block:
                 child_chunk = block.split("m_Children:", 1)[1].split("m_Father:", 1)[0]
                 child_fids = re.findall(r"-\s*\{fileID:\s*(-?\d+)", child_chunk)
-            if go_m:
-                go_id = go_m.group(1)
+            if game_object_match:
+                game_object_id = game_object_match.group(1)
                 transforms[file_id] = {
-                    "go_fid": go_id,
-                    "father_tr": father_m.group(1) if father_m else "0",
+                    "go_fid": game_object_id,
+                    "father_tr": father_match.group(1) if father_match else "0",
                     "children": child_fids,
                     "pos": _parse_unity_vec3(block, "m_LocalPosition", (0.0, 0.0, 0.0)),
                     "rot": _parse_unity_quat(block, "m_LocalRotation", (0.0, 0.0, 0.0, 1.0)),
                     "scale": _parse_unity_vec3(block, "m_LocalScale", (1.0, 1.0, 1.0)),
                 }
-                go_to_tr[go_id] = file_id
+                game_object_to_transform[game_object_id] = file_id
         elif class_id in ("23", "137"):
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
-            en_m = re.search(r"^\s*m_Enabled:[ \t]*(\d+)", block, re.MULTILINE)
-            mesh_m = re.search(r"m_Mesh:\s*\{([^\}]*)\}", block)
-            root_bone_m = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", block)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
+            enabled_match = re.search(r"^\s*m_Enabled:[ \t]*(\d+)", block, re.MULTILINE)
+            mesh_match = re.search(r"m_Mesh:\s*\{([^\}]*)\}", block)
+            root_bone_match = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", block)
             mat_sec = re.search(
                 r"m_Materials:(.*?)(?=^\s{2}[a-zA-Z_][a-zA-Z0-9_]*:|\Z)",
                 block,
@@ -419,52 +419,52 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                 if mat_sec
                 else []
             )
-            mesh_fid, mesh_guid = _extract_inline_ref(mesh_m.group(1)) if mesh_m else ("0", "")
-            if go_m:
-                renderers[go_m.group(1)] = {
+            mesh_fid, mesh_guid = _extract_inline_ref(mesh_match.group(1)) if mesh_match else ("0", "")
+            if game_object_match:
+                renderers[game_object_match.group(1)] = {
                     "comp_fid": file_id,
-                    "go_fid": go_m.group(1),
+                    "go_fid": game_object_match.group(1),
                     "class_id": class_id,
-                    "enabled": (int(en_m.group(1)) != 0) if en_m else True,
+                    "enabled": (int(enabled_match.group(1)) != 0) if enabled_match else True,
                     "mesh_fid": mesh_fid,
                     "mesh_guid": mesh_guid,
-                    "root_bone_tr": root_bone_m.group(1) if root_bone_m else "0",
+                    "root_bone_tr": root_bone_match.group(1) if root_bone_match else "0",
                     "mat_guids": mat_guids,
                 }
         elif class_id == "33":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
-            mesh_m = re.search(r"m_Mesh:\s*\{([^\}]*)\}", block)
-            if go_m and mesh_m:
-                _mfid, mguid = _extract_inline_ref(mesh_m.group(1))
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
+            mesh_match = re.search(r"m_Mesh:\s*\{([^\}]*)\}", block)
+            if game_object_match and mesh_match:
+                _mfid, mguid = _extract_inline_ref(mesh_match.group(1))
                 if mguid:
-                    mesh_filters[go_m.group(1)] = mguid
+                    mesh_filters[game_object_match.group(1)] = mguid
         elif class_id == "1001":
-            par_m = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", block)
-            src_m = re.search(
+            parent_match = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", block)
+            source_match = re.search(
                 r"m_SourcePrefab:\s*\{fileID:\s*-?\d+,\s*guid:\s*([0-9a-fA-F]{32})",
                 block,
             )
-            src_guid = src_m.group(1).lower() if src_m else ""
-            pi_name = ""
+            src_guid = source_match.group(1).lower() if source_match else ""
+            prefab_instance_name = ""
             root_name_tid = ""
             active_by_tid: Dict[str, bool] = {}
             mods: List[Dict[str, str]] = []
-            for mod_m in re.finditer(
+            for mod_match in re.finditer(
                 r"-\s*target:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-fA-F]{32}))?[^\}]*\}[ \t]*\r?\n"
                 r"[ \t]*propertyPath:[ \t]*([^\r\n]+)\r?\n"
                 r"[ \t]*value:[ \t]*([^\r\n]*)\r?\n"
                 r"[ \t]*objectReference:[ \t]*\{([^\}]*)\}",
                 block,
             ):
-                tgt_fid = mod_m.group(1)
-                tgt_guid = (mod_m.group(2) or "").lower()
-                prop_path = mod_m.group(3).strip()
-                raw_val = _decode_scalar(mod_m.group(4))
-                _ref_fid, ref_guid = _extract_inline_ref(mod_m.group(5))
+                tgt_fid = mod_match.group(1)
+                tgt_guid = (mod_match.group(2) or "").lower()
+                prop_path = mod_match.group(3).strip()
+                raw_val = _decode_scalar(mod_match.group(4))
+                _ref_fid, ref_guid = _extract_inline_ref(mod_match.group(5))
                 if prop_path == "m_Name" and raw_val:
                     is_src = bool(src_guid and tgt_guid == src_guid)
-                    if not pi_name or (is_src and not root_name_tid):
-                        pi_name = raw_val
+                    if not prefab_instance_name or (is_src and not root_name_tid):
+                        prefab_instance_name = raw_val
                         root_name_tid = tgt_fid
                 elif prop_path == "m_IsActive" and tgt_fid:
                     if not src_guid or not tgt_guid or tgt_guid == src_guid:
@@ -478,75 +478,75 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                         "ref_guid": ref_guid,
                     }
                 )
-            pi_active = True
+            prefab_instance_active = True
             if root_name_tid and root_name_tid in active_by_tid:
-                pi_active = active_by_tid[root_name_tid]
+                prefab_instance_active = active_by_tid[root_name_tid]
             elif not root_name_tid and "100000" in active_by_tid:
-                pi_active = active_by_tid["100000"]
+                prefab_instance_active = active_by_tid["100000"]
 
             prefab_instances[file_id] = {
-                "parent_tr": par_m.group(1) if par_m else "0",
+                "parent_tr": parent_match.group(1) if parent_match else "0",
                 "source_guid": src_guid,
-                "name": pi_name,
-                "active": pi_active,
+                "name": prefab_instance_name,
+                "active": prefab_instance_active,
                 "mods": mods,
             }
         elif class_id == "114":
-            script_m = re.search(r"m_Script:\s*\{[^\}]*guid:\s*([0-9a-fA-F]{32})", block)
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
-            en_m = re.search(r"^\s*m_Enabled:[ \t]*(\d+)", block, re.MULTILINE)
-            if not (script_m and go_m):
+            script_match = re.search(r"m_Script:\s*\{[^\}]*guid:\s*([0-9a-fA-F]{32})", block)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", block)
+            enabled_match = re.search(r"^\s*m_Enabled:[ \t]*(\d+)", block, re.MULTILINE)
+            if not (script_match and game_object_match):
                 continue
-            script_guid = script_m.group(1).lower()
-            go_fid = go_m.group(1)
-            is_enabled = (int(en_m.group(1)) != 0) if en_m else True
+            script_guid = script_match.group(1).lower()
+            game_object_file_id = game_object_match.group(1)
+            is_enabled = (int(enabled_match.group(1)) != 0) if enabled_match else True
 
             if script_guid == MA_MERGE_ARMATURE_GUID:
-                ref_m = re.search(r"mergeTarget:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]*referencePath:[ \t]*([^\r\n]*)", block)
-                pref_m = re.search(r"^\s*prefix:[ \t]*([^\r\n]*)", block, re.MULTILINE)
-                suff_m = re.search(r"^\s*suffix:[ \t]*([^\r\n]*)", block, re.MULTILINE)
-                mangle_m = re.search(r"^\s*mangleNames:[ \t]*(\d+)", block, re.MULTILINE)
+                ref_match = re.search(r"mergeTarget:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]*referencePath:[ \t]*([^\r\n]*)", block)
+                prefab_match = re.search(r"^\s*prefix:[ \t]*([^\r\n]*)", block, re.MULTILINE)
+                suffix_match = re.search(r"^\s*suffix:[ \t]*([^\r\n]*)", block, re.MULTILINE)
+                mangle_match = re.search(r"^\s*mangleNames:[ \t]*(\d+)", block, re.MULTILINE)
                 merge_armatures.append(
                     {
-                        "go_fid": go_fid,
+                        "go_fid": game_object_file_id,
                         "enabled": is_enabled,
-                        "merge_target_path": _decode_scalar(ref_m.group(1)) if ref_m else "",
-                        "prefix": _decode_scalar(pref_m.group(1)) if pref_m else "",
-                        "suffix": _decode_scalar(suff_m.group(1)) if suff_m else "",
-                        "mangle_names": (int(mangle_m.group(1)) != 0) if mangle_m else True,
+                        "merge_target_path": _decode_scalar(ref_match.group(1)) if ref_match else "",
+                        "prefix": _decode_scalar(prefab_match.group(1)) if prefab_match else "",
+                        "suffix": _decode_scalar(suffix_match.group(1)) if suffix_match else "",
+                        "mangle_names": (int(mangle_match.group(1)) != 0) if mangle_match else True,
                     }
                 )
             elif script_guid == MA_BONE_PROXY_GUID:
-                bone_ref_m = re.search(r"boneReference:[ \t]*(-?\d+)", block)
-                sub_path_m = re.search(r"subPath:[ \t]*([^\r\n]*)", block)
-                att_m = re.search(r"attachmentMode:[ \t]*(-?\d+)", block)
-                scale_m = re.search(r"matchScale:[ \t]*(\d+)", block)
+                bone_ref_match = re.search(r"boneReference:[ \t]*(-?\d+)", block)
+                sub_path_match = re.search(r"subPath:[ \t]*([^\r\n]*)", block)
+                attach_match = re.search(r"attachmentMode:[ \t]*(-?\d+)", block)
+                scale_match = re.search(r"matchScale:[ \t]*(\d+)", block)
                 bone_proxies.append(
                     {
-                        "go_fid": go_fid,
+                        "go_fid": game_object_file_id,
                         "enabled": is_enabled,
-                        "bone_reference": int(bone_ref_m.group(1)) if bone_ref_m else -1,
-                        "sub_path": _decode_scalar(sub_path_m.group(1)) if sub_path_m else "",
-                        "attachment_mode": int(att_m.group(1)) if att_m else 1,
-                        "match_scale": (int(scale_m.group(1)) != 0) if scale_m else False,
+                        "bone_reference": int(bone_ref_match.group(1)) if bone_ref_match else -1,
+                        "sub_path": _decode_scalar(sub_path_match.group(1)) if sub_path_match else "",
+                        "attachment_mode": int(attach_match.group(1)) if attach_match else 1,
+                        "match_scale": (int(scale_match.group(1)) != 0) if scale_match else False,
                     }
                 )
             elif script_guid == MA_SCALE_ADJUSTER_GUID:
-                vec_m = re.search(
+                vec_match = re.search(
                     r"m_Scale:\s*\{x:\s*([^,]+),\s*y:\s*([^,]+),\s*z:\s*([^\}]+)\}",
                     block,
                 )
-                if vec_m and is_enabled:
+                if vec_match and is_enabled:
                     try:
                         scale_xyz = (
-                            float(vec_m.group(1)),
-                            float(vec_m.group(2)),
-                            float(vec_m.group(3)),
+                            float(vec_match.group(1)),
+                            float(vec_match.group(2)),
+                            float(vec_match.group(3)),
                         )
                     except ValueError:
                         scale_xyz = (1.0, 1.0, 1.0)
                     scale_adjusters.append(
-                        {"go_fid": go_fid, "enabled": is_enabled, "scale": scale_xyz}
+                        {"go_fid": game_object_file_id, "enabled": is_enabled, "scale": scale_xyz}
                     )
             elif script_guid == MA_BLENDSHAPE_SYNC_GUID and is_enabled:
                 bindings: List[Dict[str, Any]] = []
@@ -580,13 +580,13 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                             }
                         )
                 if bindings:
-                    blendshape_syncs.append({"go_fid": go_fid, "bindings": bindings})
+                    blendshape_syncs.append({"go_fid": game_object_file_id, "bindings": bindings})
             elif script_guid == MA_OBJECT_TOGGLE_GUID and is_enabled:
-                inv_m = re.search(r"^\s*m_inverted:[ \t]*(\d+)", block, re.MULTILINE)
-                is_inverted = (int(inv_m.group(1)) != 0) if inv_m else False
+                inverted_match = re.search(r"^\s*m_inverted:[ \t]*(\d+)", block, re.MULTILINE)
+                is_inverted = (int(inverted_match.group(1)) != 0) if inverted_match else False
                 if not is_inverted:
                     toggles: List[Dict[str, Any]] = []
-                    for tog_m in re.finditer(
+                    for toggle_match in re.finditer(
                         r"-\s*Object:[ \t]*\r?\n"
                         r"(?:[ \t]+[^\n]*\n)*?"
                         r"[ \t]*referencePath:[ \t]*([^\r\n]*)\r?\n"
@@ -596,20 +596,20 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                     ):
                         toggles.append(
                             {
-                                "reference_path": _decode_scalar(tog_m.group(1)),
-                                "active": int(tog_m.group(2)) != 0,
+                                "reference_path": _decode_scalar(toggle_match.group(1)),
+                                "active": int(toggle_match.group(2)) != 0,
                             }
                         )
                     if toggles:
-                        object_toggles.append({"go_fid": go_fid, "toggles": toggles})
+                        object_toggles.append({"go_fid": game_object_file_id, "toggles": toggles})
             elif script_guid == MA_SHAPE_CHANGER_GUID and is_enabled:
-                inv_m = re.search(r"^\s*m_inverted:[ \t]*(\d+)", block, re.MULTILINE)
-                is_inverted = (int(inv_m.group(1)) != 0) if inv_m else False
-                thr_m = re.search(r"^\s*m_threshold:[ \t]*([-+0-9.eE]+)", block, re.MULTILINE)
-                threshold = float(thr_m.group(1)) if thr_m else 0.01
+                inverted_match = re.search(r"^\s*m_inverted:[ \t]*(\d+)", block, re.MULTILINE)
+                is_inverted = (int(inverted_match.group(1)) != 0) if inverted_match else False
+                threshold_match = re.search(r"^\s*m_threshold:[ \t]*([-+0-9.eE]+)", block, re.MULTILINE)
+                threshold = float(threshold_match.group(1)) if threshold_match else 0.01
                 if not is_inverted:
                     shapes: List[Dict[str, Any]] = []
-                    for shp_m in re.finditer(
+                    for shape_match in re.finditer(
                         r"-\s*Object:[ \t]*\r?\n"
                         r"(?:[ \t]+[^\n]*\n)*?"
                         r"[ \t]*referencePath:[ \t]*([^\r\n]*)\r?\n"
@@ -619,17 +619,17 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                         r"[ \t]*Value:[ \t]*([^\r\n]+)",
                         block,
                     ):
-                        shape_name = _decode_scalar(shp_m.group(2))
-                        change_type = int(shp_m.group(3))
+                        shape_name = _decode_scalar(shape_match.group(2))
+                        change_type = int(shape_match.group(3))
                         try:
-                            raw_num = float(shp_m.group(4).strip())
+                            raw_num = float(shape_match.group(4).strip())
                         except ValueError:
                             continue
                         weight_norm = 1.0 if change_type == 0 else (raw_num / 100.0)
                         if shape_name:
                             shapes.append(
                                 {
-                                    "reference_path": _decode_scalar(shp_m.group(1)),
+                                    "reference_path": _decode_scalar(shape_match.group(1)),
                                     "shape_name": shape_name,
                                     "change_type": change_type,
                                     "weight": weight_norm,
@@ -637,42 +637,42 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                                 }
                             )
                     if shapes:
-                        shape_changers.append({"go_fid": go_fid, "shapes": shapes})
+                        shape_changers.append({"go_fid": game_object_file_id, "shapes": shapes})
             elif script_guid == MA_REPLACE_OBJECT_GUID and is_enabled:
-                ref_m = re.search(
+                ref_match = re.search(
                     r"targetObject:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]*referencePath:[ \t]*([^\r\n]*)",
                     block,
                 )
-                if ref_m and ref_m.group(1).strip():
+                if ref_match and ref_match.group(1).strip():
                     replace_objects.append(
-                        {"go_fid": go_fid, "target_path": _decode_scalar(ref_m.group(1))}
+                        {"go_fid": game_object_file_id, "target_path": _decode_scalar(ref_match.group(1))}
                     )
             elif script_guid == MA_MESH_SETTINGS_GUID and is_enabled:
-                root_m = re.search(
+                root_match = re.search(
                     r"RootBone:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]*referencePath:[ \t]*([^\r\n]*)",
                     block,
                 )
                 mesh_settings.append(
                     {
-                        "go_fid": go_fid,
-                        "root_bone_path": _decode_scalar(root_m.group(1)) if root_m else "",
+                        "go_fid": game_object_file_id,
+                        "root_bone_path": _decode_scalar(root_match.group(1)) if root_match else "",
                     }
                 )
             elif script_guid == MA_ACTIVATOR_GUID:
-                activators.append({"go_fid": go_fid, "enabled": is_enabled})
+                activators.append({"go_fid": game_object_file_id, "enabled": is_enabled})
             elif script_guid == VRC_PHYSBONE_GUID and is_enabled:
-                root_m = re.search(r"rootTransform:\s*\{fileID:\s*(-?\d+)", block)
+                root_match = re.search(r"rootTransform:\s*\{fileID:\s*(-?\d+)", block)
                 physbones.append(
                     {
-                        "go_fid": go_fid,
-                        "root_tr": root_m.group(1) if root_m else "0",
+                        "go_fid": game_object_file_id,
+                        "root_tr": root_match.group(1) if root_match else "0",
                     }
                 )
 
     parsed_doc = {
         "gameobjects": gameobjects,
         "transforms": transforms,
-        "go_to_tr": go_to_tr,
+        "go_to_tr": game_object_to_transform,
         "renderers": renderers,
         "mesh_filters": mesh_filters,
         "prefab_instances": prefab_instances,
@@ -1020,37 +1020,37 @@ def _collect_guid_paths_for_ma(
     return resolved
 
 
-def _is_go_active_in_doc(
+def _is_game_object_active_in_doc(
     doc_data: Dict[str, Any],
-    go_fid: str,
-    stop_tr: Optional[str] = None,
+    game_object_file_id: str,
+    stop_transform: Optional[str] = None,
 ) -> bool:
     """Walk up Transforms in `doc_data` (stopping at selected avatar root `stop_tr`) to check active state."""
     visited: Set[str] = set()
-    cur_go = go_fid
-    go_map = doc_data["gameobjects"]
-    tr_map = doc_data["transforms"]
-    go_to_tr = doc_data["go_to_tr"]
-    cur_tr = go_to_tr.get(cur_go, "")
+    cur_game_object = game_object_file_id
+    game_object_map = doc_data["gameobjects"]
+    transform_map = doc_data["transforms"]
+    game_object_to_transform = doc_data["go_to_tr"]
+    cur_transform = game_object_to_transform.get(cur_game_object, "")
 
-    if cur_tr and stop_tr and cur_tr == stop_tr:
+    if cur_transform and stop_transform and cur_transform == stop_transform:
         return True
-    if cur_go in go_map and not go_map[cur_go].get("active", True):
+    if cur_game_object in game_object_map and not game_object_map[cur_game_object].get("active", True):
         return False
-    while cur_tr and cur_tr not in visited:
-        if stop_tr and cur_tr == stop_tr:
+    while cur_transform and cur_transform not in visited:
+        if stop_transform and cur_transform == stop_transform:
             break
-        visited.add(cur_tr)
-        tr_info = tr_map.get(cur_tr)
-        if tr_info is None:
+        visited.add(cur_transform)
+        transform_info = transform_map.get(cur_transform)
+        if transform_info is None:
             break
-        node_go = tr_info.get("go_fid", "")
-        if node_go in go_map and not go_map[node_go].get("active", True):
+        node_game_object = transform_info.get("go_fid", "")
+        if node_game_object in game_object_map and not game_object_map[node_game_object].get("active", True):
             return False
-        parent_tr = tr_info.get("father_tr", "0")
-        if parent_tr == "0":
+        parent_transform = transform_info.get("father_tr", "0")
+        if parent_transform == "0":
             break
-        cur_tr = parent_tr
+        cur_transform = parent_transform
     return True
 
 
@@ -1062,17 +1062,17 @@ IDENTITY_UNITY_TRS: Tuple[
 
 
 def _quat_mul_unity(
-    quat_a: Tuple[float, float, float, float],
-    quat_b: Tuple[float, float, float, float],
+    quat_first: Tuple[float, float, float, float],
+    quat_second: Tuple[float, float, float, float],
 ) -> Tuple[float, float, float, float]:
     """Multiply two Unity quaternions `(x, y, z, w)` cleanly."""
-    ax_val, ay_val, az_val, aw_val = quat_a
-    bx_val, by_val, bz_val, bw_val = quat_b
+    first_quat_x, first_quat_y, first_quat_z, first_quat_scalar = quat_first
+    second_quat_x, second_quat_y, second_quat_z, second_quat_scalar = quat_second
     return (
-        aw_val * bx_val + ax_val * bw_val + ay_val * bz_val - az_val * by_val,
-        aw_val * by_val - ax_val * bz_val + ay_val * bw_val + az_val * bx_val,
-        aw_val * bz_val + ax_val * by_val - ay_val * bx_val + az_val * bw_val,
-        aw_val * bw_val - ax_val * bx_val - ay_val * by_val - az_val * bz_val,
+        first_quat_scalar * second_quat_x + first_quat_x * second_quat_scalar + first_quat_y * second_quat_z - first_quat_z * second_quat_y,
+        first_quat_scalar * second_quat_y - first_quat_x * second_quat_z + first_quat_y * second_quat_scalar + first_quat_z * second_quat_x,
+        first_quat_scalar * second_quat_z + first_quat_x * second_quat_y - first_quat_y * second_quat_x + first_quat_z * second_quat_scalar,
+        first_quat_scalar * second_quat_scalar - first_quat_x * second_quat_x - first_quat_y * second_quat_y - first_quat_z * second_quat_z,
     )
 
 
@@ -1081,15 +1081,15 @@ def _quat_rotate_vec_unity(
     vec_xyz: Tuple[float, float, float],
 ) -> Tuple[float, float, float]:
     """Rotate 3D vector `(x, y, z)` by Unity quaternion `(x, y, z, w)`."""
-    qx_val, qy_val, qz_val, qw_val = quat_xyzw
-    vx_val, vy_val, vz_val = vec_xyz
-    cross_x = 2.0 * (qy_val * vz_val - qz_val * vy_val)
-    cross_y = 2.0 * (qz_val * vx_val - qx_val * vz_val)
-    cross_z = 2.0 * (qx_val * vy_val - qy_val * vx_val)
+    quat_x_val, quat_y_val, quat_z_val, quat_scalar_val = quat_xyzw
+    vert_x_val, vert_y_val, vert_z_val = vec_xyz
+    cross_x = 2.0 * (quat_y_val * vert_z_val - quat_z_val * vert_y_val)
+    cross_y = 2.0 * (quat_z_val * vert_x_val - quat_x_val * vert_z_val)
+    cross_z = 2.0 * (quat_x_val * vert_y_val - quat_y_val * vert_x_val)
     return (
-        vx_val + qw_val * cross_x + (qy_val * cross_z - qz_val * cross_y),
-        vy_val + qw_val * cross_y + (qz_val * cross_x - qx_val * cross_z),
-        vz_val + qw_val * cross_z + (qx_val * cross_y - qy_val * cross_x),
+        vert_x_val + quat_scalar_val * cross_x + (quat_y_val * cross_z - quat_z_val * cross_y),
+        vert_y_val + quat_scalar_val * cross_y + (quat_z_val * cross_x - quat_x_val * cross_z),
+        vert_z_val + quat_scalar_val * cross_z + (quat_x_val * cross_y - quat_y_val * cross_x),
     )
 
 
@@ -1140,23 +1140,23 @@ def unity_trs_to_blender_matrix_rows(
 ) -> List[List[float]]:
     """Convert Unity world `(pos, rot, scale)` into a 4x4 Blender matrix (`F4 @ U @ J4` or `F4 @ U @ F4^T`)."""
     pos_u, rot_u, scale_u = unity_trs
-    qx_val, qy_val, qz_val, qw_val = rot_u
-    norm_sq = qx_val * qx_val + qy_val * qy_val + qz_val * qz_val + qw_val * qw_val
-    if norm_sq > 1e-12:
-        inv_norm = norm_sq ** -0.5
-        qx_val *= inv_norm
-        qy_val *= inv_norm
-        qz_val *= inv_norm
-        qw_val *= inv_norm
-    xx_val, yy_val, zz_val = qx_val * qx_val, qy_val * qy_val, qz_val * qz_val
-    xy_val, xz_val, yz_val = qx_val * qy_val, qx_val * qz_val, qy_val * qz_val
-    wx_val, wy_val, wz_val = qw_val * qx_val, qw_val * qy_val, qw_val * qz_val
-    sx_val, sy_val, sz_val = scale_u
+    quat_x_val, quat_y_val, quat_z_val, quat_scalar_val = rot_u
+    norm_squared = quat_x_val * quat_x_val + quat_y_val * quat_y_val + quat_z_val * quat_z_val + quat_scalar_val * quat_scalar_val
+    if norm_squared > 1e-12:
+        inv_norm = norm_squared ** -0.5
+        quat_x_val *= inv_norm
+        quat_y_val *= inv_norm
+        quat_z_val *= inv_norm
+        quat_scalar_val *= inv_norm
+    quat_x_x, quat_y_y, quat_z_z = quat_x_val * quat_x_val, quat_y_val * quat_y_val, quat_z_val * quat_z_val
+    quat_x_y, quat_x_z, quat_y_z = quat_x_val * quat_y_val, quat_x_val * quat_z_val, quat_y_val * quat_z_val
+    scalar_x_prod, scalar_y_prod, scalar_z_prod = quat_scalar_val * quat_x_val, quat_scalar_val * quat_y_val, quat_scalar_val * quat_z_val
+    scale_x_val, scale_y_val, scale_z_val = scale_u
 
     rot_scaled = [
-        [(1.0 - 2.0 * (yy_val + zz_val)) * sx_val, 2.0 * (xy_val - wz_val) * sy_val, 2.0 * (xz_val + wy_val) * sz_val],
-        [2.0 * (xy_val + wz_val) * sx_val, (1.0 - 2.0 * (xx_val + zz_val)) * sy_val, 2.0 * (yz_val - wx_val) * sz_val],
-        [2.0 * (xz_val - wy_val) * sx_val, 2.0 * (yz_val + wx_val) * sy_val, (1.0 - 2.0 * (xx_val + yy_val)) * sz_val],
+        [(1.0 - 2.0 * (quat_y_y + quat_z_z)) * scale_x_val, 2.0 * (quat_x_y - scalar_z_prod) * scale_y_val, 2.0 * (quat_x_z + scalar_y_prod) * scale_z_val],
+        [2.0 * (quat_x_y + scalar_z_prod) * scale_x_val, (1.0 - 2.0 * (quat_x_x + quat_z_z)) * scale_y_val, 2.0 * (quat_y_z - scalar_x_prod) * scale_z_val],
+        [2.0 * (quat_x_z - scalar_y_prod) * scale_x_val, 2.0 * (quat_y_z + scalar_x_prod) * scale_y_val, (1.0 - 2.0 * (quat_x_x + quat_y_y)) * scale_z_val],
     ]
     mat_u = [
         [rot_scaled[0][0], rot_scaled[0][1], rot_scaled[0][2], pos_u[0]],
@@ -1186,20 +1186,20 @@ def unity_trs_to_blender_matrix_rows(
         ]
     )
 
-    def _mul4(left_m: List[List[float]], right_m: List[List[float]]) -> List[List[float]]:
-        out_m = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
+    def _mul4(left_mat: List[List[float]], right_mat: List[List[float]]) -> List[List[float]]:
+        out_mat = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
         for row_idx in range(4):
             for col_idx in range(4):
-                out_m[row_idx][col_idx] = sum(
-                    left_m[row_idx][mid_idx] * right_m[mid_idx][col_idx]
+                out_mat[row_idx][col_idx] = sum(
+                    left_mat[row_idx][mid_idx] * right_mat[mid_idx][col_idx]
                     for mid_idx in range(4)
                 )
-        return out_m
+        return out_mat
 
     return _mul4(_mul4(f4_mat, mat_u), rhs_mat)
 
 
-def extract_tr_mod_overrides(
+def extract_transform_mod_overrides(
     mods_list: Sequence[Dict[str, Any]],
     expected_guid: str = "",
 ) -> Dict[str, Dict[str, Any]]:
@@ -1229,87 +1229,87 @@ def extract_tr_mod_overrides(
 def compute_doc_unity_world_transforms(
     doc_data: Dict[str, Any],
     *,
-    root_tr: Optional[str] = None,
+    root_transform: Optional[str] = None,
     base_world: Tuple[
         Tuple[float, float, float],
         Tuple[float, float, float, float],
         Tuple[float, float, float],
     ] = IDENTITY_UNITY_TRS,
-    overrides_by_tr: Optional[Dict[str, Dict[str, Any]]] = None,
+    overrides_by_transform: Optional[Dict[str, Dict[str, Any]]] = None,
     treat_root_as_avatar_origin: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     """Compute avatar-local Unity world transforms for all `Transform` nodes in `doc_data`."""
-    tr_map = doc_data.get("transforms", {})
-    go_map = doc_data.get("gameobjects", {})
-    ov_map = overrides_by_tr or {}
+    transform_map = doc_data.get("transforms", {})
+    game_object_map = doc_data.get("gameobjects", {})
+    override_map = overrides_by_transform or {}
     memo: Dict[str, Tuple[Any, str, Tuple[float, float, float]]] = {}
 
-    def _effective_local(tr_fid: str) -> Tuple[
+    def _effective_local(transform_file_id: str) -> Tuple[
         Tuple[float, float, float],
         Tuple[float, float, float, float],
         Tuple[float, float, float],
     ]:
-        info = tr_map[tr_fid]
+        info = transform_map[transform_file_id]
         pos_x, pos_y, pos_z = info.get("pos", (0.0, 0.0, 0.0))
-        rot_x, rot_y, rot_z, rot_w = info.get("rot", (0.0, 0.0, 0.0, 1.0))
+        rot_x, rot_y, rot_z, rot_scalar = info.get("rot", (0.0, 0.0, 0.0, 1.0))
         scl_x, scl_y, scl_z = info.get("scale", (1.0, 1.0, 1.0))
-        tr_ov = ov_map.get(tr_fid)
-        if tr_ov:
-            pos_ov = tr_ov.get("m_LocalPosition", {})
-            pos_x = pos_ov.get("x", pos_x)
-            pos_y = pos_ov.get("y", pos_y)
-            pos_z = pos_ov.get("z", pos_z)
-            rot_ov = tr_ov.get("m_LocalRotation", {})
-            rot_x = rot_ov.get("x", rot_x)
-            rot_y = rot_ov.get("y", rot_y)
-            rot_z = rot_ov.get("z", rot_z)
-            rot_w = rot_ov.get("w", rot_w)
-            scl_ov = tr_ov.get("m_LocalScale", {})
-            scl_x = scl_ov.get("x", scl_x)
-            scl_y = scl_ov.get("y", scl_y)
-            scl_z = scl_ov.get("z", scl_z)
-        return ((pos_x, pos_y, pos_z), (rot_x, rot_y, rot_z, rot_w), (scl_x, scl_y, scl_z))
+        transform_overrides = override_map.get(transform_file_id)
+        if transform_overrides:
+            pos_override = transform_overrides.get("m_LocalPosition", {})
+            pos_x = pos_override.get("x", pos_x)
+            pos_y = pos_override.get("y", pos_y)
+            pos_z = pos_override.get("z", pos_z)
+            rot_override = transform_overrides.get("m_LocalRotation", {})
+            rot_x = rot_override.get("x", rot_x)
+            rot_y = rot_override.get("y", rot_y)
+            rot_z = rot_override.get("z", rot_z)
+            rot_scalar = rot_override.get("w", rot_scalar)
+            scale_override = transform_overrides.get("m_LocalScale", {})
+            scl_x = scale_override.get("x", scl_x)
+            scl_y = scale_override.get("y", scl_y)
+            scl_z = scale_override.get("z", scl_z)
+        return ((pos_x, pos_y, pos_z), (rot_x, rot_y, rot_z, rot_scalar), (scl_x, scl_y, scl_z))
 
-    def _resolve_node(tr_fid: str, stack_seen: Set[str]) -> Tuple[Any, str, Tuple[float, float, float]]:
-        if tr_fid in memo:
-            return memo[tr_fid]
-        if tr_fid in stack_seen or tr_fid not in tr_map:
+    def _resolve_node(transform_file_id: str, stack_seen: Set[str]) -> Tuple[Any, str, Tuple[float, float, float]]:
+        if transform_file_id in memo:
+            return memo[transform_file_id]
+        if transform_file_id in stack_seen or transform_file_id not in transform_map:
             return (base_world, "", (1.0, 1.0, 1.0))
-        stack_seen.add(tr_fid)
-        tr_info = tr_map[tr_fid]
-        go_name = str(go_map.get(tr_info.get("go_fid", ""), {}).get("name", "") or "")
-        loc_trs = _effective_local(tr_fid)
+        stack_seen.add(transform_file_id)
+        transform_info = transform_map[transform_file_id]
+        game_object_name = str(game_object_map.get(transform_info.get("go_fid", ""), {}).get("name", "") or "")
+        loc_trs = _effective_local(transform_file_id)
         loc_scale = loc_trs[2]
-        if root_tr and tr_fid == root_tr:
+        if root_transform and transform_file_id == root_transform:
             eff_loc = (
                 ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), loc_scale)
                 if treat_root_as_avatar_origin
                 else loc_trs
             )
             world_val = compose_unity_trs(base_world, eff_loc)
-            res = (world_val, go_name, loc_scale)
-            memo[tr_fid] = res
+            res = (world_val, game_object_name, loc_scale)
+            memo[transform_file_id] = res
             return res
 
-        father_fid = tr_info.get("father_tr", "0")
-        if father_fid == "0" or father_fid not in tr_map:
+        father_fid = transform_info.get("father_tr", "0")
+        if father_fid == "0" or father_fid not in transform_map:
             par_world, par_path = base_world, ""
         else:
             par_world, par_path, _ = _resolve_node(father_fid, stack_seen)
-        cur_path = f"{par_path}/{go_name}" if (par_path and go_name) else (par_path or go_name)
+        cur_path = f"{par_path}/{game_object_name}" if (par_path and game_object_name) else (par_path or game_object_name)
         world_val = compose_unity_trs(par_world, loc_trs)
         res = (world_val, cur_path, loc_scale)
-        memo[tr_fid] = res
+        memo[transform_file_id] = res
         return res
 
     out_map: Dict[str, Dict[str, Any]] = {}
-    for tr_fid, tr_info in tr_map.items():
-        world_trs, node_path, loc_scale = _resolve_node(tr_fid, set())
-        go_name = str(go_map.get(tr_info.get("go_fid", ""), {}).get("name", "") or "")
-        out_map[tr_fid] = {
-            "name": go_name,
+    for transform_file_id, transform_info in transform_map.items():
+        world_trs, node_path, loc_scale = _resolve_node(transform_file_id, set())
+        game_object_name = str(game_object_map.get(transform_info.get("go_fid", ""), {}).get("name", "") or "")
+        out_map[transform_file_id] = {
+            "name": game_object_name,
             "path": node_path,
-            "father_tr": tr_info.get("father_tr", "0"),
+            "father_tr": transform_info.get("father_tr", "0"),
             "world": world_trs,
             "local_scale": loc_scale,
         }
@@ -1339,11 +1339,11 @@ def compute_bone_unit_scale_correction(
     fbx_pts: List[Tuple[float, float, float]] = []
     uni_pts: List[Tuple[float, float, float]] = []
     col_norms: List[float] = []
-    for bone_name, fbx_pt in fbx_points_by_bone.items():
+    for bone_name, fbx_point in fbx_points_by_bone.items():
         rows = bone_matrices.get(bone_name) or mats_low.get(bone_name.lower())
         if rows is None:
             continue
-        fbx_pts.append(fbx_pt)
+        fbx_pts.append(fbx_point)
         uni_pts.append((float(rows[0][3]), float(rows[1][3]), float(rows[2][3])))
         col_norm = (rows[0][0] ** 2 + rows[1][0] ** 2 + rows[2][0] ** 2) ** 0.5
         if col_norm > 1e-6:
@@ -1353,24 +1353,24 @@ def compute_bone_unit_scale_correction(
 
     def _mean_radius(pts_list: List[Tuple[float, float, float]]) -> float:
         cnt = float(len(pts_list))
-        cen_x = sum(pt_item[0] for pt_item in pts_list) / cnt
-        cen_y = sum(pt_item[1] for pt_item in pts_list) / cnt
-        cen_z = sum(pt_item[2] for pt_item in pts_list) / cnt
+        cen_x = sum(point_item[0] for point_item in pts_list) / cnt
+        cen_y = sum(point_item[1] for point_item in pts_list) / cnt
+        cen_z = sum(point_item[2] for point_item in pts_list) / cnt
         return sum(
             (
-                (pt_item[0] - cen_x) ** 2
-                + (pt_item[1] - cen_y) ** 2
-                + (pt_item[2] - cen_z) ** 2
+                (point_item[0] - cen_x) ** 2
+                + (point_item[1] - cen_y) ** 2
+                + (point_item[2] - cen_z) ** 2
             )
             ** 0.5
-            for pt_item in pts_list
+            for point_item in pts_list
         )
 
-    rad_f = _mean_radius(fbx_pts)
+    radius_fbx = _mean_radius(fbx_pts)
     rad_u = _mean_radius(uni_pts)
-    if rad_f <= 1e-4 or rad_u <= 1e-4:
+    if radius_fbx <= 1e-4 or rad_u <= 1e-4:
         return 1.0
-    spatial_scale = rad_u / rad_f
+    spatial_scale = rad_u / radius_fbx
     col_norms.sort()
     med_col = col_norms[len(col_norms) // 2]
     if med_col <= 1e-6:
@@ -1446,13 +1446,13 @@ def stamp_unity_mats_on_blender_objects(
     """Attach compact per-mesh Unity `.mat` metadata JSON to imported Blender mesh objects."""
     if not mesh_objs or not mesh_mats_map:
         return 0
-    mats_ci = {str(key).strip().lower(): val for key, val in mesh_mats_map.items() if key}
+    mats_lower = {str(key).strip().lower(): val for key, val in mesh_mats_map.items() if key}
     stamped = 0
     for mesh_obj in mesh_objs:
         if getattr(mesh_obj, "type", "") != "MESH":
             continue
         base_name = re.sub(r"\.\d{3}$", "", str(getattr(mesh_obj, "name", "") or "")).strip()
-        mat_list = mesh_mats_map.get(base_name) or mats_ci.get(base_name.lower())
+        mat_list = mesh_mats_map.get(base_name) or mats_lower.get(base_name.lower())
         if not mat_list:
             continue
         compact_list = [
@@ -1490,16 +1490,16 @@ def apply_unity_textures_to_blender_meshes(
         for slot_idx, mat_info in enumerate(mat_list):
             if slot_idx >= len(mesh_obj.data.materials):
                 break
-            bl_mat = mesh_obj.data.materials[slot_idx]
-            if bl_mat is None:
+            blender_mat = mesh_obj.data.materials[slot_idx]
+            if blender_mat is None:
                 continue
             tex_envs = mat_info.get("tex_envs", {})
             main_entry = tex_envs.get("_MainTex") or tex_envs.get("_BaseMap") or tex_envs.get("_BaseColorMap")
             tex_path = main_entry.get("path") if isinstance(main_entry, dict) else None
             if not tex_path or not os.path.isfile(tex_path):
                 continue
-            bl_mat.use_nodes = True
-            node_tree = bl_mat.node_tree
+            blender_mat.use_nodes = True
+            node_tree = blender_mat.node_tree
             if node_tree is None:
                 continue
             bsdf = next((node_item for node_item in node_tree.nodes if node_item.type == "BSDF_PRINCIPLED"), None)

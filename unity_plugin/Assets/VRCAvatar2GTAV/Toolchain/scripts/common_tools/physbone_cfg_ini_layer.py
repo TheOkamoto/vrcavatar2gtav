@@ -63,23 +63,23 @@ def format_curve_string(points: Sequence[Tuple[float, float]]) -> str:
     return ", ".join(f"{point_time:.7g}:{point_val:.7g}" for point_time, point_val in points)
 
 
-def evaluate_curve(points: Sequence[Tuple[float, float]], param_t: float, default_val: float = 1.0) -> float:
+def evaluate_curve(points: Sequence[Tuple[float, float]], curve_param: float, default_val: float = 1.0) -> float:
     """Evaluate a piecewise-linear normalized Unity curve at param_t in [0, 1]."""
     if not points:
         return default_val
-    clamped_t = max(0.0, min(1.0, float(param_t)))
-    if len(points) == 1 or clamped_t <= points[0][0]:
+    clamped_time = max(0.0, min(1.0, float(curve_param)))
+    if len(points) == 1 or clamped_time <= points[0][0]:
         return float(points[0][1])
-    if clamped_t >= points[-1][0]:
+    if clamped_time >= points[-1][0]:
         return float(points[-1][1])
     for idx in range(len(points) - 1):
-        left_t, left_val = points[idx]
-        right_t, right_val = points[idx + 1]
-        if left_t <= clamped_t <= right_t:
-            span = right_t - left_t
+        left_time, left_val = points[idx]
+        right_time, right_val = points[idx + 1]
+        if left_time <= clamped_time <= right_time:
+            span = right_time - left_time
             if span <= 1e-8:
                 return float(right_val)
-            frac = (clamped_t - left_t) / span
+            frac = (clamped_time - left_time) / span
             return float(left_val + (right_val - left_val) * frac)
     return float(points[-1][1])
 
@@ -107,7 +107,7 @@ def load_physbone_config(cfg_path: Union[str, Path]) -> Dict[str, Any]:
 
     metadata = dict(parser["metadata"]) if parser.has_section("metadata") else {}
     bone_mapping = dict(parser["bone_mapping"]) if parser.has_section("bone_mapping") else {}
-    bone_mapping_ci = {
+    bone_mapping_lower = {
         str(src_name).strip().lower(): str(dst_name).strip()
         for src_name, dst_name in bone_mapping.items()
         if str(src_name).strip() and str(dst_name).strip()
@@ -169,7 +169,7 @@ def load_physbone_config(cfg_path: Union[str, Path]) -> Dict[str, Any]:
     return {
         "metadata": metadata,
         "bone_mapping": bone_mapping,
-        "bone_mapping_ci": bone_mapping_ci,
+        "bone_mapping_ci": bone_mapping_lower,
         "chains": chains,
     }
 
@@ -214,14 +214,14 @@ def build_chain_specs_from_config(
     chain_specs = tuple(specs_list)
     parent_map = _chain_parent_map(chain_specs, root_parents)
     custom_bones = tuple(bone_name for _ck, _gn, _sb, gbs in chain_specs for bone_name in gbs)
-    bone_mapping_ci = dict(loaded_cfg.get("bone_mapping_ci") or {})
-    if not bone_mapping_ci:
-        bone_mapping_ci = {
+    bone_mapping_lower = dict(loaded_cfg.get("bone_mapping_ci") or {})
+    if not bone_mapping_lower:
+        bone_mapping_lower = {
             str(src_name).strip().lower(): str(dst_name).strip()
             for src_name, dst_name in (loaded_cfg.get("bone_mapping") or {}).items()
             if str(src_name).strip() and str(dst_name).strip()
         }
-    return chain_specs, parent_map, custom_bones, bone_mapping_ci
+    return chain_specs, parent_map, custom_bones, bone_mapping_lower
 
 
 def save_physbone_config(
@@ -271,8 +271,8 @@ def save_physbone_config(
         lines.append(f"version = {int(cfg_data.get('version', 1))}")
         lines.append(f"integration_type = {int(cfg_data.get('integration_type', 0))}")
         lines.append(f"multi_child_type = {int(cfg_data.get('multi_child_type', 0))}")
-        end_pt = cfg_data.get("endpoint_position", (0.0, 0.0, 0.0))
-        lines.append(f"endpoint_position = {end_pt[0]}, {end_pt[1]}, {end_pt[2]}")
+        end_point = cfg_data.get("endpoint_position", (0.0, 0.0, 0.0))
+        lines.append(f"endpoint_position = {end_point[0]}, {end_point[1]}, {end_point[2]}")
         for scalar_key in ("pull", "spring", "stiffness", "gravity", "gravity_falloff"):
             lines.append(f"{scalar_key} = {float(cfg_data.get(scalar_key, 0.0))}")
         lines.append(f"immobile_type = {int(cfg_data.get('immobile_type', 0))}")
@@ -705,8 +705,8 @@ def export_physbone_asi_ini(
             if "max_angle" in bone_entry and not max_angle_curve:
                 node_max_angle = float(bone_entry["max_angle"])
             else:
-                chain_t = min(1.0, max(0.0, cum_len / total_len))
-                angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+                chain_time = min(1.0, max(0.0, cum_len / total_len))
+                angle_scale = evaluate_curve(max_angle_curve, chain_time, default_val=1.0)
                 node_max_angle = base_angle_x * angle_scale
             loc_pos = bone_entry["local_pos"]
             loc_rot = bone_entry["local_rot"]
@@ -748,83 +748,83 @@ def export_physbone_asi_ini(
     return resolved_ini
 
 
-def _vec_add(vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    return (vec_a[0] + vec_b[0], vec_a[1] + vec_b[1], vec_a[2] + vec_b[2])
+def _vec_add(vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    return (vec_first[0] + vec_second[0], vec_first[1] + vec_second[1], vec_first[2] + vec_second[2])
 
 
-def _vec_sub(vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    return (vec_a[0] - vec_b[0], vec_a[1] - vec_b[1], vec_a[2] - vec_b[2])
+def _vec_sub(vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    return (vec_first[0] - vec_second[0], vec_first[1] - vec_second[1], vec_first[2] - vec_second[2])
 
 
-def _vec_scale(vec_a: Tuple[float, float, float], factor: float) -> Tuple[float, float, float]:
-    return (vec_a[0] * factor, vec_a[1] * factor, vec_a[2] * factor)
+def _vec_scale(vec_first: Tuple[float, float, float], factor: float) -> Tuple[float, float, float]:
+    return (vec_first[0] * factor, vec_first[1] * factor, vec_first[2] * factor)
 
 
-def _vec_dot(vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]) -> float:
-    return vec_a[0] * vec_b[0] + vec_a[1] * vec_b[1] + vec_a[2] * vec_b[2]
+def _vec_dot(vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]) -> float:
+    return vec_first[0] * vec_second[0] + vec_first[1] * vec_second[1] + vec_first[2] * vec_second[2]
 
 
-def _vec_len(vec_a: Tuple[float, float, float]) -> float:
-    return math.sqrt(vec_a[0] * vec_a[0] + vec_a[1] * vec_a[1] + vec_a[2] * vec_a[2])
+def _vec_len(vec_first: Tuple[float, float, float]) -> float:
+    return math.sqrt(vec_first[0] * vec_first[0] + vec_first[1] * vec_first[1] + vec_first[2] * vec_first[2])
 
 
-def _vec_norm(vec_a: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    length_val = _vec_len(vec_a)
+def _vec_norm(vec_first: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    length_val = _vec_len(vec_first)
     if length_val <= 1e-8:
         return (0.0, 0.0, 1.0)
     inv_len = 1.0 / length_val
-    return (vec_a[0] * inv_len, vec_a[1] * inv_len, vec_a[2] * inv_len)
+    return (vec_first[0] * inv_len, vec_first[1] * inv_len, vec_first[2] * inv_len)
 
 
-def _quat_rotate_vec(quat_xyzw: Tuple[float, float, float, float], vec_a: Tuple[float, float, float]) -> Tuple[float, float, float]:
+def _quat_rotate_vec(quat_xyzw: Tuple[float, float, float, float], vec_first: Tuple[float, float, float]) -> Tuple[float, float, float]:
     """Rotate 3D vector by quaternion (x, y, z, w)."""
-    qx_val, qy_val, qz_val, qw_val = quat_xyzw
-    ux_val = qy_val * vec_a[2] - qz_val * vec_a[1] + qw_val * vec_a[0]
-    uy_val = qz_val * vec_a[0] - qx_val * vec_a[2] + qw_val * vec_a[1]
-    uz_val = qx_val * vec_a[1] - qy_val * vec_a[0] + qw_val * vec_a[2]
-    cross_x = qy_val * uz_val - qz_val * uy_val
-    cross_y = qz_val * ux_val - qx_val * uz_val
-    cross_z = qx_val * uy_val - qy_val * ux_val
+    quat_x_val, quat_y_val, quat_z_val, quat_scalar_val = quat_xyzw
+    rot_x_val = quat_y_val * vec_first[2] - quat_z_val * vec_first[1] + quat_scalar_val * vec_first[0]
+    rot_y_val = quat_z_val * vec_first[0] - quat_x_val * vec_first[2] + quat_scalar_val * vec_first[1]
+    rot_z_val = quat_x_val * vec_first[1] - quat_y_val * vec_first[0] + quat_scalar_val * vec_first[2]
+    cross_x = quat_y_val * rot_z_val - quat_z_val * rot_y_val
+    cross_y = quat_z_val * rot_x_val - quat_x_val * rot_z_val
+    cross_z = quat_x_val * rot_y_val - quat_y_val * rot_x_val
     return (
-        vec_a[0] + 2.0 * cross_x,
-        vec_a[1] + 2.0 * cross_y,
-        vec_a[2] + 2.0 * cross_z,
+        vec_first[0] + 2.0 * cross_x,
+        vec_first[1] + 2.0 * cross_y,
+        vec_first[2] + 2.0 * cross_z,
     )
 
 
-def _quat_mul(quat_a: Tuple[float, float, float, float], quat_b: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+def _quat_mul(quat_first: Tuple[float, float, float, float], quat_second: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
     """Hamilton product of two XYZW quaternions."""
-    ax_val, ay_val, az_val, aw_val = quat_a
-    bx_val, by_val, bz_val, bw_val = quat_b
+    first_quat_x, first_quat_y, first_quat_z, first_quat_scalar = quat_first
+    second_quat_x, second_quat_y, second_quat_z, second_quat_scalar = quat_second
     return (
-        aw_val * bx_val + ax_val * bw_val + ay_val * bz_val - az_val * by_val,
-        aw_val * by_val - ax_val * bz_val + ay_val * bw_val + az_val * bx_val,
-        aw_val * bz_val + ax_val * by_val - ay_val * bx_val + az_val * bw_val,
-        aw_val * bw_val - ax_val * bx_val - ay_val * by_val - az_val * bz_val,
+        first_quat_scalar * second_quat_x + first_quat_x * second_quat_scalar + first_quat_y * second_quat_z - first_quat_z * second_quat_y,
+        first_quat_scalar * second_quat_y - first_quat_x * second_quat_z + first_quat_y * second_quat_scalar + first_quat_z * second_quat_x,
+        first_quat_scalar * second_quat_z + first_quat_x * second_quat_y - first_quat_y * second_quat_x + first_quat_z * second_quat_scalar,
+        first_quat_scalar * second_quat_scalar - first_quat_x * second_quat_x - first_quat_y * second_quat_y - first_quat_z * second_quat_z,
     )
 
 
 def _quat_from_two_vectors(dir_from: Tuple[float, float, float], dir_to: Tuple[float, float, float]) -> Tuple[float, float, float, float]:
     """Return shortest-arc XYZW quaternion rotating unit vector dir_from onto dir_to."""
-    norm_a = _vec_norm(dir_from)
-    norm_b = _vec_norm(dir_to)
-    dot_val = max(-1.0, min(1.0, _vec_dot(norm_a, norm_b)))
+    norm_first = _vec_norm(dir_from)
+    norm_second = _vec_norm(dir_to)
+    dot_val = max(-1.0, min(1.0, _vec_dot(norm_first, norm_second)))
     if dot_val > 0.999999:
         return (0.0, 0.0, 0.0, 1.0)
     if dot_val < -0.999999:
-        ortho_ref = (1.0, 0.0, 0.0) if abs(norm_a[0]) < 0.9 else (0.0, 1.0, 0.0)
-        axis_x = norm_a[1] * ortho_ref[2] - norm_a[2] * ortho_ref[1]
-        axis_y = norm_a[2] * ortho_ref[0] - norm_a[0] * ortho_ref[2]
-        axis_z = norm_a[0] * ortho_ref[1] - norm_a[1] * ortho_ref[0]
+        ortho_ref = (1.0, 0.0, 0.0) if abs(norm_first[0]) < 0.9 else (0.0, 1.0, 0.0)
+        axis_x = norm_first[1] * ortho_ref[2] - norm_first[2] * ortho_ref[1]
+        axis_y = norm_first[2] * ortho_ref[0] - norm_first[0] * ortho_ref[2]
+        axis_z = norm_first[0] * ortho_ref[1] - norm_first[1] * ortho_ref[0]
         axis_unit = _vec_norm((axis_x, axis_y, axis_z))
         return (axis_unit[0], axis_unit[1], axis_unit[2], 0.0)
-    cross_x = norm_a[1] * norm_b[2] - norm_a[2] * norm_b[1]
-    cross_y = norm_a[2] * norm_b[0] - norm_a[0] * norm_b[2]
-    cross_z = norm_a[0] * norm_b[1] - norm_a[1] * norm_b[0]
-    w_comp = 1.0 + dot_val
-    norm_len = math.sqrt(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z + w_comp * w_comp)
+    cross_x = norm_first[1] * norm_second[2] - norm_first[2] * norm_second[1]
+    cross_y = norm_first[2] * norm_second[0] - norm_first[0] * norm_second[2]
+    cross_z = norm_first[0] * norm_second[1] - norm_first[1] * norm_second[0]
+    quat_scalar_component = 1.0 + dot_val
+    norm_len = math.sqrt(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z + quat_scalar_component * quat_scalar_component)
     inv_len = 1.0 / norm_len
-    return (cross_x * inv_len, cross_y * inv_len, cross_z * inv_len, w_comp * inv_len)
+    return (cross_x * inv_len, cross_y * inv_len, cross_z * inv_len, quat_scalar_component * inv_len)
 
 
 class PhysBoneChainSimulator:
@@ -859,8 +859,8 @@ class PhysBoneChainSimulator:
         base_angle = float(self.config.get("max_angle_x", 50.0))
         angle_curve = self.config.get("max_angle_x_curve", [])
         for idx in range(self.node_count - 1):
-            frac_t = cum_len / total_len
-            deg_val = base_angle * evaluate_curve(angle_curve, frac_t, default_val=1.0)
+            frac_time = cum_len / total_len
+            deg_val = base_angle * evaluate_curve(angle_curve, frac_time, default_val=1.0)
             self.node_max_angles_rad.append(math.radians(max(0.0, min(179.0, deg_val))))
             cum_len += self.seg_lengths[idx]
 
@@ -906,7 +906,7 @@ class PhysBoneChainSimulator:
         delta_time: float,
     ) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float, float, float]]]:
         """Advance chain physics by delta_time seconds and return world (positions, rotations)."""
-        clamped_dt = max(1e-4, min(0.05, float(delta_time)))
+        clamped_delta_time = max(1e-4, min(0.05, float(delta_time)))
         pose_pos, pose_rot = self._compute_pose_world(parent_world_pos, parent_world_rot)
 
         if not self.initialized:
@@ -925,7 +925,7 @@ class PhysBoneChainSimulator:
         immobile_shift = _vec_scale(root_delta, max(0.0, min(1.0, immobile_val)))
         self.prev_root_pos = pose_pos[0]
 
-        rate_scale = clamped_dt * 60.0
+        rate_scale = clamped_delta_time * 60.0
         vel_retention = pow(max(0.05, min(0.95, 0.25 + 0.65 * spring_val)), rate_scale)
         pull_factor = 1.0 - pow(max(0.0, min(1.0, 1.0 - pull_val)), rate_scale)
 
@@ -937,7 +937,7 @@ class PhysBoneChainSimulator:
             shifted_prev = _vec_add(self.prev_pos[idx], immobile_shift)
             shifted_curr = _vec_add(self.world_pos[idx], immobile_shift)
             velocity_vec = _vec_scale(_vec_sub(shifted_curr, shifted_prev), vel_retention)
-            gravity_disp = (0.0, 0.0, -9.81 * eff_gravity_val * clamped_dt * clamped_dt)
+            gravity_disp = (0.0, 0.0, -9.81 * eff_gravity_val * clamped_delta_time * clamped_delta_time)
 
             self.prev_pos[idx] = shifted_curr
             predicted_pos = _vec_add(_vec_add(shifted_curr, velocity_vec), gravity_disp)

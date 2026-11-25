@@ -285,8 +285,8 @@ def test_custom_unity_hair_support() -> bool:
 
         alpha_mask_img = Image.new("RGBA", (8, 8), (255, 255, 255, 255))
         for px_idx in range(4, 8):
-            for py_idx in range(4, 8):
-                alpha_mask_img.putpixel((px_idx, py_idx), (0, 0, 0, 255))
+            for python_file_idx in range(4, 8):
+                alpha_mask_img.putpixel((px_idx, python_file_idx), (0, 0, 0, 255))
         alpha_mask_path = hair_dir / "hair_alpha.png"
         alpha_mask_img.save(alpha_mask_path)
         (hair_dir / "hair_alpha.png.meta").write_text(
@@ -568,17 +568,17 @@ def test_custom_unity_hair_support() -> bool:
         try:
             project_paths.set_character_custom_hair("franklin", "none")
             project_paths.set_character_custom_hair("trevor", "default", hair_scale="1.15")
-            fr_cfg = project_paths.get_character_paths("franklin")
-            tr_cfg = project_paths.get_character_paths("trevor")
-            kw_ok = (
-                fr_cfg.get("custom_hair") == "none"
-                and tr_cfg.get("custom_hair") == "default"
-                and str(tr_cfg.get("hair_scale")) == "1.15"
+            franklin_cfg = project_paths.get_character_paths("franklin")
+            trevor_cfg = project_paths.get_character_paths("trevor")
+            keywords_ok = (
+                franklin_cfg.get("custom_hair") == "none"
+                and trevor_cfg.get("custom_hair") == "default"
+                and str(trevor_cfg.get("hair_scale")) == "1.15"
             )
             suite_passed &= print_status_result(
                 i18n.translate("tests.hair_cfg_keywords"),
-                kw_ok,
-                f"franklin={fr_cfg.get('custom_hair')}, trevor={tr_cfg.get('custom_hair')}",
+                keywords_ok,
+                f"franklin={franklin_cfg.get('custom_hair')}, trevor={trevor_cfg.get('custom_hair')}",
             )
         finally:
             if previous_env_cfg is None:
@@ -685,22 +685,22 @@ def test_first_run_modular_avatar_and_error_handling() -> bool:
 
             model_id = 100
             geom_id = 200
-            bs_id = 300
+            blendshape_id = 300
             obj_children = [
                 _pack_node("Model", [("L", model_id), ("S", f"{model_name}\x00\x01Model"), ("S", "Mesh")]),
                 _pack_node("Geometry", [("L", geom_id), ("S", "Geo\x00\x01Geometry"), ("S", "Mesh")]),
-                _pack_node("Deformer", [("L", bs_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")]),
+                _pack_node("Deformer", [("L", blendshape_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")]),
             ]
             conn_children = [
                 _pack_node("C", [("S", "OO"), ("L", geom_id), ("L", model_id)]),
-                _pack_node("C", [("S", "OO"), ("L", bs_id), ("L", geom_id)]),
+                _pack_node("C", [("S", "OO"), ("L", blendshape_id), ("L", geom_id)]),
             ]
-            for s_idx, s_name in enumerate(shape_names):
-                ch_id = 400 + s_idx
+            for shape_idx, shape_name in enumerate(shape_names):
+                channel_id = 400 + shape_idx
                 obj_children.append(
-                    _pack_node("Deformer", [("L", ch_id), ("S", f"{s_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")])
+                    _pack_node("Deformer", [("L", channel_id), ("S", f"{shape_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")])
                 )
-                conn_children.append(_pack_node("C", [("S", "OO"), ("L", ch_id), ("L", bs_id)]))
+                conn_children.append(_pack_node("C", [("S", "OO"), ("L", channel_id), ("L", blendshape_id)]))
             header = b"Kaydara FBX Binary  \x00\x1a\x00" + struct.pack("<I", 7400)
             body = (
                 _pack_node("Objects", [], obj_children)
@@ -721,31 +721,31 @@ def test_first_run_modular_avatar_and_error_handling() -> bool:
                 cur = offset + 13 + len(name.encode("utf-8")) + len(prop_bytes)
                 child_chunks: List[bytes] = []
                 if child_specs:
-                    for c_name, c_props, c_sub in child_specs:
-                        c_bytes, cur = _write_node_at(cur, c_name, c_props, c_sub)
-                        child_chunks.append(c_bytes)
+                    for chunk_name, chunk_props, child_subnodes in child_specs:
+                        chunk_bytes, cur = _write_node_at(cur, chunk_name, chunk_props, child_subnodes)
+                        child_chunks.append(chunk_bytes)
                     cur += 13
                     child_chunks.append(b"\x00" * 13)
                 end_off = cur
                 hdr = struct.pack("<IIIB", end_off, len(props), len(prop_bytes), len(name.encode("utf-8")))
                 return hdr + name.encode("utf-8") + bytes(prop_bytes) + b"".join(child_chunks), end_off
 
-            o_specs = [
+            obj_specs = [
                 ("Model", [("L", model_id), ("S", f"{model_name}\x00\x01Model"), ("S", "Mesh")], ()),
                 ("Geometry", [("L", geom_id), ("S", "Geo\x00\x01Geometry"), ("S", "Mesh")], ()),
-                ("Deformer", [("L", bs_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")], ()),
+                ("Deformer", [("L", blendshape_id), ("S", "BS\x00\x01Deformer"), ("S", "BlendShape")], ()),
             ]
-            c_specs = [
+            child_node_specs = [
                 ("C", [("S", "OO"), ("L", geom_id), ("L", model_id)], ()),
-                ("C", [("S", "OO"), ("L", bs_id), ("L", geom_id)], ()),
+                ("C", [("S", "OO"), ("L", blendshape_id), ("L", geom_id)], ()),
             ]
-            for s_idx, s_name in enumerate(shape_names):
-                ch_id = 400 + s_idx
-                o_specs.append(("Deformer", [("L", ch_id), ("S", f"{s_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")], ()))
-                c_specs.append(("C", [("S", "OO"), ("L", ch_id), ("L", bs_id)], ()))
+            for shape_idx, shape_name in enumerate(shape_names):
+                channel_id = 400 + shape_idx
+                obj_specs.append(("Deformer", [("L", channel_id), ("S", f"{shape_name}\x00\x01Deformer"), ("S", "BlendShapeChannel")], ()))
+                child_node_specs.append(("C", [("S", "OO"), ("L", channel_id), ("L", blendshape_id)], ()))
 
-            obj_blob, next_off = _write_node_at(27, "Objects", (), o_specs)
-            conn_blob, _ = _write_node_at(next_off, "Connections", (), c_specs)
+            obj_blob, next_off = _write_node_at(27, "Objects", (), obj_specs)
+            conn_blob, _ = _write_node_at(next_off, "Connections", (), child_node_specs)
             fbx_out.parent.mkdir(parents=True, exist_ok=True)
             fbx_out.write_bytes(header + obj_blob + conn_blob + (b"\x00" * 13))
 
@@ -839,24 +839,24 @@ MonoBehaviour:
         # Build a 15-avatar Unity scene using SceneRoots
         scene_lines = ["%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"]
         root_ids: List[str] = []
-        for idx_av in range(1, 16):
-            go_id = 1000 + idx_av * 10
-            tr_id = 2000 + idx_av * 10
-            root_ids.append(str(tr_id))
-            act_flag = 1 if idx_av == 13 else 0
+        for avatar_idx in range(1, 16):
+            game_object_id = 1000 + avatar_idx * 10
+            transform_id = 2000 + avatar_idx * 10
+            root_ids.append(str(transform_id))
+            act_flag = 1 if avatar_idx == 13 else 0
             scene_lines.append(
-                f"--- !u!1 &{go_id}\nGameObject:\n  m_Name: Avatar_{idx_av:02d}\n  m_IsActive: {act_flag}\n"
-                f"--- !u!4 &{tr_id}\nTransform:\n  m_GameObject: {{fileID: {go_id}}}\n  m_Father: {{fileID: 0}}\n  m_Children:\n"
+                f"--- !u!1 &{game_object_id}\nGameObject:\n  m_Name: Avatar_{avatar_idx:02d}\n  m_IsActive: {act_flag}\n"
+                f"--- !u!4 &{transform_id}\nTransform:\n  m_GameObject: {{fileID: {game_object_id}}}\n  m_Father: {{fileID: 0}}\n  m_Children:\n"
             )
-            if idx_av == 13:
-                scene_lines[-1] += f"  - {{fileID: {tr_id + 1}}}\n"
+            if avatar_idx == 13:
+                scene_lines[-1] += f"  - {{fileID: {transform_id + 1}}}\n"
                 scene_lines.append(
-                    f"--- !u!1 &{go_id + 1}\nGameObject:\n  m_Name: Body\n  m_IsActive: 1\n"
-                    f"--- !u!4 &{tr_id + 1}\nTransform:\n  m_GameObject: {{fileID: {go_id + 1}}}\n  m_Father: {{fileID: {tr_id}}}\n  m_Children: []\n"
-                    f"--- !u!95 &{go_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {go_id}}}\n"
-                    f"--- !u!137 &{go_id + 3}\nSkinnedMeshRenderer:\n  m_GameObject: {{fileID: {go_id + 1}}}\n  m_Mesh: {{fileID: 4300000, guid: {avatar_prefab_guid}, type: 3}}\n"
+                    f"--- !u!1 &{game_object_id + 1}\nGameObject:\n  m_Name: Body\n  m_IsActive: 1\n"
+                    f"--- !u!4 &{transform_id + 1}\nTransform:\n  m_GameObject: {{fileID: {game_object_id + 1}}}\n  m_Father: {{fileID: {transform_id}}}\n  m_Children: []\n"
+                    f"--- !u!95 &{game_object_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {game_object_id}}}\n"
+                    f"--- !u!137 &{game_object_id + 3}\nSkinnedMeshRenderer:\n  m_GameObject: {{fileID: {game_object_id + 1}}}\n  m_Mesh: {{fileID: 4300000, guid: {avatar_prefab_guid}, type: 3}}\n"
                     f"  m_BlendShapeWeights:\n  - 0\n  - 85\n  - 100\n  - 25\n"
-                    f"--- !u!1001 &{go_id + 4}\nPrefabInstance:\n  m_TransformParent: {{fileID: {tr_id}}}\n"
+                    f"--- !u!1001 &{game_object_id + 4}\nPrefabInstance:\n  m_TransformParent: {{fileID: {transform_id}}}\n"
                     f"  m_SourcePrefab: {{fileID: 100100000, guid: {dress_prefab_guid}, type: 3}}\n"
                     f"  m_Modification:\n    m_Modifications:\n"
                     f"    - target: {{fileID: 10, guid: {dress_prefab_guid}, type: 3}}\n"
@@ -864,7 +864,7 @@ MonoBehaviour:
                 )
             else:
                 scene_lines[-1] += "  []\n"
-                scene_lines.append(f"--- !u!95 &{go_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {go_id}}}\n")
+                scene_lines.append(f"--- !u!95 &{game_object_id + 2}\nAnimator:\n  m_GameObject: {{fileID: {game_object_id}}}\n")
 
         scene_lines.append("--- !u!1660057539 &9223372036854775807\nSceneRoots:\n  m_Roots:\n")
         for rid in root_ids:
@@ -875,7 +875,7 @@ MonoBehaviour:
         # Pack into .unitypackage inside .zip to exercise full archive ingestion
         test_pkg = tmp_dir / "ShinanoTest.unitypackage"
         with tarfile.open(test_pkg, "w:gz") as tar_out:
-            for item_idx, rel_p in enumerate(
+            for item_idx, rel_path in enumerate(
                 [
                     ("Assets/ShinanoTest/ShinanoBase.fbx", avatar_fbx, uassets / "ShinanoBase.fbx.meta", avatar_prefab_guid),
                     ("Assets/ShinanoTest/CustomDress.fbx", dress_fbx, uassets / "CustomDress.fbx.meta", dress_guid),
@@ -883,18 +883,18 @@ MonoBehaviour:
                     ("Assets/ShinanoTest/TestMultiAvatar.unity", test_scene, None, "dddddddddddddddddddddddddddddddd"),
                 ]
             ):
-                unity_rel, asset_src, meta_src, g_str = rel_p
+                unity_rel, asset_src, meta_src, guid_str = rel_path
                 for sub_name, raw_bytes in [
-                    (f"{g_str}/pathname", unity_rel.encode("utf-8")),
-                    (f"{g_str}/asset", asset_src.read_bytes()),
+                    (f"{guid_str}/pathname", unity_rel.encode("utf-8")),
+                    (f"{guid_str}/asset", asset_src.read_bytes()),
                     (
-                        f"{g_str}/asset.meta",
-                        meta_src.read_bytes() if meta_src else f"fileFormatVersion: 2\nguid: {g_str}\n".encode("utf-8"),
+                        f"{guid_str}/asset.meta",
+                        meta_src.read_bytes() if meta_src else f"fileFormatVersion: 2\nguid: {guid_str}\n".encode("utf-8"),
                     ),
                 ]:
-                    t_info = tarfile.TarInfo(sub_name)
-                    t_info.size = len(raw_bytes)
-                    tar_out.addfile(t_info, io_stream.BytesIO(raw_bytes))
+                    tar_info = tarfile.TarInfo(sub_name)
+                    tar_info.size = len(raw_bytes)
+                    tar_out.addfile(tar_info, io_stream.BytesIO(raw_bytes))
 
         bundle_zip = tmp_dir / "AvatarPack.zip"
         with zipfile.ZipFile(bundle_zip, "w") as zip_out:
@@ -969,9 +969,9 @@ MonoBehaviour:
             and "Body" in zero_res["mesh_weights"]
             and "CustomDressMesh" in zero_res["mesh_weights"]
             and all(
-                abs(w_val) < 1e-6
+                abs(weight_val) < 1e-6
                 for mesh_map in zero_res["mesh_weights"].values()
-                for w_val in mesh_map.values()
+                for weight_val in mesh_map.values()
             )
         )
         suite_passed &= print_status_result(
@@ -1086,8 +1086,8 @@ def test_universal_npc_pipeline() -> bool:
         )
 
         # 2. PhysBone un-sided Skirt_0 vs Skirt_8 separation, wrist/ankle parents, & model INI scoping
-        chain_a = physbone_helper._normalize_gtav_chain_name("Skirt_0")
-        chain_b = physbone_helper._normalize_gtav_chain_name("Skirt_8")
+        chain_first = physbone_helper._normalize_gtav_chain_name("Skirt_0")
+        chain_second = physbone_helper._normalize_gtav_chain_name("Skirt_8")
         parent_hand, _tag_hand = physbone_helper.resolve_parent_bone_from_unity_chain(
             ["LeftHand", "LeftLowerArm"]
         )
@@ -1133,12 +1133,12 @@ def test_universal_npc_pipeline() -> bool:
         suite_passed &= print_status_result(
             "PhysBone ring separation, limb parents & model-scoped INI merge",
             (
-                chain_a != chain_b
+                chain_first != chain_second
                 and parent_hand == "SKEL_L_Hand"
                 and parent_shoe == "SKEL_R_Foot"
                 and models_found == {"player_one", "ig_lamardavis"}
             ),
-            f"rings={chain_a}/{chain_b} models={sorted(models_found)}",
+            f"rings={chain_first}/{chain_second} models={sorted(models_found)}",
         )
 
         # 3. Eye blink curved lash fit ignoring below-eye stray brow micro-deltas
@@ -1297,9 +1297,9 @@ def test_universal_npc_pipeline() -> bool:
         import repack_and_deploy_everything as repack_helper
 
         plugin_dir = PROJECT_ROOT_DIR / "unity_plugin"
-        editor_cs_files = sorted((plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor").glob("*.cs"))
-        cs_lengths_ok = bool(editor_cs_files) and all(
-            len(cs_path.read_text(encoding="utf-8").splitlines()) <= 500 for cs_path in editor_cs_files
+        editor_csharp_files = sorted((plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor").glob("*.cs"))
+        csharp_lengths_ok = bool(editor_csharp_files) and all(
+            len(csharp_path.read_text(encoding="utf-8").splitlines()) <= 500 for csharp_path in editor_csharp_files
         )
         existing_asset = mock_unity_root / "Assets" / "KeepMe.txt"
         existing_asset.write_text("do-not-touch", encoding="utf-8")
@@ -1322,13 +1322,13 @@ def test_universal_npc_pipeline() -> bool:
         (mock_gtav / "RageOpenV.asi").write_bytes(b"MODS_READER")
         (mock_gtav / "GTAVVToon.ini").write_text("; custom\n", encoding="utf-8")
         repack_helper.sync_gtav_runtime_mods(PROJECT_ROOT_DIR, mock_gtav, overwrite_inis=False)
-        rt_status = repack_helper.inspect_gtav_runtime_prerequisites(mock_gtav)
+        runtime_status = repack_helper.inspect_gtav_runtime_prerequisites(mock_gtav)
         runtime_sync_ok = (
-            rt_status["asi_loader_ok"]
-            and rt_status["scripthookv_ok"]
-            and rt_status["mods_loader_ok"]
-            and rt_status["physbones_asi_ok"]
-            and rt_status["vtoon_asi_ok"]
+            runtime_status["asi_loader_ok"]
+            and runtime_status["scripthookv_ok"]
+            and runtime_status["mods_loader_ok"]
+            and runtime_status["physbones_asi_ok"]
+            and runtime_status["vtoon_asi_ok"]
             and (mock_gtav / "GTAVVToon.ini").read_text(encoding="utf-8") == "; custom\n"
         )
 
@@ -1351,7 +1351,7 @@ def test_universal_npc_pipeline() -> bool:
             and isinstance(selected_name, str)
             and protag_ids_ok
             and win_split_ok
-            and cs_lengths_ok
+            and csharp_lengths_ok
             and runtime_sync_ok
             and not legacy_plugin_dir.exists()
             and 'Tools/VRCAvatar2GTAV/Export Avatar to GTA V' in win_txt
@@ -1407,13 +1407,13 @@ def test_universal_npc_pipeline() -> bool:
         import unittest.mock
         import error_handler_helper as err_helper
 
-        ws_bundled = err_helper.resolve_workspace_root(
+        workspace_bundled = err_helper.resolve_workspace_root(
             tmp_root / "SomeUnityProj" / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
         )
-        ws_standalone = err_helper.resolve_workspace_root(tmp_root / "StandaloneRepo")
-        ws_redirect_ok = (
-            ws_bundled == (tmp_root / "SomeUnityProj" / "VRCAvatar2GTAV_Work").resolve()
-            and ws_standalone == (tmp_root / "StandaloneRepo").resolve()
+        workspace_standalone = err_helper.resolve_workspace_root(tmp_root / "StandaloneRepo")
+        workspace_redirect_ok = (
+            workspace_bundled == (tmp_root / "SomeUnityProj" / "VRCAvatar2GTAV_Work").resolve()
+            and workspace_standalone == (tmp_root / "StandaloneRepo").resolve()
         )
 
         # Verify texture_overrides + atlas_size=512 + normal_size=64 cleanly with mocked rage build
@@ -1465,11 +1465,11 @@ def test_universal_npc_pipeline() -> bool:
                     vtoon_char_id=0,
                     sync_to_game=False,
                 )
-        norm_check_sz = Image.open(atlas_ovr_res["normal_png"]).size
+        normal_check_size = Image.open(atlas_ovr_res["normal_png"]).size
         diff_px = Image.open(atlas_ovr_res["atlas_png"]).getpixel((16, 16))
         atlas_res_ok = (
             atlas_ovr_res["atlas_size"] == 512
-            and norm_check_sz == (64, 64)
+            and normal_check_size == (64, 64)
             and diff_px[1] > 180
         )
 
@@ -1539,29 +1539,29 @@ def test_universal_npc_pipeline() -> bool:
         )
 
         # Enforce byte-for-byte mirror parity between Google Drive source and Unity Toolchain bundle
-        bundled_tc_dir = plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
+        bundled_toolchain_dir = plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
         toolchain_mismatches: List[str] = []
-        if bundled_tc_dir.is_dir():
-            for tc_file in sorted(bundled_tc_dir.rglob("*")):
-                if not tc_file.is_file() or tc_file.name.endswith(".meta"):
+        if bundled_toolchain_dir.is_dir():
+            for toolchain_file in sorted(bundled_toolchain_dir.rglob("*")):
+                if not toolchain_file.is_file() or toolchain_file.name.endswith(".meta"):
                     continue
-                rel_tc = tc_file.relative_to(bundled_tc_dir)
-                if rel_tc.as_posix() == "vrc2gtav.cfg" or "__pycache__" in rel_tc.parts:
+                rel_toolchain = toolchain_file.relative_to(bundled_toolchain_dir)
+                if rel_toolchain.as_posix() == "vrc2gtav.cfg" or "__pycache__" in rel_toolchain.parts:
                     continue
-                orig_file = PROJECT_ROOT_DIR / rel_tc
-                if not orig_file.is_file() or tc_file.read_bytes() != orig_file.read_bytes():
-                    toolchain_mismatches.append(rel_tc.as_posix())
-        disc_cs = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavConfigDiscovery.cs").read_text(encoding="utf-8")
-        cmd_cs = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavCommandBuilder.cs").read_text(encoding="utf-8")
+                orig_file = PROJECT_ROOT_DIR / rel_toolchain
+                if not orig_file.is_file() or toolchain_file.read_bytes() != orig_file.read_bytes():
+                    toolchain_mismatches.append(rel_toolchain.as_posix())
+        disc_csharp = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavConfigDiscovery.cs").read_text(encoding="utf-8")
+        cmd_csharp = (plugin_dir / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavCommandBuilder.cs").read_text(encoding="utf-8")
         bundled_first_ok = (
             not toolchain_mismatches
-            and "if (IsValidRepoRoot(bundled)) return Path.GetFullPath(bundled);" in disc_cs
-            and "PreferBundledToolchain" in cmd_cs
+            and "if (IsValidRepoRoot(bundled)) return Path.GetFullPath(bundled);" in disc_csharp
+            and "PreferBundledToolchain" in cmd_csharp
         )
         suite_passed &= print_status_result(
             "Prefab scoped ingest, protagonist VToon IDs & non-destructive Unity plugin install",
-            unity_plugin_ok and budget_ok and ws_redirect_ok and atlas_res_ok and sec_budget_ok and pkg_paths_ok and bundled_first_ok and len(editor_cs_files) == 9,
-            f"kind={ingested_prefab.get('source_kind')} cs_files={len(editor_cs_files)} pkg_entries={len(packed_asset_paths)} bundled_first={bundled_first_ok} mismatches={len(toolchain_mismatches)}",
+            unity_plugin_ok and budget_ok and workspace_redirect_ok and atlas_res_ok and sec_budget_ok and pkg_paths_ok and bundled_first_ok and len(editor_csharp_files) == 9,
+            f"kind={ingested_prefab.get('source_kind')} cs_files={len(editor_csharp_files)} pkg_entries={len(packed_asset_paths)} bundled_first={bundled_first_ok} mismatches={len(toolchain_mismatches)}",
         )
 
     return suite_passed

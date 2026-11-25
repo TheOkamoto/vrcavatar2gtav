@@ -416,8 +416,8 @@ def resolve_character_blendshapes(
         if not resolved_meshes and cfg_exists:
             loaded_zero, _ = load_blendshapes_cfg(effective_cfg)
             resolved_meshes = {
-                mesh_k: {shape_k: 0.0 for shape_k in shape_v}
-                for mesh_k, shape_v in loaded_zero.items()
+                zero_mesh_key: {zero_shape_key: 0.0 for zero_shape_key in shape_v}
+                for zero_mesh_key, shape_v in loaded_zero.items()
             }
         source_used = "fbx_zeroed"
         resolved_metadata = {
@@ -535,7 +535,7 @@ def apply_blendshapes_to_blender_object(
     mesh_obj: Any,
     shape_weights: Dict[str, float],
     reset_unlisted: bool = True,
-    allow_lr_symmetry: bool = False,
+    allow_left_right_symmetry: bool = False,
 ) -> Tuple[int, int]:
     """
     Apply a `{shape_name_or_index: weight}` dictionary to a Blender mesh object.
@@ -576,7 +576,7 @@ def apply_blendshapes_to_blender_object(
             applied_count += 1
             if abs(weight_val) > 1e-6:
                 active_count += 1
-        elif allow_lr_symmetry:
+        elif allow_left_right_symmetry:
             for side_suffix in ("_R", "_L"):
                 side_block = key_blocks.get(f"{shape_key}{side_suffix}")
                 if side_block is not None:
@@ -593,13 +593,13 @@ def apply_blendshapes_to_blender_scene(
     mesh_weights: Dict[str, Dict[str, float]],
     exclude_meshes: Sequence[str] = (),
     include_meshes: Optional[Sequence[str]] = None,
-    lr_symmetry_meshes: Sequence[str] = ("Body",),
+    left_right_symmetry_meshes: Sequence[str] = ("Body",),
     reset_unlisted: bool = True,
 ) -> Dict[str, Tuple[int, int]]:
     """Apply resolved blendshapes across matching objects in the active Blender scene."""
     excluded_set = set(exclude_meshes)
     included_set = set(include_meshes) if include_meshes is not None else None
-    symmetry_set = set(lr_symmetry_meshes)
+    symmetry_set = set(left_right_symmetry_meshes)
     summary_map: Dict[str, Tuple[int, int]] = {}
 
     for mesh_name, shape_dict in mesh_weights.items():
@@ -614,7 +614,7 @@ def apply_blendshapes_to_blender_scene(
             target_obj,
             shape_dict,
             reset_unlisted=reset_unlisted,
-            allow_lr_symmetry=mesh_name in symmetry_set,
+            allow_left_right_symmetry=mesh_name in symmetry_set,
         )
         summary_map[mesh_name] = counts
 
@@ -780,9 +780,9 @@ def apply_ma_shape_changers_and_syncs(
                 if not getattr(target_obj.data, "shape_keys", None):
                     continue
                 kblocks = target_obj.data.shape_keys.key_blocks
-                for shp_name, w_val in (shape_dict or {}).items():
+                for shp_name, sync_weight_val in (shape_dict or {}).items():
                     if shp_name in kblocks:
-                        kblocks[shp_name].value = float(w_val)
+                        kblocks[shp_name].value = float(sync_weight_val)
                         res["set_applied"] += 1
 
     for sync_item in ma_plan.get("blendshape_syncs") or ():

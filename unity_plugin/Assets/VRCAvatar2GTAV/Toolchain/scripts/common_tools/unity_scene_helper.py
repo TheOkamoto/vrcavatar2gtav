@@ -181,20 +181,20 @@ def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
 
     current_type = ""
     current_id = ""
-    current_go: Dict[str, object] = {}
-    current_xf: Dict[str, object] = {}
-    current_pi: Dict[str, object] = {}
+    current_game_object: Dict[str, object] = {}
+    current_transform: Dict[str, object] = {}
+    current_prefab_instance: Dict[str, object] = {}
     in_modifications = False
 
     def flush_block() -> None:
         if not current_id:
             return
         if current_type == "1":
-            game_objects[current_id] = current_go
+            game_objects[current_id] = current_game_object
         elif current_type == "4":
-            transforms[current_id] = current_xf
+            transforms[current_id] = current_transform
         elif current_type == "1001":
-            prefab_instances[current_id] = current_pi
+            prefab_instances[current_id] = current_prefab_instance
 
     with open(yaml_path, "r", encoding="utf-8", errors="ignore") as yaml_handle:
         for raw_line in yaml_handle:
@@ -205,9 +205,9 @@ def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
                 current_id = header_tokens[2].lstrip("&") if len(header_tokens) > 2 else ""
                 in_modifications = False
                 if current_type == "1":
-                    current_go = {"name": "", "active": 1}
+                    current_game_object = {"name": "", "active": 1}
                 elif current_type == "4":
-                    current_xf = {
+                    current_transform = {
                         "go": "",
                         "father": "0",
                         "scale": DEFAULT_SCALE,
@@ -216,7 +216,7 @@ def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
                         "src_guid": "",
                     }
                 elif current_type == "1001":
-                    current_pi = {
+                    current_prefab_instance = {
                         "parent": "0",
                         "source_guid": "",
                         "mods": [],
@@ -225,36 +225,36 @@ def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
 
             if current_type == "1":
                 if raw_line.startswith("  m_Name:"):
-                    current_go["name"] = decode_unity_name(raw_line.split(":", 1)[1])
+                    current_game_object["name"] = decode_unity_name(raw_line.split(":", 1)[1])
                 elif raw_line.startswith("  m_IsActive:"):
                     raw_active = raw_line.split(":", 1)[1].strip()
-                    current_go["active"] = 0 if raw_active == "0" else 1
+                    current_game_object["active"] = 0 if raw_active == "0" else 1
 
             elif current_type == "4":
                 if raw_line.startswith("  m_GameObject:"):
-                    current_xf["go"] = _extract_file_id(raw_line)
+                    current_transform["go"] = _extract_file_id(raw_line)
                 elif raw_line.startswith("  m_Father:"):
                     father_id = _extract_file_id(raw_line)
-                    current_xf["father"] = father_id or "0"
+                    current_transform["father"] = father_id or "0"
                 elif raw_line.startswith("  m_LocalScale:"):
-                    current_xf["scale"] = _parse_inline_vec3(raw_line.split(":", 1)[1])
+                    current_transform["scale"] = _parse_inline_vec3(raw_line.split(":", 1)[1])
                 elif raw_line.startswith("  m_PrefabInstance:"):
-                    current_xf["pi"] = _extract_file_id(raw_line)
+                    current_transform["pi"] = _extract_file_id(raw_line)
                 elif raw_line.startswith("  m_CorrespondingSourceObject:"):
-                    current_xf["src_file_id"] = _extract_file_id(raw_line)
-                    current_xf["src_guid"] = _extract_guid(raw_line)
+                    current_transform["src_file_id"] = _extract_file_id(raw_line)
+                    current_transform["src_guid"] = _extract_guid(raw_line)
 
             elif current_type == "1001":
                 if raw_line.startswith("    m_TransformParent:"):
                     parent_id = _extract_file_id(raw_line)
-                    current_pi["parent"] = parent_id or "0"
+                    current_prefab_instance["parent"] = parent_id or "0"
                 elif raw_line.startswith("  m_SourcePrefab:") or raw_line.startswith("    m_SourcePrefab:"):
-                    current_pi["source_guid"] = _extract_guid(raw_line)
+                    current_prefab_instance["source_guid"] = _extract_guid(raw_line)
                 elif raw_line.startswith("    m_Modifications:"):
                     in_modifications = True
                 elif in_modifications:
                     if raw_line.startswith("    - target:"):
-                        current_pi["mods"].append(
+                        current_prefab_instance["mods"].append(
                             {
                                 "target_id": _extract_file_id(raw_line),
                                 "target_guid": _extract_guid(raw_line),
@@ -262,11 +262,11 @@ def _stream_parse_unity_yaml_uncached(yaml_path: Path) -> Dict[str, object]:
                                 "val": "",
                             }
                         )
-                    elif raw_line.startswith("      propertyPath:") and current_pi["mods"]:
-                        current_pi["mods"][-1]["prop"] = raw_line.split(":", 1)[1].strip()
-                    elif raw_line.startswith("      value:") and current_pi["mods"]:
+                    elif raw_line.startswith("      propertyPath:") and current_prefab_instance["mods"]:
+                        current_prefab_instance["mods"][-1]["prop"] = raw_line.split(":", 1)[1].strip()
+                    elif raw_line.startswith("      value:") and current_prefab_instance["mods"]:
                         raw_val = raw_line.split(":", 1)[1].strip()
-                        current_pi["mods"][-1]["val"] = decode_unity_name(raw_val)
+                        current_prefab_instance["mods"][-1]["val"] = decode_unity_name(raw_val)
                     elif raw_line.startswith("    m_") or raw_line.startswith("  m_"):
                         in_modifications = False
 
@@ -362,16 +362,16 @@ def _load_prefab_file_id_names(asset_path: Path) -> Dict[str, str]:
     id_to_name: Dict[str, str] = {}
     if asset_path.suffix.lower() == ".prefab" and asset_path.is_file():
         parsed = _stream_parse_unity_yaml(asset_path)
-        go_map: Dict[str, Dict[str, object]] = parsed["game_objects"]  # type: ignore[assignment]
-        xf_map: Dict[str, Dict[str, object]] = parsed["transforms"]  # type: ignore[assignment]
-        for go_id, go_info in go_map.items():
-            go_name = str(go_info.get("name", ""))
-            if go_name:
-                id_to_name[go_id] = go_name
-        for xf_id, xf_info in xf_map.items():
-            go_name = str(go_map.get(str(xf_info.get("go", "")), {}).get("name", ""))
-            if go_name:
-                id_to_name[xf_id] = go_name
+        game_object_map: Dict[str, Dict[str, object]] = parsed["game_objects"]  # type: ignore[assignment]
+        transform_map: Dict[str, Dict[str, object]] = parsed["transforms"]  # type: ignore[assignment]
+        for game_object_id, game_object_info in game_object_map.items():
+            game_object_name = str(game_object_info.get("name", ""))
+            if game_object_name:
+                id_to_name[game_object_id] = game_object_name
+        for transform_id, transform_info in transform_map.items():
+            game_object_name = str(game_object_map.get(str(transform_info.get("go", "")), {}).get("name", ""))
+            if game_object_name:
+                id_to_name[transform_id] = game_object_name
     elif asset_path.suffix.lower() == ".fbx":
         meta_file = Path(f"{asset_path}.meta")
         if meta_file.is_file():
@@ -395,18 +395,18 @@ def _load_prefab_file_id_names(asset_path: Path) -> Dict[str, str]:
     return id_to_name
 
 
-def _extract_pi_identity(
-    pi_info: Dict[str, object],
-    root_go_fid: str = "",
+def _extract_prefab_instance_identity(
+    prefab_instance_info: Dict[str, object],
+    root_game_object_file_id: str = "",
 ) -> Tuple[str, Optional[int]]:
     """Derive a PrefabInstance display name and root active state from its m_Modifications."""
     found_name = ""
     found_active: Optional[int] = None
     root_name_target = ""
-    src_guid = str(pi_info.get("source_guid", "")).lower()
+    src_guid = str(prefab_instance_info.get("source_guid", "")).lower()
     active_by_target: Dict[str, int] = {}
 
-    for mod_item in pi_info.get("mods", []):  # type: ignore[union-attr]
+    for mod_item in prefab_instance_info.get("mods", []):  # type: ignore[union-attr]
         prop_name = str(mod_item.get("prop", ""))
         val_str = str(mod_item.get("val", ""))
         target_id = str(mod_item.get("target_id", ""))
@@ -421,8 +421,8 @@ def _extract_pi_identity(
             if not src_guid or not target_guid or target_guid == src_guid:
                 active_by_target[target_id] = active_val
 
-    if root_go_fid and root_go_fid in active_by_target:
-        found_active = active_by_target[root_go_fid]
+    if root_game_object_file_id and root_game_object_file_id in active_by_target:
+        found_active = active_by_target[root_game_object_file_id]
     elif root_name_target and root_name_target in active_by_target:
         found_active = active_by_target[root_name_target]
     elif not root_name_target and "100000" in active_by_target:
@@ -445,8 +445,8 @@ def _select_target_root(
     `'xf'`, `'pi'`, or `''` if nothing matched.
     """
     children_map: Dict[str, List[str]] = {}
-    for xf_id, xf_info in transforms.items():
-        children_map.setdefault(str(xf_info.get("father", "0")), []).append(xf_id)
+    for transform_id, transform_info in transforms.items():
+        children_map.setdefault(str(transform_info.get("father", "0")), []).append(transform_id)
 
     candidates: List[Tuple[int, str, str, str, Optional[bool]]] = []
     normalized_target = avatar_name.strip().lower() if avatar_name else ""
@@ -475,38 +475,38 @@ def _select_target_root(
             base_score += 40
         return base_score
 
-    for xf_id, xf_info in transforms.items():
-        go_info = game_objects.get(str(xf_info.get("go", "")), {})
-        go_name = str(go_info.get("name", ""))
-        if not go_name:
+    for transform_id, transform_info in transforms.items():
+        game_object_info = game_objects.get(str(transform_info.get("go", "")), {})
+        game_object_name = str(game_object_info.get("name", ""))
+        if not game_object_name:
             continue
-        is_top_level = str(xf_info.get("father", "0")) in ("0", "")
+        is_top_level = str(transform_info.get("father", "0")) in ("0", "")
         child_names = {
             str(game_objects.get(str(transforms[child_id].get("go", "")), {}).get("name", "")).lower()
-            for child_id in children_map.get(xf_id, [])
+            for child_id in children_map.get(transform_id, [])
         }
         has_armature = any(child_name.startswith("armature") for child_name in child_names)
         if not is_top_level and not has_armature and not normalized_target:
             continue
-        active_flag = bool(go_info.get("active", 1))
-        match_score = score_candidate(go_name, active_flag, has_armature)
+        active_flag = bool(game_object_info.get("active", 1))
+        match_score = score_candidate(game_object_name, active_flag, has_armature)
         if match_score >= 0:
             if is_top_level:
                 match_score += 25
-            candidates.append((match_score, "xf", xf_id, go_name, active_flag))
+            candidates.append((match_score, "xf", transform_id, game_object_name, active_flag))
 
-    for pi_id, pi_info in prefab_instances.items():
-        if str(pi_info.get("parent", "0")) not in ("0", "") and not normalized_target:
+    for prefab_instance_id, prefab_instance_info in prefab_instances.items():
+        if str(prefab_instance_info.get("parent", "0")) not in ("0", "") and not normalized_target:
             continue
-        pi_name, pi_active = _extract_pi_identity(pi_info)
-        if not pi_name:
+        prefab_instance_name, prefab_instance_active = _extract_prefab_instance_identity(prefab_instance_info)
+        if not prefab_instance_name:
             continue
-        active_flag = True if pi_active is None else bool(pi_active)
-        match_score = score_candidate(pi_name, active_flag, True)
+        active_flag = True if prefab_instance_active is None else bool(prefab_instance_active)
+        match_score = score_candidate(prefab_instance_name, active_flag, True)
         if match_score >= 0:
-            if str(pi_info.get("parent", "0")) in ("0", ""):
+            if str(prefab_instance_info.get("parent", "0")) in ("0", ""):
                 match_score += 15
-            candidates.append((match_score, "pi", pi_id, pi_name, active_flag))
+            candidates.append((match_score, "pi", prefab_instance_id, prefab_instance_name, active_flag))
 
     if not candidates:
         return ("", "", "", None)
@@ -541,8 +541,8 @@ def _priority_search_dirs(
     return ordered_dirs
 
 
-def _extract_pi_scale_mods(
-    pi_info: Dict[str, object],
+def _extract_prefab_instance_scale_mods(
+    prefab_instance_info: Dict[str, object],
     tolerance: float,
 ) -> Tuple[Dict[Tuple[str, str], Tuple[float, float, float]], Dict[Tuple[str, str], str], Set[Tuple[str, str]]]:
     """Collect per-(guid, fileID) scale modifications, renames, and disabled states."""
@@ -550,7 +550,7 @@ def _extract_pi_scale_mods(
     target_names: Dict[Tuple[str, str], str] = {}
     disabled_targets: Set[Tuple[str, str]] = set()
 
-    for mod_item in pi_info.get("mods", []):  # type: ignore[union-attr]
+    for mod_item in prefab_instance_info.get("mods", []):  # type: ignore[union-attr]
         target_key = (str(mod_item.get("target_guid", "")), str(mod_item.get("target_id", "")))
         prop_name = str(mod_item.get("prop", ""))
         val_str = str(mod_item.get("val", ""))
@@ -616,8 +616,8 @@ def extract_unity_avatar_config(
     result["root_active"] = root_active
 
     children_map: Dict[str, List[str]] = {}
-    for xf_id, xf_info in transforms.items():
-        children_map.setdefault(str(xf_info.get("father", "0")), []).append(xf_id)
+    for transform_id, transform_info in transforms.items():
+        children_map.setdefault(str(transform_info.get("father", "0")), []).append(transform_id)
 
     bone_scales: Dict[str, Tuple[float, float, float]] = {}
     node_scales: Dict[str, Tuple[float, float, float]] = {}
@@ -636,42 +636,42 @@ def extract_unity_avatar_config(
         node_chain_scales: Dict[Tuple[str, str], List[Tuple[float, float, float]]] = {}
         queue: deque = deque([(root_id, (resolved_name,))])
         while queue:
-            cur_xf_id, cur_path = queue.popleft()
-            subtree_xforms.add(cur_xf_id)
-            xf_info = transforms.get(cur_xf_id, {})
-            go_info = game_objects.get(str(xf_info.get("go", "")), {})
-            go_name = str(go_info.get("name", "")).strip()
-            go_active = True if cur_xf_id == root_id else bool(go_info.get("active", 1))
+            cur_transform_id, cur_path = queue.popleft()
+            subtree_xforms.add(cur_transform_id)
+            transform_info = transforms.get(cur_transform_id, {})
+            game_object_info = game_objects.get(str(transform_info.get("go", "")), {})
+            game_object_name = str(game_object_info.get("name", "")).strip()
+            game_object_active = True if cur_transform_id == root_id else bool(game_object_info.get("active", 1))
 
-            lower_node = go_name.lower()
+            lower_node = game_object_name.lower()
             if lower_node in _ALL_DEFAULT_HAIR_NAMES:
-                base_hair_flags.append(bool(go_info.get("active", 1)))
+                base_hair_flags.append(bool(game_object_info.get("active", 1)))
 
-            if not go_active:
+            if not game_object_active:
                 continue
 
-            node_scale = xf_info.get("scale", DEFAULT_SCALE)
+            node_scale = transform_info.get("scale", DEFAULT_SCALE)
             if isinstance(node_scale, tuple) and not is_unit_scale(node_scale, tolerance=tolerance):
-                if not _is_ignored_scale_node(go_name):
-                    if cur_xf_id == root_id:
+                if not _is_ignored_scale_node(game_object_name):
+                    if cur_transform_id == root_id:
                         root_scale = node_scale
                     elif lower_node in ("armature", "armature.1") and len(cur_path) <= 3:
                         if is_unit_scale(armature_scale, tolerance=tolerance):
                             armature_scale = node_scale
-                    node_scales.setdefault(go_name, node_scale)
+                    node_scales.setdefault(game_object_name, node_scale)
                     in_armature = any(segment.lower().startswith("armature") for segment in cur_path)
                     if in_armature and not lower_node.startswith("armature"):
                         arm_index = next(
                             idx for idx, segment in enumerate(cur_path) if segment.lower().startswith("armature")
                         )
                         arm_root_key = "/".join(cur_path[: arm_index + 1])
-                        chain_key = (arm_root_key, go_name)
+                        chain_key = (arm_root_key, game_object_name)
                         node_chain_scales.setdefault(chain_key, []).append(node_scale)
 
-            for child_xf_id in children_map.get(cur_xf_id, []):
-                child_go_id = str(transforms.get(child_xf_id, {}).get("go", ""))
-                child_name = str(game_objects.get(child_go_id, {}).get("name", ""))
-                queue.append((child_xf_id, cur_path + (child_name,)))
+            for child_transform_id in children_map.get(cur_transform_id, []):
+                child_game_object_id = str(transforms.get(child_transform_id, {}).get("go", ""))
+                child_name = str(game_objects.get(child_game_object_id, {}).get("name", ""))
+                queue.append((child_transform_id, cur_path + (child_name,)))
 
         # Collapse Marshmallow PB / PhysBone duplicate wrapper nodes (e.g., 0.5 * 2.0 == 1.0).
         for (_arm_root_key, bone_name), scale_list in node_chain_scales.items():
@@ -686,13 +686,13 @@ def extract_unity_avatar_config(
             if not is_unit_scale(combined_scale, tolerance=tolerance):
                 bone_scales.setdefault(bone_name, combined_scale)
 
-        for pi_id, pi_info in prefab_instances.items():
-            parent_xf = str(pi_info.get("parent", "0"))
-            if parent_xf in subtree_xforms:
-                parent_go = game_objects.get(str(transforms.get(parent_xf, {}).get("go", "")), {})
-                if parent_xf == root_id or bool(parent_go.get("active", 1)):
-                    parent_name = str(parent_go.get("name", ""))
-                    relevant_pis.append((pi_id, parent_name))
+        for prefab_instance_id, prefab_instance_info in prefab_instances.items():
+            parent_transform = str(prefab_instance_info.get("parent", "0"))
+            if parent_transform in subtree_xforms:
+                parent_game_object = game_objects.get(str(transforms.get(parent_transform, {}).get("go", "")), {})
+                if parent_transform == root_id or bool(parent_game_object.get("active", 1)):
+                    parent_name = str(parent_game_object.get("name", ""))
+                    relevant_pis.append((prefab_instance_id, parent_name))
     else:
         relevant_pis.append((root_id, ""))
 
@@ -704,21 +704,21 @@ def extract_unity_avatar_config(
                 break
 
     needed_guids: Set[str] = set()
-    pi_name_tokens: List[str] = []
-    for pi_id, _parent_name in relevant_pis:
-        pi_info = prefab_instances[pi_id]
-        pi_display_name, pi_active_flag = _extract_pi_identity(pi_info)
-        if pi_active_flag == 0:
+    prefab_instance_name_tokens: List[str] = []
+    for prefab_instance_id, _parent_name in relevant_pis:
+        prefab_instance_info = prefab_instances[prefab_instance_id]
+        prefab_instance_display_name, prefab_instance_active_flag = _extract_prefab_instance_identity(prefab_instance_info)
+        if prefab_instance_active_flag == 0:
             continue
-        scale_mods, _, _ = _extract_pi_scale_mods(pi_info, tolerance=tolerance)
-        if scale_mods and pi_display_name:
-            for split_part in pi_display_name.replace("_", " ").split():
+        scale_mods, _, _ = _extract_prefab_instance_scale_mods(prefab_instance_info, tolerance=tolerance)
+        if scale_mods and prefab_instance_display_name:
+            for split_part in prefab_instance_display_name.replace("_", " ").split():
                 if len(split_part) >= 3:
-                    pi_name_tokens.append(split_part.lower())
+                    prefab_instance_name_tokens.append(split_part.lower())
         for target_guid, _target_id in scale_mods:
             if target_guid:
                 needed_guids.add(target_guid)
-        src_guid = str(pi_info.get("source_guid", ""))
+        src_guid = str(prefab_instance_info.get("source_guid", ""))
         if src_guid and (scale_mods or root_kind == "pi"):
             needed_guids.add(src_guid)
 
@@ -727,7 +727,7 @@ def extract_unity_avatar_config(
         for word in (
             [resolved_name, avatar_name or ""]
             + list(character_hints)
-            + pi_name_tokens
+            + prefab_instance_name_tokens
             + ["shinano", "milltina", "miltina", "neko"]
         )
         if word and word.strip()
@@ -737,27 +737,27 @@ def extract_unity_avatar_config(
         search_dirs = _priority_search_dirs(scene_file, assets_dir, hint_keywords)
         guid_paths = _collect_guid_paths_bounded(needed_guids, search_dirs)
 
-    for pi_id, parent_name in relevant_pis:
-        pi_info = prefab_instances[pi_id]
-        pi_name, pi_active = _extract_pi_identity(pi_info)
-        if pi_active == 0:
+    for prefab_instance_id, parent_name in relevant_pis:
+        prefab_instance_info = prefab_instances[prefab_instance_id]
+        prefab_instance_name, prefab_instance_active = _extract_prefab_instance_identity(prefab_instance_info)
+        if prefab_instance_active == 0:
             continue
 
-        scale_mods, inline_names, disabled_targets = _extract_pi_scale_mods(pi_info, tolerance=tolerance)
+        scale_mods, inline_names, disabled_targets = _extract_prefab_instance_scale_mods(prefab_instance_info, tolerance=tolerance)
         lower_parent = parent_name.lower()
-        lower_pi = pi_name.lower()
+        lower_prefab_instance = prefab_instance_name.lower()
         looks_like_hair_child = (
             lower_parent in ("head", "hair_root")
             and (
-                "hair" in lower_pi
-                or "bob" in lower_pi
-                or "twin" in lower_pi
-                or "ponytail" in lower_pi
-                or "wig" in lower_pi
+                "hair" in lower_prefab_instance
+                or "bob" in lower_prefab_instance
+                or "twin" in lower_prefab_instance
+                or "ponytail" in lower_prefab_instance
+                or "wig" in lower_prefab_instance
             )
         )
-        if looks_like_hair_child and pi_name:
-            custom_hair_names.append(pi_name)
+        if looks_like_hair_child and prefab_instance_name:
+            custom_hair_names.append(prefab_instance_name)
 
         for target_key, scale_tuple in scale_mods.items():
             if target_key in disabled_targets:
@@ -766,7 +766,7 @@ def extract_unity_avatar_config(
             if not resolved_from_target and target_key[0] in guid_paths:
                 prefab_map = _load_prefab_file_id_names(guid_paths[target_key[0]])
                 resolved_from_target = prefab_map.get(target_key[1], "")
-            resolved_node = resolved_from_target or pi_name
+            resolved_node = resolved_from_target or prefab_instance_name
 
             if not resolved_node or _is_ignored_scale_node(resolved_node):
                 continue

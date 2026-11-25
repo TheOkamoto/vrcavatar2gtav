@@ -113,10 +113,10 @@ def ensure_rage_cli_ready(*, download_if_missing: bool = True) -> str:
                 except Exception:
                     pass
                 return str(downloaded_exe)
-        except Exception as dl_exc:
+        except Exception as download_exc:
             raise FileNotFoundError(
-                f"RAGE CLI ({exe_name}) missing and auto-download failed: {dl_exc}"
-            ) from dl_exc
+                f"RAGE CLI ({exe_name}) missing and auto-download failed: {download_exc}"
+            ) from download_exc
 
     raise FileNotFoundError(
         f"RAGE CLI ({exe_name}) not found. Click 'Download Required Tools & Setup' in Unity."
@@ -296,7 +296,7 @@ def discover_npc_location(
 
     # Choose primary ped archive: prefer streamedpeds_ig/strm/players, then componentpeds, then cutspeds, then DLC
     def _rank_archive_candidate(item: Tuple[Tuple[str, str], List[str]]) -> Tuple[int, int, str]:
-        (_outer_p, inner_rel_str), members_list = item
+        (_outer_path, inner_rel_str), members_list = item
         low_inner = inner_rel_str.lower()
         has_yft = any(mem.lower() == f"{ped_name}.yft" for mem in members_list)
         if "cutspeds" in low_inner:
@@ -317,7 +317,7 @@ def discover_npc_location(
     else:
         sorted_dlc = sorted(
             dlc_hits_by_pack.items(),
-            key=lambda kv_item: (0 if any(mem.lower() == f"{ped_name}.yft" for mem in kv_item[1]) else 1, kv_item[0][0]),
+            key=lambda keyval_item: (0 if any(mem.lower() == f"{ped_name}.yft" for mem in keyval_item[1]) else 1, keyval_item[0][0]),
         )
         (dlc_name, primary_outer_rpf, primary_inner_rel), primary_members = sorted_dlc[0]
         primary_source = f"dlc:{dlc_name}"
@@ -386,12 +386,12 @@ def discover_npc_location(
     prop_targets = [
         {
             "source": src_tag,
-            "outer_rpf": outer_p,
-            "inner_rpf_rel": inner_p,
+            "outer_rpf": prop_outer_rpf,
+            "inner_rpf_rel": inner_path,
             "prop_folder": f"{ped_name}_p",
             "members": sorted(set(mems)),
         }
-        for (src_tag, outer_p, inner_p), mems in sorted(props_by_inner.items())
+        for (src_tag, prop_outer_rpf, inner_path), mems in sorted(props_by_inner.items())
     ]
 
     return {
@@ -1010,8 +1010,8 @@ def repack_and_deploy_npc_entry(
     if gtav_dir.is_dir() and not (gtav_dir / "dinput8.dll").is_file():
         try:
             repack_helper.download_and_install_asi_loader(gtav_dir)
-        except Exception as dl_exc:
-            print(f"[WARN] Could not auto-download dinput8.dll ASI loader: {dl_exc}", flush=True)
+        except Exception as download_exc:
+            print(f"[WARN] Could not auto-download dinput8.dll ASI loader: {download_exc}", flush=True)
     repack_helper.print_gtav_runtime_status(gtav_dir)
     return deployed_paths
 
@@ -1025,7 +1025,7 @@ def build_rpf7_open_streaming(
     Build an uncompressed `OPEN` RPF7 archive via 4 MB streaming I/O (`< 16 MB` RAM),
     avoiding `rage.exe create` multi-gigabyte in-memory Vec OOM on large archives.
     """
-    start_ts = time.time()
+    start_timestamp = time.time()
     root_dir = Path(source_directory_path)
     out_path = Path(output_rpf_path)
     if not root_dir.is_dir():
@@ -1052,7 +1052,7 @@ def build_rpf7_open_streaming(
         cur_path = nodes[cur_idx]["path"]
         children = sorted(
             cur_path.iterdir(),
-            key=lambda item_p: (item_p.name.encode("ascii", "replace").lower(), item_p.name),
+            key=lambda item_path: (item_path.name.encode("ascii", "replace").lower(), item_path.name),
         )
         nodes[cur_idx]["start"] = len(nodes)
         nodes[cur_idx]["count"] = len(children)
@@ -1149,12 +1149,12 @@ def build_rpf7_open_streaming(
                     d2_val = node_rec["start"]
                     d3_val = node_rec["count"]
                 elif node_rec["is_rsc7"]:
-                    f_size = node_rec["size"]
-                    d0_val = (node_rec["name_off"] & 0xFFFF) | ((f_size & 0xFFFF) << 16)
+                    entry_file_size = node_rec["size"]
+                    d0_val = (node_rec["name_off"] & 0xFFFF) | ((entry_file_size & 0xFFFF) << 16)
                     d1_val = (
                         0x80000000
                         | ((node_rec["sector"] & 0x7FFFFF) << 8)
-                        | ((f_size >> 16) & 0xFF)
+                        | ((entry_file_size >> 16) & 0xFF)
                     )
                     d2_val = node_rec["d2_val"]
                     d3_val = node_rec["d3_val"]
@@ -1181,16 +1181,16 @@ def build_rpf7_open_streaming(
                         written_payload += len(block)
                         if total_payload_bytes > 0:
                             pct = min(99.9, (written_payload / total_payload_bytes) * 100.0)
-                            now_ts = time.time()
-                            if (sys.stdout.isatty() and now_ts - last_tty_print >= 0.25) or (
+                            now_timestamp = time.time()
+                            if (sys.stdout.isatty() and now_timestamp - last_tty_print >= 0.25) or (
                                 not sys.stdout.isatty() and pct >= next_pct_step
                             ):
                                 bar_str = repack_helper.format_progress_bar(pct / 100.0)
                                 repack_helper.write_progress_line(
-                                    f"  {bar_str} {pct:5.1f}% ({written_payload / (1024.0 * 1024.0):.1f}/{total_mb:.1f} MB | {now_ts - start_ts:.1f}s)",
+                                    f"  {bar_str} {pct:5.1f}% ({written_payload / (1024.0 * 1024.0):.1f}/{total_mb:.1f} MB | {now_timestamp - start_timestamp:.1f}s)",
                                     is_final=False,
                                 )
-                                last_tty_print = now_ts
+                                last_tty_print = now_timestamp
                                 while next_pct_step <= pct:
                                     next_pct_step += 25.0
                 rem_bytes = node_rec["size"] % 512
@@ -1205,7 +1205,7 @@ def build_rpf7_open_streaming(
             except OSError:
                 pass
 
-    elapsed_sec = max(0.001, time.time() - start_ts)
+    elapsed_sec = max(0.001, time.time() - start_timestamp)
     final_mb = out_path.stat().st_size / (1024.0 * 1024.0)
     repack_helper.write_progress_line(
         f"  {repack_helper.format_progress_bar(1.0)} 100.0% ({final_mb:.1f} MB) Finished in {elapsed_sec:.1f}s",

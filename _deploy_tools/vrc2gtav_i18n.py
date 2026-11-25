@@ -66,10 +66,10 @@ def configure_utf8_stdio() -> None:
         return
     for stream_name in ("stdout", "stderr"):
         stream_obj = getattr(sys, stream_name, None)
-        reconfigure_fn = getattr(stream_obj, "reconfigure", None)
-        if callable(reconfigure_fn):
+        reconfigure_func = getattr(stream_obj, "reconfigure", None)
+        if callable(reconfigure_func):
             try:
-                reconfigure_fn(encoding="utf-8", errors="replace")
+                reconfigure_func(encoding="utf-8", errors="replace")
             except Exception:
                 pass
     _STDIO_CONFIGURED = True
@@ -203,9 +203,9 @@ def detect_system_language(
         current_locale, _encoding = locale.getlocale()
     except Exception:
         current_locale = None
-    normalized_py_locale = normalize_language_code(current_locale)
-    if normalized_py_locale in SUPPORTED_LANGUAGES:
-        return normalized_py_locale
+    normalized_python_locale = normalize_language_code(current_locale)
+    if normalized_python_locale in SUPPORTED_LANGUAGES:
+        return normalized_python_locale
 
     return DEFAULT_LANGUAGE
 

@@ -358,8 +358,8 @@ def pack_physbone_chains_to_gtav_budget(
                 included_gtav_bones.extend(gtav_bones)
             # Preserve exact casing for bone_mapping keys where available while dropping skipped chains
             bone_map_out = {
-                src_k: dst_v
-                for src_k, dst_v in template_bone_map.items()
+                source_key: dst_v
+                for source_key, dst_v in template_bone_map.items()
                 if dst_v not in excluded_gtav_bones
             }
             priority_report = build_physbone_priority_report_from_chains(
@@ -421,11 +421,11 @@ def pack_physbone_chains_to_gtav_budget(
                 for item_rec in rec_list
             ]
             has_zero_ring = any(
-                regex_module.search(r"[._]0$", root_nm) is not None for root_nm in root_names
+                regex_module.search(r"[._]0$", root_name) is not None for root_name in root_names
             )
             if has_zero_ring and len(set(root_names)) == len(root_names):
-                for item_rec, root_nm in zip(rec_list, root_names):
-                    split_grouped[(root_nm, parent_bone_name)] = [item_rec]
+                for item_rec, root_name in zip(rec_list, root_names):
+                    split_grouped[(root_name, parent_bone_name)] = [item_rec]
                 continue
         split_grouped[(group_stem, parent_bone_name)] = rec_list
     grouped = split_grouped
@@ -584,16 +584,16 @@ def pack_physbone_chains_to_gtav_budget(
         seg_slots = max(2, len(sampled_src))
         clean_stem = regex_module.sub(r"[^A-Za-z0-9_]+", "", group_stem)[:18] or f"Ch{grp_idx}"
         gtav_chain_name = f"{gtav_prefix}_{clean_stem}"
-        candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
+        candidate_bones = [f"{gtav_chain_name}_{bone_idx}" for bone_idx in range(seg_slots)]
         # Guarantee zero ELF uint16 hash collisions
         suffix_num = 1
-        while any(compute_gtav_bone_tag(bone_nm) in used_tags or bone_nm in custom_bones_out for bone_nm in candidate_bones):
+        while any(compute_gtav_bone_tag(bone_name) in used_tags or bone_name in custom_bones_out for bone_name in candidate_bones):
             gtav_chain_name = f"{gtav_prefix}_{clean_stem}_{suffix_num}"
-            candidate_bones = [f"{gtav_chain_name}_{b_idx}" for b_idx in range(seg_slots)]
+            candidate_bones = [f"{gtav_chain_name}_{bone_idx}" for bone_idx in range(seg_slots)]
             suffix_num += 1
-        for bone_nm in candidate_bones:
-            used_tags.add(compute_gtav_bone_tag(bone_nm))
-            custom_bones_out.append(bone_nm)
+        for bone_name in candidate_bones:
+            used_tags.add(compute_gtav_bone_tag(bone_name))
+            custom_bones_out.append(bone_name)
 
         chain_key = group_stem.lower()
         while chain_key in chains_out:
@@ -636,12 +636,12 @@ def pack_physbone_chains_to_gtav_budget(
         }
 
         for rec_item in rec_list:
-            sp_list = list(rec_item.get("spoke_bones") or [rec_item["root_bone"]])
-            for sp_idx, bone_item in enumerate(sp_list):
+            spoke_list = list(rec_item.get("spoke_bones") or [rec_item["root_bone"]])
+            for spoke_idx, bone_item in enumerate(spoke_list):
                 mapped_tier = min(
                     seg_slots - 1,
-                    int((sp_idx / max(1, len(sp_list) - 1)) * (seg_slots - 1) + 0.5)
-                    if len(sp_list) > 1
+                    int((spoke_idx / max(1, len(spoke_list) - 1)) * (seg_slots - 1) + 0.5)
+                    if len(spoke_list) > 1
                     else 0,
                 )
                 bone_map_out[bone_item.lower()] = candidate_bones[mapped_tier]
@@ -892,20 +892,20 @@ def resolve_character_physbones(
     elif source_used != "unity" and tmpl_specs and tmpl_parents and tmpl_bmap:
         # Keep explicit fallback from builtin template when scene and cfg are both absent
         fallback_chains: Dict[str, Dict[str, object]] = {}
-        excluded_fb_bones: Set[str] = set()
-        for ck_str, gn_str, sb_tup, gb_tup in tmpl_specs:
-            if not use_marshmallow and ck_str in marsh_only_set:
-                excluded_fb_bones.update(gb_tup)
+        excluded_fallback_bones: Set[str] = set()
+        for chain_key_str, gtav_name_str, source_bones_tuple, gtav_bones_tuple in tmpl_specs:
+            if not use_marshmallow and chain_key_str in marsh_only_set:
+                excluded_fallback_bones.update(gtav_bones_tuple)
                 continue
-            p_name = tmpl_parents[ck_str]
-            fallback_chains[ck_str] = {
-                "source_key": ck_str,
-                "gtav_chain_name": gn_str,
-                "root_bone": gb_tup[0],
-                "chain_bones": list(gb_tup),
-                "source_bones": list(sb_tup),
-                "parent_bone": p_name,
-                "parent_bone_tag": PARENT_BONE_TAGS.get(p_name, SKEL_PELVIS_TAG),
+            parent_bone_str = tmpl_parents[chain_key_str]
+            fallback_chains[chain_key_str] = {
+                "source_key": chain_key_str,
+                "gtav_chain_name": gtav_name_str,
+                "root_bone": gtav_bones_tuple[0],
+                "chain_bones": list(gtav_bones_tuple),
+                "source_bones": list(source_bones_tuple),
+                "parent_bone": parent_bone_str,
+                "parent_bone_tag": PARENT_BONE_TAGS.get(parent_bone_str, SKEL_PELVIS_TAG),
             }
         loaded_data = {
             "metadata": {
@@ -914,7 +914,7 @@ def resolve_character_physbones(
                 "marshmallow_pb": "true" if use_marshmallow else "false",
             },
             "bone_mapping": {
-                src_k: dst_v for src_k, dst_v in tmpl_bmap.items() if dst_v not in excluded_fb_bones
+                source_key: dst_v for source_key, dst_v in tmpl_bmap.items() if dst_v not in excluded_fallback_bones
             },
             "chains": fallback_chains,
         }
@@ -930,36 +930,36 @@ def resolve_character_physbones(
         and candidate_fbxs
         and (prune_orphaned is True or bool(override_excluded_meshes) or bool(override_active_meshes))
     ):
-        excluded_ci = {
+        excluded_lower = {
             str(mesh_item).strip().lower()
             for mesh_item in override_excluded_meshes
             if str(mesh_item).strip()
         }
-        active_override_ci = {
+        active_override_lower = {
             str(mesh_item).strip().lower()
             for mesh_item in override_active_meshes
             if str(mesh_item).strip()
         }
-        _all_fbx_b, _w_fbx_b, _par_fbx, mesh_w_by_file, fbx_has_skin = _inspect_fbx_weights_detailed(
-            candidate_fbxs, excluded_meshes=sorted(excluded_ci)
+        _all_fbx_bones, _weighted_fbx_bones, _par_fbx, mesh_weights_by_file_map, fbx_has_skin = _inspect_fbx_weights_detailed(
+            candidate_fbxs, excluded_meshes=sorted(excluded_lower)
         )
         if fbx_has_skin:
-            active_w_bones: Set[str] = set()
-            disabled_w_bones: Set[str] = set()
-            for file_mesh_map in mesh_w_by_file.values():
+            active_weighted_bones: Set[str] = set()
+            disabled_weighted_bones: Set[str] = set()
+            for file_mesh_map in mesh_weights_by_file_map.values():
                 for mesh_low, weight_set in file_mesh_map.items():
-                    is_excluded_mesh = mesh_low in excluded_ci or (
-                        bool(active_override_ci) and mesh_low not in active_override_ci
+                    is_excluded_mesh = mesh_low in excluded_lower or (
+                        bool(active_override_lower) and mesh_low not in active_override_lower
                     )
                     if is_excluded_mesh:
-                        disabled_w_bones.update(weight_set)
+                        disabled_weighted_bones.update(weight_set)
                     else:
-                        active_w_bones.update(weight_set)
+                        active_weighted_bones.update(weight_set)
             prune_res = prune_orphaned_physbone_chains(
                 loaded_data["chains"],
-                active_weighted_bones_ci=active_w_bones,
+                active_weighted_bones_lower=active_weighted_bones,
                 bone_mapping=loaded_data.get("bone_mapping"),
-                disabled_mesh_bones_ci=(disabled_w_bones - active_w_bones),
+                disabled_mesh_bones_lower=(disabled_weighted_bones - active_weighted_bones),
             )
             if prune_res["orphaned_physbones"]:
                 loaded_data["chains"] = prune_res["chains"]
@@ -969,7 +969,7 @@ def resolve_character_physbones(
                 if loaded_data.get("metadata") is not None:
                     loaded_data["metadata"]["orphaned_physbones_removed"] = len(orphaned_physbones)
 
-    chain_specs, parent_map, custom_bones, bone_mapping_ci = build_chain_specs_from_config(loaded_data)
+    chain_specs, parent_map, custom_bones, bone_mapping_lower = build_chain_specs_from_config(loaded_data)
     if loaded_data.get("metadata") is not None:
         loaded_data["metadata"]["marshmallow_pb"] = "true" if use_marshmallow else "false"
         loaded_data["metadata"]["chain_count"] = len(chain_specs)
@@ -1015,7 +1015,7 @@ def resolve_character_physbones(
         "chains": loaded_data.get("chains") or {},
         "metadata": loaded_data.get("metadata") or {},
         "bone_mapping": loaded_data.get("bone_mapping") or {},
-        "bone_mapping_ci": bone_mapping_ci,
+        "bone_mapping_ci": bone_mapping_lower,
         "chain_specs": chain_specs,
         "parent_map": parent_map,
         "custom_bones": custom_bones,
@@ -1163,7 +1163,7 @@ def build_dynamic_physbone_chains(
     chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
     parent_map: Dict[str, str],
     chain_cfgs: Dict[str, Dict[str, object]],
-    source_world_mat_fn: Callable[[str], Optional[Any]],
+    source_world_mat_func: Callable[[str], Optional[Any]],
     ped_world_matrices: Optional[Dict[str, Any]] = None,
     default_limit_rotation: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
@@ -1183,7 +1183,7 @@ def build_dynamic_physbone_chains(
         mapped_mats = []
         missing_flag = False
         for src_name in src_chain_bones:
-            world_mat = source_world_mat_fn(src_name)
+            world_mat = source_world_mat_func(src_name)
             if world_mat is None:
                 missing_flag = True
                 break
@@ -1196,9 +1196,9 @@ def build_dynamic_physbone_chains(
         # Synthesize virtual tip matrix when Unity chain has only 1 bone (e.g. Butt.L/R, UN_Bag_Ring)
         while len(mapped_mats) < len(gtav_chain_bones):
             last_mat = mapped_mats[-1]
-            end_pt = cfg_entry.get("endpoint_position", (0.0, 0.04, 0.0))
+            end_point = cfg_entry.get("endpoint_position", (0.0, 0.04, 0.0))
             end_vec = mathutils.Vector(
-                (float(end_pt[0]), float(end_pt[1]), float(end_pt[2]))
+                (float(end_point[0]), float(end_point[1]), float(end_point[2]))
             )
             if end_vec.length < 0.015:
                 end_vec = mathutils.Vector((0.0, 0.035, 0.0))
@@ -1250,8 +1250,8 @@ def build_dynamic_physbone_chains(
             else:
                 seg_len = 0.025
 
-            chain_t = min(1.0, max(0.0, cum_len / total_len))
-            angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+            chain_time = min(1.0, max(0.0, cum_len / total_len))
+            angle_scale = evaluate_curve(max_angle_curve, chain_time, default_val=1.0)
             node_max_angle = base_angle_x * angle_scale
             lim_axis_vec = compute_safe_local_limit_axis(
                 cur_world_mat,
@@ -1314,7 +1314,7 @@ def build_avatar_physbone_chains(
     chain_specs: Sequence[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]]],
     parent_map: Dict[str, str],
     cfg_path: Optional[str | Path] = None,
-    world_transform_fn: Optional[Callable[[object], object]] = None,
+    world_transform_func: Optional[Callable[[object], object]] = None,
     default_limit_rotation: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     """
@@ -1329,23 +1329,23 @@ def build_avatar_physbone_chains(
         else {"chains": {}}
     )
     chain_cfgs = loaded_cfg.get("chains", {})
-    vrc_bones_ci = {pbone.name.lower(): pbone for pbone in vrc_armature.pose.bones}
+    vrc_bones_lower = {pbone.name.lower(): pbone for pbone in vrc_armature.pose.bones}
     identity_mat = mathutils.Matrix.Identity(4)
 
     custom_bones: List[Dict[str, object]] = []
     chain_records: List[Dict[str, object]] = []
 
     for chain_key, gtav_chain_name, src_chain_bones, gtav_chain_bones in chain_specs:
-        if any(src_name.lower() not in vrc_bones_ci for src_name in src_chain_bones):
+        if any(src_name.lower() not in vrc_bones_lower for src_name in src_chain_bones):
             continue
         if len(gtav_chain_bones) < 2:
             continue
 
         mapped_world_mats: List[mathutils.Matrix] = []
         for src_name in src_chain_bones:
-            pose_bone = vrc_bones_ci[src_name.lower()]
+            pose_bone = vrc_bones_lower[src_name.lower()]
             src_world = vrc_armature.matrix_world @ pose_bone.matrix
-            tgt_world = world_transform_fn(src_world) if world_transform_fn else src_world.copy()
+            tgt_world = world_transform_func(src_world) if world_transform_func else src_world.copy()
             mapped_world_mats.append(tgt_world)
 
         cfg_entry = dict(chain_cfgs.get(chain_key, {}))
@@ -1388,8 +1388,8 @@ def build_avatar_physbone_chains(
             else:
                 seg_len = 0.025
 
-            chain_t = min(1.0, max(0.0, cum_len / total_len))
-            angle_scale = evaluate_curve(max_angle_curve, chain_t, default_val=1.0)
+            chain_time = min(1.0, max(0.0, cum_len / total_len))
+            angle_scale = evaluate_curve(max_angle_curve, chain_time, default_val=1.0)
             node_max_angle = base_angle_x * angle_scale
             lim_axis_tuple = compute_safe_local_limit_axis(
                 cur_world_mat,

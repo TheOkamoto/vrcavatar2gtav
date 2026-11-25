@@ -168,8 +168,8 @@ def build_vtoon_slot_from_mat(
     raw_border_col = _color_lin("_ShadowBorderColor", (1.0, 0.65, 0.74))
     raw_rim_col = _color_lin("_RimColor", (0.72, 0.74, 0.82))
     rim_raw_alpha = (colors.get("_RimColor") or (1, 1, 1, 0.5))[3]
-    raw_mc_col = _color_lin("_MatCapColor", (1.0, 1.0, 1.0))
-    mc_raw_alpha = (colors.get("_MatCapColor") or (1, 1, 1, 0.35))[3]
+    raw_matcap_col = _color_lin("_MatCapColor", (1.0, 1.0, 1.0))
+    matcap_raw_alpha = (colors.get("_MatCapColor") or (1, 1, 1, 0.35))[3]
 
     shadow_strength = floats.get("_ShadowStrength", 0.85 if use_shadow else 0.0)
     shadow_border = floats.get("_ShadowBorder", 0.50)
@@ -190,40 +190,40 @@ def build_vtoon_slot_from_mat(
         light_min = max(floats.get("_LightMinLimit", 0.08), 0.20)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.78)
         use_rim_default = 0.25 if slot_type == SLOT_SKIN else 0.0
-        use_mc_default = 0.0
+        use_matcap_default = 0.0
     elif slot_type == SLOT_EYES:
         shadow_strength = min(shadow_strength, 0.25)
         light_min = max(floats.get("_LightMinLimit", 0.25), 0.48)
         light_max = floats.get("_LightMaxLimit", 1.0)
         use_rim_default = 0.0
-        use_mc_default = 1.0
+        use_matcap_default = 1.0
     elif slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA):
         light_min = max(floats.get("_LightMinLimit", 0.10), 0.15)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.94)
         raw_shadow2_col = tuple(
-            min(raw_shadow_col[ch_idx], raw_shadow2_col[ch_idx])
-            for ch_idx in range(3)
+            min(raw_shadow_col[channel_idx], raw_shadow2_col[channel_idx])
+            for channel_idx in range(3)
         )
         use_rim_default = 1.0 if floats.get("_UseRim", 1.0) >= 0.5 else 0.4
-        use_mc_default = 1.0
+        use_matcap_default = 1.0
     elif slot_type == SLOT_NAILS:
         light_min = max(floats.get("_LightMinLimit", 0.12), 0.18)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.92)
         use_rim_default = 1.0
-        use_mc_default = 1.0
+        use_matcap_default = 1.0
     elif slot_type == SLOT_METAL:
         light_min = max(floats.get("_LightMinLimit", 0.12), 0.22)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.92)
         use_rim_default = 1.0
-        use_mc_default = 1.0
-        if raw_mc_col == (1.0, 1.0, 1.0):
-            raw_mc_col = (0.80, 0.72, 0.68)
-        mc_raw_alpha = max(mc_raw_alpha, 0.58)
+        use_matcap_default = 1.0
+        if raw_matcap_col == (1.0, 1.0, 1.0):
+            raw_matcap_col = (0.80, 0.72, 0.68)
+        matcap_raw_alpha = max(matcap_raw_alpha, 0.58)
     else:
         light_min = max(floats.get("_LightMinLimit", 0.06), 0.14)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.92)
         use_rim_default = 1.0 if floats.get("_UseRim", 0.0) >= 0.5 else 0.0
-        use_mc_default = 1.0 if floats.get("_UseMatCap", 0.0) >= 0.5 else 0.0
+        use_matcap_default = 1.0 if floats.get("_UseMatCap", 0.0) >= 0.5 else 0.0
 
     cull_mode = floats.get("_Cull", 2.0)
     double_sided = 1.0 if cull_mode < 0.5 else 0.0
@@ -246,9 +246,9 @@ def build_vtoon_slot_from_mat(
         "shadow_blur": shadow_blur,
         "shadow_border_color": raw_border_col,
         "shadow_border_range": shadow_border_range,
-        "rim_color": tuple(ch_val * rim_alpha_scale for ch_val in raw_rim_col),
+        "rim_color": tuple(channel_val * rim_alpha_scale for channel_val in raw_rim_col),
         "rim_border": floats.get("_RimBorder", 0.52),
-        "matcap_color": (raw_mc_col[0], raw_mc_col[1], raw_mc_col[2], min(0.75, max(0.20, mc_raw_alpha))),
+        "matcap_color": (raw_matcap_col[0], raw_matcap_col[1], raw_matcap_col[2], min(0.75, max(0.20, matcap_raw_alpha))),
         "shadow_strength": shadow_strength if use_shadow else 0.0,
         "shadow_2nd_border": shadow_2nd_border,
         "shadow_2nd_blur": shadow_2nd_blur,
@@ -259,7 +259,7 @@ def build_vtoon_slot_from_mat(
         "rim_fresnel": rim_fresnel_val,
         "rim_main_strength": floats.get("_RimMainStrength", 0.35),
         "use_rim": use_rim_default,
-        "use_matcap": use_mc_default,
+        "use_matcap": use_matcap_default,
         "specular_intensity": spec_val,
         "slot_type": float(slot_type),
         "double_sided": double_sided,
@@ -273,16 +273,16 @@ def create_default_studio_matcap(size_px: int = 256) -> Image.Image:
     """Synthesize a smooth anime hair & nail anisotropic angel-ring MatCap texture."""
     coords = numpy_mod.linspace(-1.0, 1.0, size_px, dtype=numpy_mod.float32)
     grid_y, grid_x = numpy_mod.meshgrid(coords, coords, indexing="ij")
-    radius_sq = grid_x * grid_x + grid_y * grid_y
+    radius_squared = grid_x * grid_x + grid_y * grid_y
 
     # Soft studio dome glow + crisp curved upper-front angel-ring highlight
     ring_band = numpy_mod.exp(-numpy_mod.square((grid_y + 0.36 - 0.14 * grid_x * grid_x) * 4.2))
     ring_band *= numpy_mod.clip(1.0 - numpy_mod.abs(grid_x) * 0.72, 0.0, 1.0)
-    upper_sheen = numpy_mod.exp(-radius_sq * 2.6) * 0.18
-    rim_arc = numpy_mod.exp(-numpy_mod.square((numpy_mod.sqrt(numpy_mod.maximum(radius_sq, 1e-5)) - 0.86) * 6.5)) * 0.22
+    upper_sheen = numpy_mod.exp(-radius_squared * 2.6) * 0.18
+    rim_arc = numpy_mod.exp(-numpy_mod.square((numpy_mod.sqrt(numpy_mod.maximum(radius_squared, 1e-5)) - 0.86) * 6.5)) * 0.22
 
     intensity = numpy_mod.clip(ring_band * 0.82 + upper_sheen + rim_arc, 0.0, 1.0)
-    inside_sphere = radius_sq <= 1.02
+    inside_sphere = radius_squared <= 1.02
     intensity = numpy_mod.where(inside_sphere, intensity, 0.0)
 
     rgb = numpy_mod.stack(
@@ -310,13 +310,13 @@ def blender_uv_rect_to_lut_rect(
     """Convert Blender/manifest bottom-up UV rect into DX top-down LUT region spec."""
     u_min = max(0.0, min(1.0, float(u_offset)))
     u_max = max(u_min, min(1.0, float(u_offset) + float(u_scale)))
-    v_top_dx = max(0.0, min(1.0, 1.0 - (float(v_offset) + float(v_scale))))
-    v_bot_dx = max(v_top_dx, min(1.0, 1.0 - float(v_offset)))
+    v_top_coord = max(0.0, min(1.0, 1.0 - (float(v_offset) + float(v_scale))))
+    v_bottom_coord = max(v_top_coord, min(1.0, 1.0 - float(v_offset)))
     return {
         "u0": u_min,
-        "v0": v_top_dx,
+        "v0": v_top_coord,
         "u1": u_max,
-        "v1": v_bot_dx,
+        "v1": v_bottom_coord,
         "slot_id": int(slot_id),
         "shadow_mask": float(shadow_mask),
         "rim_mask": float(rim_mask),
@@ -349,9 +349,9 @@ def create_character_lut_image(
         v_min = max(0.0, min(1.0, float(region["v0"])))
         v_max = max(0.0, min(1.0, float(region["v1"])))
         slot_id = max(0, min(15, int(region.get("slot_id", 0))))
-        sh_byte = int(round(_clamp_unit(region.get("shadow_mask", 1.0)) * 255.0))
+        shadow_byte = int(round(_clamp_unit(region.get("shadow_mask", 1.0)) * 255.0))
         rim_byte = int(round(_clamp_unit(region.get("rim_mask", 0.5)) * 255.0))
-        em_byte = int(round(_clamp_unit(region.get("emission_mask", 0.0)) * 255.0))
+        emission_byte = int(round(_clamp_unit(region.get("emission_mask", 0.0)) * 255.0))
 
         px_x0 = max(0, min(lut_size - 1, int(round(u_min * lut_size))))
         px_x1 = max(px_x0 + 1, min(lut_size, int(round(u_max * lut_size))))
@@ -359,9 +359,9 @@ def create_character_lut_image(
         px_y1 = max(px_y0 + 1, min(lut_size, int(round(v_max * lut_size))))
 
         arr[px_y0:px_y1, px_x0:px_x1, 0] = int(round((slot_id / 15.0) * 255.0))
-        arr[px_y0:px_y1, px_x0:px_x1, 1] = sh_byte
+        arr[px_y0:px_y1, px_x0:px_x1, 1] = shadow_byte
         arr[px_y0:px_y1, px_x0:px_x1, 2] = rim_byte
-        arr[px_y0:px_y1, px_x0:px_x1, 3] = em_byte
+        arr[px_y0:px_y1, px_x0:px_x1, 3] = emission_byte
 
     if extra_eye_rects:
         for eye_u0, eye_v0, eye_u1, eye_v1 in extra_eye_rects:
@@ -455,8 +455,8 @@ def _format_vtoon_ini(global_cfg: dict[str, str], chars_map: dict[int, dict]) ->
         "; GTAVVToon.ini - Auto-calibrated from Unity lilToon materials (press F10 in-game to hot-reload)",
         "[Global]",
     ]
-    for g_key, g_val in global_cfg.items():
-        lines_out.append(f"{g_key} = {g_val}")
+    for global_key, global_val in global_cfg.items():
+        lines_out.append(f"{global_key} = {global_val}")
 
     for char_key_id in sorted(chars_map):
         char_entry = chars_map[char_key_id]

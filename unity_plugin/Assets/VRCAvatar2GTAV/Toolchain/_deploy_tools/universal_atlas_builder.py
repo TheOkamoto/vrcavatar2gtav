@@ -174,8 +174,8 @@ def parse_unity_material_file(
     )
     shader_match = re.search(r"m_Shader:\s*\{[^}]*guid:\s*([0-9a-fA-F]{32})", mat_text)
     shader_guid = shader_match.group(1).lower() if shader_match else str(parent_info.get("shader_guid", ""))
-    kw_match = re.search(r"m_ShaderKeywords:\s*(.*)$", mat_text, re.MULTILINE)
-    shader_keywords = kw_match.group(1) if kw_match else ""
+    keyword_match = re.search(r"m_ShaderKeywords:\s*(.*)$", mat_text, re.MULTILINE)
+    shader_keywords = keyword_match.group(1) if keyword_match else ""
     render_queue_match = re.search(r"m_CustomRenderQueue:\s*(-?\d+)", mat_text)
     render_queue = int(render_queue_match.group(1)) if render_queue_match else int(parent_info.get("render_queue", 2000))
     if render_queue < 0 and parent_info:
@@ -260,30 +260,30 @@ def _collect_scoped_scene_mat_guids(
     doc_data = modular_avatar_helper.parse_unity_yaml_with_ma(scene_or_prefab)
     gameobjects = doc_data.get("gameobjects", {})
     transforms = doc_data.get("transforms", {})
-    go_to_tr = doc_data.get("go_to_tr", {})
-    children_by_tr: Dict[str, List[str]] = {}
-    for tr_id, tr_info in transforms.items():
-        children_by_tr.setdefault(str(tr_info.get("father_tr", "0")), []).append(tr_id)
+    game_object_to_transform = doc_data.get("go_to_tr", {})
+    children_by_transform: Dict[str, List[str]] = {}
+    for transform_id, transform_info in transforms.items():
+        children_by_transform.setdefault(str(transform_info.get("father_tr", "0")), []).append(transform_id)
 
-    stop_tr: Optional[str] = None
+    stop_transform: Optional[str] = None
     subtree_trs: Optional[set[str]] = None
     if avatar_name and scene_or_prefab.suffix.lower() == ".unity":
         wanted_low = str(avatar_name).strip().lower()
-        for tr_id, tr_info in transforms.items():
-            go_fid = str(tr_info.get("go_fid", ""))
-            go_name = str(gameobjects.get(go_fid, {}).get("name", "") or "").strip().lower()
-            if go_name == wanted_low:
-                stop_tr = tr_id
+        for transform_id, transform_info in transforms.items():
+            game_object_file_id = str(transform_info.get("go_fid", ""))
+            game_object_name = str(gameobjects.get(game_object_file_id, {}).get("name", "") or "").strip().lower()
+            if game_object_name == wanted_low:
+                stop_transform = transform_id
                 break
-        if stop_tr is not None:
+        if stop_transform is not None:
             subtree_trs = set()
-            stack_trs = [stop_tr]
+            stack_trs = [stop_transform]
             while stack_trs:
-                cur_tr = stack_trs.pop()
-                if cur_tr in subtree_trs:
+                cur_transform = stack_trs.pop()
+                if cur_transform in subtree_trs:
                     continue
-                subtree_trs.add(cur_tr)
-                stack_trs.extend(children_by_tr.get(cur_tr, []))
+                subtree_trs.add(cur_transform)
+                stack_trs.extend(children_by_transform.get(cur_transform, []))
 
     found_mats: List[Path] = []
     seen_mat_keys: set[str] = set()
@@ -295,11 +295,11 @@ def _collect_scoped_scene_mat_guids(
                 seen_mat_keys.add(key_str)
                 found_mats.append(cand_path)
 
-    for go_fid, rend_info in doc_data.get("renderers", {}).items():
-        if subtree_trs is not None and go_to_tr.get(go_fid) not in subtree_trs:
+    for game_object_file_id, rend_info in doc_data.get("renderers", {}).items():
+        if subtree_trs is not None and game_object_to_transform.get(game_object_file_id) not in subtree_trs:
             continue
-        is_act = modular_avatar_helper._is_go_active_in_doc(
-            doc_data, go_fid, stop_tr=stop_tr
+        is_act = modular_avatar_helper._is_game_object_active_in_doc(
+            doc_data, game_object_file_id, stop_transform=stop_transform
         ) and bool(rend_info.get("enabled", True))
         if not is_act:
             continue
@@ -307,12 +307,12 @@ def _collect_scoped_scene_mat_guids(
             _push_mat(guid_map.get(str(mat_guid).lower()))
 
     prefab_queue: List[Path] = []
-    for pi_info in doc_data.get("prefab_instances", {}).values():
-        if not pi_info.get("active", True):
+    for prefab_instance_info in doc_data.get("prefab_instances", {}).values():
+        if not prefab_instance_info.get("active", True):
             continue
-        if subtree_trs is not None and str(pi_info.get("parent_tr", "0")) not in subtree_trs:
+        if subtree_trs is not None and str(prefab_instance_info.get("parent_tr", "0")) not in subtree_trs:
             continue
-        src_pref = guid_map.get(str(pi_info.get("source_guid", "")).lower())
+        src_pref = guid_map.get(str(prefab_instance_info.get("source_guid", "")).lower())
         if src_pref and src_pref.suffix.lower() == ".prefab" and src_pref.is_file():
             prefab_queue.append(src_pref)
 
@@ -324,18 +324,18 @@ def _collect_scoped_scene_mat_guids(
             continue
         visited_prefabs.add(pref_key)
         pref_doc = modular_avatar_helper.parse_unity_yaml_with_ma(cur_pref)
-        for go_fid, rend_info in pref_doc.get("renderers", {}).items():
-            is_act = modular_avatar_helper._is_go_active_in_doc(pref_doc, go_fid) and bool(
+        for game_object_file_id, rend_info in pref_doc.get("renderers", {}).items():
+            is_act = modular_avatar_helper._is_game_object_active_in_doc(pref_doc, game_object_file_id) and bool(
                 rend_info.get("enabled", True)
             )
             if not is_act:
                 continue
             for mat_guid in rend_info.get("mat_guids", []):
                 _push_mat(guid_map.get(str(mat_guid).lower()))
-        for pi_info in pref_doc.get("prefab_instances", {}).values():
-            if not pi_info.get("active", True):
+        for prefab_instance_info in pref_doc.get("prefab_instances", {}).values():
+            if not prefab_instance_info.get("active", True):
                 continue
-            src_pref = guid_map.get(str(pi_info.get("source_guid", "")).lower())
+            src_pref = guid_map.get(str(prefab_instance_info.get("source_guid", "")).lower())
             if src_pref and src_pref.suffix.lower() == ".prefab" and src_pref.is_file():
                 prefab_queue.append(src_pref)
 
@@ -444,29 +444,29 @@ def _load_tinted_tile(
         color_alpha = max(0.0, min(1.0, float(color_rgba[3]) if len(color_rgba) >= 4 else 1.0))
         arr_float[:, :, 3] *= color_alpha
         if alpha_mask_tex and Path(alpha_mask_tex).is_file():
-            am_img = (
+            alpha_mask_img = (
                 Image.open(alpha_mask_tex)
                 .convert("RGBA")
                 .resize((tile_size, tile_size), Image.Resampling.LANCZOS)
             )
-            am_r = numpy_lib.array(am_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
-            eff_mask = numpy_lib.clip(am_r * float(alpha_mask_scale) + float(alpha_mask_val), 0.0, 1.0)
+            alpha_mask_red = numpy_lib.array(alpha_mask_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
+            eff_mask = numpy_lib.clip(alpha_mask_red * float(alpha_mask_scale) + float(alpha_mask_val), 0.0, 1.0)
             arr_float[:, :, 3] *= eff_mask
     else:
         arr_float[:, :, 3] = 255.0
 
     if emission_tex and Path(emission_tex).is_file():
-        em_mag = max(float(emission_rgba[0]), float(emission_rgba[1]), float(emission_rgba[2]))
-        if em_mag > 0.02:
-            em_img = (
+        emission_magnitude = max(float(emission_rgba[0]), float(emission_rgba[1]), float(emission_rgba[2]))
+        if emission_magnitude > 0.02:
+            emission_img = (
                 Image.open(emission_tex)
                 .convert("RGBA")
                 .resize((tile_size, tile_size), Image.Resampling.LANCZOS)
             )
-            em_arr = numpy_lib.array(em_img, dtype=numpy_lib.float32)
+            emission_arr = numpy_lib.array(emission_img, dtype=numpy_lib.float32)
             for chan_idx in range(3):
                 arr_float[:, :, chan_idx] += (
-                    em_arr[:, :, chan_idx] * float(emission_rgba[chan_idx]) * 0.65
+                    emission_arr[:, :, chan_idx] * float(emission_rgba[chan_idx]) * 0.65
                 )
 
     clamped = numpy_lib.clip(arr_float, 0.0, 255.0).astype(numpy_lib.uint8)
@@ -551,12 +551,12 @@ def build_universal_avatar_atlas(
         tint_rgb = tuple(round(float(val), 3) for val in mat_info["color_rgba"][:3])
         hsvg_sig = tuple(round(float(val), 3) for val in (mat_info.get("hsvg_rgba") or (0.0, 1.0, 1.0, 1.0))[:4])
         use_2nd = int(round(float(mat_info.get("use_main2nd", 0.0))))
-        raw_mat_p = str(mat_info.get("mat_path", "") or "").lower()
+        raw_mat_path = str(mat_info.get("mat_path", "") or "").lower()
         if main_tex and Path(main_tex).is_file():
             dedup_key = (str(Path(main_tex).resolve()).lower(), tint_rgb, hsvg_sig, use_2nd)
             resolved_main_tex = main_tex
         else:
-            dedup_key = ("__solid_color__", tint_rgb, raw_mat_p)
+            dedup_key = ("__solid_color__", tint_rgb, raw_mat_path)
             resolved_main_tex = "__SOLID_COLOR__"
         if dedup_key not in tile_key_to_idx:
             tile_idx = len(tile_entries)
@@ -751,19 +751,19 @@ def build_universal_avatar_atlas(
             )
             if is_hair_token and str(reg_data.get("alpha_mode")) == "transparent":
                 slot_id = vtoon_profile_helper.SLOT_HAIR_ALPHA
-                rim_mask, sh_mask = 0.85, 0.90
+                rim_mask, preset_shadow_mask = 0.85, 0.90
             elif is_hair_token:
                 slot_id = vtoon_profile_helper.SLOT_HAIR
-                rim_mask, sh_mask = 0.85, 0.95
+                rim_mask, preset_shadow_mask = 0.85, 0.95
             elif "face" in low_mat or "head" in low_mat:
                 slot_id = vtoon_profile_helper.SLOT_FACE
-                rim_mask, sh_mask = 0.20, 0.88
+                rim_mask, preset_shadow_mask = 0.20, 0.88
             elif "body" in low_mat or "skin" in low_mat:
                 slot_id = vtoon_profile_helper.SLOT_SKIN
-                rim_mask, sh_mask = 0.25, 0.90
+                rim_mask, preset_shadow_mask = 0.25, 0.90
             else:
                 slot_id = vtoon_profile_helper.SLOT_CLOTH
-                rim_mask, sh_mask = 0.45, 0.95
+                rim_mask, preset_shadow_mask = 0.45, 0.95
             lut_regions.append(
                 vtoon_profile_helper.blender_uv_rect_to_lut_rect(
                     reg_data["u_offset"],
@@ -771,16 +771,16 @@ def build_universal_avatar_atlas(
                     reg_data["u_scale"],
                     reg_data["v_scale"],
                     slot_id=slot_id,
-                    shadow_mask=sh_mask,
+                    shadow_mask=preset_shadow_mask,
                     rim_mask=rim_mask,
                 )
             )
             if slot_id not in slot_materials:
-                mat_p = reg_data.get("mat_path")
-                if mat_p:
-                    matcap_candidates.append(mat_p)
+                reg_mat_path = reg_data.get("mat_path")
+                if reg_mat_path:
+                    matcap_candidates.append(reg_mat_path)
                 parsed_mat = vtoon_profile_helper.parse_liltoon_mat_file(
-                    mat_p,
+                    reg_mat_path,
                     assets_root=project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir,
                 )
                 slot_materials[slot_id] = vtoon_profile_helper.build_vtoon_slot_from_mat(

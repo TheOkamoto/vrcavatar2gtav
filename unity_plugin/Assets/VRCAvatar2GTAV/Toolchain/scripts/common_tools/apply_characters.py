@@ -89,7 +89,7 @@ def _load_apply_runtime_config(
         extra_ydd_paths = [
             Path(extra_path) for extra_path in (char_cfg.get("extra_model_ydds") or [])
         ]
-        model_r_ydd_path = next(
+        model_racial_ydd_path = next(
             (
                 item_path
                 for item_path in extra_ydd_paths
@@ -97,8 +97,8 @@ def _load_apply_runtime_config(
             ),
             None,
         )
-        if model_r_ydd_path is None:
-            model_r_ydd_path = next(
+        if model_racial_ydd_path is None:
+            model_racial_ydd_path = next(
                 (
                     item_path
                     for item_path in extra_ydd_paths
@@ -109,7 +109,7 @@ def _load_apply_runtime_config(
         character_registry[ped_key] = {
             "display_name": _format_assignment_label(protagonist_key, avatar_id),
             "model_ydd_path": char_cfg["target_model_ydd"],
-            "model_r_ydd_path": model_r_ydd_path or char_cfg["target_model_ydd"],
+            "model_r_ydd_path": model_racial_ydd_path or char_cfg["target_model_ydd"],
             "texture_ytd_path": char_cfg["ytd_file"],
             "skeleton_yft_path": char_cfg["target_yft"],
         }
@@ -161,10 +161,10 @@ def patch_single_character_directory(
         }
 
     source_model_path = Path(character_configuration["model_ydd_path"])
-    raw_model_r_path = character_configuration.get("model_r_ydd_path")
-    source_model_r_path = (
-        Path(raw_model_r_path)
-        if raw_model_r_path and Path(raw_model_r_path).exists()
+    raw_model_racial_path = character_configuration.get("model_r_ydd_path")
+    source_model_racial_path = (
+        Path(raw_model_racial_path)
+        if raw_model_racial_path and Path(raw_model_racial_path).exists()
         else source_model_path
     )
     source_texture_path = character_configuration["texture_ytd_path"]
@@ -190,7 +190,7 @@ def patch_single_character_directory(
                 lower_stem = target_file_path.stem.lower()
                 is_race_slot = lower_stem.endswith("_r") or "_r_" in lower_stem
                 chosen_model_path = (
-                    source_model_r_path if is_race_slot else source_model_path
+                    source_model_racial_path if is_race_slot else source_model_path
                 )
                 shutil.copyfile(chosen_model_path, target_file_path)
                 statistics_counter["uppr_models"] += 1

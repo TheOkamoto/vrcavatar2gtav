@@ -359,7 +359,7 @@ def compute_pocket_watch_align_matrix(
 def compute_skirt_vertex_weights(
     source_obj,
     orig_vert_idx,
-    ydd_co,
+    ydd_coord,
     vgroup_names_by_idx,
     vgroup_target_names,
 ):
@@ -390,11 +390,11 @@ def compute_skirt_vertex_weights(
 
     if skirt_weight > 0.0:
         # Vertical ramp: waist (+0.10) anchored 100% to Pelvis; hem (<= +0.02) shares up to 28%
-        vertical_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
+        vertical_ramp = smoothstep_unit((0.10 - ydd_coord.z) / 0.08)
         # Front-to-back ramp: keep front (y <= -0.02) on Pelvis to prevent belly sink when sitting
-        back_ramp = smoothstep_unit((ydd_co.y + 0.02) / 0.06)
+        back_ramp = smoothstep_unit((ydd_coord.y + 0.02) / 0.06)
         # Left/right blend across centerline (+X left thigh, -X right thigh)
-        left_right_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
+        left_right_mix = smoothstep_unit((ydd_coord.x + 0.035) / 0.070)
 
         thigh_cap = vertical_ramp * 0.28 * back_ramp
         thigh_weight = skirt_weight * thigh_cap
@@ -427,7 +427,7 @@ def compute_skirt_vertex_weights(
     return remapped_weights
 
 
-def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=None):
+def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_lower=None):
     """Map a VRChat/Unity bone name to its target GTA V RAGE skeleton bone."""
     if mesh_name == "UN3_Bag":
         lower_bone_name = source_bone_name.lower()
@@ -440,7 +440,7 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=N
         if "upper_arm.r" in lower_bone_name or "upperarm.r" in lower_bone_name:
             return "SKEL_R_UpperArm"
         phys_bag_bone = physbone_helper.resolve_michael_er_gtav_bone(
-            source_bone_name, bone_mapping_ci=bone_mapping_ci
+            source_bone_name, bone_mapping_lower=bone_mapping_lower
         )
         if phys_bag_bone is not None:
             return phys_bag_bone
@@ -474,7 +474,7 @@ def resolve_gtav_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=N
         return f"SKEL_{side_code}_Hand"
 
     phys_er_bone = physbone_helper.resolve_michael_er_gtav_bone(
-        source_bone_name, bone_mapping_ci=bone_mapping_ci
+        source_bone_name, bone_mapping_lower=bone_mapping_lower
     )
     if phys_er_bone is not None:
         return phys_er_bone
@@ -660,8 +660,8 @@ def process_michael_er_mesh_inventory(
         bmesh_data.from_mesh(baked_mesh)
 
         orig_vert_layer = bmesh_data.verts.layers.int.new("orig_vert_idx")
-        for vert_idx_counter, bm_vert_item in enumerate(bmesh_data.verts):
-            bm_vert_item[orig_vert_layer] = vert_idx_counter
+        for vert_idx_counter, bmesh_vert_item in enumerate(bmesh_data.verts):
+            bmesh_vert_item[orig_vert_layer] = vert_idx_counter
 
         if mesh_name == "Body":
             alpha_mat_indices = [
@@ -692,7 +692,7 @@ def process_michael_er_mesh_inventory(
                 for loop_item in face_item.loops:
                     kept_loop_indices.append(loop_item[orig_loop_layer])
             kept_orig_vert_indices = [
-                bm_vert_item[orig_vert_layer] for bm_vert_item in bmesh_data.verts
+                bmesh_vert_item[orig_vert_layer] for bmesh_vert_item in bmesh_data.verts
             ]
             bmesh_data.to_mesh(baked_mesh)
             bmesh_data.free()
@@ -760,7 +760,7 @@ def process_michael_er_mesh_inventory(
             for face_item in bmesh_data.faces:
                 face_item.smooth = True
             kept_orig_vert_indices = [
-                bm_vert_item[orig_vert_layer] for bm_vert_item in bmesh_data.verts
+                bmesh_vert_item[orig_vert_layer] for bmesh_vert_item in bmesh_data.verts
             ]
             bmesh_data.to_mesh(baked_mesh)
             bmesh_data.free()
@@ -801,27 +801,27 @@ def process_michael_er_mesh_inventory(
         eval_world_matrix = evaluated_obj.matrix_world
         has_negative_det = eval_world_matrix.determinant() < 0.0
         for vert_item in baked_mesh.vertices:
-            world_co = eval_world_matrix @ vert_item.co
+            world_coord = eval_world_matrix @ vert_item.co
             if is_beret_mesh:
-                rel_co = world_co - hat_pivot
-                world_co = hat_pivot + (hat_rot_matrix @ rel_co) + hat_pos_delta
+                rel_coord = world_coord - hat_pivot
+                world_coord = hat_pivot + (hat_rot_matrix @ rel_coord) + hat_pos_delta
             elif is_neko_hair and hair_root_rest_pos is not None:
-                rel_hair = (world_co - hair_root_rest_pos) * neko_hair_scale
-                world_co = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
+                rel_hair = (world_coord - hair_root_rest_pos) * neko_hair_scale
+                world_coord = neko_target_hair_root + (neko_hair_rot_matrix @ rel_hair)
             elif mesh_name == "Pocket Watch":
-                world_co = watch_transform_matrix @ world_co
+                world_coord = watch_transform_matrix @ world_coord
 
-            vert_item.co.x = (world_co.x + offset_x) * scale_factor
-            vert_item.co.y = (world_co.y + offset_y) * scale_factor
-            vert_item.co.z = (world_co.z + offset_z) * scale_factor + vertical_offset
+            vert_item.co.x = (world_coord.x + offset_x) * scale_factor
+            vert_item.co.y = (world_coord.y + offset_y) * scale_factor
+            vert_item.co.z = (world_coord.z + offset_z) * scale_factor + vertical_offset
 
         if has_negative_det:
             # Flip winding cleanly for mirrored FBX parts such as Nail_L (det < 0)
-            bm_flip = bmesh.new()
-            bm_flip.from_mesh(baked_mesh)
-            bmesh.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
-            bm_flip.to_mesh(baked_mesh)
-            bm_flip.free()
+            bmesh_flip = bmesh.new()
+            bmesh_flip.from_mesh(baked_mesh)
+            bmesh.ops.reverse_faces(bmesh_flip, faces=bmesh_flip.faces)
+            bmesh_flip.to_mesh(baked_mesh)
+            bmesh_flip.free()
             baked_mesh.update()
 
         if (
@@ -870,13 +870,13 @@ def process_michael_er_mesh_inventory(
 
         # Assign vertex weights to valid GTA V bones
         pb_active_bones = set(pb_resolution.get("custom_bones") or ())
-        pb_bmap_ci = pb_resolution.get("bone_mapping_ci")
+        pb_bone_map_lower = pb_resolution.get("bone_mapping_ci")
         vgroup_names_by_idx = {
             vgroup.index: vgroup.name for vgroup in source_obj.vertex_groups
         }
         vgroup_target_names = {
             vgroup.index: resolve_gtav_target_bone(
-                vgroup.name, mesh_name, bone_mapping_ci=pb_bmap_ci
+                vgroup.name, mesh_name, bone_mapping_lower=pb_bone_map_lower
             )
             for vgroup in source_obj.vertex_groups
         }
@@ -887,11 +887,11 @@ def process_michael_er_mesh_inventory(
             pass
         elif mesh_name == "UN1_Skirt":
             for new_vert_idx, orig_vert_idx in enumerate(kept_orig_vert_indices):
-                ydd_vert_co = baked_mesh.vertices[new_vert_idx].co
+                ydd_vert_coord = baked_mesh.vertices[new_vert_idx].co
                 vertex_weight_map[new_vert_idx] = compute_skirt_vertex_weights(
                     source_obj,
                     orig_vert_idx,
-                    ydd_vert_co,
+                    ydd_vert_coord,
                     vgroup_names_by_idx,
                     vgroup_target_names,
                 )
@@ -1041,12 +1041,12 @@ def apply_michael_er_split_normals(
         )
         for poly_item in joined_mesh_obj.data.polygons:
             for loop_idx in poly_item.loop_indices:
-                vert_co = mesh_verts[mesh_loops[loop_idx].vertex_index].co
+                vert_coord = mesh_verts[mesh_loops[loop_idx].vertex_index].co
                 if loop_idx < face_loop_count:
-                    if vert_co.y < 0.020 and 0.60 < vert_co.z < 0.77 and abs(vert_co.x) < 0.085:
-                        norm_x = vert_co.x * 2.2
+                    if vert_coord.y < 0.020 and 0.60 < vert_coord.z < 0.77 and abs(vert_coord.x) < 0.085:
+                        norm_x = vert_coord.x * 2.2
                         norm_y = -1.0
-                        norm_z = (vert_co.z - 0.69) * 1.4
+                        norm_z = (vert_coord.z - 0.69) * 1.4
                         vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
                         split_normals[loop_idx] = (
                             norm_x / vec_len,
@@ -1056,8 +1056,8 @@ def apply_michael_er_split_normals(
                 elif mesh_uvs is not None:
                     loop_uv = mesh_uvs[loop_idx].uv
                     if 0.25 <= loop_uv.x < 0.50 and loop_uv.y >= 0.50:
-                        if vert_co.y < 0.025 and 0.535 < vert_co.z < 0.655 and abs(vert_co.x) < 0.065:
-                            norm_x = vert_co.x * 3.5
+                        if vert_coord.y < 0.025 and 0.535 < vert_coord.z < 0.655 and abs(vert_coord.x) < 0.065:
+                            norm_x = vert_coord.x * 3.5
                             norm_y = -1.0
                             norm_z = -0.1
                             vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
@@ -1090,31 +1090,31 @@ def _compute_er_earlobe_anchors(bpy_mod, bmesh_mod, mathutils_mod, arm_base):
     world_pts = [eval_body.matrix_world @ vert.co for vert in eval_body.data.vertices]
     # Target the outer human earlobe specifically (|x| >= 0.058 excludes jawline/cheek vertices)
     left_cands = [
-        pt_vec
-        for pt_vec in world_pts
-        if 0.0580 <= pt_vec.x < 0.0750
-        and -0.0180 < pt_vec.y < 0.0100
-        and (head_pos.z + 0.0140) < pt_vec.z < (head_pos.z + 0.0360)
+        point_vec
+        for point_vec in world_pts
+        if 0.0580 <= point_vec.x < 0.0750
+        and -0.0180 < point_vec.y < 0.0100
+        and (head_pos.z + 0.0140) < point_vec.z < (head_pos.z + 0.0360)
     ]
     right_cands = [
-        pt_vec
-        for pt_vec in world_pts
-        if -0.0750 < pt_vec.x <= -0.0580
-        and -0.0180 < pt_vec.y < 0.0100
-        and (head_pos.z + 0.0140) < pt_vec.z < (head_pos.z + 0.0360)
+        point_vec
+        for point_vec in world_pts
+        if -0.0750 < point_vec.x <= -0.0580
+        and -0.0180 < point_vec.y < 0.0100
+        and (head_pos.z + 0.0140) < point_vec.z < (head_pos.z + 0.0360)
     ]
     if len(left_cands) >= 3:
-        low_left = sorted(left_cands, key=lambda pt_vec: pt_vec.z)[:4]
-        mean_lx = sum(pt_vec.x for pt_vec in low_left) / len(low_left)
-        mean_ly = sum(pt_vec.y for pt_vec in low_left) / len(low_left)
-        min_lz = min(pt_vec.z for pt_vec in low_left)
-        left_anchor = mathutils_mod.Vector((mean_lx, mean_ly, min_lz + 0.0008))
+        low_left = sorted(left_cands, key=lambda point_vec: point_vec.z)[:4]
+        mean_left_x = sum(point_vec.x for point_vec in low_left) / len(low_left)
+        mean_left_y = sum(point_vec.y for point_vec in low_left) / len(low_left)
+        min_left_z = min(point_vec.z for point_vec in low_left)
+        left_anchor = mathutils_mod.Vector((mean_left_x, mean_left_y, min_left_z + 0.0008))
     if len(right_cands) >= 3:
-        low_right = sorted(right_cands, key=lambda pt_vec: pt_vec.z)[:4]
-        mean_rx = sum(pt_vec.x for pt_vec in low_right) / len(low_right)
-        mean_ry = sum(pt_vec.y for pt_vec in low_right) / len(low_right)
-        min_rz = min(pt_vec.z for pt_vec in low_right)
-        right_anchor = mathutils_mod.Vector((mean_rx, mean_ry, min_rz + 0.0008))
+        low_right = sorted(right_cands, key=lambda point_vec: point_vec.z)[:4]
+        mean_right_x = sum(point_vec.x for point_vec in low_right) / len(low_right)
+        mean_right_y = sum(point_vec.y for point_vec in low_right) / len(low_right)
+        min_right_z = min(point_vec.z for point_vec in low_right)
+        right_anchor = mathutils_mod.Vector((mean_right_x, mean_right_y, min_right_z + 0.0008))
     return left_anchor, right_anchor
 
 
@@ -1191,17 +1191,17 @@ def import_and_place_er_earrings(
     # Bake raw transform cleanly into vertices, center stud at top origin, slight outward yaw (+25 deg L)
     raw_verts = [raw_ear_world_mat @ vert.co for vert in raw_ear_mesh.data.vertices]
     stud_verts = [
-        raw_ear_world_mat @ raw_ear_mesh.data.vertices[vi_idx].co
+        raw_ear_world_mat @ raw_ear_mesh.data.vertices[vertex_index].co
         for poly_item in raw_ear_mesh.data.polygons
         if poly_item.material_index == 2
-        for vi_idx in poly_item.vertices
+        for vertex_index in poly_item.vertices
     ]
     anchor_src = stud_verts if stud_verts else raw_verts
     stud_center = mathutils_mod.Vector(
         (
-            sum(pt_vec.x for pt_vec in anchor_src) / len(anchor_src),
-            sum(pt_vec.y for pt_vec in anchor_src) / len(anchor_src),
-            sum(pt_vec.z for pt_vec in anchor_src) / len(anchor_src),
+            sum(point_vec.x for point_vec in anchor_src) / len(anchor_src),
+            sum(point_vec.y for point_vec in anchor_src) / len(anchor_src),
+            sum(point_vec.z for point_vec in anchor_src) / len(anchor_src),
         )
     )
     outward_yaw = mathutils_mod.Matrix.Rotation(math.radians(25.0), 3, "Z")
@@ -1229,11 +1229,11 @@ def import_and_place_er_earrings(
     for vert_idx, vert_item in enumerate(right_ear_obj.data.vertices):
         rel_vec = outward_yaw @ ((raw_verts[vert_idx] - stud_center) * ear_scale)
         vert_item.co = mathutils_mod.Vector((-rel_vec.x, rel_vec.y, rel_vec.z)) + right_earlobe
-    bm_flip = bmesh_mod.new()
-    bm_flip.from_mesh(right_ear_obj.data)
-    bmesh_mod.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
-    bm_flip.to_mesh(right_ear_obj.data)
-    bm_flip.free()
+    bmesh_flip = bmesh_mod.new()
+    bmesh_flip.from_mesh(right_ear_obj.data)
+    bmesh_mod.ops.reverse_faces(bmesh_flip, faces=bmesh_flip.faces)
+    bmesh_flip.to_mesh(right_ear_obj.data)
+    bmesh_flip.free()
     right_ear_obj.data.update()
     _stamp_earring_slot_uvs(right_ear_obj, mathutils_mod)
 

@@ -1043,10 +1043,10 @@ def download_and_install_asi_loader(
             resolved_url = None
 
     resolved_url = resolved_url or ASI_LOADER_FALLBACK_URL
-    dl_req = urllib.request.Request(
+    download_req = urllib.request.Request(
         resolved_url, headers={"User-Agent": "VRCAvatar2GTAV/1.0"}
     )
-    with urllib.request.urlopen(dl_req, timeout=60.0) as zip_resp:
+    with urllib.request.urlopen(download_req, timeout=60.0) as zip_resp:
         archive_bytes = zip_resp.read()
 
     with zipfile.ZipFile(io_stream.BytesIO(archive_bytes)) as zip_archive:
@@ -1222,7 +1222,7 @@ def _resize_extracted_png_for_budget(
     max_normal_px: int,
 ) -> None:
     """Resize extracted texture PNG according to diffuse/normal/specular role."""
-    import numpy as np_lib
+    import numpy as numpy_lib
     from PIL import Image
 
     resampling_enum = getattr(Image, "Resampling", Image)
@@ -1230,7 +1230,7 @@ def _resize_extracted_png_for_budget(
     stem_low = img_path.stem.lower()
     with Image.open(img_path) as raw_img:
         rgba_img = raw_img.convert("RGBA")
-        arr_u8 = np_lib.array(rgba_img)
+        arr_u8 = numpy_lib.array(rgba_img)
 
     if "spec" in stem_low:
         max_span = max(
@@ -1246,7 +1246,7 @@ def _resize_extracted_png_for_budget(
         return
 
     if "normal" in stem_low or "nrm" in stem_low:
-        delta_flat = np_lib.abs(arr_u8[:, :, :3].astype(int) - np_lib.array([128, 128, 255]))
+        delta_flat = numpy_lib.abs(arr_u8[:, :, :3].astype(int) - numpy_lib.array([128, 128, 255]))
         if int(delta_flat.max()) <= 3:
             Image.new("RGB", (64, 64), (128, 128, 255)).save(img_path, format="PNG")
             return
@@ -1262,18 +1262,18 @@ def _resize_extracted_png_for_budget(
         from common_tools import vtoon_profile_helper
 
     detected_vtoon_id = vtoon_profile_helper.decode_vtoon_watermark_block(rgba_img)
-    target_w = min(rgba_img.width, max_diffuse_px)
-    target_h = min(rgba_img.height, max_diffuse_px)
-    if target_w != rgba_img.width or target_h != rgba_img.height:
-        rgba_img = rgba_img.resize((target_w, target_h), lanczos_filter)
-        if detected_vtoon_id > 0 and target_w >= 16 and target_h >= 16:
+    target_width = min(rgba_img.width, max_diffuse_px)
+    target_height = min(rgba_img.height, max_diffuse_px)
+    if target_width != rgba_img.width or target_height != rgba_img.height:
+        rgba_img = rgba_img.resize((target_width, target_height), lanczos_filter)
+        if detected_vtoon_id > 0 and target_width >= 16 and target_height >= 16:
             rgba_img = vtoon_profile_helper.stamp_vtoon_watermark_block(
                 rgba_img, detected_vtoon_id
             )
-        arr_u8 = np_lib.array(rgba_img)
+        arr_u8 = numpy_lib.array(rgba_img)
     elif detected_vtoon_id > 0:
         rgba_img = vtoon_profile_helper.stamp_vtoon_watermark_block(rgba_img, detected_vtoon_id)
-        arr_u8 = np_lib.array(rgba_img)
+        arr_u8 = numpy_lib.array(rgba_img)
     alpha_min = int(arr_u8[:, :, 3].min())
     out_img = rgba_img.convert("RGB") if alpha_min >= 254 else rgba_img
     out_img.save(img_path, format="PNG")
@@ -1344,14 +1344,14 @@ def _build_tiny_dummy_ytd_via_rage(dest_ytd: Path) -> Path:
 def _is_secondary_uppr_ytd_candidate(
     file_name: str,
     *,
-    include_000_non_a: bool,
+    include_000_alt_variants: bool,
 ) -> bool:
     """Return True for `uppr_diff_*.ytd` secondary outfit/color slots eligible for downscaling."""
     low_name = file_name.lower()
     if not (low_name.startswith("uppr_diff_") and low_name.endswith(".ytd")):
         return False
     if low_name.startswith("uppr_diff_000_"):
-        return include_000_non_a and not low_name.startswith("uppr_diff_000_a_")
+        return include_000_alt_variants and not low_name.startswith("uppr_diff_000_a_")
     return True
 
 
@@ -1361,7 +1361,7 @@ def _compact_protagonist_uppr_ytds(
     max_diffuse_px: int,
     max_normal_px: int,
     min_size_bytes: int,
-    include_000_non_a: bool,
+    include_000_alt_variants: bool,
     compact_builder: Any,
 ) -> int:
     """Replace oversized duplicate secondary `uppr_diff_*.ytd` files with compact variants."""
@@ -1380,7 +1380,7 @@ def _compact_protagonist_uppr_ytds(
                 if item_path.is_file()
                 and item_path.stat().st_size > min_size_bytes
                 and _is_secondary_uppr_ytd_candidate(
-                    item_path.name, include_000_non_a=include_000_non_a
+                    item_path.name, include_000_alt_variants=include_000_alt_variants
                 )
             )
             if not candidates:
@@ -1497,7 +1497,7 @@ def ensure_x64v_streamed_budget(
                 if secondary_atlas_size <= 512
                 else SECONDARY_YTD_MIN_COMPACT_BYTES
             ),
-            include_000_non_a=False,
+            include_000_alt_variants=False,
             compact_builder=resolved_compact,
         )
         streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
@@ -1532,7 +1532,7 @@ def ensure_x64v_streamed_budget(
         max_diffuse_px=1024,
         max_normal_px=512,
         min_size_bytes=SECONDARY_YTD_MIN_COMPACT_BYTES,
-        include_000_non_a=False,
+        include_000_alt_variants=False,
         compact_builder=resolved_compact,
     )
     streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)
@@ -1552,7 +1552,7 @@ def ensure_x64v_streamed_budget(
             max_diffuse_px=512,
             max_normal_px=256,
             min_size_bytes=TIER2_YTD_MIN_COMPACT_BYTES,
-            include_000_non_a=True,
+            include_000_alt_variants=True,
             compact_builder=resolved_compact,
         )
         streamed_bytes = _directory_content_bytes(streamedpeds_extracted_dir)

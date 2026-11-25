@@ -434,26 +434,26 @@ def _generate_miltina_vtoon_profile(
 
     if eye_spec_mask_raw is not None and lut_path.is_file():
         lut_img = Image.open(lut_path).convert("RGBA")
-        lut_w, lut_h = lut_img.size
-        face_w = lut_w // 2
-        face_h = lut_h // 2
+        lut_width, lut_height = lut_img.size
+        face_width = lut_width // 2
+        face_height = lut_height // 2
         mask_arr = (
             numpy_lib.array(
                 Image.fromarray((eye_spec_mask_raw.astype(numpy_lib.uint8) * 255)).resize(
-                    (face_w, face_h), Image.Resampling.NEAREST
+                    (face_width, face_height), Image.Resampling.NEAREST
                 )
             )
             > 127
         )
         lut_arr = numpy_lib.array(lut_img)
-        eye_region = lut_arr[0:face_h, 0:face_w]
+        eye_region = lut_arr[0:face_height, 0:face_width]
         eye_region[mask_arr] = [
             int(round((vtoon_profile_helper.SLOT_EYES / 15.0) * 255.0)),
             85,
             185,
             78,
         ]
-        lut_arr[0:face_h, 0:face_w] = eye_region
+        lut_arr[0:face_height, 0:face_width] = eye_region
         updated_lut = Image.fromarray(lut_arr, mode="RGBA")
         updated_lut.save(lut_path)
         for extra_dir in sync_dirs:

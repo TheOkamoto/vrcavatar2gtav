@@ -645,8 +645,72 @@ def test_i18n_catalog_integrity() -> bool:
     )
 
 
+_ALLOWED_AXIS_SEGMENTS = frozenset({"x", "y", "z", "u", "v"})
+_ALLOWED_TWO_CHAR_SEGMENTS = frozenset({
+    "as", "at", "by", "do", "er", "id", "if", "in", "io", "is",
+    "ma", "mb", "mm", "no", "ns", "of", "ok", "on", "or", "os",
+    "pb", "px", "to", "ui", "up", "uv",
+})
+
+
+def _has_invalid_short_identifier_parts(
+    identifier: str, allowed_stdlib_short_names: Any = ("_", "os", "re")
+) -> bool:
+    """Return True if identifier is <=2 chars or hides 1-2 char non-axis abbreviations inside `_`."""
+    if not identifier or identifier in allowed_stdlib_short_names:
+        return False
+    if len(identifier) <= 2:
+        return True
+    if (identifier.startswith("__") and identifier.endswith("__")) or identifier.isupper():
+        return False
+    segments = [part.lower() for part in identifier.strip("_").split("_") if part]
+    if len(segments) < 2:
+        return False
+    for segment in segments:
+        if len(segment) == 1 and segment.isalpha() and segment not in _ALLOWED_AXIS_SEGMENTS:
+            return True
+        if len(segment) == 2 and segment.isalpha() and segment not in _ALLOWED_TWO_CHAR_SEGMENTS:
+            return True
+    return False
+
+
+def _collect_invalid_short_identifiers(
+    syntax_tree: ast.AST, allowed_stdlib_short_names: Any
+) -> List[str]:
+    """Collect AST identifiers failing >=3-char or per-segment naming checks."""
+    imported_bare = {
+        alias.name.split(".")[0]
+        for node in ast.walk(syntax_tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if not alias.asname
+    } | {
+        alias.name
+        for node in ast.walk(syntax_tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if not alias.asname
+    }
+    candidates = set()
+    for node in ast.walk(syntax_tree):
+        if isinstance(node, ast.Name):
+            if not (isinstance(node.ctx, ast.Load) and node.id in imported_bare):
+                candidates.add(node.id)
+        elif isinstance(node, ast.arg):
+            candidates.add(node.arg)
+        elif isinstance(node, (ast.ExceptHandler, ast.alias)):
+            val = node.name if isinstance(node, ast.ExceptHandler) else node.asname
+            if val:
+                candidates.add(val)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            candidates.add(node.name)
+    return sorted(
+        ident for ident in candidates if _has_invalid_short_identifier_parts(ident, allowed_stdlib_short_names)
+    )
+
+
 def test_code_quality_and_mirror_sync() -> bool:
-    """Verify zero emojis, >=3-char AST identifiers, and byte-identical mirrors."""
+    """Verify zero emojis, >=3-char AST identifiers/segments, and byte-identical mirrors."""
     print(i18n.translate("tests.sec6_title"))
     quality_passed = True
     emoji_pattern = regex_module.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
@@ -676,48 +740,12 @@ def test_code_quality_and_mirror_sync() -> bool:
                 f"lines={len(file_content.splitlines())}, has_doc={bool(ast.get_docstring(syntax_tree))}",
             )
 
-        invalid_short_names = sorted(
-            {
-                node.id
-                for node in ast.walk(syntax_tree)
-                if isinstance(node, ast.Name)
-                and len(node.id) <= 2
-                and node.id not in allowed_stdlib_short_names
-            }
-            | {
-                node.arg
-                for node in ast.walk(syntax_tree)
-                if isinstance(node, ast.arg) and len(node.arg) <= 2
-            }
-            | {
-                node.name
-                for node in ast.walk(syntax_tree)
-                if isinstance(node, ast.ExceptHandler)
-                and node.name
-                and len(node.name) <= 2
-                and node.name not in allowed_stdlib_short_names
-            }
-            | {
-                node.asname
-                for node in ast.walk(syntax_tree)
-                if isinstance(node, ast.alias)
-                and node.asname
-                and len(node.asname) <= 2
-                and node.asname not in allowed_stdlib_short_names
-            }
-            | {
-                node.name
-                for node in ast.walk(syntax_tree)
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and len(node.name) <= 2
-                and node.name not in allowed_stdlib_short_names
-            }
+        invalid_short_names = _collect_invalid_short_identifiers(
+            syntax_tree, allowed_stdlib_short_names
         )
         if invalid_short_names:
             quality_passed &= print_status_result(
-                i18n.translate(
-                    "tests.vars_min_len", path=python_file.relative_to(root_dir)
-                ),
+                i18n.translate("tests.vars_min_len", path=python_file.relative_to(root_dir)),
                 False,
                 i18n.translate("tests.found_short_vars", items=invalid_short_names),
             )
@@ -1038,9 +1066,9 @@ def test_source_templates_and_dummies() -> bool:
         )
         == (0.0, 0.0)
     )
-    for expected_zone, sample_pt in sample_points:
+    for expected_zone, sample_point in sample_points:
         proj_u, proj_v_blender = ped_damage_helper.project_point_onto_damage_zone(
-            sample_pt, expected_zone, damage_cylinders
+            sample_point, expected_zone, damage_cylinders
         )
         v_ydd = 1.0 - proj_v_blender
         decoded_zone = int(((-v_ydd) + 0.5) * 0.5)
@@ -1162,13 +1190,13 @@ def test_source_templates_and_dummies() -> bool:
         def _write_synthetic_rpf7(
             target_rpf: Path,
             d1_descriptor: int,
-            f_size_val: int,
+            file_size_val: int,
             entry_name_str: str,
         ) -> None:
             name_bytes = entry_name_str.encode("ascii") + b"\x00"
             names_padded = name_bytes + (b"\x00" * ((16 - (len(name_bytes) % 16)) % 16))
-            d0_val = 0 | ((f_size_val & 0xFFFF) << 16)
-            d1_packed = d1_descriptor | ((f_size_val >> 16) & 0xFF)
+            d0_val = 0 | ((file_size_val & 0xFFFF) << 16)
+            d1_packed = d1_descriptor | ((file_size_val >> 16) & 0xFF)
             with open(target_rpf, "wb") as synth_handle:
                 synth_handle.write(struct.pack("<II", 0x52504637, 1))
                 synth_handle.write(struct.pack("<I4s", len(names_padded), b"OPEN"))
@@ -1270,24 +1298,24 @@ def test_source_templates_and_dummies() -> bool:
     import physbone_helper as pb_mod
     import types
 
-    qp_center = eye_blink_helper.solve_nonneg_two_vector_weights(
+    quad_prop_center = eye_blink_helper.solve_nonneg_two_vector_weights(
         (0.0, 0.0, -0.02),
         (0.0, 0.0, -0.025),
         (-0.01, 0.0, -0.01),
     )
-    qp_blend = eye_blink_helper.solve_nonneg_two_vector_weights(
+    quad_prop_blend = eye_blink_helper.solve_nonneg_two_vector_weights(
         (-0.005, 0.0, -0.0175),
         (0.0, 0.0, -0.025),
         (-0.01, 0.0, -0.01),
     )
-    qp_simplex_ok = (
-        qp_center[0] >= 0.79
-        and qp_center[1] <= 0.01
-        and qp_blend[0] >= 0.0
-        and qp_blend[1] >= 0.0
-        and (qp_blend[0] + qp_blend[1]) <= 1.0001
-        and abs(qp_blend[0] - 0.5) < 0.05
-        and abs(qp_blend[1] - 0.5) < 0.05
+    quad_prop_simplex_ok = (
+        quad_prop_center[0] >= 0.79
+        and quad_prop_center[1] <= 0.01
+        and quad_prop_blend[0] >= 0.0
+        and quad_prop_blend[1] >= 0.0
+        and (quad_prop_blend[0] + quad_prop_blend[1]) <= 1.0001
+        and abs(quad_prop_blend[0] - 0.5) < 0.05
+        and abs(quad_prop_blend[1] - 0.5) < 0.05
     )
 
     dummy_keys = [
@@ -1460,15 +1488,15 @@ def test_source_templates_and_dummies() -> bool:
     eyelid_indices = set(range(12))
     blink_key_coords = []
     brow_key_coords = []
-    for v_idx, (bx_val, by_val, bz_val) in enumerate(base_coords):
+    for v_idx, (second_quat_x, second_quat_y, second_quat_z) in enumerate(base_coords):
         if v_idx in eyelid_indices:
-            blink_key_coords.append(_MockVec3(bx_val, by_val - 0.003, bz_val - 0.018))
+            blink_key_coords.append(_MockVec3(second_quat_x, second_quat_y - 0.003, second_quat_z - 0.018))
         elif v_idx == 14:
-            blink_key_coords.append(_MockVec3(bx_val, by_val + 0.001, bz_val - 0.004))
+            blink_key_coords.append(_MockVec3(second_quat_x, second_quat_y + 0.001, second_quat_z - 0.004))
         else:
-            blink_key_coords.append(_MockVec3(bx_val, by_val, bz_val))
-        brow_z = bz_val + 0.003 if v_idx == 13 else bz_val
-        brow_key_coords.append(_MockVec3(bx_val, by_val, brow_z))
+            blink_key_coords.append(_MockVec3(second_quat_x, second_quat_y, second_quat_z))
+        brow_z = second_quat_z + 0.003 if v_idx == 13 else second_quat_z
+        brow_key_coords.append(_MockVec3(second_quat_x, second_quat_y, brow_z))
 
     key_basis = types.SimpleNamespace(
         name="Basis",
@@ -1480,13 +1508,13 @@ def test_source_templates_and_dummies() -> bool:
         name="vrc.Blink",
         value=0.0,
         mute=False,
-        data=[types.SimpleNamespace(co=vec_co) for vec_co in blink_key_coords],
+        data=[types.SimpleNamespace(co=vec_coord) for vec_coord in blink_key_coords],
     )
     key_brow = types.SimpleNamespace(
         name="eyebrow_straight",
         value=0.0,
         mute=False,
-        data=[types.SimpleNamespace(co=vec_co) for vec_co in brow_key_coords],
+        data=[types.SimpleNamespace(co=vec_coord) for vec_coord in brow_key_coords],
     )
     key_pleasure = types.SimpleNamespace(name="eye_pleasure", value=0.75, mute=False)
     key_turi = types.SimpleNamespace(name="eyelid_turi1", value=0.65, mute=False)
@@ -1494,8 +1522,8 @@ def test_source_templates_and_dummies() -> bool:
 
     def _eval_fake_coords():
         coords_out = []
-        for v_idx, (bx_val, by_val, bz_val) in enumerate(base_coords):
-            x_out, y_out, z_out = bx_val, by_val, bz_val
+        for v_idx, (second_quat_x, second_quat_y, second_quat_z) in enumerate(base_coords):
+            x_out, y_out, z_out = second_quat_x, second_quat_y, second_quat_z
             if v_idx == 12:
                 z_out += 0.006 * key_smile.value
             elif v_idx == 13:
@@ -1515,7 +1543,7 @@ def test_source_templates_and_dummies() -> bool:
 
     def _eval_fake_body(_deps):
         eval_mesh = types.SimpleNamespace(
-            vertices=[types.SimpleNamespace(co=vec_co) for vec_co in _eval_fake_coords()]
+            vertices=[types.SimpleNamespace(co=vec_coord) for vec_coord in _eval_fake_coords()]
         )
         return types.SimpleNamespace(
             matrix_world=_IdentityMat4(),
@@ -1534,61 +1562,28 @@ def test_source_templates_and_dummies() -> bool:
     )
     fake_bpy_mod = types.SimpleNamespace(
         context=types.SimpleNamespace(
-            evaluated_depsgraph_get=lambda: None,
-            view_layer=types.SimpleNamespace(update=lambda: None),
+            evaluated_depsgraph_get=lambda: None, view_layer=types.SimpleNamespace(update=lambda: None)
         )
     )
     extracted_rig = eye_blink_helper.extract_body_eyelid_blink_rig_data(
-        fake_bpy_mod,
-        fake_body_obj,
-        eye_blink_mode="auto",
-        shape_weights={
-            "eye_pleasure": 0.75,
-            "eyelid_turi1": 0.65,
-            "mouth_smile": 0.40,
-        },
+        fake_bpy_mod, fake_body_obj, eye_blink_mode="auto",
+        shape_weights={"eye_pleasure": 0.75, "eyelid_turi1": 0.65, "mouth_smile": 0.40},
     )
+    weights_by_vert = extracted_rig.get("weights_by_orig_vert", {})
     other_blendshapes_untouched_ok = (
-        extracted_rig.get("enabled") is True
-        and abs(key_blink.value - 0.0) < 1e-6
-        and abs(key_pleasure.value - 0.75) < 1e-6
-        and abs(key_turi.value - 0.65) < 1e-6
-        and abs(key_smile.value - 0.40) < 1e-6
-        and (12 not in extracted_rig.get("weights_by_orig_vert", {}))
-        and (13 not in extracted_rig.get("weights_by_orig_vert", {}))
-        and (14 not in extracted_rig.get("weights_by_orig_vert", {}))
-        and all(
-            idx in extracted_rig.get("weights_by_orig_vert", {})
-            for idx in eyelid_indices
-        )
+        extracted_rig.get("enabled") is True and abs(key_blink.value) < 1e-6
+        and abs(key_pleasure.value - 0.75) < 1e-6 and abs(key_turi.value - 0.65) < 1e-6 and abs(key_smile.value - 0.40) < 1e-6
+        and 12 not in weights_by_vert and 13 not in weights_by_vert and 14 not in weights_by_vert
+        and all(idx in weights_by_vert for idx in eyelid_indices)
         and "PB_Blink_L" in extracted_rig.get("pivots_world", {})
         and "PB_Blink_R" in extracted_rig.get("rot_quats_world", {})
     )
-
     eye_blink_ok = print_status_result(
         i18n.translate("tests.eye_blink_rigging"),
-        qp_simplex_ok
-        and (found_key is not None and found_key.name == "vrc.blink ")
-        and (conflict_safe_open is None)
-        and (conflict_closed is not None)
-        and (conflict_blink is not None)
-        and bone_budget_ok
-        and ini_roundtrip_ok
-        and strength_resolution_ok
-        and other_blendshapes_untouched_ok,
-        (
-            f"key='vrc.blink ', bone_budget=127/128, ini_merge={ini_roundtrip_ok}, "
-            f"strength_presets={strength_resolution_ok}, other_shapes_isolated={other_blendshapes_untouched_ok}"
-        ),
+        quad_prop_simplex_ok and (found_key is not None and found_key.name == "vrc.blink ")
+        and conflict_safe_open is None and conflict_closed is not None and conflict_blink is not None
+        and bone_budget_ok and ini_roundtrip_ok and strength_resolution_ok and other_blendshapes_untouched_ok,
+        f"key='vrc.blink ', bone_budget=127/128, ini_merge={ini_roundtrip_ok}, strength_presets={strength_resolution_ok}, other_shapes_isolated={other_blendshapes_untouched_ok}",
     )
-
-    return (
-        template_ok
-        and gitignore_check
-        and dummies_ok
-        and physbones_source_ok
-        and damage_decals_ok
-        and rpf7_guards_ok
-        and eye_blink_ok
-    )
+    return template_ok and gitignore_check and dummies_ok and physbones_source_ok and damage_decals_ok and rpf7_guards_ok and eye_blink_ok
 

@@ -583,22 +583,22 @@ def prepare_universal_npc_build(
     package_dir.mkdir(parents=True, exist_ok=True)
     blender_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_bs_cfg = blender_dir / f"{norm_ped}_blendshapes.cfg"
+    saved_blendshape_cfg = blender_dir / f"{norm_ped}_blendshapes.cfg"
     saved_pb_cfg = blender_dir / f"{norm_ped}_physbones.cfg"
 
     active_face_mesh = next(
-        (m_name for m_name in active_meshes if m_name.lower() == "body"),
+        (active_mesh_name for active_mesh_name in active_meshes if active_mesh_name.lower() == "body"),
         next(
             (
-                m_name
-                for m_name in active_meshes
-                if any(tok in m_name.lower() for tok in ("face", "head", "body"))
+                active_mesh_name
+                for active_mesh_name in active_meshes
+                if any(tok in active_mesh_name.lower() for tok in ("face", "head", "body"))
             ),
             "Body",
         ),
     )
-    bs_source_eff = str(blendshapes_source or ("unity" if selected_scene_or_prefab else "auto"))
-    bs_cfg_host = str(project_paths.to_host_path(blendshapes_cfg)) if blendshapes_cfg else None
+    blendshape_source_eff = str(blendshapes_source or ("unity" if selected_scene_or_prefab else "auto"))
+    blendshape_cfg_host = str(project_paths.to_host_path(blendshapes_cfg)) if blendshapes_cfg else None
     pb_cfg_host = str(project_paths.to_host_path(physbones_cfg)) if physbones_cfg else None
     emit_slot_progress(
         0.36,
@@ -615,12 +615,12 @@ def prepare_universal_npc_build(
         character_hints=hints,
         default_face_mesh=active_face_mesh,
         unity_assets_root=assets_root,
-        override_source=bs_source_eff,
-        override_cfg_path=bs_cfg_host or None,
+        override_source=blendshape_source_eff,
+        override_cfg_path=blendshape_cfg_host or None,
         override_unity_scene=selected_scene_or_prefab,
         override_avatar_name=effective_avatar_name,
         override_face_anim=face_anim_path,
-        save_cfg_path=saved_bs_cfg,
+        save_cfg_path=saved_blendshape_cfg,
         import_face=import_face_blendshapes,
         import_body=import_body_blendshapes,
     )
@@ -748,23 +748,23 @@ def _compute_target_yft_pose_metrics(ped_armature: Any) -> Dict[str, Any]:
         bone_item = data_bones.get(bone_name)
         return float((arm_world @ bone_item.head_local).z) if bone_item is not None else None
 
-    ph_l = _head_z("PH_L_Foot")
-    ph_r = _head_z("PH_R_Foot")
-    foot_l = _head_z("SKEL_L_Foot")
-    foot_r = _head_z("SKEL_R_Foot")
+    helper_left_z = _head_z("PH_L_Foot")
+    helper_right_z = _head_z("PH_R_Foot")
+    foot_left_z = _head_z("SKEL_L_Foot")
+    foot_right_z = _head_z("SKEL_R_Foot")
     head_z = _head_z("SKEL_Head")
 
-    ground_vals = [val for val in (ph_l, ph_r) if val is not None]
-    foot_vals = [val for val in (foot_l, foot_r) if val is not None]
+    ground_vals = [val for val in (helper_left_z, helper_right_z) if val is not None]
+    foot_vals = [val for val in (foot_left_z, foot_right_z) if val is not None]
     ground_z = sum(ground_vals) / len(ground_vals) if ground_vals else -1.0
     foot_z = sum(foot_vals) / len(foot_vals) if foot_vals else -0.908
     target_head_z = head_z if head_z is not None else 0.640
 
     arm_drop_deg = 55.0
     u_arm = data_bones.get("SKEL_L_UpperArm")
-    f_arm = data_bones.get("SKEL_L_Forearm")
-    if u_arm is not None and f_arm is not None:
-        vec_arm = (arm_world @ f_arm.head_local) - (arm_world @ u_arm.head_local)
+    forearm_bone = data_bones.get("SKEL_L_Forearm")
+    if u_arm is not None and forearm_bone is not None:
+        vec_arm = (arm_world @ forearm_bone.head_local) - (arm_world @ u_arm.head_local)
         horiz_len = max(1e-5, math.hypot(vec_arm.x, vec_arm.y))
         arm_drop_deg = max(35.0, min(68.0, math.degrees(math.atan2(-vec_arm.z, horiz_len))))
 
@@ -776,7 +776,7 @@ def _compute_target_yft_pose_metrics(ped_armature: Any) -> Dict[str, Any]:
     }
 
 
-def _pose_avatar_arms_to_gtav_a_pose(
+def _pose_avatar_arms_to_gtav_apose(
     bpy_mod: Any,
     mathutils_mod: Any,
     src_armature: Any,
@@ -790,7 +790,7 @@ def _pose_avatar_arms_to_gtav_a_pose(
     bpy_mod.ops.object.mode_set(mode="POSE")
     bpy_mod.context.view_layer.update()
 
-    arm_mw = src_armature.matrix_world
+    armature_mat_world = src_armature.matrix_world
     side_specs = (
         ("L", ("Upper_arm.L", "LeftUpperArm", "UpperArm.L")),
         ("R", ("Upper_arm.R", "RightUpperArm", "UpperArm.R")),
@@ -806,9 +806,9 @@ def _pose_avatar_arms_to_gtav_a_pose(
         if upper_pb is None or lower_pb is None:
             continue
 
-        start_pt = arm_mw @ upper_pb.head
-        end_pt = arm_mw @ lower_pb.head
-        arm_vec = (end_pt - start_pt)
+        start_point = armature_mat_world @ upper_pb.head
+        end_point = armature_mat_world @ lower_pb.head
+        arm_vec = (end_point - start_point)
         if arm_vec.length < 1e-4:
             continue
         cur_deg = math.degrees(math.atan2(-arm_vec.z, max(1e-5, math.hypot(arm_vec.x, arm_vec.y))))
@@ -825,9 +825,9 @@ def _pose_avatar_arms_to_gtav_a_pose(
         world_rot = mathutils_mod.Quaternion(rot_axis, math.radians(delta_deg))
 
         if upper_pb.parent is not None:
-            parent_rot = (arm_mw.to_3x3() @ upper_pb.parent.matrix.to_3x3()).normalized()
+            parent_rot = (armature_mat_world.to_3x3() @ upper_pb.parent.matrix.to_3x3()).normalized()
         else:
-            parent_rot = arm_mw.to_3x3().normalized()
+            parent_rot = armature_mat_world.to_3x3().normalized()
         rest_local_rot = (
             upper_pb.bone.matrix_local.to_3x3()
             if upper_pb.parent is None
@@ -895,7 +895,7 @@ def _strip_object_base_name(raw_name: str) -> str:
 def _resolve_universal_target_bone(
     raw_bone_name: str,
     mesh_name: str,
-    pb_bone_mapping_ci: Dict[str, str],
+    pb_bone_mapping_lower: Dict[str, str],
     src_parent_lookup: Optional[Dict[str, str]] = None,
 ) -> str:
     """Resolve an arbitrary Unity bone weight name onto the GTA V + PhysBone skeleton."""
@@ -947,14 +947,14 @@ def _resolve_universal_target_bone(
         if exact_compact in ("hips", "pelvis", "spine", "chest", "upperchest", "neck", "head"):
             return humanoid_table["hips" if exact_compact == "pelvis" else exact_compact]
 
-        if low_tok in pb_bone_mapping_ci:
-            return pb_bone_mapping_ci[low_tok]
+        if low_tok in pb_bone_mapping_lower:
+            return pb_bone_mapping_lower[low_tok]
         space_tok = re.sub(r"\.(\d{3})$", lambda match_obj: f" {int(match_obj.group(1))}", low_tok)
-        if space_tok in pb_bone_mapping_ci:
-            return pb_bone_mapping_ci[space_tok]
+        if space_tok in pb_bone_mapping_lower:
+            return pb_bone_mapping_lower[space_tok]
 
         direct_pb = physbone_helper.resolve_bone_from_mapping(
-            cand_name, bone_mapping_ci=pb_bone_mapping_ci
+            cand_name, bone_mapping_lower=pb_bone_mapping_lower
         )
         if direct_pb is not None:
             return direct_pb
@@ -1023,8 +1023,8 @@ def _compute_soft_skirt_weights(
             target_bone = vgroup_target_names[grp_elem.group]
             if "skirt" in raw_name.lower():
                 if target_bone.startswith("PB_"):
-                    pb_w = grp_elem.weight * 0.78
-                    remapped[target_bone] = remapped.get(target_bone, 0.0) + pb_w
+                    physbone_weight = grp_elem.weight * 0.78
+                    remapped[target_bone] = remapped.get(target_bone, 0.0) + physbone_weight
                     skirt_weight += grp_elem.weight * 0.22
                 else:
                     skirt_weight += grp_elem.weight
@@ -1034,15 +1034,15 @@ def _compute_soft_skirt_weights(
     if skirt_weight > 0.0:
         vert_z = max(0.0, min(1.0, (0.05 - float(ydd_coord.z)) / 0.14))
         thigh_cap = vert_z * 0.22
-        thigh_w = skirt_weight * thigh_cap
-        pelvis_w = skirt_weight - thigh_w
-        if pelvis_w > 1e-6:
-            remapped["SKEL_Pelvis"] = remapped.get("SKEL_Pelvis", 0.0) + pelvis_w
+        thigh_weight = skirt_weight * thigh_cap
+        pelvis_weight = skirt_weight - thigh_weight
+        if pelvis_weight > 1e-6:
+            remapped["SKEL_Pelvis"] = remapped.get("SKEL_Pelvis", 0.0) + pelvis_weight
         side_mix = max(0.0, min(1.0, (float(ydd_coord.x) + 0.04) / 0.08))
-        if thigh_w * side_mix > 1e-6:
-            remapped["SKEL_L_Thigh"] = remapped.get("SKEL_L_Thigh", 0.0) + (thigh_w * side_mix)
-        if thigh_w * (1.0 - side_mix) > 1e-6:
-            remapped["SKEL_R_Thigh"] = remapped.get("SKEL_R_Thigh", 0.0) + (thigh_w * (1.0 - side_mix))
+        if thigh_weight * side_mix > 1e-6:
+            remapped["SKEL_L_Thigh"] = remapped.get("SKEL_L_Thigh", 0.0) + (thigh_weight * side_mix)
+        if thigh_weight * (1.0 - side_mix) > 1e-6:
+            remapped["SKEL_R_Thigh"] = remapped.get("SKEL_R_Thigh", 0.0) + (thigh_weight * (1.0 - side_mix))
 
     if len(remapped) > 4:
         remapped = dict(
@@ -1235,20 +1235,20 @@ def _extract_vertex_weight_map(mesh_obj, vertex_obj) -> dict:
 
 
 def _assign_vertex_weight_map(mesh_obj, vertex_index: int, weight_map: dict) -> None:
-    filtered = {bn_name: val for bn_name, val in weight_map.items() if val > 1e-5}
+    filtered = {weight_bone_name: val for weight_bone_name, val in weight_map.items() if val > 1e-5}
     total = sum(filtered.values())
     if total <= 1e-6:
         return
     inv_total = 1.0 / total
     existing = {grp.name: grp for grp in mesh_obj.vertex_groups}
-    for bn_name, raw_val in filtered.items():
-        grp = existing.get(bn_name)
+    for weight_bone_name, raw_val in filtered.items():
+        grp = existing.get(weight_bone_name)
         if grp is None:
-            grp = mesh_obj.vertex_groups.new(name=bn_name)
-            existing[bn_name] = grp
+            grp = mesh_obj.vertex_groups.new(name=weight_bone_name)
+            existing[weight_bone_name] = grp
         grp.add([vertex_index], raw_val * inv_total, "REPLACE")
-    for bn_name, grp in existing.items():
-        if bn_name not in filtered:
+    for weight_bone_name, grp in existing.items():
+        if weight_bone_name not in filtered:
             try:
                 grp.remove([vertex_index])
             except RuntimeError:
@@ -1299,28 +1299,28 @@ def conform_tight_torso_clothing_weights(
         mtx = skin_obj.matrix_world
         nrm_mtx = mtx.to_3x3()
         for vtx in skin_obj.data.vertices:
-            w_pos = mtx @ vtx.co
+            world_pos = mtx @ vtx.co
             if (
-                abs(w_pos.x) > medial_limit + 0.035
-                or w_pos.y >= -0.015
-                or not (chest_z_min - 0.04 <= w_pos.z <= chest_z_max + 0.03)
+                abs(world_pos.x) > medial_limit + 0.035
+                or world_pos.y >= -0.015
+                or not (chest_z_min - 0.04 <= world_pos.z <= chest_z_max + 0.03)
             ):
                 continue
-            w_nrm = (nrm_mtx @ vtx.normal).normalized()
-            if w_nrm.y >= 0.25:
+            world_normal = (nrm_mtx @ vtx.normal).normalized()
+            if world_normal.y >= 0.25:
                 continue
-            skin_w = _extract_vertex_weight_map(skin_obj, vtx)
-            if not skin_w:
+            skin_weight_map = _extract_vertex_weight_map(skin_obj, vtx)
+            if not skin_weight_map:
                 continue
-            skin_samples.append((w_pos, w_nrm, skin_w))
+            skin_samples.append((world_pos, world_normal, skin_weight_map))
 
     if not skin_samples:
         return 0
 
-    kd_tree = kdtree.KDTree(len(skin_samples))
-    for smp_idx, (w_pos, _w_nrm, _skin_w) in enumerate(skin_samples):
-        kd_tree.insert(w_pos, smp_idx)
-    kd_tree.balance()
+    kdtree_index = kdtree.KDTree(len(skin_samples))
+    for smp_idx, (world_pos, _world_normal, _skin_weight) in enumerate(skin_samples):
+        kdtree_index.insert(world_pos, smp_idx)
+    kdtree_index.balance()
 
     adjusted_count = 0
     fade_span = 0.025
@@ -1334,66 +1334,66 @@ def conform_tight_torso_clothing_weights(
         cloth_changed = False
 
         for vtx in cloth_data.vertices:
-            w_pos = mtx @ vtx.co
+            world_pos = mtx @ vtx.co
             if (
-                abs(w_pos.x) >= medial_limit
-                or w_pos.y >= -0.010
-                or not (chest_z_min <= w_pos.z <= chest_z_max)
+                abs(world_pos.x) >= medial_limit
+                or world_pos.y >= -0.010
+                or not (chest_z_min <= world_pos.z <= chest_z_max)
             ):
                 continue
-            w_nrm = (nrm_mtx @ vtx.normal).normalized()
-            if w_nrm.y >= -0.15:
+            world_normal = (nrm_mtx @ vtx.normal).normalized()
+            if world_normal.y >= -0.15:
                 continue
 
             best_sample = None
             best_dist = max_skin_dist
-            for _cand_pos, cand_idx, cand_dist in kd_tree.find_n(w_pos, 4):
+            for _cand_pos, cand_idx, cand_dist in kdtree_index.find_n(world_pos, 4):
                 if cand_dist > best_dist:
                     continue
-                s_pos, s_nrm, s_weights = skin_samples[cand_idx]
-                if s_nrm.dot(w_nrm) <= 0.20:
+                sample_pos, sample_normal, sample_weights = skin_samples[cand_idx]
+                if sample_normal.dot(world_normal) <= 0.20:
                     continue
-                if abs(w_pos.x) < abs(s_pos.x) - 0.025:
+                if abs(world_pos.x) < abs(sample_pos.x) - 0.025:
                     continue
-                best_sample = (s_pos, s_nrm, s_weights)
+                best_sample = (sample_pos, sample_normal, sample_weights)
                 best_dist = cand_dist
                 break
 
             if best_sample is None:
                 continue
 
-            s_pos, s_nrm, s_weights = best_sample
-            edge_fade = min(1.0, max(0.0, (medial_limit - abs(w_pos.x)) / fade_span))
+            sample_pos, sample_normal, sample_weights = best_sample
+            edge_fade = min(1.0, max(0.0, (medial_limit - abs(world_pos.x)) / fade_span))
             if edge_fade <= 1e-4:
                 continue
 
             cur_weights = _extract_vertex_weight_map(cloth_obj, vtx)
-            arm_weight = sum(cur_weights.get(bn_name, 0.0) for bn_name in _TORSO_ARM_BONES)
+            arm_weight = sum(cur_weights.get(weight_bone_name, 0.0) for weight_bone_name in _TORSO_ARM_BONES)
             prox_blend = min(1.0, 0.70 + 0.30 * (1.0 - (best_dist / max_skin_dist)))
             blend_amt = edge_fade * prox_blend
 
             did_modify_vtx = False
             if arm_weight > 0.03:
                 new_weights = {}
-                for bn_name, w_val in cur_weights.items():
-                    if bn_name in _TORSO_ARM_BONES:
-                        rem_val = w_val * (1.0 - blend_amt)
+                for weight_bone_name, weight_val in cur_weights.items():
+                    if weight_bone_name in _TORSO_ARM_BONES:
+                        rem_val = weight_val * (1.0 - blend_amt)
                         if rem_val > 1e-5:
-                            new_weights[bn_name] = rem_val
+                            new_weights[weight_bone_name] = rem_val
                     else:
-                        new_weights[bn_name] = (w_val * (1.0 - blend_amt))
-                for bn_name, s_val in s_weights.items():
-                    if bn_name in _TORSO_ARM_BONES:
+                        new_weights[weight_bone_name] = (weight_val * (1.0 - blend_amt))
+                for weight_bone_name, sample_weight in sample_weights.items():
+                    if weight_bone_name in _TORSO_ARM_BONES:
                         continue
-                    new_weights[bn_name] = new_weights.get(bn_name, 0.0) + (s_val * blend_amt)
+                    new_weights[weight_bone_name] = new_weights.get(weight_bone_name, 0.0) + (sample_weight * blend_amt)
                 _assign_vertex_weight_map(cloth_obj, vtx.index, new_weights)
                 did_modify_vtx = True
 
-            signed_clear = (w_pos - s_pos).dot(s_nrm)
+            signed_clear = (world_pos - sample_pos).dot(sample_normal)
             req_clear = min_clearance * edge_fade
             if -0.004 <= signed_clear < req_clear:
-                lift_vec = s_nrm * (req_clear - signed_clear)
-                vtx.co = inv_mtx @ (w_pos + lift_vec)
+                lift_vec = sample_normal * (req_clear - signed_clear)
+                vtx.co = inv_mtx @ (world_pos + lift_vec)
                 did_modify_vtx = True
                 cloth_changed = True
 

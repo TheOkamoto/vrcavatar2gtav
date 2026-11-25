@@ -319,7 +319,7 @@ def relocate_blender_armature_bones(
 def inject_custom_bones_into_blender_armature(
     armature_obj,
     custom_bones: Sequence[Dict[str, object]],
-    bone_tag_fn: Optional[Callable[[str], int]] = None,
+    bone_tag_func: Optional[Callable[[str], int]] = None,
     bone_flags: Sequence[str] = ("RotX", "RotY", "RotZ", "TransX", "TransY", "TransZ"),
 ) -> int:
     """
@@ -381,7 +381,7 @@ def inject_custom_bones_into_blender_armature(
         if blender_bone is None:
             continue
         bone_props = blender_bone.bone_properties
-        resolved_tag = int(bone_desc["tag"]) if "tag" in bone_desc else int(bone_tag_fn(bone_name))
+        resolved_tag = int(bone_desc["tag"]) if "tag" in bone_desc else int(bone_tag_func(bone_name))
         bone_props.manual_tag = resolved_tag
         bone_props.use_manual_tag = True
         bone_props.flags.clear()

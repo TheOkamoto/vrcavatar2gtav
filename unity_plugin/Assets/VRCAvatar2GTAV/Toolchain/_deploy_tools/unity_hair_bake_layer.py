@@ -196,10 +196,10 @@ def _load_disk_guid_cache(root_dir: Path, max_age_sec: float = 300.0) -> Optiona
             return None
         if int(payload.get("root_mtime_ns", -1)) != int(cur_mtime_ns):
             return None
-        saved_ts = float(payload.get("saved_at", 0.0))
-        if saved_ts <= 0.0 or (time.time() - saved_ts) > max_age_sec:
+        saved_timestamp = float(payload.get("saved_at", 0.0))
+        if saved_timestamp <= 0.0 or (time.time() - saved_timestamp) > max_age_sec:
             return None
-        return {guid_k: Path(asset_str) for guid_k, asset_str in payload.get("entries", {}).items()}
+        return {guid_key: Path(asset_str) for guid_key, asset_str in payload.get("entries", {}).items()}
     except Exception:
         return None
 
@@ -226,7 +226,7 @@ def _save_disk_guid_cache(
             "root_mtime_ns": int(root_mtime_ns),
             "saved_at": time.time(),
             "truncated": bool(truncated),
-            "entries": {guid_k: str(asset_p) for guid_k, asset_p in guid_map.items()},
+            "entries": {guid_key: str(asset_path) for guid_key, asset_path in guid_map.items()},
         }
         cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except Exception:
@@ -590,10 +590,10 @@ def parse_unity_material(
         if token in lower_label or token in str(tex_envs.get("_MainTex", {}).get("path", "")).lower():
             semantic_tokens.append(token)
 
-    rq_match = re.search(r"m_CustomRenderQueue:\s*(-?\d+)", raw_text)
-    render_queue = int(rq_match.group(1)) if rq_match else 2000
-    kw_match = re.search(r"m_ShaderKeywords:\s*(.*)$", raw_text, re.MULTILINE)
-    shader_keywords = kw_match.group(1) if kw_match else ""
+    render_queue_match = re.search(r"m_CustomRenderQueue:\s*(-?\d+)", raw_text)
+    render_queue = int(render_queue_match.group(1)) if render_queue_match else 2000
+    keyword_match = re.search(r"m_ShaderKeywords:\s*(.*)$", raw_text, re.MULTILINE)
+    shader_keywords = keyword_match.group(1) if keyword_match else ""
     cull_mode = float(floats_dict.get("_Cull", 2.0))
     is_double_sided = cull_mode < 0.5
     trans_shader_guids = LILTOON_TRANSPARENT_SHADER_GUIDS
@@ -706,9 +706,9 @@ def _dilate_rgba_transparent_edges(rgba_array: Any, passes: int = 8) -> Any:
             break
         accum = numpy_mod.zeros_like(rgb)
         counts = numpy_mod.zeros(alpha.shape, dtype=numpy_mod.float32)
-        for dy_step, dx_step in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            rolled_rgb = numpy_mod.roll(rgb, shift=(dy_step, dx_step), axis=(0, 1))
-            rolled_mask = numpy_mod.roll(filled, shift=(dy_step, dx_step), axis=(0, 1)).astype(numpy_mod.float32)
+        for step_y, step_x in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            rolled_rgb = numpy_mod.roll(rgb, shift=(step_y, step_x), axis=(0, 1))
+            rolled_mask = numpy_mod.roll(filled, shift=(step_y, step_x), axis=(0, 1)).astype(numpy_mod.float32)
             accum += rolled_rgb * rolled_mask[..., None]
             counts += rolled_mask
         fill_targets = (~filled) & (counts > 0)
@@ -778,24 +778,24 @@ def _apply_liltoon_hsvg(
     lin_arr = numpy_mod.power(srgb_unit, 2.2)
     lin_gamma = numpy_mod.power(numpy_mod.abs(lin_arr), max(0.05, gamma_pow))
 
-    chan_r = lin_gamma[..., 0]
-    chan_g = lin_gamma[..., 1]
-    chan_b = lin_gamma[..., 2]
-    max_c = numpy_mod.maximum(numpy_mod.maximum(chan_r, chan_g), chan_b)
-    min_c = numpy_mod.minimum(numpy_mod.minimum(chan_r, chan_g), chan_b)
-    delta_c = max_c - min_c
+    chan_red = lin_gamma[..., 0]
+    chan_green = lin_gamma[..., 1]
+    chan_blue = lin_gamma[..., 2]
+    max_channel = numpy_mod.maximum(numpy_mod.maximum(chan_red, chan_green), chan_blue)
+    min_channel = numpy_mod.minimum(numpy_mod.minimum(chan_red, chan_green), chan_blue)
+    delta_chroma = max_channel - min_channel
 
-    hue_val = numpy_mod.zeros_like(max_c)
-    non_gray = delta_c > 1e-7
-    mask_r = non_gray & (max_c == chan_r)
-    mask_g = non_gray & (max_c == chan_g) & (~mask_r)
-    mask_b = non_gray & (~mask_r) & (~mask_g)
-    hue_val[mask_r] = (((chan_g[mask_r] - chan_b[mask_r]) / delta_c[mask_r]) % 6.0) / 6.0
-    hue_val[mask_g] = (((chan_b[mask_g] - chan_r[mask_g]) / delta_c[mask_g]) + 2.0) / 6.0
-    hue_val[mask_b] = (((chan_r[mask_b] - chan_g[mask_b]) / delta_c[mask_b]) + 4.0) / 6.0
+    hue_val = numpy_mod.zeros_like(max_channel)
+    non_gray = delta_chroma > 1e-7
+    mask_red = non_gray & (max_channel == chan_red)
+    mask_green = non_gray & (max_channel == chan_green) & (~mask_red)
+    mask_blue = non_gray & (~mask_red) & (~mask_green)
+    hue_val[mask_red] = (((chan_green[mask_red] - chan_blue[mask_red]) / delta_chroma[mask_red]) % 6.0) / 6.0
+    hue_val[mask_green] = (((chan_blue[mask_green] - chan_red[mask_green]) / delta_chroma[mask_green]) + 2.0) / 6.0
+    hue_val[mask_blue] = (((chan_red[mask_blue] - chan_green[mask_blue]) / delta_chroma[mask_blue]) + 4.0) / 6.0
 
-    sat_val = numpy_mod.clip((delta_c / (max_c + 1e-7)) * sat_scale, 0.0, 1.0)
-    val_chan = numpy_mod.clip(max_c * val_scale, 0.0, 1.0)
+    sat_val = numpy_mod.clip((delta_chroma / (max_channel + 1e-7)) * sat_scale, 0.0, 1.0)
+    val_chan = numpy_mod.clip(max_channel * val_scale, 0.0, 1.0)
     hue_val = (hue_val + hue_shift) % 1.0
 
     hue_offsets = numpy_mod.stack([hue_val + 1.0, hue_val + (2.0 / 3.0), hue_val + (1.0 / 3.0)], axis=-1)
@@ -875,7 +875,7 @@ def composite_unity_material_textures(
     from PIL import Image as pil_image
     import texture_calibration_helper as calibration_helper
 
-    target_w, target_h = int(tile_size[0]), int(tile_size[1])
+    target_width, target_height = int(tile_size[0]), int(tile_size[1])
     tex_envs = mat_info.get("tex_envs", {})
     floats = mat_info.get("floats", {})
     colors = mat_info.get("colors", {})
@@ -883,37 +883,37 @@ def composite_unity_material_textures(
     def _load_slot_rgba(
         prop_names: Sequence[str],
         default_rgba: Tuple[int, int, int, int],
-        dilate_black_bg: bool = False,
+        dilate_black_background: bool = False,
     ) -> Tuple[Any, Tuple[float, float], Tuple[float, float]]:
         for prop_key in prop_names:
             entry = tex_envs.get(prop_key)
             if entry and entry.get("path") and os.path.isfile(entry["path"]):
                 with pil_image.open(entry["path"]) as raw_opened:
                     opened_img = raw_opened.convert("RGBA")
-                if dilate_black_bg:
+                if dilate_black_background:
                     opened_img = _dilate_black_uv_background_if_detected(
                         opened_img, numpy_mod, pil_image, passes=10
                     )
                 loaded = opened_img.resize(
-                    (target_w, target_h), pil_image.Resampling.LANCZOS
+                    (target_width, target_height), pil_image.Resampling.LANCZOS
                 )
                 return loaded, tuple(entry.get("scale", (1.0, 1.0))), tuple(entry.get("offset", (0.0, 0.0)))
-        return pil_image.new("RGBA", (target_w, target_h), default_rgba), (1.0, 1.0), (0.0, 0.0)
+        return pil_image.new("RGBA", (target_width, target_height), default_rgba), (1.0, 1.0), (0.0, 0.0)
 
     def _srgb_vec_to_lin(col_vec: Sequence[float]) -> Any:
         arr_rgb = numpy_mod.array(col_vec[:3], dtype=numpy_mod.float32)
         return numpy_mod.power(numpy_mod.maximum(arr_rgb, 0.0), 2.2)
 
     has_main_tex = any(
-        isinstance(tex_envs.get(k_name), dict)
-        and tex_envs[k_name].get("path")
-        and os.path.isfile(tex_envs[k_name]["path"])
-        for k_name in ("_MainTex", "_BaseMap", "_BaseColorMap")
+        isinstance(tex_envs.get(lookup_key_name), dict)
+        and tex_envs[lookup_key_name].get("path")
+        and os.path.isfile(tex_envs[lookup_key_name]["path"])
+        for lookup_key_name in ("_MainTex", "_BaseMap", "_BaseColorMap")
     )
     main_img, main_scale, main_off = _load_slot_rgba(
         ("_MainTex", "_BaseMap", "_BaseColorMap"),
         (255, 255, 255, 255),
-        dilate_black_bg=True,
+        dilate_black_background=True,
     )
     main_img = _apply_uv_tile_transform(main_img, main_scale, main_off)
     base_arr = numpy_mod.array(main_img, dtype=numpy_mod.float32)
@@ -957,9 +957,9 @@ def composite_unity_material_textures(
         layer_alpha = (layer_arr[..., 3:4] / 255.0) * blend_mask_arr * max(0.0, min(1.0, float(layer_col[3])))
 
         raw_blend_val = 0.0
-        for b_key in blend_keys:
-            if b_key in floats:
-                raw_blend_val = floats[b_key]
+        for blend_key in blend_keys:
+            if blend_key in floats:
+                raw_blend_val = floats[blend_key]
                 break
         blend_mode = 0 if (force_iris_normal_2nd and idx_str == "2nd") else int(round(raw_blend_val))
         base_lin = _lil_blend_linear(base_lin, layer_lin, layer_alpha, blend_mode, numpy_mod)
@@ -980,12 +980,12 @@ def composite_unity_material_textures(
             mc2_col = colors.get("_MatCap2ndColor", [1.0, 1.0, 1.0, 1.0])
             mc2_lin = numpy_mod.power(numpy_mod.clip(mc2_center, 0.0, 1.0), 2.2) * _srgb_vec_to_lin(mc2_col)
             mc2_blend = max(0.0, min(1.0, float(floats.get("_MatCap2ndBlend", 1.0)) * float(mc2_col[3])))
-            mc2_mask_arr = numpy_mod.ones((target_h, target_w, 1), dtype=numpy_mod.float32)
+            mc2_mask_arr = numpy_mod.ones((target_height, target_width, 1), dtype=numpy_mod.float32)
             mc2_mask_entry = tex_envs.get("_MatCap2ndBlendMask")
             if mc2_mask_entry and mc2_mask_entry.get("path") and os.path.isfile(mc2_mask_entry["path"]):
-                mc2_m_img, mc2_ms, mc2_mo = _load_slot_rgba(("_MatCap2ndBlendMask",), (255, 255, 255, 255))
-                mc2_m_img = _apply_uv_tile_transform(mc2_m_img, mc2_ms, mc2_mo)
-                mc2_mask_arr = numpy_mod.array(mc2_m_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+                matcap2_mask_img, matcap2_mask_scale, matcap2_mask_offset = _load_slot_rgba(("_MatCap2ndBlendMask",), (255, 255, 255, 255))
+                matcap2_mask_img = _apply_uv_tile_transform(matcap2_mask_img, matcap2_mask_scale, matcap2_mask_offset)
+                mc2_mask_arr = numpy_mod.array(matcap2_mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
             base_lin = _lil_blend_linear(
                 base_lin,
                 base_lin * mc2_lin[None, None, :],
@@ -1016,36 +1016,36 @@ def composite_unity_material_textures(
             base_lin = _lil_blend_linear(base_lin, mc1_src, mc1_blend, (0 if mc1_mode == 3 else mc1_mode), numpy_mod)
     if not has_main_tex and floats.get("_UseRim", 0.0) >= 0.5:
         rim_col = colors.get("_RimColor", [0.0, 0.0, 0.0, 0.0])
-        rim_a = max(0.0, min(1.0, float(rim_col[3]) if len(rim_col) >= 4 else 1.0)) * 0.45
-        if rim_a > 0.01:
-            base_lin = numpy_mod.clip(base_lin + _srgb_vec_to_lin(rim_col)[None, None, :] * rim_a, 0.0, 1.0)
+        rim_alpha = max(0.0, min(1.0, float(rim_col[3]) if len(rim_col) >= 4 else 1.0)) * 0.45
+        if rim_alpha > 0.01:
+            base_lin = numpy_mod.clip(base_lin + _srgb_vec_to_lin(rim_col)[None, None, :] * rim_alpha, 0.0, 1.0)
 
     # Apply 1st and 2nd Emission layers cleanly in linear space
-    for use_em_key, map_em_key, mask_em_key, col_em_key, blend_em_key, mode_em_key in (
+    for use_emission_key, map_emission_key, mask_emission_key, color_emission_key, blend_emission_key, mode_emission_key in (
         ("_UseEmission", "_EmissionMap", "_EmissionBlendMask", "_EmissionColor", "_EmissionBlend", "_EmissionBlendMode"),
         ("_UseEmission2nd", "_Emission2ndMap", "_Emission2ndBlendMask", "_Emission2ndColor", "_Emission2ndBlend", "_Emission2ndBlendMode"),
     ):
-        if floats.get(use_em_key, 0.0) < 0.5:
+        if floats.get(use_emission_key, 0.0) < 0.5:
             continue
-        em_entry = tex_envs.get(map_em_key)
-        if not em_entry or not em_entry.get("path") or not os.path.isfile(em_entry["path"]):
+        emission_entry = tex_envs.get(map_emission_key)
+        if not emission_entry or not emission_entry.get("path") or not os.path.isfile(emission_entry["path"]):
             continue
-        em_raw = colors.get(col_em_key, [0.0, 0.0, 0.0, 1.0])
-        em_gain = numpy_mod.clip(numpy_mod.array(em_raw[:3], dtype=numpy_mod.float32), 0.0, 1.55)
-        em_img, em_scale, em_off = _load_slot_rgba((map_em_key,), (255, 255, 255, 255))
-        em_img = _apply_uv_tile_transform(em_img, em_scale, em_off)
-        em_arr = numpy_mod.array(em_img, dtype=numpy_mod.float32) / 255.0
-        em_lin = numpy_mod.power(numpy_mod.clip(em_arr[..., :3], 0.0, 1.0), 2.2)
-        em_tint = numpy_mod.power(numpy_mod.minimum(em_gain, 1.0), 2.2) * numpy_mod.maximum(em_gain, 1.0)
-        em_val = em_lin * em_tint[None, None, :]
-        em_mask_val = 1.0
-        if tex_envs.get(mask_em_key, {}).get("path") and os.path.isfile(tex_envs[mask_em_key]["path"]):
-            em_m_img, em_ms, em_mo = _load_slot_rgba((mask_em_key,), (255, 255, 255, 255))
-            em_m_img = _apply_uv_tile_transform(em_m_img, em_ms, em_mo)
-            em_mask_val = numpy_mod.array(em_m_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
-        em_alpha = max(0.0, min(1.0, float(floats.get(blend_em_key, 1.0)) * float(em_raw[3]))) * em_arr[..., 3:4] * em_mask_val
-        em_mode = int(round(floats.get(mode_em_key, 1.0)))
-        base_lin = _lil_blend_linear(base_lin, em_val, em_alpha, em_mode, numpy_mod)
+        emission_raw = colors.get(color_emission_key, [0.0, 0.0, 0.0, 1.0])
+        emission_gain = numpy_mod.clip(numpy_mod.array(emission_raw[:3], dtype=numpy_mod.float32), 0.0, 1.55)
+        emission_img, emission_scale, emission_offset = _load_slot_rgba((map_emission_key,), (255, 255, 255, 255))
+        emission_img = _apply_uv_tile_transform(emission_img, emission_scale, emission_offset)
+        emission_arr = numpy_mod.array(emission_img, dtype=numpy_mod.float32) / 255.0
+        emission_linear = numpy_mod.power(numpy_mod.clip(emission_arr[..., :3], 0.0, 1.0), 2.2)
+        emission_tint = numpy_mod.power(numpy_mod.minimum(emission_gain, 1.0), 2.2) * numpy_mod.maximum(emission_gain, 1.0)
+        emission_val = emission_linear * emission_tint[None, None, :]
+        emission_mask_val = 1.0
+        if tex_envs.get(mask_emission_key, {}).get("path") and os.path.isfile(tex_envs[mask_emission_key]["path"]):
+            emission_mask_img, emission_mask_scale, emission_mask_offset = _load_slot_rgba((mask_emission_key,), (255, 255, 255, 255))
+            emission_mask_img = _apply_uv_tile_transform(emission_mask_img, emission_mask_scale, emission_mask_offset)
+            emission_mask_val = numpy_mod.array(emission_mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+        emission_alpha = max(0.0, min(1.0, float(floats.get(blend_emission_key, 1.0)) * float(emission_raw[3]))) * emission_arr[..., 3:4] * emission_mask_val
+        emission_mode = int(round(floats.get(mode_emission_key, 1.0)))
+        base_lin = _lil_blend_linear(base_lin, emission_val, emission_alpha, emission_mode, numpy_mod)
 
     base_rgb = numpy_mod.clip(
         numpy_mod.power(numpy_mod.clip(base_lin, 0.0, 1.0), 1.0 / 2.2) * 255.0,
@@ -1089,8 +1089,8 @@ def composite_unity_material_textures(
     use_bump = floats.get("_UseBumpMap", 0.0) >= 0.5
     bump_entry = tex_envs.get("_BumpMap")
     if use_bump and bump_entry and bump_entry.get("path") and os.path.isfile(bump_entry["path"]):
-        bump_img, b_scale, b_off = _load_slot_rgba(("_BumpMap",), (128, 128, 255, 255))
-        bump_img = _apply_uv_tile_transform(bump_img, b_scale, b_off).convert("RGB")
+        bump_img, bump_scale, bump_offset = _load_slot_rgba(("_BumpMap",), (128, 128, 255, 255))
+        bump_img = _apply_uv_tile_transform(bump_img, bump_scale, bump_offset).convert("RGB")
         bump_arr = numpy_mod.array(bump_img, dtype=numpy_mod.float32)
         bump_str = max(0.15, min(1.25, float(floats.get("_BumpScale", 0.6))))
         neutral = numpy_mod.array([128.0, 128.0, 255.0], dtype=numpy_mod.float32)
@@ -1151,8 +1151,8 @@ def extract_liltoon_emission_mask(
     tex_envs = mat_info.get("tex_envs", {})
     floats = mat_info.get("floats", {})
     colors = mat_info.get("colors", {})
-    target_w, target_h = int(tile_size[0]), int(tile_size[1])
-    combined_luma = numpy_mod.zeros((target_h, target_w), dtype=numpy_mod.float32)
+    target_width, target_height = int(tile_size[0]), int(tile_size[1])
+    combined_luma = numpy_mod.zeros((target_height, target_width), dtype=numpy_mod.float32)
     found_any = False
 
     for use_key, map_key, col_key, weight_gain in (
@@ -1165,14 +1165,14 @@ def extract_liltoon_emission_mask(
         if not entry or not entry.get("path") or not os.path.isfile(entry["path"]):
             continue
         col_vec = colors.get(col_key, [1.0, 1.0, 1.0, 1.0])
-        with pil_image.open(entry["path"]) as raw_em:
-            em_resized = raw_em.convert("RGBA").resize(
-                (target_w, target_h), pil_image.Resampling.LANCZOS
+        with pil_image.open(entry["path"]) as raw_emission:
+            emission_resized = raw_emission.convert("RGBA").resize(
+                (target_width, target_height), pil_image.Resampling.LANCZOS
             )
-        em_arr = numpy_mod.array(em_resized, dtype=numpy_mod.float32) / 255.0
+        emission_arr = numpy_mod.array(emission_resized, dtype=numpy_mod.float32) / 255.0
         rgb_gain = numpy_mod.clip(numpy_mod.array(col_vec[:3], dtype=numpy_mod.float32), 0.0, 1.5)
-        weighted = em_arr[..., :3] * rgb_gain[None, None, :] * weight_gain
-        luma_map = weighted.max(axis=-1) * em_arr[..., 3]
+        weighted = emission_arr[..., :3] * rgb_gain[None, None, :] * weight_gain
+        luma_map = weighted.max(axis=-1) * emission_arr[..., 3]
         combined_luma = numpy_mod.maximum(combined_luma, luma_map)
         found_any = True
 
@@ -1189,8 +1189,8 @@ def compute_quadrant_tile_entries(
     gutter_px: int = 4,
 ) -> Tuple[List[Dict[str, Any]], int, int, int, int, int, int, int]:
     """Compute grid dimensions and packed UV tile metadata without requiring PIL."""
-    quad_w, quad_h = int(quad_size[0]), int(quad_size[1])
-    quad_u0, quad_v0, quad_du, quad_dv = quad_uv_rect
+    quad_width, quad_height = int(quad_size[0]), int(quad_size[1])
+    quad_u0, quad_v0, quad_delta_u, quad_delta_v = quad_uv_rect
 
     active_mats = list(materials) if materials else [
         {
@@ -1218,25 +1218,25 @@ def compute_quadrant_tile_entries(
         cols = math.ceil(math.sqrt(mat_total))
         rows = math.ceil(mat_total / cols)
 
-    cell_w = max(16, quad_w // cols)
-    cell_h = max(16, quad_h // rows)
+    cell_width = max(16, quad_width // cols)
+    cell_height = max(16, quad_height // rows)
     pad_px = gutter_px if mat_total > 1 else 0
-    inner_w = max(8, cell_w - 2 * pad_px)
-    inner_h = max(8, cell_h - 2 * pad_px)
+    inner_width = max(8, cell_width - 2 * pad_px)
+    inner_height = max(8, cell_height - 2 * pad_px)
 
     tile_entries: List[Dict[str, Any]] = []
     for mat_idx, mat_item in enumerate(active_mats):
         col_idx = mat_idx % cols
         row_top_idx = mat_idx // cols
-        px_x0 = col_idx * cell_w
-        px_y0 = row_top_idx * cell_h
+        px_x0 = col_idx * cell_width
+        px_y0 = row_top_idx * cell_height
         inner_x0 = px_x0 + pad_px
         inner_y0_top = px_y0 + pad_px
-        inner_y1_top = inner_y0_top + inner_h
-        local_u0 = inner_x0 / float(quad_w)
-        local_v0 = (quad_h - inner_y1_top) / float(quad_h)
-        local_du = inner_w / float(quad_w)
-        local_dv = inner_h / float(quad_h)
+        inner_y1_top = inner_y0_top + inner_height
+        local_u0 = inner_x0 / float(quad_width)
+        local_v0 = (quad_height - inner_y1_top) / float(quad_height)
+        local_delta_u = inner_width / float(quad_width)
+        local_delta_v = inner_height / float(quad_height)
 
         main_tex_info = mat_item.get("tex_envs", {}).get("_MainTex", {})
         main_tex_path = str(main_tex_info.get("path", ""))
@@ -1254,17 +1254,17 @@ def compute_quadrant_tile_entries(
                 "alpha_mode": str(mat_item.get("alpha_mode", "cutout")),
                 "cutoff": float(mat_item.get("cutoff", 0.38)),
                 "uv_rect": [
-                    round(quad_u0 + local_u0 * quad_du, 6),
-                    round(quad_v0 + local_v0 * quad_dv, 6),
-                    round(local_du * quad_du, 6),
-                    round(local_dv * quad_dv, 6),
+                    round(quad_u0 + local_u0 * quad_delta_u, 6),
+                    round(quad_v0 + local_v0 * quad_delta_v, 6),
+                    round(local_delta_u * quad_delta_u, 6),
+                    round(local_delta_v * quad_delta_v, 6),
                 ],
                 "_px_x0": px_x0,
                 "_px_y0": px_y0,
                 "_mat_item": mat_item,
             }
         )
-    return tile_entries, cols, rows, cell_w, cell_h, pad_px, inner_w, inner_h
+    return tile_entries, cols, rows, cell_width, cell_height, pad_px, inner_width, inner_height
 
 
 def build_inmemory_manifest_fallback(
@@ -1281,7 +1281,7 @@ def build_inmemory_manifest_fallback(
         gutter_px=gutter_px,
     )[0]
     cleaned_tiles = [
-        {k_name: v_val for k_name, v_val in tile.items() if not k_name.startswith("_")}
+        {lookup_key_name: v_val for lookup_key_name, v_val in tile.items() if not lookup_key_name.startswith("_")}
         for tile in raw_tiles
     ]
     merged = dict(hair_spec)
@@ -1302,19 +1302,19 @@ def pack_hair_materials_into_quadrant(
     import numpy as numpy_mod
     from PIL import Image as pil_image
 
-    quad_w, quad_h = int(quad_size[0]), int(quad_size[1])
-    raw_tiles, _cols, _rows, _cell_w, _cell_h, pad_px, inner_w, inner_h = (
+    quad_width, quad_height = int(quad_size[0]), int(quad_size[1])
+    raw_tiles, _cols, _rows, _cell_width, _cell_height, pad_px, inner_width, inner_height = (
         compute_quadrant_tile_entries(
             materials,
-            quad_size=(quad_w, quad_h),
+            quad_size=(quad_width, quad_height),
             quad_uv_rect=quad_uv_rect,
             gutter_px=gutter_px,
         )
     )
 
-    quad_diff = pil_image.new("RGBA", (quad_w, quad_h), (128, 128, 128, 255))
-    quad_norm = pil_image.new("RGB", (quad_w, quad_h), (128, 128, 255))
-    quad_spec = pil_image.new("RGB", (quad_w, quad_h), (40, 40, 40))
+    quad_diff = pil_image.new("RGBA", (quad_width, quad_height), (128, 128, 128, 255))
+    quad_norm = pil_image.new("RGB", (quad_width, quad_height), (128, 128, 255))
+    quad_spec = pil_image.new("RGB", (quad_width, quad_height), (40, 40, 40))
     tile_entries: List[Dict[str, Any]] = []
 
     for tile_meta in raw_tiles:
@@ -1324,7 +1324,7 @@ def pack_hair_materials_into_quadrant(
 
         diff_tile, norm_tile, spec_tile = composite_unity_material_textures(
             mat_item,
-            tile_size=(inner_w, inner_h),
+            tile_size=(inner_width, inner_height),
         )
 
         # Pad outer gutter with clamped border pixels to eliminate bilinear seam bleeding
@@ -1349,9 +1349,9 @@ def pack_hair_materials_into_quadrant(
 
         tile_entries.append(
             {
-                k_name: v_val
-                for k_name, v_val in tile_meta.items()
-                if not k_name.startswith("_")
+                lookup_key_name: v_val
+                for lookup_key_name, v_val in tile_meta.items()
+                if not lookup_key_name.startswith("_")
             }
         )
 

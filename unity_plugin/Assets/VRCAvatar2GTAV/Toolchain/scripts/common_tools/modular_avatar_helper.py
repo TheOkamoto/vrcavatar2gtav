@@ -63,9 +63,9 @@ try:
     _MA_GUID_SCAN_STATE,
     _is_builtin_unity_guid,
     _collect_guid_paths_for_ma,
-    _is_go_active_in_doc,
+    _is_game_object_active_in_doc,
     IDENTITY_UNITY_TRS,
-    extract_tr_mod_overrides,
+    extract_transform_mod_overrides,
     extract_renderer_mod_overrides,
     resolve_overridden_renderer_mats,
     stamp_unity_mats_on_blender_objects,
@@ -103,9 +103,9 @@ except ImportError:
     _MA_GUID_SCAN_STATE,
     _is_builtin_unity_guid,
     _collect_guid_paths_for_ma,
-    _is_go_active_in_doc,
+    _is_game_object_active_in_doc,
     IDENTITY_UNITY_TRS,
-    extract_tr_mod_overrides,
+    extract_transform_mod_overrides,
     extract_renderer_mod_overrides,
     resolve_overridden_renderer_mats,
     stamp_unity_mats_on_blender_objects,
@@ -165,26 +165,26 @@ def build_modular_avatar_bake_plan(
     root_doc = parse_unity_yaml_with_ma(src_path)
     gameobjects = root_doc["gameobjects"]
     transforms = root_doc["transforms"]
-    go_to_tr = root_doc["go_to_tr"]
+    game_object_to_transform = root_doc["go_to_tr"]
     prefab_instances = root_doc["prefab_instances"]
 
     # Locate target avatar root (Transform or root PrefabInstance)
-    target_tr: Optional[str] = None
-    target_pi: Optional[str] = None
+    target_transform: Optional[str] = None
+    target_prefab_instance: Optional[str] = None
     resolved_avatar_name = avatar_name or ""
     norm_target = (avatar_name or "").strip().lower()
     hint_tokens = [tok.strip().lower() for tok in character_hints if tok]
 
     best_score = -1
-    for tr_fid, tr_info in transforms.items():
-        if tr_info.get("father_tr", "0") != "0" and norm_target:
+    for transform_file_id, transform_info in transforms.items():
+        if transform_info.get("father_tr", "0") != "0" and norm_target:
             # Allow matching direct named transform even when nested
             pass
-        go_info = gameobjects.get(tr_info.get("go_fid", ""), {})
-        go_name = str(go_info.get("name", "") or "").strip()
-        if not go_name:
+        game_object_info = gameobjects.get(transform_info.get("go_fid", ""), {})
+        game_object_name = str(game_object_info.get("name", "") or "").strip()
+        if not game_object_name:
             continue
-        low_name = go_name.lower()
+        low_name = game_object_name.lower()
         score = -1
         if norm_target and low_name == norm_target:
             score = 100
@@ -192,105 +192,105 @@ def build_modular_avatar_bake_plan(
             score = 60
         elif not norm_target and any(tok in low_name for tok in hint_tokens):
             score = 40
-        elif not norm_target and tr_info.get("father_tr", "0") == "0":
+        elif not norm_target and transform_info.get("father_tr", "0") == "0":
             score = 15
         if score >= 0:
-            active_bonus = 5 if go_info.get("active", True) else 0
+            active_bonus = 5 if game_object_info.get("active", True) else 0
             if score + active_bonus > best_score:
                 best_score = score + active_bonus
-                target_tr = tr_fid
-                target_pi = None
-                resolved_avatar_name = go_name
+                target_transform = transform_file_id
+                target_prefab_instance = None
+                resolved_avatar_name = game_object_name
 
-    if target_tr is None:
-        for pi_fid, pi_info in prefab_instances.items():
-            if pi_info.get("parent_tr", "0") != "0" and norm_target:
+    if target_transform is None:
+        for prefab_instance_file_id, prefab_instance_info in prefab_instances.items():
+            if prefab_instance_info.get("parent_tr", "0") != "0" and norm_target:
                 continue
-            pi_name = str(pi_info.get("name", "") or "").strip()
-            low_name = pi_name.lower()
+            prefab_instance_name = str(prefab_instance_info.get("name", "") or "").strip()
+            low_name = prefab_instance_name.lower()
             score = -1
             if norm_target and low_name == norm_target:
                 score = 95
             elif norm_target and norm_target in low_name:
                 score = 55
-            elif not norm_target and pi_name:
+            elif not norm_target and prefab_instance_name:
                 score = 20
             if score > best_score:
                 best_score = score
-                target_pi = pi_fid
-                resolved_avatar_name = pi_name
+                target_prefab_instance = prefab_instance_file_id
+                resolved_avatar_name = prefab_instance_name
 
     # Collect subtree transforms and path strings relative to avatar root
     subtree_trs: Set[str] = set()
-    rel_path_by_go: Dict[str, str] = {}
-    if target_tr is not None:
-        bfs_queue = deque([(target_tr, "")])
+    rel_path_by_game_object: Dict[str, str] = {}
+    if target_transform is not None:
+        bfs_queue = deque([(target_transform, "")])
         while bfs_queue:
-            cur_tr, cur_rel = bfs_queue.popleft()
-            if cur_tr in subtree_trs:
+            cur_transform, cur_rel = bfs_queue.popleft()
+            if cur_transform in subtree_trs:
                 continue
-            subtree_trs.add(cur_tr)
-            tr_info = transforms.get(cur_tr)
-            if not tr_info:
+            subtree_trs.add(cur_transform)
+            transform_info = transforms.get(cur_transform)
+            if not transform_info:
                 continue
-            go_fid = tr_info.get("go_fid", "")
-            if go_fid:
-                rel_path_by_go[go_fid] = cur_rel
-            for child_tr in tr_info.get("children", []):
-                child_go = transforms.get(child_tr, {}).get("go_fid", "")
-                child_name = gameobjects.get(child_go, {}).get("name", "")
+            game_object_file_id = transform_info.get("go_fid", "")
+            if game_object_file_id:
+                rel_path_by_game_object[game_object_file_id] = cur_rel
+            for child_transform in transform_info.get("children", []):
+                child_game_object = transforms.get(child_transform, {}).get("go_fid", "")
+                child_name = gameobjects.get(child_game_object, {}).get("name", "")
                 next_rel = f"{cur_rel}/{child_name}".lstrip("/") if child_name else cur_rel
-                bfs_queue.append((child_tr, next_rel))
+                bfs_queue.append((child_transform, next_rel))
 
-    def _is_go_in_avatar_subtree(go_fid: str) -> bool:
-        if target_tr is None and target_pi is None:
+    def _is_game_object_in_avatar_subtree(game_object_file_id: str) -> bool:
+        if target_transform is None and target_prefab_instance is None:
             return False
         if src_path.suffix.lower() == ".prefab":
             return True
-        if target_tr is not None:
-            tr_id = go_to_tr.get(go_fid)
-            return tr_id in subtree_trs if tr_id else False
+        if target_transform is not None:
+            transform_id = game_object_to_transform.get(game_object_file_id)
+            return transform_id in subtree_trs if transform_id else False
         return False
 
     # Collect active child PrefabInstances (dresses, hairs, accessories attached inside avatar)
     child_pis: List[Tuple[str, Dict[str, Any]]] = []
-    if target_pi is not None and target_pi in prefab_instances:
-        child_pis.append((target_pi, prefab_instances[target_pi]))
+    if target_prefab_instance is not None and target_prefab_instance in prefab_instances:
+        child_pis.append((target_prefab_instance, prefab_instances[target_prefab_instance]))
     else:
-        for pi_fid, pi_info in prefab_instances.items():
-            if not pi_info.get("active", True):
+        for prefab_instance_file_id, prefab_instance_info in prefab_instances.items():
+            if not prefab_instance_info.get("active", True):
                 continue
-            parent_tr = pi_info.get("parent_tr", "0")
-            if src_path.suffix.lower() == ".prefab" or parent_tr in subtree_trs:
-                child_pis.append((pi_fid, pi_info))
+            parent_transform = prefab_instance_info.get("parent_tr", "0")
+            if src_path.suffix.lower() == ".prefab" or parent_transform in subtree_trs:
+                child_pis.append((prefab_instance_file_id, prefab_instance_info))
 
     # Gather GUIDs for source prefabs, meshes, and materials
     needed_guids: Set[str] = set()
-    for _pi_fid, pi_info in child_pis:
-        if pi_info.get("source_guid"):
-            needed_guids.add(pi_info["source_guid"])
-    for go_fid, rend_info in root_doc["renderers"].items():
-        if not _is_go_in_avatar_subtree(go_fid):
+    for _prefab_instance_file_id, prefab_instance_info in child_pis:
+        if prefab_instance_info.get("source_guid"):
+            needed_guids.add(prefab_instance_info["source_guid"])
+    for game_object_file_id, rend_info in root_doc["renderers"].items():
+        if not _is_game_object_in_avatar_subtree(game_object_file_id):
             continue
         if rend_info.get("mesh_guid"):
             needed_guids.add(rend_info["mesh_guid"])
         needed_guids.update(rend_info.get("mat_guids", []))
-    for go_fid, mesh_guid in root_doc["mesh_filters"].items():
-        if _is_go_in_avatar_subtree(go_fid) and mesh_guid:
+    for game_object_file_id, mesh_guid in root_doc["mesh_filters"].items():
+        if _is_game_object_in_avatar_subtree(game_object_file_id) and mesh_guid:
             needed_guids.add(mesh_guid)
 
-    pi_name_hints = [
-        str(pi_info.get("name", "") or "")
-        for _pi_fid, pi_info in child_pis
-        if pi_info.get("name")
+    prefab_name_hints = [
+        str(prefab_instance_info.get("name", "") or "")
+        for _prefab_instance_file_id, prefab_instance_info in child_pis
+        if prefab_instance_info.get("name")
     ]
     if resolved_avatar_name:
-        pi_name_hints.append(resolved_avatar_name)
+        prefab_name_hints.append(resolved_avatar_name)
     guid_map = _collect_guid_paths_for_ma(
         needed_guids,
         src_path,
         resolved_assets,
-        name_hints=pi_name_hints + list(character_hints),
+        name_hints=prefab_name_hints + list(character_hints),
         budget_sec=90.0,
         include_materials=bool(resolve_materials),
     )
@@ -382,89 +382,89 @@ def build_modular_avatar_bake_plan(
 
     def _find_arm_root_and_host(
         doc_data: Dict[str, Any],
-        doc_tr_map: Dict[str, Dict[str, Any]],
+        doc_transform_map: Dict[str, Dict[str, Any]],
         rend_info: Dict[str, Any],
-        rend_go_fid: str,
+        renderer_game_object_file_id: str,
     ) -> Tuple[str, str, str]:
         """Resolve `(arm_root_tr, host_tr, attach_parent_bone)` for a renderer via its `m_RootBone`."""
-        go_tr = doc_data.get("go_to_tr", {}).get(rend_go_fid, "0")
-        root_bone_tr = str(rend_info.get("root_bone_tr", "0") or "0")
-        arm_root_tr = ""
-        if rend_info.get("class_id") == "137" and root_bone_tr in doc_tr_map:
-            cur_tr = root_bone_tr
+        game_object_transform = doc_data.get("go_to_tr", {}).get(renderer_game_object_file_id, "0")
+        root_bone_transform = str(rend_info.get("root_bone_tr", "0") or "0")
+        arm_root_transform = ""
+        if rend_info.get("class_id") == "137" and root_bone_transform in doc_transform_map:
+            cur_transform = root_bone_transform
             raw_trs = doc_data.get("transforms", {})
             for _step in range(10):
-                tr_entry = doc_tr_map.get(cur_tr)
-                if tr_entry is None:
+                transform_entry = doc_transform_map.get(cur_transform)
+                if transform_entry is None:
                     break
-                name_low = str(tr_entry.get("name", "") or "").lower()
-                par_tr = str(tr_entry.get("father_tr", "0") or "0")
+                name_low = str(transform_entry.get("name", "") or "").lower()
+                parent_transform_id = str(transform_entry.get("father_tr", "0") or "0")
                 if name_low.startswith(("armature", "li-ne_")):
-                    arm_root_tr = cur_tr
+                    arm_root_transform = cur_transform
                     break
-                raw_rot = raw_trs.get(cur_tr, {}).get("rot", (0.0, 0.0, 0.0, 1.0))
+                raw_rot = raw_trs.get(cur_transform, {}).get("rot", (0.0, 0.0, 0.0, 1.0))
                 is_arm_rot = (
                     abs(abs(raw_rot[0]) - 0.7071) < 0.02
                     and abs(raw_rot[1]) < 0.02
                     and abs(raw_rot[2]) < 0.02
                     and abs(abs(raw_rot[3]) - 0.7071) < 0.02
                 )
-                if is_arm_rot and cur_tr != root_bone_tr and par_tr != "0":
-                    arm_root_tr = cur_tr
+                if is_arm_rot and cur_transform != root_bone_transform and parent_transform_id != "0":
+                    arm_root_transform = cur_transform
                     break
-                if par_tr == "0" or par_tr not in doc_tr_map:
+                if parent_transform_id == "0" or parent_transform_id not in doc_transform_map:
                     break
-                cur_tr = par_tr
+                cur_transform = parent_transform_id
 
-        host_tr = (
-            str(doc_tr_map[arm_root_tr].get("father_tr", "0") or "0")
-            if arm_root_tr and arm_root_tr in doc_tr_map
-            else go_tr
+        host_transform = (
+            str(doc_transform_map[arm_root_transform].get("father_tr", "0") or "0")
+            if arm_root_transform and arm_root_transform in doc_transform_map
+            else game_object_transform
         )
         attach_bone = ""
-        walk_tr = host_tr
+        walk_transform = host_transform
         for _step in range(12):
-            if walk_tr not in doc_tr_map:
+            if walk_transform not in doc_transform_map:
                 break
-            walk_name = str(doc_tr_map[walk_tr].get("name", "") or "")
+            walk_name = str(doc_transform_map[walk_transform].get("name", "") or "")
             norm_tok = normalize_bone_match_key(walk_name)
             if norm_tok in humanoid_anchor_keys:
                 attach_bone = humanoid_anchor_keys[norm_tok]
                 break
-            walk_tr = str(doc_tr_map[walk_tr].get("father_tr", "0") or "0")
-        return arm_root_tr, host_tr, attach_bone
+            walk_transform = str(doc_transform_map[walk_transform].get("father_tr", "0") or "0")
+        return arm_root_transform, host_transform, attach_bone
 
     def _collect_arm_subtree_matrices(
         doc_data: Dict[str, Any],
-        doc_tr_map: Dict[str, Dict[str, Any]],
-        arm_root_tr: str,
+        doc_transform_map: Dict[str, Dict[str, Any]],
+        arm_root_transform: str,
         stop_sub_roots: Set[str],
     ) -> Dict[str, List[List[float]]]:
         """Collect Blender-space target bone 4x4 matrices under an FBX `Armature` transform."""
-        if not arm_root_tr or arm_root_tr not in doc_tr_map:
+        if not arm_root_transform or arm_root_transform not in doc_transform_map:
             return {}
         children_by_father: Dict[str, List[str]] = {}
-        for tr_key, tr_entry in doc_tr_map.items():
-            children_by_father.setdefault(str(tr_entry.get("father_tr", "0") or "0"), []).append(tr_key)
+        for transform_key, transform_entry in doc_transform_map.items():
+            children_by_father.setdefault(str(transform_entry.get("father_tr", "0") or "0"), []).append(transform_key)
         bone_mats: Dict[str, List[List[float]]] = {}
-        bfs_nodes: deque = deque(children_by_father.get(arm_root_tr, ()))
-        seen_trs: Set[str] = {arm_root_tr}
+        bfs_nodes: deque = deque(children_by_father.get(arm_root_transform, ()))
+        seen_trs: Set[str] = {arm_root_transform}
         while bfs_nodes:
-            cur_tr = bfs_nodes.popleft()
-            if cur_tr in seen_trs or cur_tr in stop_sub_roots:
+            cur_transform = bfs_nodes.popleft()
+            if cur_transform in seen_trs or cur_transform in stop_sub_roots:
                 continue
-            seen_trs.add(cur_tr)
-            tr_entry = doc_tr_map.get(cur_tr)
-            if tr_entry is None:
+            seen_trs.add(cur_transform)
+            transform_entry = doc_transform_map.get(cur_transform)
+            if transform_entry is None:
                 continue
-            go_name = str(tr_entry.get("name", "") or "").strip()
-            if go_name and go_name not in bone_mats:
-                bone_mats[go_name] = unity_trs_to_blender_matrix_rows(
-                    tr_entry["world"], is_bone=True
+            game_object_name = str(transform_entry.get("name", "") or "").strip()
+            if game_object_name and game_object_name not in bone_mats:
+                bone_mats[game_object_name] = unity_trs_to_blender_matrix_rows(
+                    transform_entry["world"], is_bone=True
                 )
-            for child_tr in children_by_father.get(cur_tr, ()):
-                if child_tr not in seen_trs and child_tr not in stop_sub_roots:
-                    bfs_nodes.append(child_tr)
+            for child_transform in children_by_father.get(cur_transform, ()):
+                if child_transform not in seen_trs and child_transform not in stop_sub_roots:
+                    bfs_nodes.append(child_transform)
         return bone_mats
 
     def _ingest_doc_ma_components(
@@ -475,7 +475,7 @@ def build_modular_avatar_bake_plan(
         is_outfit_prefab: bool,
         root_override_name: str = "",
         base_world: Any = IDENTITY_UNITY_TRS,
-        tr_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        transform_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         renderer_overrides: Optional[Dict[str, Any]] = None,
         collect_base_scales: bool = False,
     ) -> Dict[str, Dict[str, Any]]:
@@ -486,68 +486,68 @@ def build_modular_avatar_bake_plan(
         local_fbx_paths: List[str] = []
         local_mesh_names: List[str] = []
         active_renderer_entries: List[Tuple[str, Dict[str, Any], str]] = []
-        doc_stop_tr = target_tr if filter_subtree else None
-        doc_tr_map = compute_doc_unity_world_transforms(
+        doc_stop_transform = target_transform if filter_subtree else None
+        doc_transform_map = compute_doc_unity_world_transforms(
             doc_data,
-            root_tr=(target_tr if collect_base_scales else None),
+            root_transform=(target_transform if collect_base_scales else None),
             base_world=base_world,
-            overrides_by_tr=tr_overrides,
+            overrides_by_transform=transform_overrides,
             treat_root_as_avatar_origin=collect_base_scales,
         )
         if collect_base_scales:
-            for tr_id, tr_entry in doc_tr_map.items():
-                if filter_subtree and tr_id not in subtree_trs:
+            for transform_id, transform_entry in doc_transform_map.items():
+                if filter_subtree and transform_id not in subtree_trs:
                     continue
-                go_id = doc_data["transforms"].get(tr_id, {}).get("go_fid", "")
-                if not go_id or go_id in doc_renderers:
+                game_object_id = doc_data["transforms"].get(transform_id, {}).get("go_fid", "")
+                if not game_object_id or game_object_id in doc_renderers:
                     continue
-                tr_path = str(tr_entry.get("path", "") or "")
-                path_parts = tr_path.split("/") if tr_path else []
+                transform_path = str(transform_entry.get("path", "") or "")
+                path_parts = transform_path.split("/") if transform_path else []
                 in_primary_arm = (
                     (len(path_parts) >= 3 and path_parts[1] == "Armature")
                     or (len(path_parts) >= 2 and path_parts[0] == "Armature")
                 )
                 if not in_primary_arm:
                     continue
-                if not _is_go_active_in_doc(doc_data, go_id, stop_tr=doc_stop_tr):
+                if not _is_game_object_active_in_doc(doc_data, game_object_id, stop_transform=doc_stop_transform):
                     continue
-                sx_val, sy_val, sz_val = tr_entry.get("local_scale", (1.0, 1.0, 1.0))
+                scale_x_val, scale_y_val, scale_z_val = transform_entry.get("local_scale", (1.0, 1.0, 1.0))
                 if (
-                    abs(sx_val - 1.0) > 1e-4
-                    or abs(sy_val - 1.0) > 1e-4
-                    or abs(sz_val - 1.0) > 1e-4
+                    abs(scale_x_val - 1.0) > 1e-4
+                    or abs(scale_y_val - 1.0) > 1e-4
+                    or abs(scale_z_val - 1.0) > 1e-4
                 ):
-                    bone_nm = str(tr_entry.get("name", "") or "").strip()
-                    if bone_nm and bone_nm not in base_bone_scales:
-                        base_bone_scales[bone_nm] = [sx_val, sy_val, sz_val]
+                    scale_bone_name = str(transform_entry.get("name", "") or "").strip()
+                    if scale_bone_name and scale_bone_name not in base_bone_scales:
+                        base_bone_scales[scale_bone_name] = [scale_x_val, scale_y_val, scale_z_val]
 
-        ov_active_map = (renderer_overrides or {}).get("active") or {}
-        ov_enabled_map = (renderer_overrides or {}).get("enabled") or {}
+        override_active_map = (renderer_overrides or {}).get("active") or {}
+        override_enabled_map = (renderer_overrides or {}).get("enabled") or {}
         eff_rend_mats: Dict[str, List[str]] = {}
-        for go_fid, rend_info in doc_renderers.items():
-            if filter_subtree and not _is_go_in_avatar_subtree(go_fid):
+        for game_object_file_id, rend_info in doc_renderers.items():
+            if filter_subtree and not _is_game_object_in_avatar_subtree(game_object_file_id):
                 continue
-            go_info = doc_gos.get(go_fid, {})
-            go_name = str(go_info.get("name", "") or "").strip()
+            game_object_info = doc_gos.get(game_object_file_id, {})
+            game_object_name = str(game_object_info.get("name", "") or "").strip()
             comp_fid = str(rend_info.get("comp_fid", "") or "")
             is_act = (
-                _is_go_active_in_doc(doc_data, go_fid, stop_tr=doc_stop_tr)
+                _is_game_object_active_in_doc(doc_data, game_object_file_id, stop_transform=doc_stop_transform)
                 and bool(rend_info.get("enabled", True))
-                and ov_active_map.get(go_fid, True)
-                and ov_enabled_map.get(comp_fid, True)
+                and override_active_map.get(game_object_file_id, True)
+                and override_enabled_map.get(comp_fid, True)
             )
             if not is_act:
-                if go_name:
-                    disabled_meshes.add(go_name)
+                if game_object_name:
+                    disabled_meshes.add(game_object_name)
                 continue
-            if go_name:
-                active_meshes.append(go_name)
-                local_mesh_names.append(go_name)
-            mguid = rend_info.get("mesh_guid", "") or doc_filters.get(go_fid, "")
+            if game_object_name:
+                active_meshes.append(game_object_name)
+                local_mesh_names.append(game_object_name)
+            mguid = rend_info.get("mesh_guid", "") or doc_filters.get(game_object_file_id, "")
             if mguid:
                 doc_extra_guids.add(mguid)
             full_mats = resolve_overridden_renderer_mats(rend_info, renderer_overrides)
-            eff_rend_mats[go_fid] = full_mats
+            eff_rend_mats[game_object_file_id] = full_mats
             rend_mats = [
                 mat_gid
                 for mat_gid in full_mats
@@ -555,7 +555,7 @@ def build_modular_avatar_bake_plan(
             ]
             active_mat_guids_set.update(rend_mats)
             doc_extra_guids.update(rend_mats)
-            active_renderer_entries.append((go_fid, rend_info, go_name))
+            active_renderer_entries.append((game_object_file_id, rend_info, game_object_name))
 
         mesh_hints = list(hint_tokens) + [resolved_avatar_name] + local_mesh_names
         resolved_doc_guids = _collect_guid_paths_for_ma(
@@ -568,12 +568,12 @@ def build_modular_avatar_bake_plan(
         )
         doc_sub_arm_stops: Set[Tuple[str, str]] = set()
         rend_instance_metas: List[Tuple[str, Dict[str, Any], Path, List[str], str, str, str, List[Dict[str, Any]]]] = []
-        for go_fid, rend_info, go_name in active_renderer_entries:
-            mguid = rend_info.get("mesh_guid", "") or doc_filters.get(go_fid, "")
+        for game_object_file_id, rend_info, game_object_name in active_renderer_entries:
+            mguid = rend_info.get("mesh_guid", "") or doc_filters.get(game_object_file_id, "")
             mesh_asset = resolved_doc_guids.get(mguid) or guid_map.get(mguid)
-            resolved_mesh_names: List[str] = [go_name] if go_name else []
+            resolved_mesh_names: List[str] = [game_object_name] if game_object_name else []
             mat_dicts = _resolve_material_dicts(
-                eff_rend_mats.get(go_fid, rend_info.get("mat_guids", [])),
+                eff_rend_mats.get(game_object_file_id, rend_info.get("mat_guids", [])),
                 doc_path,
                 resolved_doc_guids,
             )
@@ -598,13 +598,13 @@ def build_modular_avatar_bake_plan(
                 for item_name in resolved_mesh_names:
                     if item_name and item_name not in fbx_bucket:
                         fbx_bucket.append(item_name)
-                arm_root_tr, host_tr, attach_bone = _find_arm_root_and_host(
-                    doc_data, doc_tr_map, rend_info, go_fid
+                arm_root_transform, host_transform, attach_bone = _find_arm_root_and_host(
+                    doc_data, doc_transform_map, rend_info, game_object_file_id
                 )
-                if arm_root_tr:
-                    doc_sub_arm_stops.add((arm_root_tr, host_tr))
+                if arm_root_transform:
+                    doc_sub_arm_stops.add((arm_root_transform, host_transform))
                 rend_instance_metas.append(
-                    (go_fid, rend_info, mesh_asset, resolved_mesh_names, arm_root_tr, host_tr, attach_bone, mat_dicts)
+                    (game_object_file_id, rend_info, mesh_asset, resolved_mesh_names, arm_root_transform, host_transform, attach_bone, mat_dicts)
                 )
             if mat_dicts:
                 for item_name in resolved_mesh_names:
@@ -612,31 +612,31 @@ def build_modular_avatar_bake_plan(
                         mesh_materials[item_name] = mat_dicts
 
         inst_buckets: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for go_fid, rend_info, mesh_asset, r_names, arm_root_tr, host_tr, attach_bone, r_mats in rend_instance_metas:
+        for game_object_file_id, rend_info, mesh_asset, rend_names, arm_root_transform, host_transform, attach_bone, instance_rend_mats in rend_instance_metas:
             is_skinned_flag = bool(rend_info.get("class_id") == "137")
-            group_tr = arm_root_tr or host_tr or doc_data.get("go_to_tr", {}).get(go_fid, "0")
-            bucket_key = (str(mesh_asset), group_tr)
+            group_transform = arm_root_transform or host_transform or doc_data.get("go_to_tr", {}).get(game_object_file_id, "0")
+            bucket_key = (str(mesh_asset), group_transform)
             if bucket_key not in inst_buckets:
-                use_host_mat = bool(arm_root_tr) or (not is_skinned_flag)
+                use_host_mat = bool(arm_root_transform) or (not is_skinned_flag)
                 host_world = (
-                    doc_tr_map[host_tr]["world"]
-                    if host_tr in doc_tr_map
+                    doc_transform_map[host_transform]["world"]
+                    if host_transform in doc_transform_map
                     else base_world
                 )
                 other_stops: Set[str] = set()
                 for sub_arm, sub_host in doc_sub_arm_stops:
-                    if sub_arm == arm_root_tr:
+                    if sub_arm == arm_root_transform:
                         continue
                     other_stops.add(sub_arm)
-                    if sub_host and sub_host != host_tr and sub_host != arm_root_tr:
+                    if sub_host and sub_host != host_transform and sub_host != arm_root_transform:
                         other_stops.add(sub_host)
                 bone_mats = (
-                    _collect_arm_subtree_matrices(doc_data, doc_tr_map, arm_root_tr, other_stops)
-                    if arm_root_tr
+                    _collect_arm_subtree_matrices(doc_data, doc_transform_map, arm_root_transform, other_stops)
+                    if arm_root_transform
                     else {}
                 )
                 inst_buckets[bucket_key] = {
-                    "instance_id": f"{doc_path.stem}_{group_tr}",
+                    "instance_id": f"{doc_path.stem}_{group_transform}",
                     "fbx_path": str(mesh_asset),
                     "mesh_names": [],
                     "mesh_materials": {},
@@ -651,17 +651,17 @@ def build_modular_avatar_bake_plan(
                 }
             bucket_meshes = inst_buckets[bucket_key]["mesh_names"]
             bucket_mats = inst_buckets[bucket_key]["mesh_materials"]
-            for m_name in r_names:
-                if m_name and m_name not in bucket_meshes:
-                    bucket_meshes.append(m_name)
-                if m_name and r_mats:
-                    bucket_mats[m_name] = r_mats
+            for mesh_name in rend_names:
+                if mesh_name and mesh_name not in bucket_meshes:
+                    bucket_meshes.append(mesh_name)
+                if mesh_name and instance_rend_mats:
+                    bucket_mats[mesh_name] = instance_rend_mats
         fbx_instances.extend(inst_buckets.values())
 
         for toggle_comp in doc_data["object_toggles"]:
-            if filter_subtree and not _is_go_in_avatar_subtree(toggle_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(toggle_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, toggle_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, toggle_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             for item in toggle_comp["toggles"]:
                 ref_path = item["reference_path"]
@@ -670,18 +670,18 @@ def build_modular_avatar_bake_plan(
                     disabled_meshes.add(ref_path.rsplit("/", 1)[-1])
 
         for rep_comp in doc_data["replace_objects"]:
-            if filter_subtree and not _is_go_in_avatar_subtree(rep_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(rep_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, rep_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, rep_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             tgt_tail = str(rep_comp["target_path"]).rsplit("/", 1)[-1].strip()
             if tgt_tail:
                 disabled_meshes.add(tgt_tail)
 
         for shp_comp in doc_data["shape_changers"]:
-            if filter_subtree and not _is_go_in_avatar_subtree(shp_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(shp_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, shp_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, shp_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             for item in shp_comp["shapes"]:
                 mesh_tail = str(item.get("reference_path", "") or "").rsplit("/", 1)[-1].strip() or "Body"
@@ -697,9 +697,9 @@ def build_modular_avatar_bake_plan(
                     shape_changer_weights.setdefault(mesh_tail, {})[item["shape_name"]] = float(item["weight"])
 
         for sync_comp in doc_data["blendshape_syncs"]:
-            if filter_subtree and not _is_go_in_avatar_subtree(sync_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(sync_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, sync_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, sync_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             local_mesh = str(doc_gos.get(sync_comp["go_fid"], {}).get("name", "") or "").strip()
             for bnd in sync_comp["bindings"]:
@@ -715,9 +715,9 @@ def build_modular_avatar_bake_plan(
                 )
 
         for scl_comp in doc_data["scale_adjusters"]:
-            if filter_subtree and not _is_go_in_avatar_subtree(scl_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(scl_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, scl_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, scl_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             bone_name = str(doc_gos.get(scl_comp["go_fid"], {}).get("name", "") or "").strip()
             if bone_name:
@@ -726,9 +726,9 @@ def build_modular_avatar_bake_plan(
         for merge_comp in doc_data["merge_armatures"]:
             if not merge_comp.get("enabled", True):
                 continue
-            if filter_subtree and not _is_go_in_avatar_subtree(merge_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(merge_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, merge_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, merge_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             src_name = root_override_name or str(doc_gos.get(merge_comp["go_fid"], {}).get("name", "") or "").strip()
             armature_merges.append(
@@ -748,9 +748,9 @@ def build_modular_avatar_bake_plan(
         for proxy_comp in doc_data["bone_proxies"]:
             if not proxy_comp.get("enabled", True):
                 continue
-            if filter_subtree and not _is_go_in_avatar_subtree(proxy_comp["go_fid"]):
+            if filter_subtree and not _is_game_object_in_avatar_subtree(proxy_comp["go_fid"]):
                 continue
-            if not _is_go_active_in_doc(doc_data, proxy_comp["go_fid"], stop_tr=doc_stop_tr):
+            if not _is_game_object_active_in_doc(doc_data, proxy_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
             src_name = str(doc_gos.get(proxy_comp["go_fid"], {}).get("name", "") or "").strip()
             bone_ref_id = int(proxy_comp.get("bone_reference", -1))
@@ -770,10 +770,10 @@ def build_modular_avatar_bake_plan(
                     "mesh_names": list(local_mesh_names),
                 }
             )
-        return doc_tr_map
+        return doc_transform_map
 
     # 1. Process components directly inside the scene avatar hierarchy
-    scene_tr_map = _ingest_doc_ma_components(
+    scene_transform_map = _ingest_doc_ma_components(
         root_doc,
         src_path,
         filter_subtree=(src_path.suffix.lower() != ".prefab"),
@@ -784,33 +784,33 @@ def build_modular_avatar_bake_plan(
     # 2. Recursively process active child PrefabInstances (e.g. MA dresses / coats / accessories)
     visited_prefabs: Set[Tuple[Path, str]] = set()
     prefab_queue: deque = deque()
-    for pi_fid, pi_info in child_pis:
-        prefab_path = guid_map.get(pi_info.get("source_guid", ""))
+    for prefab_instance_file_id, prefab_instance_info in child_pis:
+        prefab_path = guid_map.get(prefab_instance_info.get("source_guid", ""))
         if prefab_path and prefab_path.is_file():
-            par_tr = str(pi_info.get("parent_tr", "0") or "0")
+            parent_transform_id = str(prefab_instance_info.get("parent_tr", "0") or "0")
             par_world = (
-                scene_tr_map[par_tr]["world"]
-                if par_tr in scene_tr_map
+                scene_transform_map[parent_transform_id]["world"]
+                if parent_transform_id in scene_transform_map
                 else IDENTITY_UNITY_TRS
             )
-            raw_mods = list(pi_info.get("mods", ()))
-            src_guid_str = str(pi_info.get("source_guid", "") or "")
-            pi_overrides = extract_tr_mod_overrides(raw_mods, expected_guid=src_guid_str)
-            pi_rend_ov = extract_renderer_mod_overrides(raw_mods, expected_guid=src_guid_str)
+            raw_mods = list(prefab_instance_info.get("mods", ()))
+            src_guid_str = str(prefab_instance_info.get("source_guid", "") or "")
+            prefab_instance_overrides = extract_transform_mod_overrides(raw_mods, expected_guid=src_guid_str)
+            prefab_instance_rend_overrides = extract_renderer_mod_overrides(raw_mods, expected_guid=src_guid_str)
             prefab_queue.append(
                 (
                     prefab_path,
-                    pi_info.get("name", "") or prefab_path.stem,
+                    prefab_instance_info.get("name", "") or prefab_path.stem,
                     par_world,
-                    pi_overrides,
-                    pi_rend_ov,
+                    prefab_instance_overrides,
+                    prefab_instance_rend_overrides,
                     raw_mods,
-                    f"scene_{pi_fid}",
+                    f"scene_{prefab_instance_file_id}",
                 )
             )
 
     while prefab_queue:
-        cur_prefab, cur_label, cur_base_world, cur_overrides, cur_rend_ov, cur_pool_mods, visit_tag = prefab_queue.popleft()
+        cur_prefab, cur_label, cur_base_world, cur_overrides, cur_rend_overrides, cur_pool_mods, visit_tag = prefab_queue.popleft()
         resolved_pref = cur_prefab.resolve()
         visit_key = (resolved_pref, visit_tag)
         if visit_key in visited_prefabs or resolved_pref.suffix.lower() != ".prefab":
@@ -818,49 +818,49 @@ def build_modular_avatar_bake_plan(
         visited_prefabs.add(visit_key)
         pref_doc = parse_unity_yaml_with_ma(cur_prefab)
         is_outfit = any(
-            kw_tok in cur_label.lower()
-            or kw_tok in cur_prefab.stem.lower()
-            for kw_tok in ("dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket", "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair", "ribbon")
+            keyword_tok in cur_label.lower()
+            or keyword_tok in cur_prefab.stem.lower()
+            for keyword_tok in ("dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket", "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair", "ribbon")
         ) or bool(pref_doc["merge_armatures"] or pref_doc["bone_proxies"])
-        pref_tr_map = _ingest_doc_ma_components(
+        prefab_transform_map = _ingest_doc_ma_components(
             pref_doc,
             cur_prefab,
             filter_subtree=False,
             is_outfit_prefab=is_outfit,
             root_override_name=cur_label,
             base_world=cur_base_world,
-            tr_overrides=cur_overrides,
-            renderer_overrides=cur_rend_ov,
+            transform_overrides=cur_overrides,
+            renderer_overrides=cur_rend_overrides,
         )
         nested_guids = {
-            nested_pi.get("source_guid", "")
-            for nested_pi in pref_doc["prefab_instances"].values()
-            if nested_pi.get("active", True) and nested_pi.get("source_guid")
+            nested_prefab_instance.get("source_guid", "")
+            for nested_prefab_instance in pref_doc["prefab_instances"].values()
+            if nested_prefab_instance.get("active", True) and nested_prefab_instance.get("source_guid")
         }
         nested_resolved = _collect_guid_paths_for_ma(nested_guids, cur_prefab, resolved_assets)
-        for nested_fid, nested_pi in pref_doc["prefab_instances"].items():
-            if not nested_pi.get("active", True):
+        for nested_fid, nested_prefab_instance in pref_doc["prefab_instances"].items():
+            if not nested_prefab_instance.get("active", True):
                 continue
-            nested_path = nested_resolved.get(nested_pi.get("source_guid", ""))
+            nested_path = nested_resolved.get(nested_prefab_instance.get("source_guid", ""))
             if nested_path and nested_path.is_file():
-                n_par_tr = str(nested_pi.get("parent_tr", "0") or "0")
-                n_world = (
-                    pref_tr_map[n_par_tr]["world"]
-                    if n_par_tr in pref_tr_map
+                nested_parent_transform = str(nested_prefab_instance.get("parent_tr", "0") or "0")
+                nested_world = (
+                    prefab_transform_map[nested_parent_transform]["world"]
+                    if nested_parent_transform in prefab_transform_map
                     else cur_base_world
                 )
-                n_src_guid = str(nested_pi.get("source_guid", "") or "")
-                n_pool_mods = list(nested_pi.get("mods", ())) + list(cur_pool_mods)
-                n_overrides = extract_tr_mod_overrides(n_pool_mods, expected_guid=n_src_guid)
-                n_rend_ov = extract_renderer_mod_overrides(n_pool_mods, expected_guid=n_src_guid)
+                nested_src_guid = str(nested_prefab_instance.get("source_guid", "") or "")
+                nested_pool_mods = list(nested_prefab_instance.get("mods", ())) + list(cur_pool_mods)
+                nested_overrides = extract_transform_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
+                nested_rend_overrides = extract_renderer_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
                 prefab_queue.append(
                     (
                         nested_path,
-                        nested_pi.get("name", "") or nested_path.stem,
-                        n_world,
-                        n_overrides,
-                        n_rend_ov,
-                        n_pool_mods,
+                        nested_prefab_instance.get("name", "") or nested_path.stem,
+                        nested_world,
+                        nested_overrides,
+                        nested_rend_overrides,
+                        nested_pool_mods,
                         f"{visit_tag}_{nested_fid}",
                     )
                 )
@@ -944,9 +944,9 @@ def _apply_unity_transform_deltas_to_outfit(
     ident_mat = mathutils.Matrix.Identity(4)
 
     bone_mats_lower = {str(key).lower(): val for key, val in bone_mats.items()}
-    outfit_mw = outfit_arm_obj.matrix_world.copy()
+    outfit_mat_world = outfit_arm_obj.matrix_world.copy()
     fbx_pts_map = {
-        bone.name: tuple(float(axis_val) for axis_val in (outfit_mw @ bone.head_local))
+        bone.name: tuple(float(axis_val) for axis_val in (outfit_mat_world @ bone.head_local))
         for bone in outfit_arm_obj.data.bones
     }
     unit_corr = compute_bone_unit_scale_correction(fbx_pts_map, bone_mats)
@@ -965,7 +965,7 @@ def _apply_unity_transform_deltas_to_outfit(
         return ident_mat
 
     for bone in outfit_arm_obj.data.bones:
-        p_inv = _find_anchor_pose_inv(bone)
+        parent_inv = _find_anchor_pose_inv(bone)
         raw_rows = bone_mats.get(bone.name) or bone_mats_lower.get(bone.name.lower())
         if raw_rows is not None:
             raw_mat = mathutils.Matrix(raw_rows)
@@ -973,8 +973,8 @@ def _apply_unity_transform_deltas_to_outfit(
                 for row_idx in range(3):
                     for col_idx in range(3):
                         raw_mat[row_idx][col_idx] *= unit_corr
-            tgt_mat = p_inv @ raw_mat
-            fbx_mat = outfit_mw @ bone.matrix_local
+            tgt_mat = parent_inv @ raw_mat
+            fbx_mat = outfit_mat_world @ bone.matrix_local
             try:
                 delta_by_bone[bone.name] = tgt_mat @ fbx_mat.inverted()
             except ValueError:
@@ -982,12 +982,12 @@ def _apply_unity_transform_deltas_to_outfit(
         elif bone.parent and bone.parent.name in delta_by_bone:
             delta_by_bone[bone.name] = delta_by_bone[bone.parent.name]
         elif host_rows is not None:
-            delta_by_bone[bone.name] = p_inv @ mathutils.Matrix(host_rows)
+            delta_by_bone[bone.name] = parent_inv @ mathutils.Matrix(host_rows)
 
     host_fallback = ident_mat
     if host_rows is not None:
-        host_p_inv = pose_inv_map.get(attach_bone, ident_mat) if attach_bone else ident_mat
-        host_fallback = host_p_inv @ mathutils.Matrix(host_rows)
+        host_parent_inv = pose_inv_map.get(attach_bone, ident_mat) if attach_bone else ident_mat
+        host_fallback = host_parent_inv @ mathutils.Matrix(host_rows)
     elif delta_by_bone:
         host_fallback = next(iter(delta_by_bone.values()))
 
@@ -1016,24 +1016,24 @@ def _apply_unity_transform_deltas_to_outfit(
     for mesh_obj in outfit_meshes:
         if mesh_obj.type != "MESH":
             continue
-        mesh_mw = mesh_obj.matrix_world.copy()
-        mesh_mwi = mesh_mw.inverted()
-        mesh_rot_w = mesh_mw.to_3x3()
-        mesh_rot_wi = mesh_mwi.to_3x3()
-        vg_names = [vgrp.name for vgrp in mesh_obj.vertex_groups]
+        mesh_mat_world = mesh_obj.matrix_world.copy()
+        mesh_mwi = mesh_mat_world.inverted()
+        mesh_rot_world = mesh_mat_world.to_3x3()
+        mesh_rot_world_inv = mesh_mwi.to_3x3()
+        vgroup_names = [vgrp.name for vgrp in mesh_obj.vertex_groups]
 
         per_vert_mats: List[Any] = []
         for vtx in mesh_obj.data.vertices:
             acc_mat = zero_mat.copy()
-            total_w = 0.0
+            total_weight = 0.0
             for grp_elem in vtx.groups:
-                if grp_elem.weight <= 0.0 or grp_elem.group >= len(vg_names):
+                if grp_elem.weight <= 0.0 or grp_elem.group >= len(vgroup_names):
                     continue
-                b_name = vg_names[grp_elem.group]
-                if b_name in delta_by_bone:
-                    acc_mat += delta_by_bone[b_name] * grp_elem.weight
-                    total_w += grp_elem.weight
-            mat_v = (acc_mat * (1.0 / total_w)) if total_w > 1e-6 else host_fallback
+                vgroup_bone_name = vgroup_names[grp_elem.group]
+                if vgroup_bone_name in delta_by_bone:
+                    acc_mat += delta_by_bone[vgroup_bone_name] * grp_elem.weight
+                    total_weight += grp_elem.weight
+            mat_v = (acc_mat * (1.0 / total_weight)) if total_weight > 1e-6 else host_fallback
             per_vert_mats.append(mat_v)
 
         shape_keys_obj = getattr(mesh_obj.data, "shape_keys", None)
@@ -1042,29 +1042,29 @@ def _apply_unity_transform_deltas_to_outfit(
             basis_blk = key_blocks[0]
             orig_basis_local = [basis_blk.data[idx].co.copy() for idx in range(len(mesh_obj.data.vertices))]
             new_basis_local: List[Any] = []
-            for idx, orig_co in enumerate(orig_basis_local):
-                new_co = mesh_mwi @ (per_vert_mats[idx] @ (mesh_mw @ orig_co))
-                new_basis_local.append(new_co)
-                basis_blk.data[idx].co = new_co
-                mesh_obj.data.vertices[idx].co = new_co
-            for kb_item in key_blocks[1:]:
+            for idx, orig_coord in enumerate(orig_basis_local):
+                new_coord = mesh_mwi @ (per_vert_mats[idx] @ (mesh_mat_world @ orig_coord))
+                new_basis_local.append(new_coord)
+                basis_blk.data[idx].co = new_coord
+                mesh_obj.data.vertices[idx].co = new_coord
+            for key_block_item in key_blocks[1:]:
                 for idx in range(len(orig_basis_local)):
-                    disp_w = mesh_rot_w @ (kb_item.data[idx].co - orig_basis_local[idx])
-                    kb_item.data[idx].co = new_basis_local[idx] + mesh_rot_wi @ (
-                        per_vert_mats[idx].to_3x3() @ disp_w
+                    disp_world = mesh_rot_world @ (key_block_item.data[idx].co - orig_basis_local[idx])
+                    key_block_item.data[idx].co = new_basis_local[idx] + mesh_rot_world_inv @ (
+                        per_vert_mats[idx].to_3x3() @ disp_world
                     )
         else:
             for idx, vtx in enumerate(mesh_obj.data.vertices):
-                vtx.co = mesh_mwi @ (per_vert_mats[idx] @ (mesh_mw @ vtx.co))
+                vtx.co = mesh_mwi @ (per_vert_mats[idx] @ (mesh_mat_world @ vtx.co))
 
         sample_det = host_fallback.to_3x3().determinant()
         if sample_det < 0.0:
-            bm_flip = bmesh.new()
-            bm_flip.from_mesh(mesh_obj.data)
-            bmesh.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
-            bm_flip.normal_update()
-            bm_flip.to_mesh(mesh_obj.data)
-            bm_flip.free()
+            bmesh_flip = bmesh.new()
+            bmesh_flip.from_mesh(mesh_obj.data)
+            bmesh.ops.reverse_faces(bmesh_flip, faces=bmesh_flip.faces)
+            bmesh_flip.normal_update()
+            bmesh_flip.to_mesh(mesh_obj.data)
+            bmesh_flip.free()
         mesh_obj.data.update()
 
         if custom_renames:
@@ -1123,28 +1123,28 @@ def _bake_merge_armature_in_blender(
         if mesh_obj.type != "MESH":
             continue
         remapped_groups: Dict[str, List[Tuple[int, float]]] = {}
-        existing_vg_names = [vgroup.name for vgroup in mesh_obj.vertex_groups]
-        for vg_name in existing_vg_names:
-            target_bone = bone_map.get(vg_name)
-            if not target_bone or target_bone == vg_name:
+        existing_vgroup_names = [vgroup.name for vgroup in mesh_obj.vertex_groups]
+        for vgroup_name in existing_vgroup_names:
+            target_bone = bone_map.get(vgroup_name)
+            if not target_bone or target_bone == vgroup_name:
                 continue
-            src_vg = mesh_obj.vertex_groups.get(vg_name)
-            if src_vg is None:
+            src_vgroup = mesh_obj.vertex_groups.get(vgroup_name)
+            if src_vgroup is None:
                 continue
-            src_idx = src_vg.index
+            src_idx = src_vgroup.index
             weights_for_target = remapped_groups.setdefault(target_bone, [])
             for vtx in mesh_obj.data.vertices:
                 for grp_elem in vtx.groups:
                     if grp_elem.group == src_idx and grp_elem.weight > 0.0:
                         weights_for_target.append((vtx.index, grp_elem.weight))
-            mesh_obj.vertex_groups.remove(src_vg)
+            mesh_obj.vertex_groups.remove(src_vgroup)
 
         for target_bone, pairs in remapped_groups.items():
-            dst_vg = mesh_obj.vertex_groups.get(target_bone)
-            if dst_vg is None:
-                dst_vg = mesh_obj.vertex_groups.new(name=target_bone)
+            dst_vgroup = mesh_obj.vertex_groups.get(target_bone)
+            if dst_vgroup is None:
+                dst_vgroup = mesh_obj.vertex_groups.new(name=target_bone)
             for vtx_idx, weight_val in pairs:
-                dst_vg.add([vtx_idx], weight_val, "ADD")
+                dst_vgroup.add([vtx_idx], weight_val, "ADD")
 
     # Collect world-space rest geometry for unmapped custom outfit bones
     outfit_matrix = outfit_arm_obj.matrix_world.copy()
@@ -1155,18 +1155,18 @@ def _bake_merge_armature_in_blender(
         if bone.name in bone_map:
             continue
         parent_name = bone.parent.name if bone.parent else ""
-        head_w = outfit_matrix @ bone.head_local
-        tail_w = outfit_matrix @ bone.tail_local
+        head_world = outfit_matrix @ bone.head_local
+        tail_weight = outfit_matrix @ bone.tail_local
         bone_delta = delta_by_bone.get(bone.name)
         if bone_delta is not None:
-            head_w = bone_delta @ head_w
-            tail_w = bone_delta @ tail_w
+            head_world = bone_delta @ head_world
+            tail_weight = bone_delta @ tail_weight
         custom_bone_specs.append(
             {
                 "name": custom_renames.get(bone.name, bone.name),
                 "parent_src": parent_name,
-                "head_world": head_w,
-                "tail_world": tail_w,
+                "head_world": head_world,
+                "tail_world": tail_weight,
                 "roll": bone.matrix_local.to_3x3().to_euler().y,
             }
         )
@@ -1184,29 +1184,29 @@ def _bake_merge_armature_in_blender(
                 bname = spec["name"]
                 if bname in edit_bones:
                     continue
-                new_eb = edit_bones.new(bname)
-                new_eb.head = base_inv_matrix @ spec["head_world"]
+                new_edit_bone = edit_bones.new(bname)
+                new_edit_bone.head = base_inv_matrix @ spec["head_world"]
                 tail_local = base_inv_matrix @ spec["tail_world"]
-                if (tail_local - new_eb.head).length < 1e-4:
-                    tail_local = new_eb.head.copy()
+                if (tail_local - new_edit_bone.head).length < 1e-4:
+                    tail_local = new_edit_bone.head.copy()
                     tail_local.z += 0.05
-                new_eb.tail = tail_local
-                new_eb.roll = spec["roll"]
+                new_edit_bone.tail = tail_local
+                new_edit_bone.roll = spec["roll"]
                 grafted_count += 1
 
             for spec in custom_bone_specs:
                 bname = spec["name"]
-                eb_cur = edit_bones.get(bname)
-                if eb_cur is None:
+                edit_bone_cur = edit_bones.get(bname)
+                if edit_bone_cur is None:
                     continue
                 parent_src = spec["parent_src"]
                 resolved_parent = custom_renames.get(parent_src) or bone_map.get(parent_src, parent_src)
                 if resolved_parent in edit_bones:
-                    eb_cur.parent = edit_bones[resolved_parent]
+                    edit_bone_cur.parent = edit_bones[resolved_parent]
                 elif attach_parent_bone and attach_parent_bone in edit_bones:
-                    eb_cur.parent = edit_bones[attach_parent_bone]
+                    edit_bone_cur.parent = edit_bones[attach_parent_bone]
                 elif "Hips" in edit_bones:
-                    eb_cur.parent = edit_bones["Hips"]
+                    edit_bone_cur.parent = edit_bones["Hips"]
         finally:
             bpy_mod.ops.object.mode_set(mode="OBJECT")
 
@@ -1362,14 +1362,14 @@ def apply_modular_avatar_plan_in_blender(
         if hasattr(bpy_mod.context, "view_layer") and hasattr(bpy_mod.context.view_layer, "update"):
             bpy_mod.context.view_layer.update()
         try:
-            arm_mw = base_arm_obj.matrix_world.copy()
+            armature_mat_world = base_arm_obj.matrix_world.copy()
             for bone_item in base_arm_obj.data.bones:
                 pose_bone = base_arm_obj.pose.bones.get(bone_item.name)
                 if pose_bone is None:
                     continue
-                rest_w = arm_mw @ bone_item.matrix_local
-                pose_w = arm_mw @ pose_bone.matrix
-                pose_delta_inv[bone_item.name] = (pose_w @ rest_w.inverted()).inverted()
+                rest_world = armature_mat_world @ bone_item.matrix_local
+                pose_world = armature_mat_world @ pose_bone.matrix
+                pose_delta_inv[bone_item.name] = (pose_world @ rest_world.inverted()).inverted()
         except Exception:
             pose_delta_inv = {}
 
@@ -1483,17 +1483,17 @@ def apply_modular_avatar_plan_in_blender(
                 if not is_identity_mat4(host_mat):
                     det_val = host_mat.to_3x3().determinant()
                     for mesh_obj in mesh_objs:
-                        mesh_mw = mesh_obj.matrix_world.copy()
-                        mesh_mwi = mesh_mw.inverted()
+                        mesh_mat_world = mesh_obj.matrix_world.copy()
+                        mesh_mwi = mesh_mat_world.inverted()
                         for vtx in mesh_obj.data.vertices:
-                            vtx.co = mesh_mwi @ (host_mat @ (mesh_mw @ vtx.co))
+                            vtx.co = mesh_mwi @ (host_mat @ (mesh_mat_world @ vtx.co))
                         if det_val < 0.0:
-                            bm_flip = bmesh.new()
-                            bm_flip.from_mesh(mesh_obj.data)
-                            bmesh.ops.reverse_faces(bm_flip, faces=bm_flip.faces)
-                            bm_flip.normal_update()
-                            bm_flip.to_mesh(mesh_obj.data)
-                            bm_flip.free()
+                            bmesh_flip = bmesh.new()
+                            bmesh_flip.from_mesh(mesh_obj.data)
+                            bmesh.ops.reverse_faces(bmesh_flip, faces=bmesh_flip.faces)
+                            bmesh_flip.normal_update()
+                            bmesh_flip.to_mesh(mesh_obj.data)
+                            bmesh_flip.free()
                         mesh_obj.data.update()
             except ImportError:
                 pass
@@ -1504,7 +1504,7 @@ def apply_modular_avatar_plan_in_blender(
                         vtx_indices = [vtx.index for vtx in mesh_obj.data.vertices]
                         if vtx_indices:
                             vgroup.add(vtx_indices, 1.0, "REPLACE")
-                        arm_mod = next((m_item for m_item in mesh_obj.modifiers if m_item.type == "ARMATURE"), None)
+                        arm_mod = next((modifier_item for modifier_item in mesh_obj.modifiers if modifier_item.type == "ARMATURE"), None)
                         if arm_mod is None:
                             arm_mod = mesh_obj.modifiers.new(name="Armature", type="ARMATURE")
                         arm_mod.object = base_arm_obj
@@ -1521,10 +1521,10 @@ def apply_modular_avatar_plan_in_blender(
         target_mesh_names = {
             name.lower() for name in proxy_spec.get("mesh_names", ()) if name
         }
-        src_go_low = str(proxy_spec.get("source_go", "") or "").lower()
+        source_game_object_lower = str(proxy_spec.get("source_go", "") or "").lower()
         for mesh_obj in all_imported_meshes:
             clean_low = re.sub(r"\.\d{3}$", "", mesh_obj.name).strip().lower()
-            if clean_low not in target_mesh_names and src_go_low not in clean_low:
+            if clean_low not in target_mesh_names and source_game_object_lower not in clean_low:
                 continue
             if not mesh_obj.vertex_groups:
                 vgroup = mesh_obj.vertex_groups.new(name=target_bone_name)

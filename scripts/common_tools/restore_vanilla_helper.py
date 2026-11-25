@@ -61,11 +61,11 @@ def _collect_ini_sync_targets(gtav_root: Optional[Path], project_root: Path, ped
             continue
         seen_dirs.add(key_str)
         pb_file = base_dir / "GTAVPhysBones.ini"
-        vt_file = base_dir / "GTAVVToon.ini"
+        vtoon_file = base_dir / "GTAVVToon.ini"
         if pb_file.is_file():
             pb_inis.append(pb_file)
-        if vt_file.is_file():
-            vtoon_inis.append(vt_file)
+        if vtoon_file.is_file():
+            vtoon_inis.append(vtoon_file)
     return pb_inis, vtoon_inis
 
 
@@ -459,7 +459,7 @@ def run_multi_slot_builds(
     slots_spec: Any,
     *,
     shared_defaults: Optional[Dict[str, Any]] = None,
-    build_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+    build_func: Optional[Callable[..., Dict[str, Any]]] = None,
     deploy: bool = True,
     repack_and_deploy: bool = True,
     secondary_atlas_size: int = 0,
@@ -483,7 +483,7 @@ def run_multi_slot_builds(
     import inspect
     import universal_gtav_rigging_layer as rigging_layer_mod
 
-    executor = build_fn or universal_gtav_builder.build_and_deploy_npc_from_source
+    executor = build_func or universal_gtav_builder.build_and_deploy_npc_from_source
     exec_params = inspect.signature(executor).parameters
     accepts_slot_meta = "slot_index" in exec_params or any(
         param_obj.kind == inspect.Parameter.VAR_KEYWORD for param_obj in exec_params.values()

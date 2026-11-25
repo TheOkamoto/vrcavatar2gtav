@@ -670,7 +670,7 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
 
     gameobjects: Dict[str, Dict[str, Any]] = {}
     transforms: Dict[str, Dict[str, Any]] = {}
-    go_to_transform: Dict[str, str] = {}
+    game_object_to_transform: Dict[str, str] = {}
     skinned_meshes: Dict[str, Dict[str, Any]] = {}
     prefab_instances: Dict[str, Dict[str, Any]] = {}
     shape_changers: List[Dict[str, Any]] = []
@@ -696,7 +696,7 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
             is_active = int(active_match.group(1)) == 1 if active_match else True
             gameobjects[file_id] = {"name": obj_name, "active": is_active}
         elif class_id == 4:
-            go_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
             father_match = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)\}", block_body)
             child_ids: List[str] = []
             if "m_Children:" in block_body:
@@ -704,16 +704,16 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
                     "m_Father:", 1
                 )[0]
                 child_ids = re.findall(r"-\s*\{fileID:\s*(-?\d+)\}", children_chunk)
-            if go_match:
-                go_id = go_match.group(1)
+            if game_object_match:
+                game_object_id = game_object_match.group(1)
                 transforms[file_id] = {
-                    "gameobject": go_id,
+                    "gameobject": game_object_id,
                     "father": father_match.group(1) if father_match else "0",
                     "children": child_ids,
                 }
-                go_to_transform[go_id] = file_id
+                game_object_to_transform[game_object_id] = file_id
         elif class_id == 137:
-            go_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
             enabled_match = re.search(r"^\s*m_Enabled:\s*(\d+)", block_body, re.MULTILINE)
             weights_list: List[float] = []
             if "m_BlendShapeWeights:\n" in block_body:
@@ -727,9 +727,9 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
                             break
                     elif stripped_item and not stripped_item.startswith("#"):
                         break
-            if go_match:
+            if game_object_match:
                 skinned_meshes[file_id] = {
-                    "gameobject": go_match.group(1),
+                    "gameobject": game_object_match.group(1),
                     "enabled": int(enabled_match.group(1)) == 1 if enabled_match else True,
                     "weights": weights_list,
                 }
@@ -737,10 +737,10 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
             if MA_SHAPE_CHANGER_GUID in block_body or (
                 "m_shapes:" in block_body and "ShapeName:" in block_body
             ):
-                go_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
+                game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)\}", block_body)
                 enabled_match = re.search(r"^\s*m_Enabled:\s*(\d+)", block_body, re.MULTILINE)
                 is_enabled = (int(enabled_match.group(1)) != 0) if enabled_match else True
-                if is_enabled and go_match:
+                if is_enabled and game_object_match:
                     shape_items: List[Dict[str, Any]] = []
                     for item_match in re.finditer(
                         r"-\s*Object:[ \t]*\r?\n(?:[ \t]+[^\n]*\n)*?"
@@ -771,7 +771,7 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
                     if shape_items:
                         shape_changers.append(
                             {
-                                "gameobject": go_match.group(1),
+                                "gameobject": game_object_match.group(1),
                                 "shapes": shape_items,
                             }
                         )
@@ -824,23 +824,23 @@ def _parse_unity_yaml_components(yaml_path: Path) -> Dict[str, Any]:
                             "value": raw_val,
                         }
                     )
-            pi_active = True
+            prefab_instance_active = True
             if root_name_target_id and root_name_target_id in active_by_target:
-                pi_active = active_by_target[root_name_target_id]
+                prefab_instance_active = active_by_target[root_name_target_id]
             elif not root_name_target_id and "100000" in active_by_target:
-                pi_active = active_by_target["100000"]
+                prefab_instance_active = active_by_target["100000"]
             prefab_instances[file_id] = {
                 "transform_parent": parent_match.group(1) if parent_match else "0",
                 "source_guid": src_guid_str,
                 "name_override": root_name_override,
-                "active": pi_active,
+                "active": prefab_instance_active,
                 "modifications": mod_entries,
             }
 
     return {
         "gameobjects": gameobjects,
         "transforms": transforms,
-        "go_to_transform": go_to_transform,
+        "go_to_transform": game_object_to_transform,
         "skinned_meshes": skinned_meshes,
         "prefab_instances": prefab_instances,
         "shape_changers": shape_changers,
@@ -855,66 +855,66 @@ def _select_avatar_root_target(
     """Select root Transform or top-level PrefabInstance (`("tr"|"pi", file_id, name)`)."""
     gameobjects = parsed_doc["gameobjects"]
     transforms = parsed_doc["transforms"]
-    go_to_transform = parsed_doc["go_to_transform"]
+    game_object_to_transform = parsed_doc["go_to_transform"]
     prefab_instances = parsed_doc["prefab_instances"]
 
-    def count_descendants(start_tr: str) -> int:
+    def count_descendants(start_transform: str) -> int:
         seen: Set[str] = set()
-        queue_tr = deque([start_tr])
-        while queue_tr:
-            current_tr = queue_tr.popleft()
-            if current_tr in seen:
+        queue_transform = deque([start_transform])
+        while queue_transform:
+            current_transform = queue_transform.popleft()
+            if current_transform in seen:
                 continue
-            seen.add(current_tr)
-            tr_info = transforms.get(current_tr)
-            if tr_info:
-                queue_tr.extend(tr_info["children"])
+            seen.add(current_transform)
+            transform_info = transforms.get(current_transform)
+            if transform_info:
+                queue_transform.extend(transform_info["children"])
         return len(seen)
 
     candidates: List[Tuple[int, int, int, str, str, str]] = []
     normalized_target = (avatar_name or "").strip().lower()
     hint_tokens = [token.strip().lower() for token in (character_hints or []) if token]
 
-    for go_id, go_info in gameobjects.items():
-        tr_id = go_to_transform.get(go_id)
-        if not tr_id:
+    for game_object_id, game_object_info in gameobjects.items():
+        transform_id = game_object_to_transform.get(game_object_id)
+        if not transform_id:
             continue
-        go_name = go_info["name"]
-        go_lower = go_name.lower()
+        game_object_name = game_object_info["name"]
+        game_object_lower = game_object_name.lower()
         score = -1
-        if normalized_target and go_lower == normalized_target:
+        if normalized_target and game_object_lower == normalized_target:
             score = 100
-        elif normalized_target and normalized_target in go_lower:
+        elif normalized_target and normalized_target in game_object_lower:
             score = 60
-        elif any(hint_token in go_lower for hint_token in hint_tokens):
+        elif any(hint_token in game_object_lower for hint_token in hint_tokens):
             score = 40
         elif not normalized_target and not hint_tokens:
-            father_id = transforms[tr_id]["father"]
+            father_id = transforms[transform_id]["father"]
             if father_id == "0":
                 score = 20
         if score >= 0:
-            active_flag = 1 if go_info["active"] else 0
-            candidates.append((score, active_flag, count_descendants(tr_id), "tr", tr_id, go_name))
+            active_flag = 1 if game_object_info["active"] else 0
+            candidates.append((score, active_flag, count_descendants(transform_id), "tr", transform_id, game_object_name))
 
-    for pi_id, pi_info in prefab_instances.items():
-        if str(pi_info.get("transform_parent", "0")) != "0":
+    for prefab_instance_id, prefab_instance_info in prefab_instances.items():
+        if str(prefab_instance_info.get("transform_parent", "0")) != "0":
             continue
-        pi_name = str(pi_info.get("name_override", "") or "").strip()
-        if not pi_name:
+        prefab_instance_name = str(prefab_instance_info.get("name_override", "") or "").strip()
+        if not prefab_instance_name:
             continue
-        pi_lower = pi_name.lower()
+        prefab_instance_lower = prefab_instance_name.lower()
         score = -1
-        if normalized_target and pi_lower == normalized_target:
+        if normalized_target and prefab_instance_lower == normalized_target:
             score = 98
-        elif normalized_target and normalized_target in pi_lower:
+        elif normalized_target and normalized_target in prefab_instance_lower:
             score = 58
-        elif any(hint_token in pi_lower for hint_token in hint_tokens):
+        elif any(hint_token in prefab_instance_lower for hint_token in hint_tokens):
             score = 38
         elif not normalized_target and not hint_tokens:
             score = 18
         if score >= 0:
-            active_flag = 1 if pi_info.get("active", True) else 0
-            candidates.append((score, active_flag, 1, "pi", pi_id, pi_name))
+            active_flag = 1 if prefab_instance_info.get("active", True) else 0
+            candidates.append((score, active_flag, 1, "pi", prefab_instance_id, prefab_instance_name))
 
     if candidates:
         candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
@@ -923,18 +923,18 @@ def _select_avatar_root_target(
 
     if transforms:
         top_roots = [
-            (count_descendants(tr_id), tr_id, gameobjects.get(tr_info["gameobject"], {}).get("name", ""))
-            for tr_id, tr_info in transforms.items()
-            if tr_info["father"] == "0"
+            (count_descendants(transform_id), transform_id, gameobjects.get(transform_info["gameobject"], {}).get("name", ""))
+            for transform_id, transform_info in transforms.items()
+            if transform_info["father"] == "0"
         ]
         if top_roots:
             top_roots.sort(key=lambda item: item[0], reverse=True)
             return "tr", top_roots[0][1], top_roots[0][2]
 
     top_pis = [
-        (pi_id, str(pi_info.get("name_override", "") or ""))
-        for pi_id, pi_info in prefab_instances.items()
-        if str(pi_info.get("transform_parent", "0")) == "0"
+        (prefab_instance_id, str(prefab_instance_info.get("name_override", "") or ""))
+        for prefab_instance_id, prefab_instance_info in prefab_instances.items()
+        if str(prefab_instance_info.get("transform_parent", "0")) == "0"
     ]
     if top_pis:
         return "pi", top_pis[0][0], top_pis[0][1]
@@ -964,15 +964,15 @@ def _collect_descendant_transforms(
     if root_transform_id is None:
         return set(transforms.keys())
     descendants: Set[str] = set()
-    queue_tr = deque([root_transform_id])
-    while queue_tr:
-        current_tr = queue_tr.popleft()
-        if current_tr in descendants:
+    queue_transform = deque([root_transform_id])
+    while queue_transform:
+        current_transform = queue_transform.popleft()
+        if current_transform in descendants:
             continue
-        descendants.add(current_tr)
-        tr_info = transforms.get(current_tr)
-        if tr_info:
-            queue_tr.extend(tr_info["children"])
+        descendants.add(current_transform)
+        transform_info = transforms.get(current_transform)
+        if transform_info:
+            queue_transform.extend(transform_info["children"])
     return descendants
 
 
@@ -998,8 +998,8 @@ def _collect_prefab_blendshapes(
     mesh_slots: Dict[str, Dict[int, float]] = {}
 
     for smr_id, smr_info in parsed_prefab["skinned_meshes"].items():
-        go_id = smr_info["gameobject"]
-        mesh_name = parsed_prefab["gameobjects"].get(go_id, {}).get("name", "")
+        game_object_id = smr_info["gameobject"]
+        mesh_name = parsed_prefab["gameobjects"].get(game_object_id, {}).get("name", "")
         if not mesh_name:
             continue
         smr_id_to_name[smr_id] = mesh_name
@@ -1009,14 +1009,14 @@ def _collect_prefab_blendshapes(
                 slot_weights[slot_idx] = weight_val
 
     nested_guids = {
-        pi_info["source_guid"]
-        for pi_info in parsed_prefab["prefab_instances"].values()
-        if pi_info["source_guid"]
+        prefab_instance_info["source_guid"]
+        for prefab_instance_info in parsed_prefab["prefab_instances"].values()
+        if prefab_instance_info["source_guid"]
     }
     nested_map = guid_resolver(nested_guids)
 
-    for pi_info in parsed_prefab["prefab_instances"].values():
-        nested_path = nested_map.get(pi_info["source_guid"])
+    for prefab_instance_info in parsed_prefab["prefab_instances"].values():
+        nested_path = nested_map.get(prefab_instance_info["source_guid"])
         if not nested_path:
             continue
         nested_id_map, nested_weights = _collect_prefab_blendshapes(
@@ -1024,7 +1024,7 @@ def _collect_prefab_blendshapes(
         )
         for nested_mesh, nested_slots in nested_weights.items():
             mesh_slots.setdefault(nested_mesh, {}).update(nested_slots)
-        for mod_item in pi_info["modifications"]:
+        for mod_item in prefab_instance_info["modifications"]:
             slot_match = re.match(
                 r"m_BlendShapeWeights\.Array\.data\[(\d+)\]",
                 mod_item["property_path"],
@@ -1078,14 +1078,14 @@ def extract_unity_scene_blendshapes(
         return empty_result
 
     parsed_doc = _parse_unity_yaml_components(resolved_unity)
-    root_kind, root_tr_or_pi_id, selected_root_name = _select_avatar_root_target(
+    root_kind, root_transform_or_prefab_id, selected_root_name = _select_avatar_root_target(
         parsed_doc, avatar_name=avatar_name, character_hints=character_hints
     )
-    root_tr_id = root_tr_or_pi_id if root_kind == "tr" else None
+    active_root_transform_id = root_transform_or_prefab_id if root_kind == "tr" else None
     if root_kind == "pi":
         descendant_trs: Set[str] = set()
     else:
-        descendant_trs = _collect_descendant_transforms(parsed_doc, root_tr_id)
+        descendant_trs = _collect_descendant_transforms(parsed_doc, active_root_transform_id)
 
     assets_dir = Path(unity_assets_root).resolve() if unity_assets_root else None
     tiered_roots: List[Tuple[Path, Optional[int], Optional[float]]] = []
@@ -1135,11 +1135,11 @@ def extract_unity_scene_blendshapes(
 
     if root_kind == "tr":
         for smr_info in parsed_doc["skinned_meshes"].values():
-            go_id = smr_info["gameobject"]
-            tr_id = parsed_doc["go_to_transform"].get(go_id)
-            if tr_id is not None and tr_id not in descendant_trs:
+            game_object_id = smr_info["gameobject"]
+            transform_id = parsed_doc["go_to_transform"].get(game_object_id)
+            if transform_id is not None and transform_id not in descendant_trs:
                 continue
-            mesh_name = parsed_doc["gameobjects"].get(go_id, {}).get("name", "")
+            mesh_name = parsed_doc["gameobjects"].get(game_object_id, {}).get("name", "")
             if not mesh_name:
                 continue
             slot_map: Dict[int, float] = {}
@@ -1149,24 +1149,24 @@ def extract_unity_scene_blendshapes(
             if slot_map:
                 indexed_by_mesh[mesh_name] = slot_map
 
-    if root_kind == "pi" and root_tr_or_pi_id in parsed_doc["prefab_instances"]:
-        relevant_pis = [parsed_doc["prefab_instances"][root_tr_or_pi_id]]
+    if root_kind == "pi" and root_transform_or_prefab_id in parsed_doc["prefab_instances"]:
+        relevant_pis = [parsed_doc["prefab_instances"][root_transform_or_prefab_id]]
     else:
         relevant_pis = [
-            pi_info
-            for pi_info in parsed_doc["prefab_instances"].values()
-            if pi_info.get("active", True)
+            prefab_instance_info
+            for prefab_instance_info in parsed_doc["prefab_instances"].values()
+            if prefab_instance_info.get("active", True)
             and (
                 resolved_unity.suffix.lower() == ".prefab"
-                or pi_info["transform_parent"] in descendant_trs
-                or pi_info["transform_parent"] == root_tr_id
+                or prefab_instance_info["transform_parent"] in descendant_trs
+                or prefab_instance_info["transform_parent"] == active_root_transform_id
             )
         ]
-    pi_guids = {pi_info["source_guid"] for pi_info in relevant_pis if pi_info["source_guid"]}
-    resolved_prefabs = resolve_guids(pi_guids)
+    prefab_instance_guids = {prefab_instance_info["source_guid"] for prefab_instance_info in relevant_pis if prefab_instance_info["source_guid"]}
+    resolved_prefabs = resolve_guids(prefab_instance_guids)
 
-    for pi_info in relevant_pis:
-        prefab_file = resolved_prefabs.get(pi_info["source_guid"])
+    for prefab_instance_info in relevant_pis:
+        prefab_file = resolved_prefabs.get(prefab_instance_info["source_guid"])
         if not prefab_file:
             continue
         smr_id_map, base_slots = _collect_prefab_blendshapes(
@@ -1184,7 +1184,7 @@ def extract_unity_scene_blendshapes(
                 if non_zero:
                     indexed_by_mesh.setdefault(base_mesh, {}).update(non_zero)
 
-        for mod_item in pi_info["modifications"]:
+        for mod_item in prefab_instance_info["modifications"]:
             slot_match = re.match(
                 r"m_BlendShapeWeights\.Array\.data\[(\d+)\]",
                 mod_item["property_path"],
@@ -1225,15 +1225,15 @@ def extract_unity_scene_blendshapes(
 
     # Apply Modular Avatar ShapeChanger weights targeting meshes in the avatar subtree
     if root_kind == "tr":
-        for sc_entry in parsed_doc.get("shape_changers", []):
-            go_id = sc_entry.get("gameobject", "")
-            tr_id = parsed_doc["go_to_transform"].get(go_id)
-            if tr_id is not None and tr_id not in descendant_trs:
+        for shape_changer_entry in parsed_doc.get("shape_changers", []):
+            game_object_id = shape_changer_entry.get("gameobject", "")
+            transform_id = parsed_doc["go_to_transform"].get(game_object_id)
+            if transform_id is not None and transform_id not in descendant_trs:
                 continue
-            go_info = parsed_doc["gameobjects"].get(go_id, {})
-            if go_info and not go_info.get("active", True):
+            game_object_info = parsed_doc["gameobjects"].get(game_object_id, {})
+            if game_object_info and not game_object_info.get("active", True):
                 continue
-            for shape_item in sc_entry.get("shapes", []):
+            for shape_item in shape_changer_entry.get("shapes", []):
                 ref_path = str(shape_item.get("reference_path", "") or "").strip()
                 shape_name = str(shape_item.get("shape_name", "") or "").strip()
                 if not shape_name:
@@ -1254,7 +1254,7 @@ def extract_unity_scene_blendshapes(
         "loaded": True,
         "source_path": str(resolved_unity),
         "root_name": selected_root_name,
-        "root_file_id": root_tr_or_pi_id or "",
+        "root_file_id": root_transform_or_prefab_id or "",
         "mesh_weights": named_by_mesh,
         "indexed_mesh_weights": indexed_by_mesh,
         "warnings": [],

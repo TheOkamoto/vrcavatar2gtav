@@ -345,12 +345,12 @@ def update_cfg_values_in_place(
             updated_lines.append(f"{missing_key} = {missing_val}\n")
         remaining_updates[active_section].clear()
 
-    for extra_section, extra_kv in remaining_updates.items():
-        if extra_kv:
+    for extra_section, extra_keyval in remaining_updates.items():
+        if extra_keyval:
             if updated_lines and not updated_lines[-1].endswith("\n"):
                 updated_lines.append("\n")
             updated_lines.append(f"\n[{extra_section}]\n")
-            for extra_key, extra_val in extra_kv.items():
+            for extra_key, extra_val in extra_keyval.items():
                 if extra_val:
                     updated_lines.append(f"{extra_key} = {extra_val}\n")
                 else:
@@ -693,31 +693,31 @@ def configure_vrc2gtav_cfg(
         else None
     )
     blender_probe = avatar_archive_helper.inspect_blender_installation(resolved_blender_path)
-    needs_blender_dl = (not blender_probe["exists"]) or (not blender_probe["is_4_0_series"])
-    needs_sollumz_dl = blender_probe["exists"] and blender_probe["is_4_0_series"] and (
+    needs_blender_download = (not blender_probe["exists"]) or (not blender_probe["is_4_0_series"])
+    needs_sollumz_download = blender_probe["exists"] and blender_probe["is_4_0_series"] and (
         not blender_probe["sollumz_installed"]
     )
-    if needs_blender_dl or needs_sollumz_dl:
+    if needs_blender_download or needs_sollumz_download:
         should_download = download_blender
         if should_download is None and interactive:
             prompt_txt = (
                 project_i18n.translate("setup.prompt_download_blender")
-                if needs_blender_dl
+                if needs_blender_download
                 else project_i18n.translate("setup.prompt_download_sollumz")
             )
             try:
-                dl_ans = input(f"  {prompt_txt} [Y/n]: ").strip()
+                download_ans = input(f"  {prompt_txt} [Y/n]: ").strip()
             except EOFError:
-                dl_ans = "y"
-            should_download = project_i18n.is_affirmative_answer(dl_ans, default_yes=True)
+                download_ans = "y"
+            should_download = project_i18n.is_affirmative_answer(download_ans, default_yes=True)
         if should_download:
             with err_helper.guarded_stage("download_blender", logger=active_logger):
-                if needs_blender_dl:
-                    dl_exe = avatar_archive_helper.download_and_install_blender(
+                if needs_blender_download:
+                    download_exe = avatar_archive_helper.download_and_install_blender(
                         PROJECT_ROOT_HINT, install_sollumz=True, logger=active_logger
                     )
-                    chosen_blender = format_path_for_cfg(str(dl_exe))
-                elif needs_sollumz_dl and resolved_blender_path is not None:
+                    chosen_blender = format_path_for_cfg(str(download_exe))
+                elif needs_sollumz_download and resolved_blender_path is not None:
                     avatar_archive_helper.install_sollumz_into_blender(
                         resolved_blender_path, logger=active_logger
                     )
@@ -747,26 +747,26 @@ def configure_vrc2gtav_cfg(
                 rage_exists = Path(chosen_rage).is_file()
     if not rage_exists and download_rage:
         with err_helper.guarded_stage("download_rage", logger=active_logger):
-            dl_rage = avatar_archive_helper.download_and_install_rage(
+            should_download_rage = avatar_archive_helper.download_and_install_rage(
                 PROJECT_ROOT_HINT, logger=active_logger
             )
-            chosen_rage = format_path_for_cfg(str(dl_rage))
+            chosen_rage = format_path_for_cfg(str(should_download_rage))
 
     if python_override:
         chosen_python = format_path_for_cfg(python_override)
     else:
-        py_exists = False
+        python_exists = False
         if current_python not in ("", "python3", "python"):
             try:
-                py_exists = Path(
+                python_exists = Path(
                     project_paths.to_host_path(
                         current_python, project_root_dir=PROJECT_ROOT_HINT
                     )
                 ).exists()
             except ValueError:
-                py_exists = Path(current_python).is_file()
+                python_exists = Path(current_python).is_file()
         chosen_python = (
-            current_python if py_exists else format_path_for_cfg(sys.executable)
+            current_python if python_exists else format_path_for_cfg(sys.executable)
         )
 
     dir_updates: Dict[str, str] = {
@@ -839,12 +839,12 @@ def configure_vrc2gtav_cfg(
         if detected_anim and not existing_anim_val.strip():
             cfg_updates.setdefault(target_section, {})["face_anim"] = detected_anim
 
-        existing_bs_cfg = (
+        existing_blendshape_cfg = (
             config_parser.get(target_section, "blendshapes_cfg", fallback="")
             if config_parser.has_section(target_section)
             else ""
         )
-        if not existing_bs_cfg.strip():
+        if not existing_blendshape_cfg.strip():
             cfg_updates.setdefault(target_section, {})[
                 "blendshapes_cfg"
             ] = f"${{directories:project_root}}/configs/{preset_filename}"
@@ -865,11 +865,11 @@ def configure_vrc2gtav_cfg(
             scene_for_picker = Path(str(ingested_source["preferred_scene"]))
         elif assets_dir_host.is_dir():
             first_scene = next(
-                (p_item for p_item in sorted(assets_dir_host.glob("*.unity"))), None
+                (path_item for path_item in sorted(assets_dir_host.glob("*.unity"))), None
             )
             if first_scene is None:
                 first_scene = next(
-                    (p_item for p_item in sorted(assets_dir_host.glob("*/*.unity"))), None
+                    (path_item for path_item in sorted(assets_dir_host.glob("*/*.unity"))), None
                 )
             scene_for_picker = first_scene
 
@@ -1419,9 +1419,9 @@ def run_first_run_setup(
             if (download_rage or download_blender) and not (host_gtav_dir / "dinput8.dll").is_file():
                 try:
                     repack_helper.download_and_install_asi_loader(host_gtav_dir)
-                except Exception as dl_exc:
+                except Exception as download_exc:
                     print(
-                        f"[WARN] Could not auto-download dinput8.dll ASI loader: {dl_exc}",
+                        f"[WARN] Could not auto-download dinput8.dll ASI loader: {download_exc}",
                         flush=True,
                     )
             repack_helper.print_gtav_runtime_status(host_gtav_dir)

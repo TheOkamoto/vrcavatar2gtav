@@ -243,17 +243,17 @@ def _match_tier_tokens(
     token_set: Set[str],
 ) -> Optional[str]:
     """Return matched rule label if ordered tokens / singularized tokens belong to `tier_cfg`."""
-    for bg_first, bg_second in tier_cfg.get("bigrams", ()):
+    for bigram_first, bigram_second in tier_cfg.get("bigrams", ()):
         for tok_idx in range(len(ordered_tokens) - 1):
             cur_tok = ordered_tokens[tok_idx]
             nxt_tok = ordered_tokens[tok_idx + 1]
             cur_sing = cur_tok[:-1] if (len(cur_tok) > 3 and cur_tok.endswith("s") and cur_tok not in _KEEP_FINAL_S_TOKENS) else cur_tok
             nxt_sing = nxt_tok[:-1] if (len(nxt_tok) > 3 and nxt_tok.endswith("s") and nxt_tok not in _KEEP_FINAL_S_TOKENS) else nxt_tok
-            if bg_first in (cur_tok, cur_sing) and bg_second in (nxt_tok, nxt_sing):
-                return f"{bg_first}_{bg_second}"
-    for kw_tok in tier_cfg.get("keywords", ()):
-        if kw_tok in token_set:
-            return kw_tok
+            if bigram_first in (cur_tok, cur_sing) and bigram_second in (nxt_tok, nxt_sing):
+                return f"{bigram_first}_{bigram_second}"
+    for keyword_tok in tier_cfg.get("keywords", ()):
+        if keyword_tok in token_set:
+            return keyword_tok
     return None
 
 
@@ -289,17 +289,17 @@ def score_physbone_chain_priority(
         matched_rule = hit_prop
     else:
         jewelry_hit = None
-        for bg_first, bg_second in _JEWELRY_BIGRAMS:
+        for bigram_first, bigram_second in _JEWELRY_BIGRAMS:
             for tok_idx in range(len(ordered_tokens) - 1):
-                if ordered_tokens[tok_idx] == bg_first and ordered_tokens[tok_idx + 1] == bg_second:
-                    jewelry_hit = f"{bg_first}_{bg_second}"
+                if ordered_tokens[tok_idx] == bigram_first and ordered_tokens[tok_idx + 1] == bigram_second:
+                    jewelry_hit = f"{bigram_first}_{bigram_second}"
                     break
             if jewelry_hit:
                 break
         if not jewelry_hit:
-            for jw_tok in _JEWELRY_OVERRIDES:
-                if jw_tok in token_set:
-                    jewelry_hit = jw_tok
+            for jewelry_tok in _JEWELRY_OVERRIDES:
+                if jewelry_tok in token_set:
+                    jewelry_hit = jewelry_tok
                     break
         if jewelry_hit:
             matched_tier = _PHYSBONE_TIER_BY_KEY["optional_micro_jiggle_and_jewelry"]
@@ -1401,16 +1401,16 @@ def apply_marshmallow_pb_presets(
 
     chains_map = dict(loaded_data.get("chains") or {})
     bone_map = dict(loaded_data.get("bone_mapping") or {})
-    bone_map_ci = dict(loaded_data.get("bone_mapping_ci") or {})
+    bone_map_lower = dict(loaded_data.get("bone_mapping_ci") or {})
     for src_bone, dst_bone in overlay["bone_mapping"].items():
         bone_map[src_bone] = dst_bone
-        bone_map_ci[src_bone.strip().lower()] = dst_bone
+        bone_map_lower[src_bone.strip().lower()] = dst_bone
     for chain_key, chain_cfg in overlay["chains"].items():
         chains_map[chain_key] = dict(chain_cfg)
 
     loaded_data["chains"] = chains_map
     loaded_data["bone_mapping"] = bone_map
-    loaded_data["bone_mapping_ci"] = bone_map_ci
+    loaded_data["bone_mapping_ci"] = bone_map_lower
     return loaded_data
 
 
@@ -1466,24 +1466,24 @@ VANILLA_RESERVED_BONE_TAGS: Set[int] = {
 
 def resolve_bone_from_mapping(
     raw_group_name: str,
-    bone_mapping_ci: Optional[Dict[str, str]] = None,
+    bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Resolve a lowercase vertex group name through a dynamic bone_mapping dict."""
-    if not bone_mapping_ci:
+    if not bone_mapping_lower:
         return None
-    return bone_mapping_ci.get(str(raw_group_name).strip().lower())
+    return bone_mapping_lower.get(str(raw_group_name).strip().lower())
 
 
 def resolve_michael_er_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
-    bone_mapping_ci: Optional[Dict[str, str]] = None,
+    bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Map a Shinano Eternal Reunion + hair bone name to its PB_Ear_* or PB_ER_* bone."""
     _ = mesh_name
     lowered_name = raw_group_name.strip().lower()
-    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
-        return bone_mapping_ci[lowered_name]
+    if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
+        return bone_mapping_lower[lowered_name]
     return MICHAEL_ER_BONE_MAP.get(lowered_name)
 
 
@@ -1496,22 +1496,22 @@ def resolve_neko_mimi_gtav_bone(raw_group_name: str) -> Optional[str]:
 def resolve_shinano_casual_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
-    bone_mapping_ci: Optional[Dict[str, str]] = None,
+    bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Map a Shinano Casual Blender vertex group name to its PB_SC_* GTA V bone."""
     lowered_name = raw_group_name.strip().lower()
-    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
-        return bone_mapping_ci[lowered_name]
+    if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
+        return bone_mapping_lower[lowered_name]
     return SHINANO_CASUAL_BONE_MAP.get(lowered_name)
 
 
 def resolve_miltina_maid_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
-    bone_mapping_ci: Optional[Dict[str, str]] = None,
+    bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Map a Miltina Maid Blender vertex group name to its PB_MT_* GTA V bone."""
     lowered_name = raw_group_name.strip().lower()
-    if bone_mapping_ci is not None and lowered_name in bone_mapping_ci:
-        return bone_mapping_ci[lowered_name]
+    if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
+        return bone_mapping_lower[lowered_name]
     return MILTINA_MAID_BONE_MAP.get(lowered_name)

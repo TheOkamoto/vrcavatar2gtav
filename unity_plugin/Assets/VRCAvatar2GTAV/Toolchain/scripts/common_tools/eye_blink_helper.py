@@ -273,13 +273,13 @@ def extract_facial_jaw_weights(
     if not orig_body_obj or not getattr(orig_body_obj.data, "shape_keys", None):
         return {}
     key_blocks = orig_body_obj.data.shape_keys.key_blocks
-    key_ci = {kb_item.name.strip().lower(): kb_item for kb_item in key_blocks}
-    shape_aa = next(
-        (key_ci.get(cand_key) for cand_key in MOUTH_OPEN_SHAPE_KEYS if key_ci.get(cand_key)),
+    key_blocks_lower = {key_block_item.name.strip().lower(): key_block_item for key_block_item in key_blocks}
+    shape_anchor = next(
+        (key_blocks_lower.get(cand_key) for cand_key in MOUTH_OPEN_SHAPE_KEYS if key_blocks_lower.get(cand_key)),
         None,
     )
-    basis_key = key_ci.get("basis") or key_blocks[0]
-    if not shape_aa or not basis_key:
+    basis_key = key_blocks_lower.get("basis") or key_blocks[0]
+    if not shape_anchor or not basis_key:
         return {}
 
     world_mat3 = None
@@ -290,18 +290,18 @@ def extract_facial_jaw_weights(
     drop_threshold = abs(float(delta_z_threshold))
     downward_drops: List[Tuple[int, float]] = []
     for vert_item in orig_body_obj.data.vertices:
-        base_co = basis_key.data[vert_item.index].co
-        open_co = shape_aa.data[vert_item.index].co
+        base_coord = basis_key.data[vert_item.index].co
+        open_coord = shape_anchor.data[vert_item.index].co
         if world_mat3 is not None:
-            delta_x = float(open_co.x) - float(base_co.x)
-            delta_y = float(open_co.y) - float(base_co.y)
+            delta_x = float(open_coord.x) - float(base_coord.x)
+            delta_y = float(open_coord.y) - float(base_coord.y)
             delta_z = (
                 float(world_mat3[2][0]) * delta_x
                 + float(world_mat3[2][1]) * delta_y
-                + float(world_mat3[2][2]) * (float(open_co.z) - float(base_co.z))
+                + float(world_mat3[2][2]) * (float(open_coord.z) - float(base_coord.z))
             )
         else:
-            delta_z = float(open_co.z) - float(base_co.z)
+            delta_z = float(open_coord.z) - float(base_coord.z)
         if delta_z < -drop_threshold:
             downward_drops.append((int(vert_item.index), abs(delta_z)))
 
@@ -384,10 +384,10 @@ def find_blink_shape_key(
             return False
         moved = 0
         for idx, base_pos in enumerate(base_positions):
-            key_co = key_data[idx].co
-            diff_x = float(key_co.x) - base_pos[0]
-            diff_y = float(key_co.y) - base_pos[1]
-            diff_z = float(key_co.z) - base_pos[2]
+            key_coord = key_data[idx].co
+            diff_x = float(key_coord.x) - base_pos[0]
+            diff_y = float(key_coord.y) - base_pos[1]
+            diff_z = float(key_coord.z) - base_pos[2]
             if (diff_x * diff_x + diff_y * diff_y + diff_z * diff_z) >= 2.5e-7:
                 moved += 1
                 if moved >= min_moved_verts:
@@ -464,8 +464,8 @@ def capture_eyelid_blink_anchors(ped_armature: Any) -> Dict[str, Tuple[float, fl
     for blink_name, vanilla_name in VANILLA_BLINK_ANCHOR_MAP.items():
         vanilla_bone = data_bones.get(vanilla_name)
         if vanilla_bone is not None:
-            world_pt = (arm_world @ vanilla_bone.matrix_local).translation
-            anchors[blink_name] = (float(world_pt.x), float(world_pt.y), float(world_pt.z))
+            world_point = (arm_world @ vanilla_bone.matrix_local).translation
+            anchors[blink_name] = (float(world_point.x), float(world_point.y), float(world_point.z))
         else:
             off_xyz = fallback_offsets[blink_name]
             anchors[blink_name] = (
@@ -517,11 +517,11 @@ def build_blink_custom_bone_specs(
     specs: List[Dict[str, object]] = []
     for bone_name, bone_tag, parent_name, _ptag in EYELID_BLINK_BONE_SPECS:
         if bone_name in pivots_world:
-            src_pt = pivots_world[bone_name]
+            src_point = pivots_world[bone_name]
             anchor_xyz = (
-                (float(src_pt[0]) + off_x) * float(world_scale),
-                (float(src_pt[1]) + off_y) * float(world_scale),
-                (float(src_pt[2]) + off_z) * float(world_scale) + float(world_z_offset),
+                (float(src_point[0]) + off_x) * float(world_scale),
+                (float(src_point[1]) + off_y) * float(world_scale),
+                (float(src_point[2]) + off_z) * float(world_scale) + float(world_z_offset),
             )
         else:
             anchor_xyz = resolved_anchors.get(bone_name)
@@ -540,20 +540,20 @@ def build_blink_custom_bone_specs(
     return specs
 
 
-def _vec_dot(vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]) -> float:
-    return vec_a[0] * vec_b[0] + vec_a[1] * vec_b[1] + vec_a[2] * vec_b[2]
+def _vec_dot(vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]) -> float:
+    return vec_first[0] * vec_second[0] + vec_first[1] * vec_second[1] + vec_first[2] * vec_second[2]
 
 
 def _vec_add(
-    vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
+    vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
-    return (vec_a[0] + vec_b[0], vec_a[1] + vec_b[1], vec_a[2] + vec_b[2])
+    return (vec_first[0] + vec_second[0], vec_first[1] + vec_second[1], vec_first[2] + vec_second[2])
 
 
 def _vec_sub(
-    vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
+    vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
-    return (vec_a[0] - vec_b[0], vec_a[1] - vec_b[1], vec_a[2] - vec_b[2])
+    return (vec_first[0] - vec_second[0], vec_first[1] - vec_second[1], vec_first[2] - vec_second[2])
 
 
 def _vec_scale(
@@ -563,12 +563,12 @@ def _vec_scale(
 
 
 def _vec_cross(
-    vec_a: Tuple[float, float, float], vec_b: Tuple[float, float, float]
+    vec_first: Tuple[float, float, float], vec_second: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
     return (
-        vec_a[1] * vec_b[2] - vec_a[2] * vec_b[1],
-        vec_a[2] * vec_b[0] - vec_a[0] * vec_b[2],
-        vec_a[0] * vec_b[1] - vec_a[1] * vec_b[0],
+        vec_first[1] * vec_second[2] - vec_first[2] * vec_second[1],
+        vec_first[2] * vec_second[0] - vec_first[0] * vec_second[2],
+        vec_first[0] * vec_second[1] - vec_first[1] * vec_second[0],
     )
 
 
@@ -606,18 +606,18 @@ def _quat_rotate_vec(
     quat_xyzw: Tuple[float, float, float, float], vec_in: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
     quat_xyz = (quat_xyzw[0], quat_xyzw[1], quat_xyzw[2])
-    quat_w = quat_xyzw[3]
+    quat_scalar = quat_xyzw[3]
     two_cross = _vec_scale(_vec_cross(quat_xyz, vec_in), 2.0)
-    cross_qt = _vec_cross(quat_xyz, two_cross)
+    cross_quat = _vec_cross(quat_xyz, two_cross)
     return (
-        vec_in[0] + quat_w * two_cross[0] + cross_qt[0],
-        vec_in[1] + quat_w * two_cross[1] + cross_qt[1],
-        vec_in[2] + quat_w * two_cross[2] + cross_qt[2],
+        vec_in[0] + quat_scalar * two_cross[0] + cross_quat[0],
+        vec_in[1] + quat_scalar * two_cross[1] + cross_quat[1],
+        vec_in[2] + quat_scalar * two_cross[2] + cross_quat[2],
     )
 
 
 def _fit_eyeball_pivot_rotation(
-    anchor_pt: Tuple[float, float, float],
+    anchor_point: Tuple[float, float, float],
     delta_vec: Tuple[float, float, float],
     min_depth: float,
 ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
@@ -628,7 +628,7 @@ def _fit_eyeball_pivot_rotation(
     """
     delta_len = _vec_len(delta_vec)
     if delta_len <= 1e-6:
-        fallback_pivot = _vec_add(anchor_pt, (0.0, float(min_depth), 0.0))
+        fallback_pivot = _vec_add(anchor_point, (0.0, float(min_depth), 0.0))
         return fallback_pivot, (0.0, 0.0, 0.0, 1.0)
 
     delta_dir = _vec_scale(delta_vec, 1.0 / delta_len)
@@ -644,22 +644,22 @@ def _fit_eyeball_pivot_rotation(
     back_dir = _vec_norm(proj_post)
 
     pivot_depth = max(float(min_depth), delta_len * 1.6)
-    mid_pt = _vec_add(anchor_pt, _vec_scale(delta_vec, 0.5))
-    pivot_pt = _vec_add(mid_pt, _vec_scale(back_dir, pivot_depth))
+    mid_point = _vec_add(anchor_point, _vec_scale(delta_vec, 0.5))
+    pivot_point = _vec_add(mid_point, _vec_scale(back_dir, pivot_depth))
 
-    vec_r0 = _vec_sub(anchor_pt, pivot_pt)
-    target_pt = _vec_add(anchor_pt, delta_vec)
-    vec_r1 = _vec_sub(target_pt, pivot_pt)
-    cross_r = _vec_cross(vec_r0, vec_r1)
-    sin_val = _vec_len(cross_r)
+    vec_r0 = _vec_sub(anchor_point, pivot_point)
+    target_point = _vec_add(anchor_point, delta_vec)
+    vec_r1 = _vec_sub(target_point, pivot_point)
+    cross_rot = _vec_cross(vec_r0, vec_r1)
+    sin_val = _vec_len(cross_rot)
     cos_val = _vec_dot(vec_r0, vec_r1)
     if sin_val <= 1e-10:
-        return pivot_pt, (0.0, 0.0, 0.0, 1.0)
+        return pivot_point, (0.0, 0.0, 0.0, 1.0)
 
-    axis_vec = _vec_scale(cross_r, 1.0 / sin_val)
+    axis_vec = _vec_scale(cross_rot, 1.0 / sin_val)
     angle_rad = math.atan2(sin_val, cos_val)
     quat_xyzw = _axis_angle_to_quat(axis_vec, angle_rad)
-    return pivot_pt, quat_xyzw
+    return pivot_point, quat_xyzw
 
 
 def _clamp_zero_one(val: float) -> float:
@@ -679,44 +679,44 @@ def solve_nonneg_two_vector_weights(
     Solve `min ||delta_vec - (w_c * basis_center + w_o * basis_outer)||^2` over the
     2D simplex `{w_c >= 0, w_o >= 0, w_c + w_o <= 1}` in closed form.
     """
-    gram_cc = _vec_dot(basis_center, basis_center)
-    gram_oo = _vec_dot(basis_outer, basis_outer)
-    gram_co = _vec_dot(basis_center, basis_outer)
-    rhs_c = _vec_dot(basis_center, delta_vec)
-    rhs_o = _vec_dot(basis_outer, delta_vec)
+    gram_center_center = _vec_dot(basis_center, basis_center)
+    gram_outer_outer = _vec_dot(basis_outer, basis_outer)
+    gram_center_outer = _vec_dot(basis_center, basis_outer)
+    rhs_center = _vec_dot(basis_center, delta_vec)
+    rhs_outer = _vec_dot(basis_outer, delta_vec)
 
     candidates: List[Tuple[float, float]] = [(0.0, 0.0)]
 
-    det = gram_cc * gram_oo - gram_co * gram_co
+    det = gram_center_center * gram_outer_outer - gram_center_outer * gram_center_outer
     if det > 1e-12:
-        unc_c = (rhs_c * gram_oo - rhs_o * gram_co) / det
-        unc_o = (gram_cc * rhs_o - gram_co * rhs_c) / det
-        if unc_c >= 0.0 and unc_o >= 0.0 and (unc_c + unc_o) <= 1.0:
-            candidates.append((unc_c, unc_o))
+        unclamped_center = (rhs_center * gram_outer_outer - rhs_outer * gram_center_outer) / det
+        unclamped_outer = (gram_center_center * rhs_outer - gram_center_outer * rhs_center) / det
+        if unclamped_center >= 0.0 and unclamped_outer >= 0.0 and (unclamped_center + unclamped_outer) <= 1.0:
+            candidates.append((unclamped_center, unclamped_outer))
 
-    if gram_cc > 1e-12:
-        candidates.append((_clamp_zero_one(rhs_c / gram_cc), 0.0))
-    if gram_oo > 1e-12:
-        candidates.append((0.0, _clamp_zero_one(rhs_o / gram_oo)))
+    if gram_center_center > 1e-12:
+        candidates.append((_clamp_zero_one(rhs_center / gram_center_center), 0.0))
+    if gram_outer_outer > 1e-12:
+        candidates.append((0.0, _clamp_zero_one(rhs_outer / gram_outer_outer)))
 
     edge_dir = _vec_sub(basis_outer, basis_center)
-    edge_norm_sq = _vec_dot(edge_dir, edge_dir)
-    if edge_norm_sq > 1e-12:
-        edge_weight_o = _clamp_zero_one(
-            _vec_dot(_vec_sub(delta_vec, basis_center), edge_dir) / edge_norm_sq
+    edge_norm_squared = _vec_dot(edge_dir, edge_dir)
+    if edge_norm_squared > 1e-12:
+        edge_weight_outer = _clamp_zero_one(
+            _vec_dot(_vec_sub(delta_vec, basis_center), edge_dir) / edge_norm_squared
         )
-        candidates.append((1.0 - edge_weight_o, edge_weight_o))
+        candidates.append((1.0 - edge_weight_outer, edge_weight_outer))
 
     best_weights = (0.0, 0.0)
-    best_err_sq = float("inf")
-    for cand_c, cand_o in candidates:
-        err_x = delta_vec[0] - (cand_c * basis_center[0] + cand_o * basis_outer[0])
-        err_y = delta_vec[1] - (cand_c * basis_center[1] + cand_o * basis_outer[1])
-        err_z = delta_vec[2] - (cand_c * basis_center[2] + cand_o * basis_outer[2])
-        err_sq = err_x * err_x + err_y * err_y + err_z * err_z
-        if err_sq < best_err_sq:
-            best_err_sq = err_sq
-            best_weights = (cand_c, cand_o)
+    best_err_squared = float("inf")
+    for cand_center, cand_outer in candidates:
+        err_x = delta_vec[0] - (cand_center * basis_center[0] + cand_outer * basis_outer[0])
+        err_y = delta_vec[1] - (cand_center * basis_center[1] + cand_outer * basis_outer[1])
+        err_z = delta_vec[2] - (cand_center * basis_center[2] + cand_outer * basis_outer[2])
+        err_squared = err_x * err_x + err_y * err_y + err_z * err_z
+        if err_squared < best_err_squared:
+            best_err_squared = err_squared
+            best_weights = (cand_center, cand_outer)
 
     return best_weights
 
@@ -768,10 +768,10 @@ def _fit_one_eye_side_weights(
     if strong_down:
         sorted_dys = sorted(side_deltas[idx][1] for idx in strong_down)
         pct_idx = max(0, min(len(sorted_dys) - 1, int(len(sorted_dys) * 0.35)))
-        center_dy = min(peak_center[1], sorted_dys[pct_idx])
+        center_delta_y = min(peak_center[1], sorted_dys[pct_idx])
     else:
-        center_dy = peak_center[1]
-    peak_center = (peak_center[0], center_dy, peak_center[2])
+        center_delta_y = peak_center[1]
+    peak_center = (peak_center[0], center_delta_y, peak_center[2])
 
     # Pick outermost moving vertex with significant downward blink displacement for outer corner vector
     sig_threshold = max(0.0025, max_disp * 0.28)
@@ -819,10 +819,10 @@ def _fit_one_eye_side_weights(
 
     anchor_z = side_coords[center_idx][2]
     upper_brow_coords = [
-        pt_co for pt_co in side_brow_coords if pt_co[2] > (anchor_z + 0.004)
+        point_coord for point_coord in side_brow_coords if point_coord[2] > (anchor_z + 0.004)
     ]
     global_min_brow_z = min(
-        (pt_co[2] for pt_co in upper_brow_coords),
+        (point_coord[2] for point_coord in upper_brow_coords),
         default=anchor_z + 0.45 * max_disp,
     )
 
@@ -831,13 +831,13 @@ def _fit_one_eye_side_weights(
         if lengths[vert_idx] < 0.0004:
             continue
         vert_coord = side_coords[vert_idx]
-        vx_val, _vy_val, vz_val = vert_coord
-        near_brow_zs = [
-            pt_co[2]
-            for pt_co in upper_brow_coords
-            if abs(pt_co[0] - vx_val) <= 0.008
+        vert_x_val, _vert_y_val, vert_z_val = vert_coord
+        near_brow_z_values = [
+            point_coord[2]
+            for point_coord in upper_brow_coords
+            if abs(point_coord[0] - vert_x_val) <= 0.008
         ]
-        local_brow_z = min(near_brow_zs) if near_brow_zs else global_min_brow_z
+        local_brow_z = min(near_brow_z_values) if near_brow_z_values else global_min_brow_z
         default_ceil = (
             local_brow_z - 0.0010
             if (upper_brow_coords and dvec[2] < -0.004)
@@ -845,11 +845,11 @@ def _fit_one_eye_side_weights(
         )
         z_ceil = default_ceil
         z_start = min(anchor_z + 0.08 * max_disp, z_ceil - 0.0030)
-        if vz_val >= z_ceil:
+        if vert_z_val >= z_ceil:
             continue
         upper_fade = 1.0
-        if vz_val > z_start:
-            u_fade = (vz_val - z_start) / max(1e-6, z_ceil - z_start)
+        if vert_z_val > z_start:
+            u_fade = (vert_z_val - z_start) / max(1e-6, z_ceil - z_start)
             upper_fade = 1.0 - (u_fade * u_fade * (3.0 - 2.0 * u_fade))
 
         rel_center = _vec_sub(vert_coord, pivot_center)
@@ -860,16 +860,16 @@ def _fit_one_eye_side_weights(
         rot_disp_outer = _vec_sub(
             _quat_rotate_vec(quat_outer, rel_outer), rel_outer
         )
-        weight_c, weight_o = solve_nonneg_two_vector_weights(
+        weight_center, weight_outer = solve_nonneg_two_vector_weights(
             dvec, rot_disp_center, rot_disp_outer
         )
-        weight_c *= upper_fade
-        weight_o *= upper_fade
+        weight_center *= upper_fade
+        weight_outer *= upper_fade
         bone_map: Dict[str, float] = {}
-        if weight_c > 0.002:
-            bone_map[upper_bone_name] = weight_c
-        if weight_o > 0.002:
-            bone_map[outer_bone_name] = weight_o
+        if weight_center > 0.002:
+            bone_map[upper_bone_name] = weight_center
+        if weight_outer > 0.002:
+            bone_map[outer_bone_name] = weight_outer
         if bone_map:
             weights_out[vert_idx] = bone_map
 
@@ -947,12 +947,12 @@ def extract_body_eyelid_blink_rig_data(
         if not key_data or not basis_data or len(key_data) != len(basis_data):
             continue
         for v_idx in range(len(basis_data)):
-            b_co = basis_data[v_idx].co
-            k_co = key_data[v_idx].co
-            dx_b = float(k_co.x) - float(b_co.x)
-            dy_b = float(k_co.y) - float(b_co.y)
-            dz_b = float(k_co.z) - float(b_co.z)
-            if (dx_b * dx_b + dy_b * dy_b + dz_b * dz_b) > 4.0e-8:
+            basis_coord = basis_data[v_idx].co
+            key_vert_coord = key_data[v_idx].co
+            delta_x_bone = float(key_vert_coord.x) - float(basis_coord.x)
+            delta_y_bone = float(key_vert_coord.y) - float(basis_coord.y)
+            delta_z_bone = float(key_vert_coord.z) - float(basis_coord.z)
+            if (delta_x_bone * delta_x_bone + delta_y_bone * delta_y_bone + delta_z_bone * delta_z_bone) > 4.0e-8:
                 brow_vert_indices.add(v_idx)
 
     basis_positions = [
@@ -978,8 +978,8 @@ def extract_body_eyelid_blink_rig_data(
             return result
         open_coords: List[Tuple[float, float, float]] = []
         for vert_item in open_mesh.vertices:
-            world_pt = open_world_mat @ vert_item.co
-            open_coords.append((float(world_pt.x), float(world_pt.y), float(world_pt.z)))
+            world_point = open_world_mat @ vert_item.co
+            open_coords.append((float(world_point.x), float(world_point.y), float(world_point.z)))
     finally:
         eval_open.to_mesh_clear()
 
@@ -995,8 +995,8 @@ def extract_body_eyelid_blink_rig_data(
         shut_mesh = eval_shut.to_mesh()
         try:
             for vert_item in shut_mesh.vertices:
-                world_pt = shut_world_mat @ vert_item.co
-                shut_coords.append((float(world_pt.x), float(world_pt.y), float(world_pt.z)))
+                world_point = shut_world_mat @ vert_item.co
+                shut_coords.append((float(world_point.x), float(world_point.y), float(world_point.z)))
         finally:
             eval_shut.to_mesh_clear()
     finally:
@@ -1009,24 +1009,24 @@ def extract_body_eyelid_blink_rig_data(
     right_deltas: Dict[int, Tuple[float, float, float]] = {}
     right_coords: Dict[int, Tuple[float, float, float]] = {}
 
-    for vert_idx, open_pt in enumerate(open_coords):
+    for vert_idx, open_point in enumerate(open_coords):
         if vert_idx in excluded_set or vert_idx in brow_vert_indices:
             continue
-        shut_pt = shut_coords[vert_idx]
+        shut_point = shut_coords[vert_idx]
         dvec = (
-            shut_pt[0] - open_pt[0],
-            shut_pt[1] - open_pt[1],
-            shut_pt[2] - open_pt[2],
+            shut_point[0] - open_point[0],
+            shut_point[1] - open_point[1],
+            shut_point[2] - open_point[2],
         )
-        dlen_sq = dvec[0] * dvec[0] + dvec[1] * dvec[1] + dvec[2] * dvec[2]
-        if dlen_sq < 2.5e-7:
+        delta_len_squared = dvec[0] * dvec[0] + dvec[1] * dvec[1] + dvec[2] * dvec[2]
+        if delta_len_squared < 2.5e-7:
             continue
-        if open_pt[0] > 0.002:
+        if open_point[0] > 0.002:
             left_deltas[vert_idx] = dvec
-            left_coords[vert_idx] = open_pt
-        elif open_pt[0] < -0.002:
+            left_coords[vert_idx] = open_point
+        elif open_point[0] < -0.002:
             right_deltas[vert_idx] = dvec
-            right_coords[vert_idx] = open_pt
+            right_coords[vert_idx] = open_point
 
     left_brow_coords = [
         open_coords[v_idx]
@@ -1176,12 +1176,12 @@ def apply_eyelid_blink_weights_to_mesh(
         new_head_weight = max(0.0, head_weight * (1.0 - scaled_sum))
         head_vgroup.add([mesh_vert_idx], new_head_weight, "REPLACE")
 
-        for bone_name, raw_w in lid_weights.items():
+        for bone_name, raw_lid_weight in lid_weights.items():
             grp_obj = eyelid_vgroups.get(bone_name)
             if grp_obj is not None:
-                final_w = min(1.0, float(raw_w) * scale_factor * head_weight)
-                if final_w > 0.001:
-                    grp_obj.add([mesh_vert_idx], final_w, "REPLACE")
+                final_weight = min(1.0, float(raw_lid_weight) * scale_factor * head_weight)
+                if final_weight > 0.001:
+                    grp_obj.add([mesh_vert_idx], final_weight, "REPLACE")
         painted_count += 1
 
     return painted_count
@@ -1244,7 +1244,7 @@ def build_blink_profile_for_ped(
 
         if delta_rotations_world and bone_name in delta_rotations_world:
             raw_quat = delta_rotations_world[bone_name]
-            q_world_delta = mathutils.Quaternion(
+            quat_world_delta = mathutils.Quaternion(
                 (
                     float(raw_quat[3]),
                     float(raw_quat[0]),
@@ -1253,16 +1253,16 @@ def build_blink_profile_for_ped(
                 )
             ).normalized()
             cur_rot = cur_world.to_quaternion().normalized()
-            q_delta_local = (
-                cur_rot.inverted() @ q_world_delta @ cur_rot
+            quat_delta_local = (
+                cur_rot.inverted() @ quat_world_delta @ cur_rot
             ).normalized()
-            if q_delta_local.w < 0.0:
-                q_delta_local.negate()
+            if quat_delta_local.w < 0.0:
+                quat_delta_local.negate()
             delta_rot_tuple = (
-                float(q_delta_local.x),
-                float(q_delta_local.y),
-                float(q_delta_local.z),
-                float(q_delta_local.w),
+                float(quat_delta_local.x),
+                float(quat_delta_local.y),
+                float(quat_delta_local.z),
+                float(quat_delta_local.w),
             )
             delta_local = mathutils.Vector((0.0, 0.0, 0.0))
         else:

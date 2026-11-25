@@ -107,57 +107,57 @@ DEFAULT_HUMAN_BONE_POSITIONS: Dict[str, Tuple[float, float, float]] = {
 }
 
 
-def _vec_sub(vec_a: Sequence[float], vec_b: Sequence[float]) -> Tuple[float, float, float]:
+def _vec_sub(vec_first: Sequence[float], vec_second: Sequence[float]) -> Tuple[float, float, float]:
     return (
-        float(vec_a[0]) - float(vec_b[0]),
-        float(vec_a[1]) - float(vec_b[1]),
-        float(vec_a[2]) - float(vec_b[2]),
+        float(vec_first[0]) - float(vec_second[0]),
+        float(vec_first[1]) - float(vec_second[1]),
+        float(vec_first[2]) - float(vec_second[2]),
     )
 
 
-def _vec_add(vec_a: Sequence[float], vec_b: Sequence[float]) -> Tuple[float, float, float]:
+def _vec_add(vec_first: Sequence[float], vec_second: Sequence[float]) -> Tuple[float, float, float]:
     return (
-        float(vec_a[0]) + float(vec_b[0]),
-        float(vec_a[1]) + float(vec_b[1]),
-        float(vec_a[2]) + float(vec_b[2]),
+        float(vec_first[0]) + float(vec_second[0]),
+        float(vec_first[1]) + float(vec_second[1]),
+        float(vec_first[2]) + float(vec_second[2]),
     )
 
 
-def _vec_scale(vec_a: Sequence[float], scalar: float) -> Tuple[float, float, float]:
+def _vec_scale(vec_first: Sequence[float], scalar: float) -> Tuple[float, float, float]:
     return (
-        float(vec_a[0]) * float(scalar),
-        float(vec_a[1]) * float(scalar),
-        float(vec_a[2]) * float(scalar),
+        float(vec_first[0]) * float(scalar),
+        float(vec_first[1]) * float(scalar),
+        float(vec_first[2]) * float(scalar),
     )
 
 
-def _vec_dot(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
+def _vec_dot(vec_first: Sequence[float], vec_second: Sequence[float]) -> float:
     return (
-        float(vec_a[0]) * float(vec_b[0])
-        + float(vec_a[1]) * float(vec_b[1])
-        + float(vec_a[2]) * float(vec_b[2])
+        float(vec_first[0]) * float(vec_second[0])
+        + float(vec_first[1]) * float(vec_second[1])
+        + float(vec_first[2]) * float(vec_second[2])
     )
 
 
-def _vec_cross(vec_a: Sequence[float], vec_b: Sequence[float]) -> Tuple[float, float, float]:
+def _vec_cross(vec_first: Sequence[float], vec_second: Sequence[float]) -> Tuple[float, float, float]:
     return (
-        float(vec_a[1]) * float(vec_b[2]) - float(vec_a[2]) * float(vec_b[1]),
-        float(vec_a[2]) * float(vec_b[0]) - float(vec_a[0]) * float(vec_b[2]),
-        float(vec_a[0]) * float(vec_b[1]) - float(vec_a[1]) * float(vec_b[0]),
+        float(vec_first[1]) * float(vec_second[2]) - float(vec_first[2]) * float(vec_second[1]),
+        float(vec_first[2]) * float(vec_second[0]) - float(vec_first[0]) * float(vec_second[2]),
+        float(vec_first[0]) * float(vec_second[1]) - float(vec_first[1]) * float(vec_second[0]),
     )
 
 
-def _vec_len(vec_a: Sequence[float]) -> float:
-    return math.sqrt(_vec_dot(vec_a, vec_a))
+def _vec_len(vec_first: Sequence[float]) -> float:
+    return math.sqrt(_vec_dot(vec_first, vec_first))
 
 
 def _vec_normalize(
-    vec_a: Sequence[float], fallback: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+    vec_first: Sequence[float], fallback: Tuple[float, float, float] = (0.0, 0.0, 1.0)
 ) -> Tuple[float, float, float]:
-    length = _vec_len(vec_a)
+    length = _vec_len(vec_first)
     if length < 1e-8:
         return fallback
-    return (vec_a[0] / length, vec_a[1] / length, vec_a[2] / length)
+    return (vec_first[0] / length, vec_first[1] / length, vec_first[2] / length)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -172,7 +172,7 @@ def _closest_point_on_polyline(
         anchor = polyline[0] if polyline else (0.0, 0.0, 0.0)
         return anchor, (0.0, 0.0, 1.0)
 
-    best_dist_sq = float("inf")
+    best_dist_squared = float("inf")
     best_closest = polyline[0]
     best_tangent = _vec_normalize(_vec_sub(polyline[1], polyline[0]))
 
@@ -180,15 +180,15 @@ def _closest_point_on_polyline(
         seg_start = polyline[seg_idx]
         seg_end = polyline[seg_idx + 1]
         seg_delta = _vec_sub(seg_end, seg_start)
-        seg_len_sq = _vec_dot(seg_delta, seg_delta)
-        if seg_len_sq < 1e-10:
+        seg_len_squared = _vec_dot(seg_delta, seg_delta)
+        if seg_len_squared < 1e-10:
             continue
-        proj = _clamp(_vec_dot(_vec_sub(point, seg_start), seg_delta) / seg_len_sq, 0.0, 1.0)
+        proj = _clamp(_vec_dot(_vec_sub(point, seg_start), seg_delta) / seg_len_squared, 0.0, 1.0)
         cand_point = _vec_add(seg_start, _vec_scale(seg_delta, proj))
         diff = _vec_sub(point, cand_point)
-        dist_sq = _vec_dot(diff, diff)
-        if dist_sq < best_dist_sq:
-            best_dist_sq = dist_sq
+        dist_squared = _vec_dot(diff, diff)
+        if dist_squared < best_dist_squared:
+            best_dist_squared = dist_squared
             best_closest = cand_point
             best_tangent = _vec_normalize(seg_delta)
 
@@ -213,7 +213,7 @@ def configure_ped_shader_material(
     specular_fresnel: float = DEFAULT_ANIME_SPECULAR_FRESNEL,
     detail_settings: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     stubble_control: Tuple[float, float] = (0.0, 0.0),
-    um_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    micromovement_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
 ) -> Any:
     """Configure samplers and scalar/vector parameters on a Sollumz ped material."""
     node_tree = getattr(shader_material, "node_tree", None)
@@ -270,10 +270,10 @@ def configure_ped_shader_material(
             _assign_shader_vec4(
                 shader_node,
                 (
-                    float(um_global_params[0]),
-                    float(um_global_params[1]),
-                    float(um_global_params[2]),
-                    float(um_global_params[3]),
+                    float(micromovement_global_params[0]),
+                    float(micromovement_global_params[1]),
+                    float(micromovement_global_params[2]),
+                    float(micromovement_global_params[3]),
                 ),
             )
         elif node_name == "anisotropicSpecularIntensity":
@@ -301,7 +301,7 @@ def create_ped_material(
     specular_fresnel: float = DEFAULT_ANIME_SPECULAR_FRESNEL,
     detail_settings: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     stubble_control: Tuple[float, float] = (0.0, 0.0),
-    um_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    micromovement_global_params: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
 ) -> Any:
     """Instantiate and calibrate a Sollumz ped material with optional shader override."""
     shader_filename = shader_override or resolve_ped_shader_filename(enable_blood_decals)
@@ -319,7 +319,7 @@ def create_ped_material(
         specular_fresnel=specular_fresnel,
         detail_settings=detail_settings,
         stubble_control=stubble_control,
-        um_global_params=um_global_params,
+        micromovement_global_params=micromovement_global_params,
     )
 
 
@@ -411,19 +411,19 @@ def build_damage_cylinders(
     left_finger = bones.get("SKEL_L_Finger22")
     if left_finger is None:
         hand_dir = _vec_normalize(_vec_sub(left_hand, left_forearm), (0.6, -0.1, -0.8))
-        left_finger_pt = _vec_add(left_hand, _vec_scale(hand_dir, 0.14))
+        left_finger_point = _vec_add(left_hand, _vec_scale(hand_dir, 0.14))
     else:
-        left_finger_pt = (float(left_finger[0]), float(left_finger[1]), float(left_finger[2]))
+        left_finger_point = (float(left_finger[0]), float(left_finger[1]), float(left_finger[2]))
 
     right_upper_arm = _get_bone_pos(bones, "SKEL_R_UpperArm")
     right_forearm = _get_bone_pos(bones, "SKEL_R_Forearm")
     right_hand = _get_bone_pos(bones, "SKEL_R_Hand")
     right_finger = bones.get("SKEL_R_Finger22")
     if right_finger is None:
-        hand_dir_r = _vec_normalize(_vec_sub(right_hand, right_forearm), (-0.6, -0.1, -0.8))
-        right_finger_pt = _vec_add(right_hand, _vec_scale(hand_dir_r, 0.14))
+        hand_dir_right = _vec_normalize(_vec_sub(right_hand, right_forearm), (-0.6, -0.1, -0.8))
+        right_finger_point = _vec_add(right_hand, _vec_scale(hand_dir_right, 0.14))
     else:
-        right_finger_pt = (float(right_finger[0]), float(right_finger[1]), float(right_finger[2]))
+        right_finger_point = (float(right_finger[0]), float(right_finger[1]), float(right_finger[2]))
 
     mid_thigh = (
         0.5 * (left_thigh[0] + right_thigh[0]),
@@ -438,11 +438,11 @@ def build_damage_cylinders(
     head_axis = _vec_normalize((0.0, head_delta[1], head_delta[2]), (0.0, -0.22, 0.975))
     head_span = max(0.08, _vec_dot(head_delta, head_axis))
 
-    left_arm_delta = _vec_sub(left_upper_arm, left_finger_pt)
+    left_arm_delta = _vec_sub(left_upper_arm, left_finger_point)
     left_arm_axis = _vec_normalize(left_arm_delta, (-0.57, 0.09, 0.82))
     left_arm_span = max(0.20, _vec_dot(left_arm_delta, left_arm_axis))
 
-    right_arm_delta = _vec_sub(right_upper_arm, right_finger_pt)
+    right_arm_delta = _vec_sub(right_upper_arm, right_finger_point)
     right_arm_axis = _vec_normalize(right_arm_delta, (0.57, 0.09, 0.82))
     right_arm_span = max(0.20, _vec_dot(right_arm_delta, right_arm_axis))
 
@@ -454,8 +454,8 @@ def build_damage_cylinders(
     right_leg_axis = _vec_normalize(right_leg_delta, (0.07, -0.06, 0.995))
     right_leg_span = max(0.25, _vec_dot(right_leg_delta, right_leg_axis))
 
-    left_toe_pt = _vec_add(left_foot, (0.0, -0.10, -0.07))
-    right_toe_pt = _vec_add(right_foot, (0.0, -0.10, -0.07))
+    left_toe_point = _vec_add(left_foot, (0.0, -0.10, -0.07))
+    right_toe_point = _vec_add(right_foot, (0.0, -0.10, -0.07))
 
     return {
         "pelvis_z": pelvis[2],
@@ -480,19 +480,19 @@ def build_damage_cylinders(
             "seam_hint": (0.0, 1.0, 0.0),
         },
         DAMAGE_ZONE_LEFT_ARM: {
-            "base": left_finger_pt,
+            "base": left_finger_point,
             "axis": left_arm_axis,
             "t_base": 0.09,
             "t_slope": 0.84 / left_arm_span,
-            "polyline": (left_finger_pt, left_hand, left_forearm, left_upper_arm),
+            "polyline": (left_finger_point, left_hand, left_forearm, left_upper_arm),
             "seam_hint": (-0.4, 0.0, -0.9),
         },
         DAMAGE_ZONE_RIGHT_ARM: {
-            "base": right_finger_pt,
+            "base": right_finger_point,
             "axis": right_arm_axis,
             "t_base": 0.09,
             "t_slope": 0.84 / right_arm_span,
-            "polyline": (right_finger_pt, right_hand, right_forearm, right_upper_arm),
+            "polyline": (right_finger_point, right_hand, right_forearm, right_upper_arm),
             "seam_hint": (0.4, 0.0, -0.9),
         },
         DAMAGE_ZONE_LEFT_LEG: {
@@ -500,7 +500,7 @@ def build_damage_cylinders(
             "axis": left_leg_axis,
             "t_base": 0.14,
             "t_slope": 0.82 / left_leg_span,
-            "polyline": (left_toe_pt, left_foot, left_calf, left_thigh),
+            "polyline": (left_toe_point, left_foot, left_calf, left_thigh),
             "seam_hint": (-1.0, 0.0, 0.0),
         },
         DAMAGE_ZONE_RIGHT_LEG: {
@@ -508,7 +508,7 @@ def build_damage_cylinders(
             "axis": right_leg_axis,
             "t_base": 0.14,
             "t_slope": 0.82 / right_leg_span,
-            "polyline": (right_toe_pt, right_foot, right_calf, right_thigh),
+            "polyline": (right_toe_point, right_foot, right_calf, right_thigh),
             "seam_hint": (1.0, 0.0, 0.0),
         },
     }
@@ -670,30 +670,30 @@ def project_point_onto_damage_zone(
         return (0.0, 0.0)
 
     spec = cylinders[zone_id]
-    base_pt = spec["base"]
+    base_point = spec["base"]
     axis_hat = spec["axis"]
-    t_along = spec["t_base"] + spec["t_slope"] * _vec_dot(_vec_sub(point, base_pt), axis_hat)
-    t_clamped = _clamp(t_along, 0.02, 0.98)
+    param_along = spec["t_base"] + spec["t_slope"] * _vec_dot(_vec_sub(point, base_point), axis_hat)
+    param_clamped = _clamp(param_along, 0.02, 0.98)
 
-    center_pt, seg_tan = _closest_point_on_polyline(point, spec["polyline"])
+    center_point, seg_tan = _closest_point_on_polyline(point, spec["polyline"])
     if zone_id in (DAMAGE_ZONE_TORSO, DAMAGE_ZONE_HEAD):
         seg_tan = axis_hat
 
     seam_hint = spec["seam_hint"]
     seam_perp = _vec_sub(seam_hint, _vec_scale(seg_tan, _vec_dot(seam_hint, seg_tan)))
-    e_zero = _vec_normalize(seam_perp, (1.0, 0.0, 0.0))
-    e_quarter = _vec_normalize(_vec_cross(seg_tan, e_zero), (0.0, 1.0, 0.0))
+    basis_zero = _vec_normalize(seam_perp, (1.0, 0.0, 0.0))
+    basis_quarter = _vec_normalize(_vec_cross(seg_tan, basis_zero), (0.0, 1.0, 0.0))
 
-    radial_vec = _vec_sub(point, center_pt)
+    radial_vec = _vec_sub(point, center_point)
     radial_perp = _vec_sub(radial_vec, _vec_scale(seg_tan, _vec_dot(radial_vec, seg_tan)))
     if _vec_dot(radial_perp, radial_perp) < 1e-12:
         u_frac = 0.5
     else:
-        ang = math.atan2(_vec_dot(radial_perp, e_quarter), _vec_dot(radial_perp, e_zero))
+        ang = math.atan2(_vec_dot(radial_perp, basis_quarter), _vec_dot(radial_perp, basis_zero))
         u_frac = (ang / (2.0 * math.pi)) % 1.0
 
     u_val = 1.0 + u_frac
-    v_blender = float(2 * zone_id + 1) + t_clamped
+    v_blender = float(2 * zone_id + 1) + param_clamped
     return (u_val, v_blender)
 
 
@@ -1381,7 +1381,7 @@ def inspect_rpf7_archive_limits(rpf_file_path: Union[str, Path]) -> Dict[str, An
             "<IIII", toc_bytes[off_pos : off_pos + 16]
         )
         name_off = d0_val & 0xFFFF
-        f_size = (d0_val >> 16) | ((d1_val & 0xFF) << 16)
+        file_size = (d0_val >> 16) | ((d1_val & 0xFF) << 16)
         is_dir = d1_val == 0x7FFFFF00
         is_resource = (d1_val & 0x80000000) != 0
         sector_offset = (d1_val >> 8) & 0x7FFFFF
@@ -1399,13 +1399,13 @@ def inspect_rpf7_archive_limits(rpf_file_path: Union[str, Path]) -> Dict[str, An
             offset_overflows.append((entry_name, byte_offset))
 
         if is_resource:
-            if f_size > largest_resource_bytes:
-                largest_resource_bytes = f_size
+            if file_size > largest_resource_bytes:
+                largest_resource_bytes = file_size
                 largest_resource_name = entry_name
-            if f_size == RPF7_MAX_RESOURCE_BYTES:
-                resource_overflows.append((entry_name, f_size))
-        elif f_size != 0:
-            compressed_binaries.append((entry_name, f_size))
+            if file_size == RPF7_MAX_RESOURCE_BYTES:
+                resource_overflows.append((entry_name, file_size))
+        elif file_size != 0:
+            compressed_binaries.append((entry_name, file_size))
 
     archive_size_ok = total_bytes <= RPF7_MAX_ARCHIVE_OFFSET_BYTES
     is_ok = (
@@ -1523,7 +1523,7 @@ def enforce_ytd_rpf7_size_budget(
 
     resampling_enum = getattr(Image, "Resampling", Image)
     lanczos_filter = getattr(resampling_enum, "LANCZOS", Image.LANCZOS)
-    valid_sources = [Path(img_p) for img_p in source_image_paths if Path(img_p).is_file()]
+    valid_sources = [Path(img_path) for img_path in source_image_paths if Path(img_path).is_file()]
     if not valid_sources:
         return validate_rpf7_resource_file(target_ytd, max_bytes=max_bytes)
 
@@ -1538,9 +1538,9 @@ def enforce_ytd_rpf7_size_budget(
         for scale_step in range(1, 4):
             for img_path_item in cur_inputs:
                 with Image.open(img_path_item) as pil_img:
-                    new_w = max(256, pil_img.width // 2)
-                    new_h = max(256, pil_img.height // 2)
-                    resized_img = pil_img.resize((new_w, new_h), lanczos_filter)
+                    new_width = max(256, pil_img.width // 2)
+                    new_height = max(256, pil_img.height // 2)
+                    resized_img = pil_img.resize((new_width, new_height), lanczos_filter)
                     resized_img.save(img_path_item, format="PNG")
             print(
                 f"[RPF7 Budget] '{target_ytd.name}' was {cur_bytes / (1024.0 * 1024.0):.2f} MiB "
@@ -1548,7 +1548,7 @@ def enforce_ytd_rpf7_size_budget(
                 flush=True,
             )
             subprocess.run(
-                [str(rage_cli), "textures", "build", "--mips", "1", "-o", str(target_ytd), *[str(item_p) for item_p in cur_inputs]],
+                [str(rage_cli), "textures", "build", "--mips", "1", "-o", str(target_ytd), *[str(input_png_path) for input_png_path in cur_inputs]],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,

@@ -468,7 +468,7 @@ if blendshape_resolution.get("saved_cfg_path"):
 applied_scene_summary = blendshape_helper.apply_blendshapes_to_blender_scene(
     bpy,
     resolved_mesh_weights,
-    lr_symmetry_meshes=(),
+    left_right_symmetry_meshes=(),
     reset_unlisted=True,
 )
 body_active_count = applied_scene_summary.get("Body", (0, 0))[1]
@@ -734,7 +734,7 @@ def smoothstep_unit(scalar_val: float) -> float:
 def compute_skirt_vertex_weights(
     source_obj,
     orig_vert_idx: int,
-    ydd_co,
+    ydd_coord,
     vgroup_names_by_idx: dict,
     vgroup_target_names: dict,
 ) -> dict:
@@ -751,9 +751,9 @@ def compute_skirt_vertex_weights(
             target_bone = vgroup_target_names[grp_elem.group]
             if "skirt" in raw_name.lower():
                 if target_bone.startswith("PB_SC_Skirt"):
-                    pb_w = grp_elem.weight * 0.75
+                    physbone_weight = grp_elem.weight * 0.75
                     remapped_weights[target_bone] = (
-                        remapped_weights.get(target_bone, 0.0) + pb_w
+                        remapped_weights.get(target_bone, 0.0) + physbone_weight
                     )
                     skirt_weight += grp_elem.weight * 0.25
                 else:
@@ -764,9 +764,9 @@ def compute_skirt_vertex_weights(
                 )
 
     if skirt_weight > 0.0:
-        vertical_ramp = smoothstep_unit((0.10 - ydd_co.z) / 0.08)
-        back_ramp = smoothstep_unit((ydd_co.y + 0.02) / 0.06)
-        left_right_mix = smoothstep_unit((ydd_co.x + 0.035) / 0.070)
+        vertical_ramp = smoothstep_unit((0.10 - ydd_coord.z) / 0.08)
+        back_ramp = smoothstep_unit((ydd_coord.y + 0.02) / 0.06)
+        left_right_mix = smoothstep_unit((ydd_coord.x + 0.035) / 0.070)
 
         thigh_cap = vertical_ramp * 0.28 * back_ramp
         thigh_weight = skirt_weight * thigh_cap
@@ -805,7 +805,7 @@ def get_target_bone(source_bone_name: str, mesh_name: str = None) -> str:
     pb_bone = physbone_helper.resolve_shinano_casual_gtav_bone(
         source_bone_name,
         mesh_name,
-        bone_mapping_ci=franklin_pb_resolution.get("bone_mapping_ci"),
+        bone_mapping_lower=franklin_pb_resolution.get("bone_mapping_ci"),
     )
     if pb_bone is not None:
         return pb_bone
@@ -825,7 +825,7 @@ def get_target_bone(source_bone_name: str, mesh_name: str = None) -> str:
     if lower_name.startswith("belta"):
         return "SKEL_Spine2"
     if lower_name.startswith("beltb"):
-        digits_str = "".join(ch_item for ch_item in lower_name if ch_item.isdigit())
+        digits_str = "".join(char_item for char_item in lower_name if char_item.isdigit())
         chain_idx = int(digits_str) if digits_str else 1
         if chain_idx <= 3:
             return "SKEL_Spine2"
@@ -881,10 +881,10 @@ for mesh_name in include_mesh_names:
     new_mesh = bpy.data.meshes.new_from_object(eval_obj)
 
     # Triangulate mesh and strip alpha eye-overlay faces on Body while preserving orig_vert_idx
-    bm_data = bmesh.new()
-    bm_data.from_mesh(new_mesh)
-    orig_vert_layer = bm_data.verts.layers.int.new("orig_vert_idx")
-    for orig_vert_counter, vert_elem in enumerate(bm_data.verts):
+    bmesh_data = bmesh.new()
+    bmesh_data.from_mesh(new_mesh)
+    orig_vert_layer = bmesh_data.verts.layers.int.new("orig_vert_idx")
+    for orig_vert_counter, vert_elem in enumerate(bmesh_data.verts):
         vert_elem[orig_vert_layer] = orig_vert_counter
 
     if mesh_name == "Body":
@@ -893,27 +893,27 @@ for mesh_name in include_mesh_names:
             for mat_idx, mat_item in enumerate(src_obj.data.materials)
             if mat_item is not None and "alpha" in mat_item.name.lower()
         ]
-        orig_loop_layer = bm_data.loops.layers.int.new("orig_loop_idx")
+        orig_loop_layer = bmesh_data.loops.layers.int.new("orig_loop_idx")
         loop_counter = 0
-        for face_elem in bm_data.faces:
+        for face_elem in bmesh_data.faces:
             for loop_item in face_elem.loops:
                 loop_item[orig_loop_layer] = loop_counter
                 loop_counter += 1
         if alpha_indices:
-            del_faces = [face_elem for face_elem in bm_data.faces if face_elem.material_index in alpha_indices]
-            bmesh.ops.delete(bm_data, geom=del_faces, context="FACES")
-            del_verts = [vert_item for vert_item in bm_data.verts if not vert_item.link_faces]
-            bmesh.ops.delete(bm_data, geom=del_verts, context="VERTS")
-        bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
+            del_faces = [face_elem for face_elem in bmesh_data.faces if face_elem.material_index in alpha_indices]
+            bmesh.ops.delete(bmesh_data, geom=del_faces, context="FACES")
+            del_verts = [vert_item for vert_item in bmesh_data.verts if not vert_item.link_faces]
+            bmesh.ops.delete(bmesh_data, geom=del_verts, context="VERTS")
+        bmesh.ops.triangulate(bmesh_data, faces=bmesh_data.faces)
         kept_loop_indices = []
-        for face_elem in bm_data.faces:
+        for face_elem in bmesh_data.faces:
             face_elem.smooth = True
             for loop_item in face_elem.loops:
                 kept_loop_indices.append(loop_item[orig_loop_layer])
-        bm_data.verts.ensure_lookup_table()
-        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bm_data.verts]
-        bm_data.to_mesh(new_mesh)
-        bm_data.free()
+        bmesh_data.verts.ensure_lookup_table()
+        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bmesh_data.verts]
+        bmesh_data.to_mesh(new_mesh)
+        bmesh_data.free()
         new_mesh.update()
         print(
             project_i18n.translate(
@@ -921,13 +921,13 @@ for mesh_name in include_mesh_names:
             )
         )
     else:
-        bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
-        for face_elem in bm_data.faces:
+        bmesh.ops.triangulate(bmesh_data, faces=bmesh_data.faces)
+        for face_elem in bmesh_data.faces:
             face_elem.smooth = True
-        bm_data.verts.ensure_lookup_table()
-        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bm_data.verts]
-        bm_data.to_mesh(new_mesh)
-        bm_data.free()
+        bmesh_data.verts.ensure_lookup_table()
+        kept_orig_vert_indices = [vert_elem[orig_vert_layer] for vert_elem in bmesh_data.verts]
+        bmesh_data.to_mesh(new_mesh)
+        bmesh_data.free()
         new_mesh.update()
 
     # Transform evaluated mesh vertices into GTA V world space
@@ -1042,7 +1042,7 @@ print(project_i18n.translate("franklin.arm_bones_relocated", count=relocated_arm
 
 # Inject articulated PhysBone chains (ears, tail, BeltA/B, ribbon, hair, breasts, butt, skirt)
 bpy.context.view_layer.update()
-shinano_bones_ci = {
+shinano_bones_lower = {
     pose_item.name.lower(): pose_item for pose_item in shinano_armature.pose.bones
 }
 franklin_ped_world_mats = {
@@ -1058,7 +1058,7 @@ def _map_franklin_world_mat(src_world_mat):
     return mathutils.Matrix.Translation(target_loc) @ src_world_mat.to_quaternion().to_matrix().to_4x4()
 
 def _resolve_franklin_pb_world_mat(src_bone_name):
-    pose_item = shinano_bones_ci.get(src_bone_name.strip().lower())
+    pose_item = shinano_bones_lower.get(src_bone_name.strip().lower())
     if pose_item is None:
         return None
     return _map_franklin_world_mat(shinano_armature.matrix_world @ pose_item.matrix)
@@ -1068,14 +1068,14 @@ custom_physbones, physbone_chain_records = physbone_helper.build_dynamic_physbon
     chain_specs=franklin_pb_resolution["chain_specs"],
     parent_map=franklin_pb_resolution["parent_map"],
     chain_cfgs=franklin_pb_resolution["chains"],
-    source_world_mat_fn=_resolve_franklin_pb_world_mat,
+    source_world_mat_func=_resolve_franklin_pb_world_mat,
     ped_world_matrices=franklin_ped_world_mats,
 )
 if custom_physbones:
     injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
         franklin_armature,
         custom_physbones,
-        bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+        bone_tag_func=physbone_helper.compute_gtav_bone_tag,
     )
     target_bones.update(pb_item["name"] for pb_item in custom_physbones)
     print(f"[PhysBones] Injected {injected_pb_count} Shinano Casual bones into Franklin armature ({len(physbone_chain_records)} chains)", flush=True)
@@ -1095,7 +1095,7 @@ if blink_rig_data.get("enabled"):
         hand_skeleton_helper.inject_custom_bones_into_blender_armature(
             franklin_armature,
             custom_blink_bones,
-            bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            bone_tag_func=physbone_helper.compute_gtav_bone_tag,
         )
         target_bones.update(item["name"] for item in custom_blink_bones)
     bpy.context.view_layer.update()
@@ -1185,7 +1185,7 @@ for mat_name in ["Shinano_face", "Shinano_body", "Shinano_costume"]:
         specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
+        micromovement_global_params=(0.0, 0.0, 0.0, 0.0),
     )
 shader_materials["Shinano_hair"] = ped_damage_helper.create_ped_hair_cutout_material(
     create_shader,

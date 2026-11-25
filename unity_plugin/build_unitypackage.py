@@ -255,11 +255,11 @@ def create_unitypackage(
     )
     pkg_out.parent.mkdir(parents=True, exist_ok=True)
 
-    meta_sources = tuple(p_dir for p_dir in existing_meta_dirs if p_dir.is_dir())
+    meta_sources = tuple(plugin_dir for plugin_dir in existing_meta_dirs if plugin_dir.is_dir())
     entries: List[Tuple[str, bool, Optional[Path], str]] = []
 
     root_rel = "Assets/VRCAvatar2GTAV"
-    root_meta = _load_existing_meta(Path("VRCAvatar2GTAV"), [d_path.parent for d_path in meta_sources])
+    root_meta = _load_existing_meta(Path("VRCAvatar2GTAV"), [dir_path.parent for dir_path in meta_sources])
     if root_meta is None:
         root_meta = _build_default_meta_text(root_rel, True)
     entries.append((root_rel, True, None, root_meta))

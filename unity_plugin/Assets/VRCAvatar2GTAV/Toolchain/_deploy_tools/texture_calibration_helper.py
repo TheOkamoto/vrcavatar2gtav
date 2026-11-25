@@ -307,10 +307,10 @@ def calibrate_shinano_default_hair(
         )
         mesh_mask_weight = (numpy_lib.array(mesh_mask_img, dtype=numpy_lib.float32) / 255.0) * 0.25
         cyan_tint = numpy_lib.array([65.0, 195.0, 255.0], dtype=numpy_lib.float32)
-        for ch_idx in range(3):
-            diffuse_array[:, :, ch_idx] = (
-                diffuse_array[:, :, ch_idx] * (1.0 - mesh_mask_weight)
-                + cyan_tint[ch_idx] * mesh_mask_weight
+        for channel_idx in range(3):
+            diffuse_array[:, :, channel_idx] = (
+                diffuse_array[:, :, channel_idx] * (1.0 - mesh_mask_weight)
+                + cyan_tint[channel_idx] * mesh_mask_weight
             )
 
     lim_mask_path = _find_relative_companion(root_candidates, "Mask/Shinano_hair_lim_mask.png")
@@ -431,8 +431,8 @@ def calibrate_miltina_default_hair(
             .convert("RGBA")
             .resize((cell_dim, cell_dim), Image.Resampling.LANCZOS)
         )
-        alpha_mask_r = numpy_lib.array(alpha_mask_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
-        hair_array[:, :, 3] = numpy_lib.clip(hair_array[:, :, 3] * alpha_mask_r, 0.0, 255.0)
+        alpha_mask_red = numpy_lib.array(alpha_mask_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
+        hair_array[:, :, 3] = numpy_lib.clip(hair_array[:, :, 3] * alpha_mask_red, 0.0, 255.0)
 
     if matcap_mask_path is not None:
         matcap_mask = (
@@ -539,9 +539,9 @@ def composite_miltina_eyes_with_fallback(
         )
         face_rgb = numpy_lib.array(working_face, dtype=numpy_lib.float32)
         iris_boost = numpy_lib.where(iris_region_mask, light_luma * 0.28, 0.0)
-        for ch_idx, tint_scale in enumerate((0.80, 0.92, 1.15)):
-            face_rgb[:, :, ch_idx] = numpy_lib.clip(
-                face_rgb[:, :, ch_idx] + iris_boost * 255.0 * tint_scale,
+        for channel_idx, tint_scale in enumerate((0.80, 0.92, 1.15)):
+            face_rgb[:, :, channel_idx] = numpy_lib.clip(
+                face_rgb[:, :, channel_idx] + iris_boost * 255.0 * tint_scale,
                 0.0,
                 255.0,
             )

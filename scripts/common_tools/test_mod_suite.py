@@ -28,6 +28,7 @@ try:
     import vrc2gtav_paths as project_paths
     from test_suite_core_layer import (
         _PRUNED_WALK_DIRS,
+        _has_invalid_short_identifier_parts,
         _iter_project_python_files,
         extract_placeholder_fields,
         print_status_result,
@@ -58,6 +59,7 @@ except ImportError:
     from common_tools import vrc2gtav_paths as project_paths
     from common_tools.test_suite_core_layer import (
         _PRUNED_WALK_DIRS,
+        _has_invalid_short_identifier_parts,
         _iter_project_python_files,
         extract_placeholder_fields,
         print_status_result,
@@ -231,7 +233,7 @@ def test_ma_shape_changer_and_manual_shrink() -> bool:
             ),
         ),
     )
-    dress_a = SimpleNamespace(
+    dress_first = SimpleNamespace(
         name="DressTop",
         type="MESH",
         data=SimpleNamespace(
@@ -239,7 +241,7 @@ def test_ma_shape_changer_and_manual_shrink() -> bool:
             shape_keys=SimpleNamespace(key_blocks=_make_kblocks({"Basis": zero_pts[:1], "Chest_Fit": (0.0, zero_pts[:1])})),
         ),
     )
-    dress_b = SimpleNamespace(
+    dress_second = SimpleNamespace(
         name="DressTop.001",
         type="MESH",
         data=SimpleNamespace(
@@ -247,14 +249,14 @@ def test_ma_shape_changer_and_manual_shrink() -> bool:
             shape_keys=SimpleNamespace(key_blocks=_make_kblocks({"Basis": zero_pts[:1], "Chest_Fit": (0.0, zero_pts[:1])})),
         ),
     )
-    mock_bpy = SimpleNamespace(data=SimpleNamespace(objects=[body_obj, dress_a, dress_b]))
+    mock_bpy = SimpleNamespace(data=SimpleNamespace(objects=[body_obj, dress_first, dress_second]))
     sync_summary = blendshape_helper.apply_ma_shape_changers_and_syncs(mock_bpy, plan_res)
     del_rules = blendshape_helper.collect_shape_deleted_vertex_rules(body_obj, plan_res)
     blender_rules_ok = (
         abs(body_obj.data.shape_keys.key_blocks["Toe_highheels"].value - 1.0) < 1e-6
         and abs(body_obj.data.shape_keys.key_blocks["Shrink_Foot"].value - 0.03) < 1e-6
-        and abs(dress_a.data.shape_keys.key_blocks["Chest_Fit"].value - 0.45) < 1e-6
-        and abs(dress_b.data.shape_keys.key_blocks["Chest_Fit"].value - 0.45) < 1e-6
+        and abs(dress_first.data.shape_keys.key_blocks["Chest_Fit"].value - 0.45) < 1e-6
+        and abs(dress_second.data.shape_keys.key_blocks["Chest_Fit"].value - 0.45) < 1e-6
         and sync_summary["synced_blendshapes"] == 2
         and del_rules["any_verts"] == {1}
         and del_rules["all_verts"] == {2, 3}
@@ -286,10 +288,21 @@ def test_ma_shape_changer_and_manual_shrink() -> bool:
         )
 
     suite_ok = yaml_parse_ok and blender_rules_ok and noctis_ok
+    segment_guard_ok = (
+        not _has_invalid_short_identifier_parts("axis_x")
+        and not _has_invalid_short_identifier_parts("eixo_x")
+        and not _has_invalid_short_identifier_parts("world_z_offset")
+        and not _has_invalid_short_identifier_parts("u_coord")
+        and not _has_invalid_short_identifier_parts("ma_plan_id")
+        and _has_invalid_short_identifier_parts("ch_k")
+        and _has_invalid_short_identifier_parts("vg_nm")
+        and _has_invalid_short_identifier_parts("w_val")
+        and _has_invalid_short_identifier_parts("act_m")
+    )
     return print_status_result(
         "MA ShapeChanger Delete/Set, BlendshapeSync RemapCurve & manual Shrink_* culling",
-        suite_ok,
-        f"yaml={yaml_parse_ok} rules={blender_rules_ok} noctis={noctis_ok}",
+        suite_ok and segment_guard_ok,
+        f"yaml={yaml_parse_ok} rules={blender_rules_ok} noctis={noctis_ok} seg_guard={segment_guard_ok}",
     )
 
 

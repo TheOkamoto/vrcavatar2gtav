@@ -736,7 +736,7 @@ def test_unity_scene_and_fallbacks() -> bool:
             bone_mapping=packed_budget["bone_mapping"],
         )
         reloaded_pb_cfg = physbone_helper.load_physbone_config(saved_pb_cfg)
-        built_specs, built_parents, built_bones, _built_map_ci = (
+        built_specs, built_parents, built_bones, _built_map_lower = (
             physbone_helper.build_chain_specs_from_config(reloaded_pb_cfg)
         )
         resolved_pb_cfg = physbone_helper.resolve_character_physbones(
@@ -929,15 +929,15 @@ def test_unity_scene_and_fallbacks() -> bool:
             and michael_std_resolved.get("priority_report", {}).get("within_budget") is True
         )
 
-        def _make_spoke(stem_label: str, parent_nm: str, seg_cnt: int = 3) -> Dict[str, Any]:
-            bone_seq = [f"{stem_label}_{seg_i}" for seg_i in range(seg_cnt)]
+        def _make_spoke(stem_label: str, parent_name: str, seg_cnt: int = 3) -> Dict[str, Any]:
+            bone_seq = [f"{stem_label}_{seg_idx}" for seg_idx in range(seg_cnt)]
             return {
                 "chain_key": stem_label.lower(),
                 "root_bone": bone_seq[0],
                 "spoke_bones": bone_seq,
                 "all_descendants": list(bone_seq),
-                "parent_bone": parent_nm,
-                "parent_bone_tag": physbone_helper.PARENT_BONE_TAGS[parent_nm],
+                "parent_bone": parent_name,
+                "parent_bone_tag": physbone_helper.PARENT_BONE_TAGS[parent_name],
                 "pull": 0.20,
                 "spring": 0.50,
                 "stiffness": 0.25,
@@ -1054,7 +1054,7 @@ def test_unity_scene_and_fallbacks() -> bool:
             and heavy_bmap.get("keychain_cat_0") == "SKEL_Pelvis"
         )
         packed_skirt_breast = physbone_helper.pack_physbone_chains_to_gtav_budget(
-            heavy_custom_spokes[:9] + [_make_spoke("Breast_1.L", "SKEL_Spine2", 2), _make_spoke("Breast_1.R", "SKEL_Spine2", 2)] + [_make_spoke(f"Skirt_{sk_i}", "SKEL_Pelvis", 5) for sk_i in range(18)] + [_make_spoke("Aho", "SKEL_Head", 3)],
+            heavy_custom_spokes[:9] + [_make_spoke("Breast_1.L", "SKEL_Spine2", 2), _make_spoke("Breast_1.R", "SKEL_Spine2", 2)] + [_make_spoke(f"Skirt_{skirt_idx}", "SKEL_Pelvis", 5) for skirt_idx in range(18)] + [_make_spoke("Aho", "SKEL_Head", 3)],
             gtav_prefix="PB_SkB",
             max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
         )
@@ -1115,43 +1115,43 @@ def test_unity_scene_and_fallbacks() -> bool:
             conn_pairs: List[Tuple[int, int]] = []
             bone_id_map: Dict[str, int] = {}
 
-            for bone_nm in all_bone_names:
+            for bone_name in all_bone_names:
                 bone_uid = _next_id()
-                bone_id_map[bone_nm] = bone_uid
-                obj_nodes_meta.append(("Model", [bone_uid, f"{bone_nm}\x00\x01Model", "LimbNode"], []))
+                bone_id_map[bone_name] = bone_uid
+                obj_nodes_meta.append(("Model", [bone_uid, f"{bone_name}\x00\x01Model", "LimbNode"], []))
 
-            for mesh_nm, weighted_names in mesh_to_bones.items():
+            for mesh_name, weighted_names in mesh_to_bones.items():
                 mesh_uid = _next_id()
                 geom_uid = _next_id()
                 skin_uid = _next_id()
-                obj_nodes_meta.append(("Model", [mesh_uid, f"{mesh_nm}\x00\x01Model", "Mesh"], []))
-                obj_nodes_meta.append(("Geometry", [geom_uid, f"{mesh_nm}\x00\x01Geometry", "Mesh"], []))
-                obj_nodes_meta.append(("Deformer", [skin_uid, f"{mesh_nm}_Skin\x00\x01Deformer", "Skin"], []))
+                obj_nodes_meta.append(("Model", [mesh_uid, f"{mesh_name}\x00\x01Model", "Mesh"], []))
+                obj_nodes_meta.append(("Geometry", [geom_uid, f"{mesh_name}\x00\x01Geometry", "Mesh"], []))
+                obj_nodes_meta.append(("Deformer", [skin_uid, f"{mesh_name}_Skin\x00\x01Deformer", "Skin"], []))
                 conn_pairs.append((geom_uid, mesh_uid))
                 conn_pairs.append((skin_uid, geom_uid))
-                for w_bone_nm in weighted_names:
-                    cl_uid = _next_id()
+                for weighted_bone_name in weighted_names:
+                    cluster_uid = _next_id()
                     obj_nodes_meta.append(
                         (
                             "Deformer",
-                            [cl_uid, f"Cluster_{w_bone_nm}\x00\x01Deformer", "Cluster"],
+                            [cluster_uid, f"Cluster_{weighted_bone_name}\x00\x01Deformer", "Cluster"],
                             [("Weights", [[1.0]])],
                         )
                     )
-                    conn_pairs.append((cl_uid, skin_uid))
-                    conn_pairs.append((bone_id_map[w_bone_nm], cl_uid))
+                    conn_pairs.append((cluster_uid, skin_uid))
+                    conn_pairs.append((bone_id_map[weighted_bone_name], cluster_uid))
 
             obj_prop_cursor = cursor_pos + 13 + len(b"Objects")
             compiled_obj_children: List[bytes] = []
-            for o_name, o_props, o_kids in obj_nodes_meta:
-                prop_sz = sum(len(_pack_fbx_prop(prop_val)) for prop_val in o_props)
-                kid_cursor = obj_prop_cursor + 13 + len(o_name.encode("utf-8")) + prop_sz
+            for obj_name, obj_props, child_obj_nodes in obj_nodes_meta:
+                prop_size = sum(len(_pack_fbx_prop(prop_val)) for prop_val in obj_props)
+                kid_cursor = obj_prop_cursor + 13 + len(obj_name.encode("utf-8")) + prop_size
                 compiled_kids: List[bytes] = []
-                for k_name, k_props in o_kids:
-                    k_bytes = _build_fbx_node(k_name, k_props, [], kid_cursor)
-                    compiled_kids.append(k_bytes)
-                    kid_cursor += len(k_bytes)
-                node_bytes = _build_fbx_node(o_name, o_props, compiled_kids, obj_prop_cursor)
+                for key_name, key_props in child_obj_nodes:
+                    key_bytes = _build_fbx_node(key_name, key_props, [], kid_cursor)
+                    compiled_kids.append(key_bytes)
+                    kid_cursor += len(key_bytes)
+                node_bytes = _build_fbx_node(obj_name, obj_props, compiled_kids, obj_prop_cursor)
                 compiled_obj_children.append(node_bytes)
                 obj_prop_cursor += len(node_bytes)
             objects_block = _build_fbx_node("Objects", [], compiled_obj_children, cursor_pos)
@@ -1160,9 +1160,9 @@ def test_unity_scene_and_fallbacks() -> bool:
             conn_cursor = cursor_pos + 13 + len(b"Connections")
             compiled_conns: List[bytes] = []
             for src_uid, dst_uid in conn_pairs:
-                c_bytes = _build_fbx_node("C", ["OO", src_uid, dst_uid], [], conn_cursor)
-                compiled_conns.append(c_bytes)
-                conn_cursor += len(c_bytes)
+                chunk_bytes = _build_fbx_node("C", ["OO", src_uid, dst_uid], [], conn_cursor)
+                compiled_conns.append(chunk_bytes)
+                conn_cursor += len(chunk_bytes)
             conns_block = _build_fbx_node("Connections", [], compiled_conns, cursor_pos)
             file_bytes = (
                 b"Kaydara FBX Binary  \x00\x1a\x00"
@@ -1175,10 +1175,10 @@ def test_unity_scene_and_fallbacks() -> bool:
 
         orphan_root = pb_root / "orphan_test"
         orphan_root.mkdir(parents=True, exist_ok=True)
-        base_fbx_p = orphan_root / "AvatarWithOldDress.fbx"
-        new_dress_fbx_p = orphan_root / "CustomNewDress.fbx"
+        base_fbx_path = orphan_root / "AvatarWithOldDress.fbx"
+        new_dress_fbx_path = orphan_root / "CustomNewDress.fbx"
         _write_minimal_test_fbx(
-            base_fbx_p,
+            base_fbx_path,
             {
                 "Body": ["Hips", "Ear_L", "Ear_L_Tip"],
                 "OldDress_Mesh": ["OldSkirt_0", "OldSkirt_1"],
@@ -1186,7 +1186,7 @@ def test_unity_scene_and_fallbacks() -> bool:
             ["Hips", "Ear_L", "Ear_L_Tip", "OldSkirt_0", "OldSkirt_1"],
         )
         _write_minimal_test_fbx(
-            new_dress_fbx_p,
+            new_dress_fbx_path,
             {"NewDress_Mesh": ["NewSkirt_0", "NewSkirt_1"]},
             ["NewSkirt_0", "NewSkirt_1"],
         )
@@ -1201,8 +1201,8 @@ def test_unity_scene_and_fallbacks() -> bool:
             encoding="utf-8",
         )
 
-        orphan_scene_p = orphan_root / "OrphanDressTest.unity"
-        orphan_scene_p.write_text(
+        orphan_scene_path = orphan_root / "OrphanDressTest.unity"
+        orphan_scene_path.write_text(
             "\n".join(
                 [
                     "%YAML 1.1",
@@ -1353,10 +1353,10 @@ def test_unity_scene_and_fallbacks() -> bool:
             encoding="utf-8",
         )
         orphan_extract = physbone_helper.extract_unity_scene_physbones(
-            orphan_scene_p,
+            orphan_scene_path,
             avatar_name="OrphanTestAvatar",
             unity_assets_root=orphan_root,
-            fbx_paths=[base_fbx_p, new_dress_fbx_p],
+            fbx_paths=[base_fbx_path, new_dress_fbx_path],
         )
         orphan_kept_roots = {rec["root_bone"] for rec in orphan_extract.get("chains", [])}
         orphan_reasons = {
@@ -1378,9 +1378,9 @@ def test_unity_scene_and_fallbacks() -> bool:
                     "parent_bone": "SKEL_Pelvis",
                 },
             },
-            active_weighted_bones_ci={"ear_l", "ear_l_tip", "newskirt_0", "newskirt_1"},
+            active_weighted_bones_lower={"ear_l", "ear_l_tip", "newskirt_0", "newskirt_1"},
             bone_mapping={"oldskirt_0": "PB_OldSkirt_0", "ear_l": "PB_Ear_L_0"},
-            disabled_mesh_bones_ci={"oldskirt_0", "oldskirt_1"},
+            disabled_mesh_bones_lower={"oldskirt_0", "oldskirt_1"},
         )
         orphan_cleanup_ok = (
             orphan_kept_roots == {"Ear_L", "NewSkirt_0"}
@@ -1404,7 +1404,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         import types as types_mod
         import eye_blink_helper as blink_mod
 
-        def _make_pt(pos_x: float, pos_y: float, pos_z: float):
+        def _make_point(pos_x: float, pos_y: float, pos_z: float):
             return types_mod.SimpleNamespace(
                 co=types_mod.SimpleNamespace(x=pos_x, y=pos_y, z=pos_z)
             )
@@ -1422,17 +1422,17 @@ def test_unity_scene_and_fallbacks() -> bool:
                         types_mod.SimpleNamespace(
                             name="Basis",
                             data=[
-                                _make_pt(0.0, 0.0, 1.50),
-                                _make_pt(0.0, 0.0, 1.48),
-                                _make_pt(0.0, 0.0, 1.60),
+                                _make_point(0.0, 0.0, 1.50),
+                                _make_point(0.0, 0.0, 1.48),
+                                _make_point(0.0, 0.0, 1.60),
                             ],
                         ),
                         types_mod.SimpleNamespace(
                             name="vrc.v_aa",
                             data=[
-                                _make_pt(0.0, 0.0, 1.495),   # -5mm drop
-                                _make_pt(0.0, 0.0, 1.470),   # -10mm full jaw drop
-                                _make_pt(0.0, 0.0, 1.601),   # non-mouth upper vertex
+                                _make_point(0.0, 0.0, 1.495),   # -5mm drop
+                                _make_point(0.0, 0.0, 1.470),   # -10mm full jaw drop
+                                _make_point(0.0, 0.0, 1.601),   # non-mouth upper vertex
                             ],
                         ),
                     ]
@@ -1442,10 +1442,10 @@ def test_unity_scene_and_fallbacks() -> bool:
         jaw_shut = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.0)
         jaw_def = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=None)
         jaw_wide = blink_mod.extract_facial_jaw_weights(mock_face, mouth_open_strength=0.85)
-        cs_editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
-        cs_win_file = cs_editor_dir / "Vrc2GtavExporterWindow.cs"
-        cs_cmd_file = cs_editor_dir / "Vrc2GtavCommandBuilder.cs"
-        cs_ini_file = cs_editor_dir / "Vrc2GtavIniAndWsl.cs"
+        csharp_editor_dir = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor"
+        csharp_window_file = csharp_editor_dir / "Vrc2GtavExporterWindow.cs"
+        csharp_cmd_file = csharp_editor_dir / "Vrc2GtavCommandBuilder.cs"
+        csharp_ini_file = csharp_editor_dir / "Vrc2GtavIniAndWsl.cs"
         mouth_ok = (
             abs(blink_mod.resolve_mouth_open_strength(None) - 0.70) < 1e-6
             and abs(blink_mod.resolve_mouth_open_strength(0.0, {"mouth_open_strength": "0.60"}) - 0.0) < 1e-6
@@ -1456,12 +1456,12 @@ def test_unity_scene_and_fallbacks() -> bool:
             and 2 not in jaw_def
             and abs(jaw_wide.get(1, 0.0) - 0.85) < 1e-6
             and jaw_def.get(0, 0.0) < jaw_wide.get(0, 0.0)
-            and cs_win_file.is_file()
-            and 'GUILayout.Button("0.70"' in cs_win_file.read_text(encoding="utf-8")
-            and cs_cmd_file.is_file()
-            and '"MouthOpenStrength", 0.70f' in cs_cmd_file.read_text(encoding="utf-8")
-            and cs_ini_file.is_file()
-            and "MouthOpenStrength = 0.70f;" in cs_ini_file.read_text(encoding="utf-8")
+            and csharp_window_file.is_file()
+            and 'GUILayout.Button("0.70"' in csharp_window_file.read_text(encoding="utf-8")
+            and csharp_cmd_file.is_file()
+            and '"MouthOpenStrength", 0.70f' in csharp_cmd_file.read_text(encoding="utf-8")
+            and csharp_ini_file.is_file()
+            and "MouthOpenStrength = 0.70f;" in csharp_ini_file.read_text(encoding="utf-8")
         )
         suite_passed &= print_status_result(
             "Mouth opening slider & FACIAL_jaw weight scale (0.00..1.00, default=0.70)",
@@ -1499,10 +1499,10 @@ def test_unity_scene_and_fallbacks() -> bool:
                 default_face_mesh="Face",
                 override_face_anim=str(anim_ovr),
             )
-            cs_log_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavLogConsoleWidget.cs"
-            win_txt = cs_win_file.read_text(encoding="utf-8")
-            cmd_txt = cs_cmd_file.read_text(encoding="utf-8")
-            log_txt = cs_log_file.read_text(encoding="utf-8")
+            csharp_log_file = PROJECT_ROOT_DIR / "unity_plugin" / "Assets" / "VRCAvatar2GTAV" / "Editor" / "Vrc2GtavLogConsoleWidget.cs"
+            win_txt = csharp_window_file.read_text(encoding="utf-8")
+            cmd_txt = csharp_cmd_file.read_text(encoding="utf-8")
+            log_txt = csharp_log_file.read_text(encoding="utf-8")
             face_ovr_ok = (
                 "m_IsActive" not in parsed_ovr
                 and abs(parsed_ovr.get("mouth_smile", 0.0) - 0.65) < 1e-6
@@ -1554,44 +1554,40 @@ def test_unity_scene_and_fallbacks() -> bool:
             import npc_registry_helper as npc_mod2
             import vrc2gtav_paths as paths_mod2
 
-            rage_ws = Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "tools"
-            rage_ws.mkdir(parents=True, exist_ok=True)
-            exe_nm = "rage.exe" if os.name == "nt" else "rage"
-            fake_rage = rage_ws / exe_nm
+            rage_workspace = Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "tools"
+            rage_workspace.mkdir(parents=True, exist_ok=True)
+            exe_name = "rage.exe" if os.name == "nt" else "rage"
+            fake_rage = rage_workspace / exe_name
             fake_rage.write_bytes(b"FAKE_RAGE_BIN")
-            orig_get = paths_mod2.get_rage_cli
-            orig_root = paths_mod2.get_project_root
-            orig_stg = paths_mod2.get_staging_dir
-            orig_dl = arch_mod.download_and_install_rage
+            fake_cfg = Path(rage_tmp) / "vrc2gtav.cfg"
+            if paths_mod2.has_project_config_file():
+                fake_cfg.write_text(paths_mod2.find_project_config_file().read_text(encoding="utf-8"), encoding="utf-8")
+            orig_get, orig_root, orig_stg = paths_mod2.get_rage_cli, paths_mod2.get_project_root, paths_mod2.get_staging_dir
+            orig_cfg_func, orig_download = paths_mod2.find_project_config_file, arch_mod.download_and_install_rage
             try:
                 fake_proj = Path(rage_tmp) / "Assets" / "VRCAvatar2GTAV" / "Toolchain"
                 fake_proj.mkdir(parents=True, exist_ok=True)
-                paths_mod2.get_rage_cli = lambda: ""
-                paths_mod2.get_project_root = lambda: fake_proj
+                paths_mod2.get_rage_cli, paths_mod2.get_project_root = (lambda: ""), (lambda: fake_proj)
                 paths_mod2.get_staging_dir = lambda: Path(rage_tmp) / "VRCAvatar2GTAV_Work" / "staging"
-                resolved_ws_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
+                if fake_cfg.is_file():
+                    paths_mod2.find_project_config_file = lambda _cfg_path=None: fake_cfg
+                resolved_workspace_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
                 fake_rage.unlink()
-
-                def _mock_dl(_proj):
-                    fake_rage.write_bytes(b"DL_RAGE")
-                    return fake_rage
-
-                arch_mod.download_and_install_rage = _mock_dl
-                resolved_dl_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
+                arch_mod.download_and_install_rage = lambda _proj: (fake_rage.write_bytes(b"DL_RAGE") and None) or fake_rage
+                resolved_download_cmd = npc_mod2.build_safe_rage_cmd("search", "x64v.rpf", "*player*")
                 rage_guard_ok = (
-                    resolved_ws_cmd[0] == str(fake_rage)
-                    and resolved_dl_cmd[0] == str(fake_rage)
+                    resolved_workspace_cmd[0] == str(fake_rage)
+                    and resolved_download_cmd[0] == str(fake_rage)
                     and fake_rage.read_bytes() == b"DL_RAGE"
                 )
             finally:
-                paths_mod2.get_rage_cli = orig_get
-                paths_mod2.get_project_root = orig_root
-                paths_mod2.get_staging_dir = orig_stg
-                arch_mod.download_and_install_rage = orig_dl
+                paths_mod2.get_rage_cli, paths_mod2.get_project_root, paths_mod2.get_staging_dir = orig_get, orig_root, orig_stg
+                paths_mod2.find_project_config_file, arch_mod.download_and_install_rage = orig_cfg_func, orig_download
+                paths_mod2.load_project_config(force_reload=True)
             suite_passed &= print_status_result(
                 "Empty rage= fallback & auto-download guard (prevents WinError 87)",
                 rage_guard_ok,
-                f"resolved={exe_nm}",
+                f"resolved={exe_name}",
             )
 
     return suite_passed

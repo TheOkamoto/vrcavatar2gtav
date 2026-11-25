@@ -93,10 +93,10 @@ def build_timestamped_log_path(
     project_root: Union[str, Path],
     avatar_name: str = "general",
     stage_name: str = "run",
-    now_dt: Optional[datetime] = None,
+    now_datetime: Optional[datetime] = None,
 ) -> Path:
     """Construct `<workspace_root>/logs/<YYYYMMDD_HHMMSS>_<avatar>_<stage>.log`."""
-    timestamp_obj = now_dt or datetime.now()
+    timestamp_obj = now_datetime or datetime.now()
     date_slug = timestamp_obj.strftime("%Y%m%d_%H%M%S")
     avatar_slug = sanitize_log_token(avatar_name, fallback="avatar")
     stage_slug = sanitize_log_token(stage_name, fallback="run")

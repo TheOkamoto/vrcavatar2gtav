@@ -264,42 +264,42 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
             return
         body = "\n".join(block_lines)
         if current_class == "1":
-            name_m = re.search(r"^\s*m_Name:\s*(.*)$", body, re.MULTILINE)
-            active_m = re.search(r"^\s*m_IsActive:\s*(\d+)", body, re.MULTILINE)
-            tag_m = re.search(r"^\s*m_TagString:\s*(.*)$", body, re.MULTILINE)
-            corr_m = re.search(r"m_CorrespondingSourceObject:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
-            pi_m = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", body)
+            name_match = re.search(r"^\s*m_Name:\s*(.*)$", body, re.MULTILINE)
+            active_match = re.search(r"^\s*m_IsActive:\s*(\d+)", body, re.MULTILINE)
+            tag_match = re.search(r"^\s*m_TagString:\s*(.*)$", body, re.MULTILINE)
+            correction_match = re.search(r"m_CorrespondingSourceObject:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
+            prefab_instance_match = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", body)
             game_objects[current_fid] = {
-                "name": name_m.group(1).strip() if name_m else "",
-                "is_active": (int(active_m.group(1)) != 0) if active_m else True,
-                "tag": tag_m.group(1).strip() if tag_m else "Untagged",
+                "name": name_match.group(1).strip() if name_match else "",
+                "is_active": (int(active_match.group(1)) != 0) if active_match else True,
+                "tag": tag_match.group(1).strip() if tag_match else "Untagged",
                 "stripped": is_stripped,
-                "corr_fid": corr_m.group(1) if corr_m else "0",
-                "corr_guid": (corr_m.group(2) or "").lower() if corr_m else "",
-                "prefab_instance": pi_m.group(1) if pi_m else "0",
+                "corr_fid": correction_match.group(1) if correction_match else "0",
+                "corr_guid": (correction_match.group(2) or "").lower() if correction_match else "",
+                "prefab_instance": prefab_instance_match.group(1) if prefab_instance_match else "0",
             }
         elif current_class == "4":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            father_m = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", body)
-            pos_m = re.search(r"m_LocalPosition:\s*(\{[^\}]*\})", body)
-            rot_m = re.search(r"m_LocalRotation:\s*(\{[^\}]*\})", body)
-            sca_m = re.search(r"m_LocalScale:\s*(\{[^\}]*\})", body)
-            corr_m = re.search(r"m_CorrespondingSourceObject:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            father_match = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", body)
+            pos_match = re.search(r"m_LocalPosition:\s*(\{[^\}]*\})", body)
+            rot_match = re.search(r"m_LocalRotation:\s*(\{[^\}]*\})", body)
+            scale_match = re.search(r"m_LocalScale:\s*(\{[^\}]*\})", body)
+            correction_match = re.search(r"m_CorrespondingSourceObject:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
             transforms[current_fid] = {
-                "go_fid": go_m.group(1) if go_m else "0",
-                "father_tr": father_m.group(1) if father_m else "0",
-                "pos": _parse_unity_vec3(pos_m.group(1), (0.0, 0.0, 0.0)) if pos_m else (0.0, 0.0, 0.0),
-                "rot": _parse_unity_quat(rot_m.group(1)) if rot_m else (0.0, 0.0, 0.0, 1.0),
-                "scale": _parse_unity_vec3(sca_m.group(1), (1.0, 1.0, 1.0)) if sca_m else (1.0, 1.0, 1.0),
+                "go_fid": game_object_match.group(1) if game_object_match else "0",
+                "father_tr": father_match.group(1) if father_match else "0",
+                "pos": _parse_unity_vec3(pos_match.group(1), (0.0, 0.0, 0.0)) if pos_match else (0.0, 0.0, 0.0),
+                "rot": _parse_unity_quat(rot_match.group(1)) if rot_match else (0.0, 0.0, 0.0, 1.0),
+                "scale": _parse_unity_vec3(scale_match.group(1), (1.0, 1.0, 1.0)) if scale_match else (1.0, 1.0, 1.0),
                 "stripped": is_stripped,
-                "corr_fid": corr_m.group(1) if corr_m else "0",
-                "corr_guid": (corr_m.group(2) or "").lower() if corr_m else "",
+                "corr_fid": correction_match.group(1) if correction_match else "0",
+                "corr_guid": (correction_match.group(2) or "").lower() if correction_match else "",
             }
         elif current_class in ("137", "23"):
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            enabled_m = re.search(r"^\s*m_Enabled:\s*(\d+)", body, re.MULTILINE)
-            mesh_m = re.search(r"m_Mesh:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
-            root_bone_m = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", body)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            enabled_match = re.search(r"^\s*m_Enabled:\s*(\d+)", body, re.MULTILINE)
+            mesh_match = re.search(r"m_Mesh:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
+            root_bone_match = re.search(r"m_RootBone:\s*\{fileID:\s*(-?\d+)", body)
             mat_section = re.search(
                 r"m_Materials:(.*?)(?=^\s{2}[a-zA-Z_][a-zA-Z0-9_]*:|\Z)",
                 body,
@@ -310,34 +310,34 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
                 if mat_section
                 else []
             )
-            bs_section = re.search(
+            blendshape_section = re.search(
                 r"m_BlendShapeWeights:(.*?)(?:^\s*[a-zA-Z0-9_]+:|\Z)",
                 body,
                 re.DOTALL | re.MULTILINE,
             )
-            bs_weights = (
-                [float(num_str) / 100.0 for num_str in re.findall(rf"-\s*({_FLOAT_PATTERN})", bs_section.group(1))]
-                if bs_section
+            nested_blendshape_weights = (
+                [float(num_str) / 100.0 for num_str in re.findall(rf"-\s*({_FLOAT_PATTERN})", blendshape_section.group(1))]
+                if blendshape_section
                 else []
             )
-            if go_m:
-                renderers[go_m.group(1)] = {
+            if game_object_match:
+                renderers[game_object_match.group(1)] = {
                     "component_fid": current_fid,
                     "class_id": current_class,
-                    "enabled": (int(enabled_m.group(1)) != 0) if enabled_m else True,
-                    "mesh_guid": (mesh_m.group(2) or "").lower() if mesh_m else "",
-                    "root_bone_tr": root_bone_m.group(1) if root_bone_m else "0",
+                    "enabled": (int(enabled_match.group(1)) != 0) if enabled_match else True,
+                    "mesh_guid": (mesh_match.group(2) or "").lower() if mesh_match else "",
+                    "root_bone_tr": root_bone_match.group(1) if root_bone_match else "0",
                     "mat_guids": [guid_str.lower() for guid_str in mat_guids],
-                    "blendshape_weights": bs_weights,
+                    "blendshape_weights": nested_blendshape_weights,
                 }
         elif current_class == "33":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            mesh_m = re.search(r"m_Mesh:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
-            if go_m and mesh_m and mesh_m.group(2):
-                mesh_filters[go_m.group(1)] = mesh_m.group(2).lower()
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            mesh_match = re.search(r"m_Mesh:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
+            if game_object_match and mesh_match and mesh_match.group(2):
+                mesh_filters[game_object_match.group(1)] = mesh_match.group(2).lower()
         elif current_class == "1001":
-            src_m = re.search(r"m_SourcePrefab:\s*\{fileID:\s*-?\d+,\s*guid:\s*([0-9a-f]{32})", body)
-            parent_m = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", body)
+            source_match = re.search(r"m_SourcePrefab:\s*\{fileID:\s*-?\d+,\s*guid:\s*([0-9a-f]{32})", body)
+            parent_match = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", body)
             mods: List[Dict[str, str]] = []
             for mod_match in re.finditer(
                 r"-\s*target:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?[^\}]*\}[ \t]*\r?\n"
@@ -361,46 +361,46 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
                     }
                 )
             prefab_instances[current_fid] = {
-                "source_guid": src_m.group(1).lower() if src_m else "",
-                "parent_tr": parent_m.group(1) if parent_m else "0",
+                "source_guid": source_match.group(1).lower() if source_match else "",
+                "parent_tr": parent_match.group(1) if parent_match else "0",
                 "mods": mods,
             }
         elif current_class == "114":
-            script_m = re.search(r"m_Script:\s*\{[^\}]*guid:\s*([0-9a-f]{32})", body)
-            script_guid = script_m.group(1).lower() if script_m else ""
+            script_match = re.search(r"m_Script:\s*\{[^\}]*guid:\s*([0-9a-f]{32})", body)
+            script_guid = script_match.group(1).lower() if script_match else ""
             if script_guid == MA_MERGE_ARMATURE_GUID:
-                go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-                ref_path_m = re.search(r"referencePath:\s*([^\n]*)", body)
-                pref_m = re.search(r"prefix:\s*([^\n]*)", body)
-                suff_m = re.search(r"suffix:\s*([^\n]*)", body)
-                enabled_m = re.search(r"^\s*m_Enabled:\s*(\d+)", body, re.MULTILINE)
+                game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+                ref_path_match = re.search(r"referencePath:\s*([^\n]*)", body)
+                prefab_match = re.search(r"prefix:\s*([^\n]*)", body)
+                suffix_match = re.search(r"suffix:\s*([^\n]*)", body)
+                enabled_match = re.search(r"^\s*m_Enabled:\s*(\d+)", body, re.MULTILINE)
                 ma_merge_armatures.append(
                     {
-                        "go_fid": go_m.group(1) if go_m else "0",
-                        "enabled": (int(enabled_m.group(1)) != 0) if enabled_m else True,
-                        "merge_target_path": ref_path_m.group(1).strip() if ref_path_m else "",
-                        "prefix": pref_m.group(1).strip() if pref_m else "",
-                        "suffix": suff_m.group(1).strip() if suff_m else "",
+                        "go_fid": game_object_match.group(1) if game_object_match else "0",
+                        "enabled": (int(enabled_match.group(1)) != 0) if enabled_match else True,
+                        "merge_target_path": ref_path_match.group(1).strip() if ref_path_match else "",
+                        "prefix": prefab_match.group(1).strip() if prefab_match else "",
+                        "suffix": suffix_match.group(1).strip() if suffix_match else "",
                     }
                 )
             elif script_guid == MA_BONE_PROXY_GUID:
-                go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-                bone_ref_m = re.search(r"boneReference:\s*(-?\d+)", body)
-                sub_path_m = re.search(r"subPath:\s*([^\n]*)", body)
-                att_mode_m = re.search(r"attachmentMode:\s*(-?\d+)", body)
+                game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+                bone_ref_match = re.search(r"boneReference:\s*(-?\d+)", body)
+                sub_path_match = re.search(r"subPath:\s*([^\n]*)", body)
+                attach_mode_match = re.search(r"attachmentMode:\s*(-?\d+)", body)
                 ma_bone_proxies.append(
                     {
-                        "go_fid": go_m.group(1) if go_m else "0",
-                        "bone_reference": int(bone_ref_m.group(1)) if bone_ref_m else -1,
-                        "sub_path": sub_path_m.group(1).strip() if sub_path_m else "",
-                        "attachment_mode": int(att_mode_m.group(1)) if att_mode_m else 1,
+                        "go_fid": game_object_match.group(1) if game_object_match else "0",
+                        "bone_reference": int(bone_ref_match.group(1)) if bone_ref_match else -1,
+                        "sub_path": sub_path_match.group(1).strip() if sub_path_match else "",
+                        "attachment_mode": int(attach_mode_match.group(1)) if attach_mode_match else 1,
                     }
                 )
             elif "ArmatureLink" in body or "propBone:" in body:
-                go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+                game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
                 vrcfury_links.append(
                     {
-                        "go_fid": go_m.group(1) if go_m else "0",
+                        "go_fid": game_object_match.group(1) if game_object_match else "0",
                     }
                 )
 
@@ -422,16 +422,16 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
                 block_lines.append(raw_line.rstrip("\r\n"))
     _flush_block()
 
-    go_to_tr = {
-        tr_info["go_fid"]: tr_fid
-        for tr_fid, tr_info in transforms.items()
-        if tr_info.get("go_fid")
+    game_object_to_transform = {
+        transform_info["go_fid"]: transform_file_id
+        for transform_file_id, transform_info in transforms.items()
+        if transform_info.get("go_fid")
     }
 
     return {
         "game_objects": game_objects,
         "transforms": transforms,
-        "go_to_tr": go_to_tr,
+        "go_to_tr": game_object_to_transform,
         "renderers": renderers,
         "mesh_filters": mesh_filters,
         "prefab_instances": prefab_instances,
@@ -441,43 +441,43 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
     }
 
 
-def _find_transform_for_go(parsed_yaml: Dict[str, Any], go_fid: str) -> Optional[str]:
+def _find_transform_for_game_object(parsed_yaml: Dict[str, Any], game_object_file_id: str) -> Optional[str]:
     """Return Transform fileID owning GameObject fileID."""
-    go_to_tr = parsed_yaml.get("go_to_tr")
-    if isinstance(go_to_tr, dict):
-        return go_to_tr.get(go_fid)
-    for tr_fid, tr_info in parsed_yaml["transforms"].items():
-        if tr_info["go_fid"] == go_fid:
-            return tr_fid
+    game_object_to_transform = parsed_yaml.get("go_to_tr")
+    if isinstance(game_object_to_transform, dict):
+        return game_object_to_transform.get(game_object_file_id)
+    for transform_file_id, transform_info in parsed_yaml["transforms"].items():
+        if transform_info["go_fid"] == game_object_file_id:
+            return transform_file_id
     return None
 
 
-def _is_go_hierarchy_active(parsed_yaml: Dict[str, Any], go_fid: str) -> Tuple[bool, bool]:
+def _is_game_object_hierarchy_active(parsed_yaml: Dict[str, Any], game_object_file_id: str) -> Tuple[bool, bool]:
     """Walk parent transforms upward to check (is_active_in_hierarchy, is_editor_only)."""
-    go_info = parsed_yaml["game_objects"].get(go_fid)
-    if go_info is None:
+    game_object_info = parsed_yaml["game_objects"].get(game_object_file_id)
+    if game_object_info is None:
         return True, False
-    is_editor_only = go_info.get("tag", "") == "EditorOnly"
-    if not go_info.get("is_active", True):
+    is_editor_only = game_object_info.get("tag", "") == "EditorOnly"
+    if not game_object_info.get("is_active", True):
         return False, is_editor_only
 
-    cur_tr = _find_transform_for_go(parsed_yaml, go_fid)
+    cur_transform = _find_transform_for_game_object(parsed_yaml, game_object_file_id)
     visited = set()
-    while cur_tr and cur_tr not in visited:
-        visited.add(cur_tr)
-        tr_info = parsed_yaml["transforms"].get(cur_tr)
-        if tr_info is None:
+    while cur_transform and cur_transform not in visited:
+        visited.add(cur_transform)
+        transform_info = parsed_yaml["transforms"].get(cur_transform)
+        if transform_info is None:
             break
-        cur_go = parsed_yaml["game_objects"].get(tr_info["go_fid"])
-        if cur_go is not None:
-            if cur_go.get("tag", "") == "EditorOnly":
+        cur_game_object = parsed_yaml["game_objects"].get(transform_info["go_fid"])
+        if cur_game_object is not None:
+            if cur_game_object.get("tag", "") == "EditorOnly":
                 is_editor_only = True
-            if not cur_go.get("is_active", True):
+            if not cur_game_object.get("is_active", True):
                 return False, is_editor_only
-        parent_tr = tr_info["father_tr"]
-        if parent_tr == "0":
+        parent_transform = transform_info["father_tr"]
+        if parent_transform == "0":
             break
-        cur_tr = parent_tr
+        cur_transform = parent_transform
     return True, is_editor_only
 
 
@@ -496,8 +496,8 @@ def _collect_variant_modifications(
     root_scale = (1.0, 1.0, 1.0)
     active_override_count_off = 0
 
-    for pi_info in prefab_instances.values():
-        src_guid = pi_info.get("source_guid", "")
+    for prefab_instance_info in prefab_instances.values():
+        src_guid = prefab_instance_info.get("source_guid", "")
         src_path = resolve_unity_guid(src_guid, prefab_path, unity_assets_root) if src_guid else None
         if src_path is not None and src_path.suffix.lower() == ".fbx":
             if src_path not in variant_fbxs:
@@ -506,11 +506,11 @@ def _collect_variant_modifications(
         per_target_mats: Dict[str, Dict[int, str]] = {}
         inactive_target_fids = {
             mod_item["target_fid"]
-            for mod_item in pi_info.get("mods", [])
+            for mod_item in prefab_instance_info.get("mods", [])
             if mod_item["property"] == "m_IsActive" and mod_item["value"] == "0"
         }
         root_target_fid: Optional[str] = None
-        for mod_item in pi_info.get("mods", []):
+        for mod_item in prefab_instance_info.get("mods", []):
             prop_name = mod_item["property"]
             target_fid = mod_item["target_fid"]
             if prop_name == "m_LocalPosition.x" and root_target_fid is None:
@@ -541,7 +541,7 @@ def _collect_variant_modifications(
                     root_scale = (root_scale[0], root_scale[1], float(mod_item["value"]))
 
         for slot_dict in per_target_mats.values():
-            ordered_slots = [slot_dict[slot_i] for slot_i in sorted(slot_dict)]
+            ordered_slots = [slot_dict[mat_slot_idx] for mat_slot_idx in sorted(slot_dict)]
             if ordered_slots and ordered_slots not in variant_slot_groups:
                 variant_slot_groups.append(ordered_slots)
 
@@ -563,33 +563,33 @@ def _extract_prefab_transform_hints(
     """Extract root transform, Head -> Hair_Root offset/scale, and Modular Avatar attachment hints."""
     transforms = parsed_yaml["transforms"]
     game_objects = parsed_yaml["game_objects"]
-    tr_by_lower_name: Dict[str, Tuple[str, Dict[str, Any]]] = {}
-    root_tr_info: Optional[Dict[str, Any]] = None
+    transform_by_lower_name: Dict[str, Tuple[str, Dict[str, Any]]] = {}
+    root_transform_info: Optional[Dict[str, Any]] = None
 
-    for tr_fid, tr_info in transforms.items():
-        go_info = game_objects.get(tr_info["go_fid"], {})
-        go_name = go_info.get("name", "")
-        if tr_info["father_tr"] == "0" and root_tr_info is None:
-            root_tr_info = tr_info
-        if go_name:
-            tr_by_lower_name[go_name.lower()] = (tr_fid, tr_info)
+    for transform_file_id, transform_info in transforms.items():
+        game_object_info = game_objects.get(transform_info["go_fid"], {})
+        game_object_name = game_object_info.get("name", "")
+        if transform_info["father_tr"] == "0" and root_transform_info is None:
+            root_transform_info = transform_info
+        if game_object_name:
+            transform_by_lower_name[game_object_name.lower()] = (transform_file_id, transform_info)
 
-    head_entry = tr_by_lower_name.get("head")
+    head_entry = transform_by_lower_name.get("head")
     hair_root_entry = None
     for candidate_name in ("hair root", "hair_root", "hairroot", "lazy_hair_root", "hair"):
-        if candidate_name in tr_by_lower_name:
-            candidate_fid, candidate_tr = tr_by_lower_name[candidate_name]
-            if head_entry is None or candidate_tr["father_tr"] == head_entry[0]:
-                hair_root_entry = (candidate_fid, candidate_tr)
+        if candidate_name in transform_by_lower_name:
+            candidate_fid, candidate_transform = transform_by_lower_name[candidate_name]
+            if head_entry is None or candidate_transform["father_tr"] == head_entry[0]:
+                hair_root_entry = (candidate_fid, candidate_transform)
                 break
 
     ma_merge = parsed_yaml["ma_merge_armatures"][0] if parsed_yaml["ma_merge_armatures"] else None
     ma_proxy = parsed_yaml["ma_bone_proxies"][0] if parsed_yaml["ma_bone_proxies"] else None
 
     return {
-        "root_pos": list(root_tr_info["pos"]) if root_tr_info else [0.0, 0.0, 0.0],
-        "root_rot": list(root_tr_info["rot"]) if root_tr_info else [0.0, 0.0, 0.0, 1.0],
-        "root_scale": list(root_tr_info["scale"]) if root_tr_info else [1.0, 1.0, 1.0],
+        "root_pos": list(root_transform_info["pos"]) if root_transform_info else [0.0, 0.0, 0.0],
+        "root_rot": list(root_transform_info["rot"]) if root_transform_info else [0.0, 0.0, 0.0, 1.0],
+        "root_scale": list(root_transform_info["scale"]) if root_transform_info else [1.0, 1.0, 1.0],
         "has_head_bone_in_prefab": head_entry is not None,
         "hair_root_local_scale": list(hair_root_entry[1]["scale"]) if hair_root_entry else [1.0, 1.0, 1.0],
         "hair_root_local_pos": list(hair_root_entry[1]["pos"]) if hair_root_entry else [0.0, 0.0, 0.0],
@@ -668,10 +668,10 @@ def _resolve_prefab_hair_source(
     blendshape_weights: Dict[str, Dict[str, float]] = {}
     all_mat_guids: List[str] = []
 
-    for go_fid, rend_info in parsed["renderers"].items():
-        go_info = game_objects.get(go_fid, {})
-        mesh_name = go_info.get("name", "").strip()
-        is_active, is_editor_only = _is_go_hierarchy_active(parsed, go_fid)
+    for game_object_file_id, rend_info in parsed["renderers"].items():
+        game_object_info = game_objects.get(game_object_file_id, {})
+        mesh_name = game_object_info.get("name", "").strip()
+        is_active, is_editor_only = _is_game_object_hierarchy_active(parsed, game_object_file_id)
         if not rend_info.get("enabled", True):
             is_active = False
 
@@ -686,17 +686,17 @@ def _resolve_prefab_hair_source(
                 if mesh_name not in active_meshes:
                     active_meshes.append(mesh_name)
 
-        mesh_guid = rend_info.get("mesh_guid", "") or parsed.get("mesh_filters", {}).get(go_fid, "")
+        mesh_guid = rend_info.get("mesh_guid", "") or parsed.get("mesh_filters", {}).get(game_object_file_id, "")
         if mesh_guid:
             mesh_fbx = resolve_unity_guid(mesh_guid, resolved_prefab, unity_assets_root)
             if mesh_fbx is not None and mesh_fbx.suffix.lower() == ".fbx" and mesh_fbx not in fbx_sources:
                 fbx_sources.append(mesh_fbx)
 
-        rb_tr = rend_info.get("root_bone_tr", "0")
-        if rb_tr in transforms and mesh_name:
-            rb_go = game_objects.get(transforms[rb_tr]["go_fid"], {})
-            if rb_go.get("name"):
-                mesh_root_bones[mesh_name.lower()] = rb_go["name"]
+        root_bone_transform = rend_info.get("root_bone_tr", "0")
+        if root_bone_transform in transforms and mesh_name:
+            root_bone_game_object = game_objects.get(transforms[root_bone_transform]["go_fid"], {})
+            if root_bone_game_object.get("name"):
+                mesh_root_bones[mesh_name.lower()] = root_bone_game_object["name"]
 
         mat_guids = rend_info.get("mat_guids", [])
         if is_active and not is_editor_only:
@@ -708,8 +708,8 @@ def _resolve_prefab_hair_source(
 
         if mesh_name and rend_info.get("blendshape_weights"):
             blendshape_weights[mesh_name] = {
-                f"index:{bs_idx}": weight_val
-                for bs_idx, weight_val in enumerate(rend_info["blendshape_weights"])
+                f"index:{blendshape_idx}": weight_val
+                for blendshape_idx, weight_val in enumerate(rend_info["blendshape_weights"])
                 if abs(weight_val) > 1e-4
             }
 
@@ -729,11 +729,11 @@ def _resolve_prefab_hair_source(
     ]
 
     # Also recurse into base prefabs if source_guid points to another .prefab
-    for pi_info in parsed["prefab_instances"].values():
-        src_guid = pi_info.get("source_guid", "")
+    for prefab_instance_info in parsed["prefab_instances"].values():
+        src_guid = prefab_instance_info.get("source_guid", "")
         src_path = resolve_unity_guid(src_guid, resolved_prefab, unity_assets_root) if src_guid else None
         if src_path is not None and src_path.suffix.lower() == ".prefab":
-            combined_mods = list(pi_info.get("mods", [])) + list(unmatched_mods)
+            combined_mods = list(prefab_instance_info.get("mods", [])) + list(unmatched_mods)
             nested = _resolve_prefab_hair_source(
                 src_path,
                 unity_assets_root,
@@ -752,13 +752,13 @@ def _resolve_prefab_hair_source(
             for nested_inactive in nested.get("inactive_meshes", []):
                 if nested_inactive not in active_meshes and nested_inactive not in inactive_meshes:
                     inactive_meshes.append(nested_inactive)
-            for nested_ed in nested.get("editor_only_meshes", []):
-                if nested_ed not in editor_only_meshes:
-                    editor_only_meshes.append(nested_ed)
+            for nested_editor_item in nested.get("editor_only_meshes", []):
+                if nested_editor_item not in editor_only_meshes:
+                    editor_only_meshes.append(nested_editor_item)
             for mesh_key, bone_val in nested.get("mesh_root_bones", {}).items():
                 mesh_root_bones.setdefault(mesh_key, bone_val)
-            for mesh_key, bs_map in nested.get("blendshape_weights", {}).items():
-                blendshape_weights.setdefault(mesh_key, bs_map)
+            for mesh_key, blendshape_map in nested.get("blendshape_weights", {}).items():
+                blendshape_weights.setdefault(mesh_key, blendshape_map)
             for nested_slot_group in nested.get("raw_variant_slot_groups", []):
                 if nested_slot_group not in raw_variant_slot_groups:
                     raw_variant_slot_groups.append(nested_slot_group)
@@ -869,83 +869,83 @@ def _discover_scene_custom_hair(
     prefab_instances = parsed["prefab_instances"]
 
     # Locate avatar root transform
-    avatar_root_tr: Optional[str] = None
+    avatar_root_transform: Optional[str] = None
     lower_avatar = unity_avatar_name.strip().lower()
-    for tr_fid, tr_info in transforms.items():
-        go_info = game_objects.get(tr_info["go_fid"], {})
-        if tr_info["father_tr"] == "0" and go_info.get("name", "").strip().lower() == lower_avatar:
-            avatar_root_tr = tr_fid
+    for transform_file_id, transform_info in transforms.items():
+        game_object_info = game_objects.get(transform_info["go_fid"], {})
+        if transform_info["father_tr"] == "0" and game_object_info.get("name", "").strip().lower() == lower_avatar:
+            avatar_root_transform = transform_file_id
             break
-    if avatar_root_tr is None:
+    if avatar_root_transform is None:
         return None
 
     # Build subtree membership set
     children_map: Dict[str, List[str]] = {}
-    for tr_fid, tr_info in transforms.items():
-        children_map.setdefault(tr_info["father_tr"], []).append(tr_fid)
+    for transform_file_id, transform_info in transforms.items():
+        children_map.setdefault(transform_info["father_tr"], []).append(transform_file_id)
     subtree_trs = set()
-    stack = [avatar_root_tr]
+    stack = [avatar_root_transform]
     while stack:
-        cur_tr = stack.pop()
-        if cur_tr in subtree_trs:
+        cur_transform = stack.pop()
+        if cur_transform in subtree_trs:
             continue
-        subtree_trs.add(cur_tr)
-        stack.extend(children_map.get(cur_tr, []))
+        subtree_trs.add(cur_transform)
+        stack.extend(children_map.get(cur_transform, []))
 
     # Candidate active PrefabInstances inside the avatar's subtree whose name/source looks like hair
-    ma_go_fids = {item["go_fid"] for item in parsed["ma_merge_armatures"] if item.get("enabled", True)}
-    ma_go_fids.update(item["go_fid"] for item in parsed["ma_bone_proxies"])
-    ma_go_fids.update(item["go_fid"] for item in parsed["vrcfury_links"])
-    ma_pi_fids = {
-        str(game_objects.get(go_fid, {}).get("prefab_instance", ""))
-        for go_fid in ma_go_fids
+    ma_game_object_file_ids = {item["go_fid"] for item in parsed["ma_merge_armatures"] if item.get("enabled", True)}
+    ma_game_object_file_ids.update(item["go_fid"] for item in parsed["ma_bone_proxies"])
+    ma_game_object_file_ids.update(item["go_fid"] for item in parsed["vrcfury_links"])
+    ma_prefab_instance_file_ids = {
+        str(game_objects.get(game_object_file_id, {}).get("prefab_instance", ""))
+        for game_object_file_id in ma_game_object_file_ids
     }
-    ma_pi_fids.discard("")
+    ma_prefab_instance_file_ids.discard("")
 
-    for pi_fid, pi_info in prefab_instances.items():
-        if pi_info["parent_tr"] not in subtree_trs:
+    for prefab_instance_file_id, prefab_instance_info in prefab_instances.items():
+        if prefab_instance_info["parent_tr"] not in subtree_trs:
             continue
-        src_guid = pi_info.get("source_guid", "")
+        src_guid = prefab_instance_info.get("source_guid", "")
         if not src_guid:
             continue
-        pi_name = ""
+        prefab_instance_name = ""
         root_name_target = ""
         active_by_target: Dict[str, bool] = {}
-        for mod_item in pi_info.get("mods", []):
+        for mod_item in prefab_instance_info.get("mods", []):
             prop_key = mod_item.get("property", "")
             val_txt = mod_item.get("value", "")
             tgt_fid = mod_item.get("target_fid", "")
             tgt_guid = mod_item.get("target_guid", "").lower()
             if prop_key == "m_Name" and val_txt:
                 is_src_match = bool(tgt_guid and tgt_guid == src_guid.lower())
-                if not pi_name or (is_src_match and root_name_target == ""):
-                    pi_name = val_txt
+                if not prefab_instance_name or (is_src_match and root_name_target == ""):
+                    prefab_instance_name = val_txt
                     root_name_target = tgt_fid
             elif prop_key == "m_IsActive" and tgt_fid:
                 if not tgt_guid or tgt_guid == src_guid.lower():
                     active_by_target[tgt_fid] = val_txt != "0"
 
         if root_name_target and root_name_target in active_by_target:
-            pi_active = active_by_target[root_name_target]
+            prefab_instance_active = active_by_target[root_name_target]
         elif not root_name_target and "100000" in active_by_target:
-            pi_active = active_by_target["100000"]
+            prefab_instance_active = active_by_target["100000"]
         else:
-            pi_active = True
-        if not pi_active:
+            prefab_instance_active = True
+        if not prefab_instance_active:
             continue
 
         resolved_src = resolve_unity_guid(src_guid, unity_scene_path, unity_assets_root)
-        candidate_label = f"{pi_name} {resolved_src.stem if resolved_src else ''}".lower()
-        parent_tr_info = transforms.get(pi_info["parent_tr"], {})
-        parent_go_name = game_objects.get(parent_tr_info.get("go_fid", ""), {}).get("name", "").lower()
+        candidate_label = f"{prefab_instance_name} {resolved_src.stem if resolved_src else ''}".lower()
+        parent_transform_info = transforms.get(prefab_instance_info["parent_tr"], {})
+        parent_game_object_name = game_objects.get(parent_transform_info.get("go_fid", ""), {}).get("name", "").lower()
 
-        is_under_head = parent_go_name in ("head", "hair_root", "hair root", "hairroot")
+        is_under_head = parent_game_object_name in ("head", "hair_root", "hair root", "hairroot")
         has_hair_keyword = any(tok in candidate_label for tok in HAIR_KEYWORD_TOKENS)
-        has_ma_attachment = pi_fid in ma_pi_fids
-        if resolved_src is not None and resolved_src.exists() and (is_under_head or (has_hair_keyword and (has_ma_attachment or is_under_head or pi_info["parent_tr"] == avatar_root_tr))):
+        has_ma_attachment = prefab_instance_file_id in ma_prefab_instance_file_ids
+        if resolved_src is not None and resolved_src.exists() and (is_under_head or (has_hair_keyword and (has_ma_attachment or is_under_head or prefab_instance_info["parent_tr"] == avatar_root_transform))):
             return {
                 "source_path": resolved_src,
-                "scene_pi_name": pi_name,
+                "scene_pi_name": prefab_instance_name,
             }
     return None
 

@@ -893,12 +893,12 @@ def ingest_avatar_source(
 
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", resolved_src.stem).strip("_") or "avatar_pkg"
     work_root = err_helper.resolve_workspace_root(proj_root)
-    target_ws = (
+    target_workspace = (
         Path(workspace_dir)
         if workspace_dir is not None
         else (work_root / "imported_unity_projects" / safe_stem)
     )
-    stamp_file = target_ws / ".vrc2gtav_source.json"
+    stamp_file = target_workspace / ".vrc2gtav_source.json"
 
     try:
         src_stat = resolved_src.stat()
@@ -913,7 +913,7 @@ def ingest_avatar_source(
         )
 
     cache_hit = False
-    if not force_reextract and stamp_file.is_file() and (target_ws / "Assets").is_dir():
+    if not force_reextract and stamp_file.is_file() and (target_workspace / "Assets").is_dir():
         try:
             old_sig = json.loads(stamp_file.read_text(encoding="utf-8"))
             if (
@@ -925,24 +925,24 @@ def ingest_avatar_source(
             cache_hit = False
 
     if not cache_hit:
-        target_ws.mkdir(parents=True, exist_ok=True)
+        target_workspace.mkdir(parents=True, exist_ok=True)
         active_logger.info(
-            f"Extracting {resolved_src.name} into workspace {target_ws}...", always=True
+            f"Extracting {resolved_src.name} into workspace {target_workspace}...", always=True
         )
         if suffix_low == ".unitypackage":
-            extract_unitypackage(resolved_src, target_ws, logger=active_logger)
+            extract_unitypackage(resolved_src, target_workspace, logger=active_logger)
         else:
-            zip_extract_dir = target_ws / "_zip_contents"
+            zip_extract_dir = target_workspace / "_zip_contents"
             safe_extract_zip(resolved_src, zip_extract_dir, logger=active_logger)
             inner_packages = sorted(zip_extract_dir.rglob("*.unitypackage"))
             for pkg_item in inner_packages:
                 active_logger.info(
                     f"Extracting bundled unitypackage: {pkg_item.name}...", always=True
                 )
-                extract_unitypackage(pkg_item, target_ws, logger=active_logger)
+                extract_unitypackage(pkg_item, target_workspace, logger=active_logger)
 
             # Fallback if zip only contained raw FBX/textures/prefabs without .unitypackage
-            assets_dir = target_ws / "Assets"
+            assets_dir = target_workspace / "Assets"
             if not assets_dir.is_dir() or not any(assets_dir.iterdir()):
                 raw_fallback_dir = assets_dir / safe_stem
                 raw_fallback_dir.mkdir(parents=True, exist_ok=True)
@@ -964,11 +964,11 @@ def ingest_avatar_source(
         if unity_hair_helper is not None and hasattr(unity_hair_helper, "clear_guid_cache"):
             unity_hair_helper.clear_guid_cache()
     else:
-        active_logger.debug(f"Reusing cached extracted workspace: {target_ws}")
+        active_logger.debug(f"Reusing cached extracted workspace: {target_workspace}")
 
-    assets_root = target_ws / "Assets"
+    assets_root = target_workspace / "Assets"
     scanned = _scan_project_files(assets_root)
-    zip_dir = target_ws / "_zip_contents"
+    zip_dir = target_workspace / "_zip_contents"
     if zip_dir.is_dir():
         zip_fbxs = [
             item
@@ -979,9 +979,9 @@ def ingest_avatar_source(
 
     return {
         "source_kind": suffix_low.lstrip("."),
-        "unity_project_root": target_ws,
+        "unity_project_root": target_workspace,
         "assets_root": assets_root,
-        "extracted_root": target_ws,
+        "extracted_root": target_workspace,
         "preferred_scene": scanned["scenes"][0] if scanned["scenes"] else None,
         **scanned,
     }
@@ -1059,15 +1059,15 @@ def discover_scene_avatars(
 
     game_objects: Dict[str, Dict[str, Any]] = {}
     transforms: Dict[str, Dict[str, Any]] = {}
-    stripped_tf_to_pi: Dict[str, str] = {}
+    stripped_transform_to_prefab: Dict[str, str] = {}
     prefab_instances: Dict[str, Dict[str, Any]] = {}
     scene_root_ids: List[str] = []
-    animator_go_ids: Set[str] = set()
-    smr_go_ids: Set[str] = set()
-    vrc_descriptor_go_ids: Set[str] = set()
-    ma_go_ids: Set[str] = set()
-    armature_go_ids: Set[str] = set()
-    camera_or_light_go_ids: Set[str] = set()
+    animator_game_object_ids: Set[str] = set()
+    skinned_mesh_game_object_ids: Set[str] = set()
+    vrc_descriptor_game_object_ids: Set[str] = set()
+    ma_game_object_ids: Set[str] = set()
+    armature_game_object_ids: Set[str] = set()
+    camera_or_light_game_object_ids: Set[str] = set()
 
     current_class = ""
     current_fid = ""
@@ -1079,37 +1079,37 @@ def discover_scene_avatars(
             return
         body = "\n".join(block_lines)
         if current_class == "1":
-            name_m = re.search(r"^\s*m_Name:\s*(.+)$", body, re.MULTILINE)
-            act_m = re.search(r"^\s*m_IsActive:\s*(\d+)", body, re.MULTILINE)
-            go_name = _decode_yaml_scalar(name_m.group(1)) if name_m else ""
-            is_act = (int(act_m.group(1)) != 0) if act_m else True
-            game_objects[current_fid] = {"name": go_name, "active": is_act}
-            if go_name.strip().lower() == "armature":
-                armature_go_ids.add(current_fid)
+            name_match = re.search(r"^\s*m_Name:\s*(.+)$", body, re.MULTILINE)
+            active_match = re.search(r"^\s*m_IsActive:\s*(\d+)", body, re.MULTILINE)
+            game_object_name = _decode_yaml_scalar(name_match.group(1)) if name_match else ""
+            is_act = (int(active_match.group(1)) != 0) if active_match else True
+            game_objects[current_fid] = {"name": game_object_name, "active": is_act}
+            if game_object_name.strip().lower() == "armature":
+                armature_game_object_ids.add(current_fid)
         elif current_class == "4":
             if current_stripped:
-                pi_m = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", body)
-                if pi_m:
-                    stripped_tf_to_pi[current_fid] = pi_m.group(1)
+                prefab_instance_match = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", body)
+                if prefab_instance_match:
+                    stripped_transform_to_prefab[current_fid] = prefab_instance_match.group(1)
                 return
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            father_m = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", body)
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            father_match = re.search(r"m_Father:\s*\{fileID:\s*(-?\d+)", body)
             child_fids: List[str] = []
             if "m_Children:" in body:
                 child_chunk = body.split("m_Children:", 1)[1].split("m_Father:", 1)[0]
                 child_fids = re.findall(r"-\s*\{fileID:\s*(-?\d+)", child_chunk)
             transforms[current_fid] = {
-                "go": go_m.group(1) if go_m else "",
-                "father": father_m.group(1) if father_m else "0",
+                "go": game_object_match.group(1) if game_object_match else "",
+                "father": father_match.group(1) if father_match else "0",
                 "children": child_fids,
             }
         elif current_class == "1001":
-            parent_m = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", body)
-            src_m = re.search(
+            parent_match = re.search(r"m_TransformParent:\s*\{fileID:\s*(-?\d+)", body)
+            source_match = re.search(
                 r"m_SourcePrefab:\s*\{fileID:\s*-?\d+,\s*guid:\s*([0-9a-fA-F]{32})",
                 body,
             )
-            src_guid = src_m.group(1).lower() if src_m else ""
+            src_guid = source_match.group(1).lower() if source_match else ""
             found_name = ""
             root_name_tid = ""
             active_by_tid: Dict[str, bool] = {}
@@ -1120,17 +1120,17 @@ def discover_scene_avatars(
                     and "propertyPath: m_IsActive" not in header_slice
                 ):
                     continue
-                tgt_m = re.search(
+                target_match = re.search(
                     r"\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-fA-F]{32}))?", header_slice
                 )
-                prop_m = re.search(r"propertyPath:[ \t]*([^\r\n]+)", header_slice)
-                val_m = re.search(r"value:[ \t]*([^\r\n]*)", header_slice)
-                if not (tgt_m and prop_m and val_m):
+                prop_match = re.search(r"propertyPath:[ \t]*([^\r\n]+)", header_slice)
+                value_match = re.search(r"value:[ \t]*([^\r\n]*)", header_slice)
+                if not (target_match and prop_match and value_match):
                     continue
-                prop_path = prop_m.group(1).strip()
-                raw_val = _decode_yaml_scalar(val_m.group(1))
-                tgt_fid = tgt_m.group(1)
-                tgt_guid = (tgt_m.group(2) or "").lower()
+                prop_path = prop_match.group(1).strip()
+                raw_val = _decode_yaml_scalar(value_match.group(1))
+                tgt_fid = target_match.group(1)
+                tgt_guid = (target_match.group(2) or "").lower()
                 if prop_path == "m_Name" and raw_val:
                     is_src_match = bool(src_guid and tgt_guid == src_guid)
                     if not found_name or (is_src_match and not root_name_tid):
@@ -1140,42 +1140,42 @@ def discover_scene_avatars(
                     if not src_guid or not tgt_guid or tgt_guid == src_guid:
                         active_by_tid[tgt_fid] = raw_val != "0"
 
-            pi_active: Optional[bool] = None
+            prefab_instance_active: Optional[bool] = None
             if root_name_tid and root_name_tid in active_by_tid:
-                pi_active = active_by_tid[root_name_tid]
+                prefab_instance_active = active_by_tid[root_name_tid]
             elif not root_name_tid and "100000" in active_by_tid:
-                pi_active = active_by_tid["100000"]
+                prefab_instance_active = active_by_tid["100000"]
 
             prefab_instances[current_fid] = {
-                "parent": parent_m.group(1) if parent_m else "0",
+                "parent": parent_match.group(1) if parent_match else "0",
                 "source_guid": src_guid,
                 "name": found_name,
-                "active": True if pi_active is None else pi_active,
+                "active": True if prefab_instance_active is None else prefab_instance_active,
             }
         elif current_class == "95":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            if go_m:
-                animator_go_ids.add(go_m.group(1))
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            if game_object_match:
+                animator_game_object_ids.add(game_object_match.group(1))
         elif current_class == "137":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            if go_m:
-                smr_go_ids.add(go_m.group(1))
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            if game_object_match:
+                skinned_mesh_game_object_ids.add(game_object_match.group(1))
         elif current_class in ("20", "108"):
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            if go_m:
-                camera_or_light_go_ids.add(go_m.group(1))
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            if game_object_match:
+                camera_or_light_game_object_ids.add(game_object_match.group(1))
         elif current_class == "114":
-            go_m = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
-            script_m = re.search(r"m_Script:\s*\{[^}]*guid:\s*([0-9a-fA-F]{32})", body)
-            if go_m:
-                go_id = go_m.group(1)
-                script_guid = script_m.group(1).lower() if script_m else ""
+            game_object_match = re.search(r"m_GameObject:\s*\{fileID:\s*(-?\d+)", body)
+            script_match = re.search(r"m_Script:\s*\{[^}]*guid:\s*([0-9a-fA-F]{32})", body)
+            if game_object_match:
+                game_object_id = game_object_match.group(1)
+                script_guid = script_match.group(1).lower() if script_match else ""
                 if script_guid == VRC_AVATAR_DESCRIPTOR_GUID or (
                     "lipSync:" in body and "ViewPosition:" in body
                 ):
-                    vrc_descriptor_go_ids.add(go_id)
+                    vrc_descriptor_game_object_ids.add(game_object_id)
                 elif script_guid in MA_COMPONENT_GUIDS:
-                    ma_go_ids.add(go_id)
+                    ma_game_object_ids.add(game_object_id)
         elif current_class == "1660057539":
             scene_root_ids.extend(re.findall(r"fileID:\s*(-?\d+)", body))
 
@@ -1202,38 +1202,38 @@ def discover_scene_avatars(
             cause=exc,
         )
 
-    go_to_tr = {
-        tr_info["go"]: tr_fid for tr_fid, tr_info in transforms.items() if tr_info.get("go")
+    game_object_to_transform = {
+        transform_info["go"]: transform_file_id for transform_file_id, transform_info in transforms.items() if transform_info.get("go")
     }
-    unnamed_pi_guids: Set[str] = {
-        str(pi_info.get("source_guid", "")).lower()
-        for pi_info in prefab_instances.values()
-        if pi_info.get("source_guid") and not str(pi_info.get("name", "")).strip()
+    unnamed_prefab_instance_guids: Set[str] = {
+        str(prefab_instance_info.get("source_guid", "")).lower()
+        for prefab_instance_info in prefab_instances.values()
+        if prefab_instance_info.get("source_guid") and not str(prefab_instance_info.get("name", "")).strip()
     }
     guid_stems: Dict[str, str] = {}
-    if unnamed_pi_guids and resolved_assets is not None:
+    if unnamed_prefab_instance_guids and resolved_assets is not None:
         if unity_scene_helper is not None and hasattr(unity_scene_helper, "_collect_guid_paths_bounded"):
             search_dirs = unity_scene_helper._priority_search_dirs(
                 resolved_scene, resolved_assets, [resolved_scene.stem]
             )
             found_map = unity_scene_helper._collect_guid_paths_bounded(
-                unnamed_pi_guids, search_dirs, fallback_timeout_sec=2.0
+                unnamed_prefab_instance_guids, search_dirs, fallback_timeout_sec=2.0
             )
-            guid_stems = {guid_k: path_v.stem for guid_k, path_v in found_map.items()}
+            guid_stems = {guid_lookup_key: path_v.stem for guid_lookup_key, path_v in found_map.items()}
         else:
             guid_stems = _collect_guid_stem_index(
-                resolved_assets, target_guids=unnamed_pi_guids, time_budget_sec=2.0
+                resolved_assets, target_guids=unnamed_prefab_instance_guids, time_budget_sec=2.0
             )
 
-    active_pi_count_by_tr: Dict[str, int] = {}
-    for pi_info in prefab_instances.values():
-        if pi_info.get("active", True):
-            parent_fid = str(pi_info.get("parent", "0"))
-            active_pi_count_by_tr[parent_fid] = active_pi_count_by_tr.get(parent_fid, 0) + 1
+    active_prefab_count_by_transform: Dict[str, int] = {}
+    for prefab_instance_info in prefab_instances.values():
+        if prefab_instance_info.get("active", True):
+            parent_fid = str(prefab_instance_info.get("parent", "0"))
+            active_prefab_count_by_transform[parent_fid] = active_prefab_count_by_transform.get(parent_fid, 0) + 1
 
-    def _collect_tr_subtree_stats(start_tr_fid: str) -> Dict[str, Any]:
+    def _collect_transform_subtree_stats(start_transform_file_id: str) -> Dict[str, Any]:
         seen: Set[str] = set()
-        queue_ids = deque([start_tr_fid])
+        queue_ids = deque([start_transform_file_id])
         desc_count = 0
         has_anim = False
         has_vrc = False
@@ -1242,37 +1242,37 @@ def discover_scene_avatars(
         ma_count = 0
         only_cam_light = False
 
-        root_go = transforms.get(start_tr_fid, {}).get("go", "")
-        if root_go in camera_or_light_go_ids and not transforms.get(start_tr_fid, {}).get("children"):
+        root_game_object = transforms.get(start_transform_file_id, {}).get("go", "")
+        if root_game_object in camera_or_light_game_object_ids and not transforms.get(start_transform_file_id, {}).get("children"):
             only_cam_light = True
 
         while queue_ids:
-            cur_tr = queue_ids.popleft()
-            if cur_tr in seen:
+            cur_transform = queue_ids.popleft()
+            if cur_transform in seen:
                 continue
-            seen.add(cur_tr)
+            seen.add(cur_transform)
             desc_count += 1
-            tr_info = transforms.get(cur_tr)
-            if not tr_info:
+            transform_info = transforms.get(cur_transform)
+            if not transform_info:
                 continue
-            go_fid = tr_info.get("go", "")
-            if go_fid:
-                if go_fid in animator_go_ids:
+            game_object_file_id = transform_info.get("go", "")
+            if game_object_file_id:
+                if game_object_file_id in animator_game_object_ids:
                     has_anim = True
-                if go_fid in vrc_descriptor_go_ids:
+                if game_object_file_id in vrc_descriptor_game_object_ids:
                     has_vrc = True
-                if go_fid in armature_go_ids:
+                if game_object_file_id in armature_game_object_ids:
                     has_arm = True
-                if go_fid in smr_go_ids:
+                if game_object_file_id in skinned_mesh_game_object_ids:
                     smr_count += 1
-                if go_fid in ma_go_ids:
+                if game_object_file_id in ma_game_object_ids:
                     ma_count += 1
-            for child_fid in tr_info.get("children", []):
+            for child_fid in transform_info.get("children", []):
                 queue_ids.append(child_fid)
 
         # Count nested PrefabInstances & MA components parented anywhere inside subtree
-        pi_child_count = sum(
-            active_pi_count_by_tr.get(tr_item, 0) for tr_item in seen
+        prefab_instance_child_count = sum(
+            active_prefab_count_by_transform.get(transform_item, 0) for transform_item in seen
         )
 
         return {
@@ -1282,7 +1282,7 @@ def discover_scene_avatars(
             "has_armature": has_arm,
             "smr_count": smr_count,
             "ma_count": ma_count,
-            "pi_children": pi_child_count,
+            "pi_children": prefab_instance_child_count,
             "only_cam_light": only_cam_light,
         }
 
@@ -1297,9 +1297,9 @@ def discover_scene_avatars(
                 if key not in seen_root_keys:
                     seen_root_keys.add(key)
                     ordered_roots.append(key)
-            elif root_fid in stripped_tf_to_pi:
-                pi_fid = stripped_tf_to_pi[root_fid]
-                key = ("pi", pi_fid)
+            elif root_fid in stripped_transform_to_prefab:
+                prefab_instance_file_id = stripped_transform_to_prefab[root_fid]
+                key = ("pi", prefab_instance_file_id)
                 if key not in seen_root_keys:
                     seen_root_keys.add(key)
                     ordered_roots.append(key)
@@ -1309,15 +1309,15 @@ def discover_scene_avatars(
                     seen_root_keys.add(key)
                     ordered_roots.append(key)
     else:
-        for tr_fid, tr_info in transforms.items():
-            if tr_info.get("father") == "0":
-                key = ("tr", tr_fid)
+        for transform_file_id, transform_info in transforms.items():
+            if transform_info.get("father") == "0":
+                key = ("tr", transform_file_id)
                 if key not in seen_root_keys:
                     seen_root_keys.add(key)
                     ordered_roots.append(key)
-        for pi_fid, pi_info in prefab_instances.items():
-            if str(pi_info.get("parent", "0")) == "0":
-                key = ("pi", pi_fid)
+        for prefab_instance_file_id, prefab_instance_info in prefab_instances.items():
+            if str(prefab_instance_info.get("parent", "0")) == "0":
+                key = ("pi", prefab_instance_file_id)
                 if key not in seen_root_keys:
                     seen_root_keys.add(key)
                     ordered_roots.append(key)
@@ -1325,23 +1325,23 @@ def discover_scene_avatars(
     candidates: List[Dict[str, Any]] = []
     for order_idx, (root_kind, root_fid) in enumerate(ordered_roots):
         if root_kind == "tr":
-            tr_info = transforms.get(root_fid, {})
-            go_fid = tr_info.get("go", "")
-            go_info = game_objects.get(go_fid, {})
-            disp_name = str(go_info.get("name", "") or "").strip()
+            transform_info = transforms.get(root_fid, {})
+            game_object_file_id = transform_info.get("go", "")
+            game_object_info = game_objects.get(game_object_file_id, {})
+            disp_name = str(game_object_info.get("name", "") or "").strip()
             if not disp_name:
                 disp_name = f"Transform_{root_fid}"
-            is_active = bool(go_info.get("active", True))
-            stats = _collect_tr_subtree_stats(root_fid)
+            is_active = bool(game_object_info.get("active", True))
+            stats = _collect_transform_subtree_stats(root_fid)
             src_prefab_stem = ""
         else:
-            pi_info = prefab_instances.get(root_fid, {})
-            src_guid = str(pi_info.get("source_guid", "") or "")
+            prefab_instance_info = prefab_instances.get(root_fid, {})
+            src_guid = str(prefab_instance_info.get("source_guid", "") or "")
             src_prefab_stem = guid_stems.get(src_guid, "")
-            disp_name = str(pi_info.get("name", "") or "").strip() or src_prefab_stem
+            disp_name = str(prefab_instance_info.get("name", "") or "").strip() or src_prefab_stem
             if not disp_name:
                 disp_name = f"PrefabInstance_{root_fid}"
-            is_active = bool(pi_info.get("active", True))
+            is_active = bool(prefab_instance_info.get("active", True))
             stats = {
                 "descendants": 1,
                 "has_animator": False,
@@ -1453,9 +1453,9 @@ def prompt_select_scene_avatar(
             ma_cnt = int(item.get("ma_count", 0) or 0)
             if ma_cnt > 0:
                 extra_tags.append(f"MA:{ma_cnt}")
-            pi_cnt = int(item.get("pi_children", 0) or 0)
-            if pi_cnt > 0:
-                extra_tags.append(f"Outfits:{pi_cnt}")
+            prefab_instance_count = int(item.get("pi_children", 0) or 0)
+            if prefab_instance_count > 0:
+                extra_tags.append(f"Outfits:{prefab_instance_count}")
             badge_text = ", ".join(extra_tags)
             emit(f"  [{local_num:2d}] {item.get('name', 'Avatar')} ({badge_text})")
 

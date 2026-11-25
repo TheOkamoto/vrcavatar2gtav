@@ -107,7 +107,7 @@ def patch_rpf_table_of_contents(rpf_archive_path):
 def apply_universal_slots_to_ped(
     ped_directory,
     source_uppr_u,
-    source_uppr_r,
+    source_uppr_racial,
     source_ytd,
     dummy_source_path,
     ped_label,
@@ -128,7 +128,7 @@ def apply_universal_slots_to_ped(
 
         if filename.startswith("uppr_") and filename.endswith(".ydd"):
             if filename.endswith("_r.ydd") or "_r_" in filename:
-                shutil.copy2(source_uppr_r, target_path)
+                shutil.copy2(source_uppr_racial, target_path)
             else:
                 shutil.copy2(source_uppr_u, target_path)
             uppr_count += 1
@@ -164,7 +164,7 @@ def deploy_universal():
     michael_er_dir = str(michael_cfg["character_dir"])
     michael_uppr_u = str(michael_cfg["target_model_ydd"])
     extra_michael_ydds = list(michael_cfg.get("extra_model_ydds") or [])
-    michael_uppr_r = str(extra_michael_ydds[0]) if extra_michael_ydds else michael_uppr_u
+    michael_uppr_racial = str(extra_michael_ydds[0]) if extra_michael_ydds else michael_uppr_u
     michael_ytd = str(michael_cfg["ytd_file"])
 
     franklin_dir = str(franklin_cfg["character_dir"])
@@ -207,7 +207,7 @@ def deploy_universal():
     # 1. Verify required source artifacts exist
     for required_path in (
         michael_uppr_u,
-        michael_uppr_r,
+        michael_uppr_racial,
         michael_ytd,
         franklin_uppr_u,
         franklin_ytd,
@@ -223,7 +223,7 @@ def deploy_universal():
     apply_universal_slots_to_ped(
         player_zero_dir,
         michael_uppr_u,
-        michael_uppr_r,
+        michael_uppr_racial,
         michael_ytd,
         dummy_source_path,
         "Michael (player_zero)",
@@ -333,7 +333,7 @@ def deploy_universal():
         apply_universal_slots_to_ped(
             staging_mppatches_zero_dir,
             michael_uppr_u,
-            michael_uppr_r,
+            michael_uppr_racial,
             michael_ytd,
             dummy_source_path,
             "Michael (mppatches staging)",
@@ -466,7 +466,7 @@ def deploy_universal():
         apply_universal_slots_to_ped(
             michael_patchday3_dir,
             michael_uppr_u,
-            michael_uppr_r,
+            michael_uppr_racial,
             michael_ytd,
             dummy_source_path,
             "Michael (patchday3ng)",
@@ -533,7 +533,7 @@ def deploy_universal():
             apply_universal_slots_to_ped(
                 michael_patchday4_dir,
                 michael_uppr_u,
-                michael_uppr_r,
+                michael_uppr_racial,
                 michael_ytd,
                 dummy_source_path,
                 "Michael (patchday4ng)",

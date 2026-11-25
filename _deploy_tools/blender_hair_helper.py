@@ -166,13 +166,13 @@ def _compute_mesh_world_bounds(
     bpy_module: Any,
     mesh_objects: Sequence[Any],
     z_min_filter: Optional[float] = None,
-    xy_radius_limit: Optional[float] = None,
+    planar_radius_limit: Optional[float] = None,
 ) -> Optional[Dict[str, float]]:
     """Compute world-space X/Y/Z extents over evaluated vertices inside optional cranial bounds."""
     depsgraph = bpy_module.context.evaluated_depsgraph_get()
-    xs_vals: List[float] = []
-    ys_vals: List[float] = []
-    zs_vals: List[float] = []
+    x_coord_vals: List[float] = []
+    y_coord_vals: List[float] = []
+    z_coord_vals: List[float] = []
 
     for mesh_obj in mesh_objects:
         if mesh_obj is None or mesh_obj.type != "MESH":
@@ -182,26 +182,26 @@ def _compute_mesh_world_bounds(
         world_mtx = eval_obj.matrix_world
         try:
             for vert_item in temp_mesh.vertices:
-                world_co = world_mtx @ vert_item.co
-                if z_min_filter is not None and world_co.z < z_min_filter:
+                world_coord = world_mtx @ vert_item.co
+                if z_min_filter is not None and world_coord.z < z_min_filter:
                     continue
-                if xy_radius_limit is not None and (
-                    abs(world_co.x) > xy_radius_limit or abs(world_co.y) > xy_radius_limit
+                if planar_radius_limit is not None and (
+                    abs(world_coord.x) > planar_radius_limit or abs(world_coord.y) > planar_radius_limit
                 ):
                     continue
-                xs_vals.append(float(world_co.x))
-                ys_vals.append(float(world_co.y))
-                zs_vals.append(float(world_co.z))
+                x_coord_vals.append(float(world_coord.x))
+                y_coord_vals.append(float(world_coord.y))
+                z_coord_vals.append(float(world_coord.z))
         finally:
             bpy_module.data.meshes.remove(temp_mesh)
 
-    if not xs_vals:
+    if not x_coord_vals:
         return None
 
-    sorted_zs = sorted(zs_vals)
-    p99_idx = min(len(sorted_zs) - 1, int(0.992 * (len(sorted_zs) - 1)))
-    min_x, max_x = min(xs_vals), max(xs_vals)
-    min_y, max_y = min(ys_vals), max(ys_vals)
+    sorted_z_values = sorted(z_coord_vals)
+    p99_idx = min(len(sorted_z_values) - 1, int(0.992 * (len(sorted_z_values) - 1)))
+    min_x, max_x = min(x_coord_vals), max(x_coord_vals)
+    min_y, max_y = min(y_coord_vals), max(y_coord_vals)
     return {
         "min_x": min_x,
         "max_x": max_x,
@@ -211,9 +211,9 @@ def _compute_mesh_world_bounds(
         "max_y": max_y,
         "depth_y": max_y - min_y,
         "center_y": 0.5 * (min_y + max_y),
-        "min_z": sorted_zs[0],
-        "max_z": sorted_zs[-1],
-        "crown_z": sorted_zs[p99_idx],
+        "min_z": sorted_z_values[0],
+        "max_z": sorted_z_values[-1],
+        "crown_z": sorted_z_values[p99_idx],
     }
 
 
@@ -243,7 +243,7 @@ def extract_skull_reference(
         bpy_module,
         body_meshes,
         z_min_filter=z_floor,
-        xy_radius_limit=0.18,
+        planar_radius_limit=0.18,
     )
 
     cap_candidates = [
@@ -262,7 +262,7 @@ def extract_skull_reference(
         bpy_module,
         cap_candidates,
         z_min_filter=z_floor,
-        xy_radius_limit=0.20,
+        planar_radius_limit=0.20,
     )
 
     skull_width_x = body_bounds["width_x"] if body_bounds else 0.165
@@ -325,8 +325,8 @@ def _is_hip_tail_not_hair_ponytail(
 
     vgroup_names_lower = [vgrp.name.lower() for vgrp in mesh_obj.vertex_groups]
     if any(
-        any(hair_tok in vg_name for hair_tok in ("hair", "twintail", "ponytail", "braid"))
-        for vg_name in vgroup_names_lower
+        any(hair_tok in vgroup_name for hair_tok in ("hair", "twintail", "ponytail", "braid"))
+        for vgroup_name in vgroup_names_lower
     ):
         return False
 
@@ -337,8 +337,8 @@ def _is_hip_tail_not_hair_ponytail(
 
     # Inspect world Z height against Hip bone vs Head if armature vertices exist
     has_hip_group = any(
-        vg_item in ("hips", "pelvis", "other_tail", "neko_tail", "cow_tail")
-        for vg_item in vgroup_names_lower
+        vgroup_item in ("hips", "pelvis", "other_tail", "neko_tail", "cow_tail")
+        for vgroup_item in vgroup_names_lower
     )
     if has_hip_group or root_bone_name in ("hips", "pelvis"):
         bounds = _compute_mesh_world_bounds(bpy_module, [mesh_obj])
@@ -387,13 +387,13 @@ def _apply_blendshapes_to_custom_mesh(
     for candidate_key in (mesh_obj.name, clean_name):
         if candidate_key in prefab_weights_map:
             key_blocks = mesh_obj.data.shape_keys.key_blocks
-            for bs_key, bs_val in prefab_weights_map[candidate_key].items():
-                if bs_key.startswith("index:"):
-                    idx_num = int(bs_key.split(":", 1)[1]) + 1  # key_blocks[0] is Basis
+            for blendshape_key, blendshape_val in prefab_weights_map[candidate_key].items():
+                if blendshape_key.startswith("index:"):
+                    idx_num = int(blendshape_key.split(":", 1)[1]) + 1  # key_blocks[0] is Basis
                     if 0 < idx_num < len(key_blocks):
-                        combined_weights[key_blocks[idx_num].name] = float(bs_val)
+                        combined_weights[key_blocks[idx_num].name] = float(blendshape_val)
                 else:
-                    combined_weights[bs_key] = float(bs_val)
+                    combined_weights[blendshape_key] = float(blendshape_val)
 
     if resolved_mesh_weights:
         for candidate_key in (mesh_obj.name, clean_name):
@@ -456,18 +456,18 @@ def import_and_filter_custom_hair_meshes(
             head_bone = _find_bone_insensitive(hair_arm, ("Head", "head"))
             if head_bone is not None:
                 armature_has_head_bone = True
-                h_world = hair_arm.matrix_world @ head_bone.head
-                h_mtx = hair_arm.matrix_world @ head_bone.matrix
-                armature_head_pos = (float(h_world.x), float(h_world.y), float(h_world.z))
-                armature_head_scale_x = abs(float(h_mtx.to_scale().x))
+                head_world = hair_arm.matrix_world @ head_bone.head
+                head_matrix = hair_arm.matrix_world @ head_bone.matrix
+                armature_head_pos = (float(head_world.x), float(head_world.y), float(head_world.z))
+                armature_head_scale_x = abs(float(head_matrix.to_scale().x))
 
             root_bone = _find_bone_insensitive(
                 hair_arm,
                 ("Hair Root", "Hair_root", "HairRoot", "Lazy_Hair_Root", "Hair"),
             )
             if root_bone is not None:
-                r_world = hair_arm.matrix_world @ root_bone.head
-                armature_hair_root_pos = (float(r_world.x), float(r_world.y), float(r_world.z))
+                root_world = hair_arm.matrix_world @ root_bone.head
+                armature_hair_root_pos = (float(root_world.x), float(root_world.y), float(root_world.z))
 
         for new_obj in new_objects:
             if new_obj.type == "ARMATURE":
@@ -533,7 +533,7 @@ def _estimate_hair_cap_bounds(
         bpy_module,
         target_meshes,
         z_min_filter=cranial_floor_z,
-        xy_radius_limit=0.22,
+        planar_radius_limit=0.22,
     )
     return upper_bounds or overall
 
@@ -685,7 +685,7 @@ def remap_custom_hair_uvs(
             loop_indices = list(poly_item.loop_indices)
             if not loop_indices:
                 continue
-            rect_u0, rect_v0, rect_du, rect_dv = resolved_rects.get(
+            rect_u0, rect_v0, rect_delta_u, rect_delta_v = resolved_rects.get(
                 poly_item.material_index, fallback_rect
             )
 
@@ -695,16 +695,16 @@ def remap_custom_hair_uvs(
                 uv_vec = uv_layer.data[loop_idx].uv
                 u_sum += float(uv_vec.x)
                 v_sum += float(uv_vec.y)
-            count_f = float(len(loop_indices))
-            shift_u = float(math.floor(u_sum / count_f))
-            shift_v = float(math.floor(v_sum / count_f))
+            count_float = float(len(loop_indices))
+            shift_u = float(math.floor(u_sum / count_float))
+            shift_v = float(math.floor(v_sum / count_float))
 
             for loop_idx in loop_indices:
                 uv_vec = uv_layer.data[loop_idx].uv
                 local_u = max(0.001, min(0.999, float(uv_vec.x) - shift_u))
                 local_v = max(0.001, min(0.999, float(uv_vec.y) - shift_v))
-                uv_vec.x = rect_u0 + local_u * rect_du
-                uv_vec.y = rect_v0 + local_v * rect_dv
+                uv_vec.x = rect_u0 + local_u * rect_delta_u
+                uv_vec.y = rect_v0 + local_v * rect_delta_v
 
         # Drop secondary UV channels and align primary name with Body before join()
         for extra_uv in list(mesh_data.uv_layers):
@@ -817,40 +817,40 @@ def weld_symmetry_midline_seams(
 
     merge_verts: Set[Any] = set()
     used_verts: Set[int] = set()
-    max_dist_sq = match_dist * match_dist
+    max_dist_squared = match_dist * match_dist
     cand_count = len(candidates)
-    for idx_a in range(cand_count):
-        vert_a, mat_a, col_a, row_a, norm_a = candidates[idx_a]
-        if vert_a.index in used_verts:
+    for idx_first in range(cand_count):
+        vert_first, mat_first, color_first, row_first, norm_first = candidates[idx_first]
+        if vert_first.index in used_verts:
             continue
-        neighbors_a = {edge_item.other_vert(vert_a).index for edge_item in vert_a.link_edges}
+        neighbors_first = {edge_item.other_vert(vert_first).index for edge_item in vert_first.link_edges}
         best_match = None
-        best_dist_sq = max_dist_sq
-        for idx_b in range(idx_a + 1, cand_count):
-            vert_b, mat_b, col_b, row_b, norm_b = candidates[idx_b]
-            if vert_b.index in used_verts or vert_b.index in neighbors_a:
+        best_dist_squared = max_dist_squared
+        for idx_second in range(idx_first + 1, cand_count):
+            vert_second, mat_second, color_second, row_second, norm_second = candidates[idx_second]
+            if vert_second.index in used_verts or vert_second.index in neighbors_first:
                 continue
-            if mat_a != mat_b or (col_a >= 0 and (col_a != col_b or row_a != row_b)):
+            if mat_first != mat_second or (color_first >= 0 and (color_first != color_second or row_first != row_second)):
                 continue
-            if norm_a.dot(norm_b) < normal_cos_threshold:
+            if norm_first.dot(norm_second) < normal_cos_threshold:
                 continue
-            delta_vec = vert_a.co - vert_b.co
-            dist_sq = float(delta_vec.length_squared)
-            if dist_sq <= best_dist_sq:
-                best_dist_sq = dist_sq
-                best_match = vert_b
+            delta_vec = vert_first.co - vert_second.co
+            dist_squared = float(delta_vec.length_squared)
+            if dist_squared <= best_dist_squared:
+                best_dist_squared = dist_squared
+                best_match = vert_second
         if best_match is not None:
-            mid_y = 0.5 * (float(vert_a.co.y) + float(best_match.co.y))
-            mid_z = 0.5 * (float(vert_a.co.z) + float(best_match.co.z))
-            vert_a.co.x = 0.0
-            vert_a.co.y = mid_y
-            vert_a.co.z = mid_z
+            mid_y = 0.5 * (float(vert_first.co.y) + float(best_match.co.y))
+            mid_z = 0.5 * (float(vert_first.co.z) + float(best_match.co.z))
+            vert_first.co.x = 0.0
+            vert_first.co.y = mid_y
+            vert_first.co.z = mid_z
             best_match.co.x = 0.0
             best_match.co.y = mid_y
             best_match.co.z = mid_z
-            used_verts.add(vert_a.index)
+            used_verts.add(vert_first.index)
             used_verts.add(best_match.index)
-            merge_verts.add(vert_a)
+            merge_verts.add(vert_first)
             merge_verts.add(best_match)
 
     welded_pairs = len(used_verts) // 2
@@ -935,10 +935,10 @@ def _partition_component_by_z_bands(
 ) -> List[List[int]]:
     """Subdivide an oversized connected island horizontally across Z bands (never down X=0)."""
     sort_items: List[Tuple[Tuple[float, float, float, int], int]] = []
-    has_co = bool(vertices_seq and hasattr(vertices_seq[0], "co"))
+    has_coord = bool(vertices_seq and hasattr(vertices_seq[0], "co"))
     for poly_idx in comp_polys:
         v_ids = poly_verts_map[poly_idx]
-        if has_co and v_ids:
+        if has_coord and v_ids:
             count_inv = 1.0 / float(len(v_ids))
             ctr_x = sum(float(vertices_seq[v_idx].co[0]) for v_idx in v_ids) * count_inv
             ctr_y = sum(float(vertices_seq[v_idx].co[1]) for v_idx in v_ids) * count_inv
@@ -992,9 +992,9 @@ def split_oversized_material_geometries(
     polys_by_material: Dict[int, List[int]] = {}
     poly_verts_map: Dict[int, Tuple[int, ...]] = {}
     for poly_item in polys_seq:
-        p_idx = poly_item.index
-        polys_by_material.setdefault(poly_item.material_index, []).append(p_idx)
-        poly_verts_map[p_idx] = tuple(int(v_idx) for v_idx in poly_item.vertices)
+        poly_index = poly_item.index
+        polys_by_material.setdefault(poly_item.material_index, []).append(poly_index)
+        poly_verts_map[poly_index] = tuple(int(v_idx) for v_idx in poly_item.vertices)
 
     max_polys_per_chunk = max(10000, min(19500, int(max_vertices_per_chunk * 0.65)))
     max_loops_per_chunk = 58000
@@ -1022,14 +1022,14 @@ def split_oversized_material_geometries(
 
         for poly_item in poly_indices:
             for v_idx in poly_verts_map[poly_item]:
-                first_pi = vert_owner.get(v_idx)
-                if first_pi is None:
+                first_poly_idx = vert_owner.get(v_idx)
+                if first_poly_idx is None:
                     vert_owner[v_idx] = poly_item
                 else:
-                    root_a = _find_root(poly_item)
-                    root_b = _find_root(first_pi)
-                    if root_a != root_b:
-                        parent_map[root_b] = root_a
+                    root_first = _find_root(poly_item)
+                    root_second = _find_root(first_poly_idx)
+                    if root_first != root_second:
+                        parent_map[root_second] = root_first
 
         islands_map: Dict[int, List[int]] = {}
         for poly_item in poly_indices:
@@ -1061,22 +1061,22 @@ def split_oversized_material_geometries(
         # First-Fit-Decreasing bin packing keeps each connected component whole inside one chunk
         units.sort(key=lambda unit_item: (len(unit_item[0]), len(unit_item[1])), reverse=True)
         bins: List[Tuple[List[int], Set[int], int]] = []
-        for u_polys, u_verts, u_loops in units:
+        for unit_polys, unit_verts, unit_loops in units:
             placed = False
-            for bin_idx, (b_polys, b_verts, b_loops) in enumerate(bins):
-                if len(b_polys) + len(u_polys) > max_polys_per_chunk:
+            for bin_idx, (bin_polys, bin_verts, bin_loops) in enumerate(bins):
+                if len(bin_polys) + len(unit_polys) > max_polys_per_chunk:
                     continue
-                if b_loops + u_loops > max_loops_per_chunk:
+                if bin_loops + unit_loops > max_loops_per_chunk:
                     continue
-                merged_verts = b_verts | u_verts
+                merged_verts = bin_verts | unit_verts
                 if len(merged_verts) > max_vertices_per_chunk:
                     continue
-                b_polys.extend(u_polys)
-                bins[bin_idx] = (b_polys, merged_verts, b_loops + u_loops)
+                bin_polys.extend(unit_polys)
+                bins[bin_idx] = (bin_polys, merged_verts, bin_loops + unit_loops)
                 placed = True
                 break
             if not placed:
-                bins.append((list(u_polys), set(u_verts), u_loops))
+                bins.append((list(unit_polys), set(unit_verts), unit_loops))
 
         chunk_total = len(bins)
         if chunk_total <= 1:
@@ -1094,9 +1094,9 @@ def split_oversized_material_geometries(
             sub_materials.append(duplicated_mat)
             created_chunks += 1
 
-        for chunk_idx, (b_polys, _, _) in enumerate(bins):
+        for chunk_idx, (bin_polys, _, _) in enumerate(bins):
             target_slot_idx = mesh_data_elem.materials.find(sub_materials[chunk_idx].name)
-            for poly_idx in b_polys:
+            for poly_idx in bin_polys:
                 polys_seq[poly_idx].material_index = target_slot_idx
 
     if created_chunks > 0:

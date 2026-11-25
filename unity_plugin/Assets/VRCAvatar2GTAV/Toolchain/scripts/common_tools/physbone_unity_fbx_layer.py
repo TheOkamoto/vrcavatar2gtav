@@ -86,9 +86,9 @@ def extract_unity_physbones_from_prefab(
             and VRCHAT_PHYSBONE_SCRIPT_GUID in doc_text
             and f"fileID: {VRCHAT_PHYSBONE_CLASS_FILE_ID}" in doc_text
         ):
-            go_match = regex_module.search(r"^\s*m_GameObject:\s*\{fileID:\s*(\d+)\}", doc_text, regex_module.MULTILINE)
-            if go_match:
-                physbone_blocks[go_match.group(1)] = doc_text
+            game_object_match = regex_module.search(r"^\s*m_GameObject:\s*\{fileID:\s*(\d+)\}", doc_text, regex_module.MULTILINE)
+            if game_object_match:
+                physbone_blocks[game_object_match.group(1)] = doc_text
 
     extracted: Dict[str, Dict[str, object]] = {}
     spec_by_key = {spec[0].lower(): spec for spec in NEKO_MIMI_CHAIN_SPECS}
@@ -101,9 +101,9 @@ def extract_unity_physbones_from_prefab(
         matched = regex_module.search(rf"^\s*{regex_module.escape(key_name)}:\s*([-+]?\d+)\s*$", block_text, regex_module.MULTILINE)
         return int(matched.group(1)) if matched else default_val
 
-    for go_id, block_text in physbone_blocks.items():
-        go_name = gameobject_names.get(go_id, "")
-        canonical_name = target_lookup.get(go_name.lower())
+    for game_object_id, block_text in physbone_blocks.items():
+        game_object_name = gameobject_names.get(game_object_id, "")
+        canonical_name = target_lookup.get(game_object_name.lower())
         if canonical_name is None:
             continue
         spec_entry = spec_by_key.get(canonical_name.lower())
@@ -179,9 +179,9 @@ def _inspect_fbx_weights_detailed(
     Fast pure-Python binary FBX inspector returning:
       `(all_bones_ci, weighted_bones_ci, parent_map_ci, mesh_weights_by_file, has_skin_clusters)`.
     """
-    all_bones_ci: Set[str] = set()
-    weighted_bones_ci: Set[str] = set()
-    parent_map_ci: Dict[str, str] = {}
+    all_bones_lower: Set[str] = set()
+    weighted_bones_lower: Set[str] = set()
+    parent_map_lower: Dict[str, str] = {}
     mesh_weights_by_file: Dict[Path, Dict[str, Set[str]]] = {}
     has_skin_clusters = False
     excluded_low = {str(name_item).strip().lower() for name_item in excluded_meshes if str(name_item).strip()}
@@ -301,15 +301,15 @@ def _inspect_fbx_weights_detailed(
         cached_fbx = _FBX_WEIGHTED_BONES_CACHE.get(cache_key)
         if cached_fbx is not None:
             file_bones, file_mesh_weights, file_parents = cached_fbx
-            all_bones_ci.update(file_bones)
+            all_bones_lower.update(file_bones)
             mesh_weights_by_file[fbx_file] = file_mesh_weights
-            for child_k, parent_val in file_parents.items():
-                parent_map_ci.setdefault(child_k, parent_val)
+            for child_key, parent_val in file_parents.items():
+                parent_map_lower.setdefault(child_key, parent_val)
             for mesh_low, weight_set in file_mesh_weights.items():
                 if weight_set:
                     has_skin_clusters = True
                 if mesh_low not in excluded_low:
-                    weighted_bones_ci.update(weight_set)
+                    weighted_bones_lower.update(weight_set)
             continue
 
         try:
@@ -320,8 +320,8 @@ def _inspect_fbx_weights_detailed(
         if total_len < 27 or not raw_bytes.startswith(b"Kaydara FBX Binary"):
             continue
 
-        file_bones_ci: Set[str] = set()
-        file_parents_ci: Dict[str, str] = {}
+        file_bones_lower: Set[str] = set()
+        file_parents_lower: Dict[str, str] = {}
         file_mesh_weights: Dict[str, Set[str]] = {}
         try:
             fbx_ver = struct.unpack_from("<I", raw_bytes, 23)[0]
@@ -390,15 +390,15 @@ def _inspect_fbx_weights_detailed(
                     src_name, src_subtype = models_map[src_id]
                     dst_name, dst_subtype = models_map[dst_id]
                     if src_subtype in ("LimbNode", "Null", "Root") and dst_subtype in ("LimbNode", "Null", "Root"):
-                        file_parents_ci.setdefault(src_name.lower(), dst_name.lower())
+                        file_parents_lower.setdefault(src_name.lower(), dst_name.lower())
 
             for model_id, (model_name, model_subtype) in models_map.items():
                 if model_subtype in ("LimbNode", "Null", "Root"):
-                    file_bones_ci.add(model_name.lower())
+                    file_bones_lower.add(model_name.lower())
                 if model_subtype != "Mesh":
                     continue
                 mesh_low = model_name.strip().lower()
-                mesh_w_set = file_mesh_weights.setdefault(mesh_low, set())
+                mesh_weight_set = file_mesh_weights.setdefault(mesh_low, set())
                 for geom_id in children_of.get(model_id, []):
                     if geom_id not in geom_ids:
                         continue
@@ -410,22 +410,22 @@ def _inspect_fbx_weights_detailed(
                                 continue
                             for bone_id in children_of.get(cluster_id, []):
                                 if bone_id in models_map:
-                                    mesh_w_set.add(models_map[bone_id][0].lower())
+                                    mesh_weight_set.add(models_map[bone_id][0].lower())
         except (struct.error, ValueError, zlib.error, IndexError):
             continue
 
-        _FBX_WEIGHTED_BONES_CACHE[cache_key] = (file_bones_ci, file_mesh_weights, file_parents_ci)
-        all_bones_ci.update(file_bones_ci)
+        _FBX_WEIGHTED_BONES_CACHE[cache_key] = (file_bones_lower, file_mesh_weights, file_parents_lower)
+        all_bones_lower.update(file_bones_lower)
         mesh_weights_by_file[fbx_file] = file_mesh_weights
-        for child_k, parent_val in file_parents_ci.items():
-            parent_map_ci.setdefault(child_k, parent_val)
+        for child_key, parent_val in file_parents_lower.items():
+            parent_map_lower.setdefault(child_key, parent_val)
         for mesh_low, weight_set in file_mesh_weights.items():
             if weight_set:
                 has_skin_clusters = True
             if mesh_low not in excluded_low:
-                weighted_bones_ci.update(weight_set)
+                weighted_bones_lower.update(weight_set)
 
-    return all_bones_ci, weighted_bones_ci, parent_map_ci, mesh_weights_by_file, has_skin_clusters
+    return all_bones_lower, weighted_bones_lower, parent_map_lower, mesh_weights_by_file, has_skin_clusters
 
 
 def collect_fbx_weighted_bones(
@@ -436,30 +436,30 @@ def collect_fbx_weighted_bones(
     Fast pure-Python binary FBX inspector extracting all armature bone names (lowercase),
     nonzero vertex-weighted bone names (lowercase), and lowercase `child -> parent` map.
     """
-    all_bones_ci, weighted_bones_ci, parent_map_ci, _by_file, _has_skin = _inspect_fbx_weights_detailed(
+    all_bones_lower, weighted_bones_lower, parent_map_lower, _by_file, _has_skin = _inspect_fbx_weights_detailed(
         fbx_paths, excluded_meshes=excluded_meshes
     )
-    return all_bones_ci, weighted_bones_ci, parent_map_ci
+    return all_bones_lower, weighted_bones_lower, parent_map_lower
 
 
 def prune_orphaned_physbone_chains(
     chains_map: Dict[str, Dict[str, Any]],
-    active_weighted_bones_ci: Optional[Set[str]],
+    active_weighted_bones_lower: Optional[Set[str]],
     bone_mapping: Optional[Dict[str, str]] = None,
-    disabled_mesh_bones_ci: Optional[Set[str]] = None,
+    disabled_mesh_bones_lower: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Remove orphaned PhysBone chains whose source bones have zero skin weights on active meshes
     (e.g., leftover PhysBones from an old dress deleted or toggled off after adding a custom dress).
     """
-    if active_weighted_bones_ci is None:
+    if active_weighted_bones_lower is None:
         return {
             "chains": dict(chains_map),
             "bone_mapping": dict(bone_mapping or {}),
             "orphaned_physbones": [],
         }
 
-    disabled_ci = set(disabled_mesh_bones_ci or ())
+    disabled_lower = set(disabled_mesh_bones_lower or ())
     kept_chains: Dict[str, Dict[str, Any]] = {}
     orphaned_records: List[Dict[str, Any]] = []
     orphan_src_fallbacks: Dict[str, str] = {}
@@ -467,29 +467,29 @@ def prune_orphaned_physbone_chains(
 
     for chain_key, cfg_data in chains_map.items():
         src_bones = [
-            str(bone_nm).strip()
-            for bone_nm in (cfg_data.get("source_bones") or ())
-            if str(bone_nm).strip()
+            str(bone_name).strip()
+            for bone_name in (cfg_data.get("source_bones") or ())
+            if str(bone_name).strip()
         ]
         gtav_bones = [
-            str(bone_nm).strip()
-            for bone_nm in (cfg_data.get("chain_bones") or ())
-            if str(bone_nm).strip()
+            str(bone_name).strip()
+            for bone_name in (cfg_data.get("chain_bones") or ())
+            if str(bone_name).strip()
         ]
         parent_bone = str(cfg_data.get("parent_bone") or "SKEL_Pelvis")
-        has_active_weight = any(bone_nm.lower() in active_weighted_bones_ci for bone_nm in src_bones)
+        has_active_weight = any(bone_name.lower() in active_weighted_bones_lower for bone_name in src_bones)
         if has_active_weight:
             kept_chains[chain_key] = cfg_data
             continue
 
         reason_tok = (
             "disabled_old_outfit_mesh"
-            if any(bone_nm.lower() in disabled_ci for bone_nm in src_bones)
+            if any(bone_name.lower() in disabled_lower for bone_name in src_bones)
             else "no_active_mesh_weights"
         )
         removed_gtav_bones.update(gtav_bones)
-        for bone_nm in src_bones:
-            orphan_src_fallbacks[bone_nm.lower()] = parent_bone
+        for bone_name in src_bones:
+            orphan_src_fallbacks[bone_name.lower()] = parent_bone
         orphaned_records.append(
             {
                 "chain_key": str(chain_key),
@@ -501,11 +501,11 @@ def prune_orphaned_physbone_chains(
         )
 
     cleaned_bmap: Dict[str, str] = {}
-    for src_k, dst_v in (bone_mapping or {}).items():
-        src_low = str(src_k).strip().lower()
+    for source_key, dst_v in (bone_mapping or {}).items():
+        src_low = str(source_key).strip().lower()
         if str(dst_v).strip() in removed_gtav_bones or src_low in orphan_src_fallbacks:
             continue
-        cleaned_bmap[src_k] = dst_v
+        cleaned_bmap[source_key] = dst_v
 
     return {
         "chains": kept_chains,
@@ -567,9 +567,9 @@ def _index_unity_asset_guids(
         ma_shared_cache = {}
     for guid_key in needed_low:
         if guid_key not in cached_map:
-            shared_p = ma_shared_cache.get(guid_key)
-            if shared_p is not None and shared_p.is_file():
-                cached_map[guid_key] = shared_p
+            shared_path = ma_shared_cache.get(guid_key)
+            if shared_path is not None and shared_path.is_file():
+                cached_map[guid_key] = shared_path
 
     guid_map: Dict[str, Path] = {
         guid_key: cached_map[guid_key]
@@ -752,13 +752,13 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
     cur_stripped = False
     cur_obj: Optional[Dict[str, Any]] = None
     in_ignored = False
-    cur_pi_section = "none"
+    cur_prefab_instance_section = "none"
     cur_mod: Optional[Dict[str, Any]] = None
     cur_curve_name: Optional[str] = None
     cur_curve_time: Optional[float] = None
     cur_marsh_list: Optional[str] = None
 
-    hdr_re = regex_module.compile(r"^--- !u!(\d+) &(-?\d+)(\s+stripped)?")
+    header_regex = regex_module.compile(r"^--- !u!(\d+) &(-?\d+)(\s+stripped)?")
 
     def _flush_cur() -> None:
         nonlocal cur_obj
@@ -785,9 +785,9 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
         for raw_line in yaml_file:
             if raw_line.startswith("--- !u!"):
                 _flush_cur()
-                matched_hdr = hdr_re.match(raw_line)
+                matched_hdr = header_regex.match(raw_line)
                 in_ignored = False
-                cur_pi_section = "none"
+                cur_prefab_instance_section = "none"
                 cur_mod = None
                 cur_curve_name = None
                 cur_curve_time = None
@@ -847,38 +847,38 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
                     cur_obj["src"] = _parse_unity_yaml_ref(stripped)
             elif cur_cls == "1001":
                 if stripped.startswith("m_TransformParent:"):
-                    cur_pi_section = "none"
+                    cur_prefab_instance_section = "none"
                     cur_obj["parent_tf"] = _parse_unity_yaml_ref(stripped)
                 elif stripped.startswith("m_SourcePrefab:"):
-                    cur_pi_section = "none"
+                    cur_prefab_instance_section = "none"
                     cur_obj["source_prefab"] = _parse_unity_yaml_ref(stripped)
                 elif stripped.startswith("m_Modifications:"):
-                    cur_pi_section = "mods"
+                    cur_prefab_instance_section = "mods"
                     cur_mod = None
                 elif stripped.startswith("m_RemovedGameObjects:"):
-                    cur_pi_section = "removed_gos"
+                    cur_prefab_instance_section = "removed_gos"
                     cur_mod = None
                 elif stripped.startswith("m_RemovedComponents:"):
-                    cur_pi_section = "removed_comps"
+                    cur_prefab_instance_section = "removed_comps"
                     cur_mod = None
                 elif stripped.startswith(("m_Removed", "m_Added")):
-                    cur_pi_section = "none"
+                    cur_prefab_instance_section = "none"
                     cur_mod = None
-                elif cur_pi_section == "removed_gos":
+                elif cur_prefab_instance_section == "removed_gos":
                     if stripped.startswith("- ") and "fileID:" in stripped:
                         ref_item = _parse_unity_yaml_ref(stripped)
                         if ref_item:
                             cur_obj["removed_gos"].append(ref_item)
                     elif ":" in stripped and not stripped.startswith("-"):
-                        cur_pi_section = "none"
-                elif cur_pi_section == "removed_comps":
+                        cur_prefab_instance_section = "none"
+                elif cur_prefab_instance_section == "removed_comps":
                     if stripped.startswith("- ") and "fileID:" in stripped:
                         ref_item = _parse_unity_yaml_ref(stripped)
                         if ref_item:
                             cur_obj["removed_comps"].append(ref_item)
                     elif ":" in stripped and not stripped.startswith("-"):
-                        cur_pi_section = "none"
-                elif cur_pi_section == "mods":
+                        cur_prefab_instance_section = "none"
+                elif cur_prefab_instance_section == "mods":
                     if stripped.startswith("- target:"):
                         cur_mod = {"target": _parse_unity_yaml_ref(stripped)}
                         cur_obj["mods"].append(cur_mod)
@@ -1015,7 +1015,7 @@ def _parse_marshmallow_asset_file(asset_path: Path) -> Dict[str, Any]:
         return {}
     data: Dict[str, Any] = {}
     for raw_line in asset_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        st_line = raw_line.strip()
+        stripped_line = raw_line.strip()
         for fld in (
             "path_breast_L",
             "path_breast_R",
@@ -1032,8 +1032,8 @@ def _parse_marshmallow_asset_file(asset_path: Path) -> Dict[str, Any]:
             "limit_angle_0",
             "breast_collider_radius_0",
         ):
-            if st_line.startswith(f"{fld}:"):
-                data[fld] = st_line.split(":", 1)[1].strip()
+            if stripped_line.startswith(f"{fld}:"):
+                data[fld] = stripped_line.split(":", 1)[1].strip()
                 break
     return data
 
@@ -1044,20 +1044,20 @@ def _collect_marshmallow_pb_overrides(
     guid_map: Dict[str, Path],
     doc_cache: Dict[Path, Dict[str, Any]],
     unity_assets_root: Optional[Union[str, Path]] = None,
-    is_tf_active_fn: Optional[Callable[[str], bool]] = None,
+    is_transform_active_func: Optional[Callable[[str], bool]] = None,
 ) -> List[Dict[str, Any]]:
     """Extract active Marshmallow PB breast presets and overrides from PrefabInstances."""
     results: List[Dict[str, Any]] = []
-    for pi_id in sorted(visited_pis, key=lambda val_str: int(val_str)):
-        pi_info = scene_doc["pis"].get(pi_id)
-        if not pi_info:
+    for prefab_instance_id in sorted(visited_pis, key=lambda val_str: int(val_str)):
+        prefab_instance_info = scene_doc["pis"].get(prefab_instance_id)
+        if not prefab_instance_info:
             continue
-        ptf_ref = pi_info.get("parent_tf")
+        ptf_ref = prefab_instance_info.get("parent_tf")
         ptf_id = ptf_ref[0] if ptf_ref else "0"
-        if is_tf_active_fn is not None and not is_tf_active_fn(ptf_id):
+        if is_transform_active_func is not None and not is_transform_active_func(ptf_id):
             continue
-        sp_ref = pi_info.get("source_prefab")
-        src_path = guid_map.get(sp_ref[1]) if sp_ref else None
+        stripped_prefab_ref = prefab_instance_info.get("source_prefab")
+        src_path = guid_map.get(stripped_prefab_ref[1]) if stripped_prefab_ref else None
         if not src_path or "marshmallow" not in src_path.name.lower() or not src_path.is_file():
             continue
         if src_path not in doc_cache:
@@ -1071,7 +1071,7 @@ def _collect_marshmallow_pb_overrides(
         root_active = True
         root_tag = "Untagged"
 
-        for mod_item in pi_info.get("mods", []):
+        for mod_item in prefab_instance_info.get("mods", []):
             prop_path = mod_item.get("path", "")
             val_str = mod_item.get("value", "")
             obj_ref = mod_item.get("objref")
@@ -1222,47 +1222,47 @@ def _collect_marshmallow_pb_overrides(
 
 
 def _collect_linear_spokes(
-    root_tf_id: str,
+    root_transform_id: str,
     children_map: Dict[str, List[str]],
-    name_fn: Callable[[str], str],
-    ignored_tf_ids: Set[str],
-    allowed_bones_ci: Optional[Set[str]] = None,
+    name_func: Callable[[str], str],
+    ignored_transform_ids: Set[str],
+    allowed_bones_lower: Optional[Set[str]] = None,
 ) -> Tuple[List[List[str]], List[str]]:
     """
     Walk a Unity transform subtree from root_tf_id, returning:
       - list of linear spoke chains `[root_or_spoke, ..., leaf]`
       - flat list of all valid visited bone names in subtree
     """
-    root_name = name_fn(root_tf_id)
+    root_name = name_func(root_transform_id)
     all_desc: List[str] = [root_name]
     spokes: List[List[str]] = []
 
-    def _walk(cur_tf: str, cur_path: List[str], depth_val: int) -> None:
+    def _walk(cur_transform: str, cur_path: List[str], depth_val: int) -> None:
         if depth_val > 16:
             spokes.append(cur_path)
             return
         raw_children = [
-            child_tf
-            for child_tf in children_map.get(cur_tf, [])
-            if child_tf not in ignored_tf_ids
+            child_transform
+            for child_transform in children_map.get(cur_transform, [])
+            if child_transform not in ignored_transform_ids
         ]
         # Filter out pure non-bone helpers when allowed_bones_ci is given (preserving at least direct path)
         valid_children = raw_children
-        if allowed_bones_ci is not None:
+        if allowed_bones_lower is not None:
             filtered = [
-                child_tf
-                for child_tf in raw_children
-                if name_fn(child_tf).strip().lower() in allowed_bones_ci
+                child_transform
+                for child_transform in raw_children
+                if name_func(child_transform).strip().lower() in allowed_bones_lower
             ]
             if filtered:
                 valid_children = filtered
         if not valid_children:
             spokes.append(cur_path)
             return
-        for child_tf in valid_children:
-            child_name = name_fn(child_tf)
+        for child_transform in valid_children:
+            child_name = name_func(child_transform)
             all_desc.append(child_name)
-            _walk(child_tf, cur_path + [child_name], depth_val + 1)
+            _walk(child_transform, cur_path + [child_name], depth_val + 1)
 
-    _walk(root_tf_id, [root_name], 0)
+    _walk(root_transform_id, [root_name], 0)
     return spokes, all_desc

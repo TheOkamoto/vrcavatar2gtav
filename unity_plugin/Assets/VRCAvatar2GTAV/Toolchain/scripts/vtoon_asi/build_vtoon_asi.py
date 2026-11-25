@@ -40,13 +40,13 @@ def _find_vcvars64() -> Path:
     for candidate_path in candidates:
         if candidate_path.is_file():
             return candidate_path
-    for pf_root in (
+    for program_files_root in (
         Path("/mnt/c/Program Files/Microsoft Visual Studio"),
         Path("/mnt/c/Program Files (x86)/Microsoft Visual Studio"),
     ):
-        if not pf_root.is_dir():
+        if not program_files_root.is_dir():
             continue
-        for match_bat in pf_root.rglob("vcvars64.bat"):
+        for match_bat in program_files_root.rglob("vcvars64.bat"):
             return match_bat
     raise FileNotFoundError("Could not locate MSVC vcvars64.bat")
 

@@ -122,14 +122,14 @@ BONE_MAP = {
 }
 
 
-def resolve_target_bone(source_bone_name, mesh_name=None, bone_mapping_ci=None):
+def resolve_target_bone(source_bone_name, mesh_name=None, bone_mapping_lower=None):
     """Map a Miltina FBX bone name to its corresponding GTA V RAGE bone."""
     resolved_arm_or_finger = hand_skeleton_helper.resolve_finger_or_arm_bone(source_bone_name)
     if resolved_arm_or_finger is not None:
         return resolved_arm_or_finger
 
     resolved_pb = physbone_helper.resolve_miltina_maid_gtav_bone(
-        source_bone_name, mesh_name, bone_mapping_ci=bone_mapping_ci
+        source_bone_name, mesh_name, bone_mapping_lower=bone_mapping_lower
     )
     if resolved_pb is not None:
         return resolved_pb
@@ -532,7 +532,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             face_obj,
             resolved_mesh_weights.get("Body", {}),
             reset_unlisted=True,
-            allow_lr_symmetry=True,
+            allow_left_right_symmetry=True,
         )
         bpy.context.view_layer.update()
 
@@ -617,7 +617,7 @@ def build_trevor_miltina_avatar(cli_args=None):
                 cloth_obj,
                 blendshape_dict,
                 reset_unlisted=True,
-                allow_lr_symmetry=False,
+                allow_left_right_symmetry=False,
             )
 
             bpy.context.view_layer.objects.active = cloth_obj
@@ -829,7 +829,7 @@ def build_trevor_miltina_avatar(cli_args=None):
         print(i18n.translate("trevor.build.bones_relocated", count=relocated_arm_bones))
 
         bpy.context.view_layer.update()
-        vrc_bones_ci = {
+        vrc_bones_lower = {
             pose_item.name.lower(): pose_item for pose_item in vrc_armature.pose.bones
         }
         ped_world_matrices = {
@@ -852,7 +852,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             )
 
         def _resolve_trevor_pb_world_mat(src_bone_name):
-            pose_item = vrc_bones_ci.get(src_bone_name.strip().lower())
+            pose_item = vrc_bones_lower.get(src_bone_name.strip().lower())
             if pose_item is None:
                 return None
             return _map_trevor_world_mat(vrc_armature.matrix_world @ pose_item.matrix)
@@ -862,14 +862,14 @@ def build_trevor_miltina_avatar(cli_args=None):
             chain_specs=pb_resolution["chain_specs"],
             parent_map=pb_resolution["parent_map"],
             chain_cfgs=pb_resolution["chains"],
-            source_world_mat_fn=_resolve_trevor_pb_world_mat,
+            source_world_mat_func=_resolve_trevor_pb_world_mat,
             ped_world_matrices=ped_world_matrices,
         )
         if custom_physbones:
             injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
                 ped_armature,
                 custom_physbones,
-                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+                bone_tag_func=physbone_helper.compute_gtav_bone_tag,
             )
             print(
                 f"[PhysBones] Injected {injected_pb_count} Miltina Maid bones into Trevor armature ({len(physbone_chain_records)} chains)",
@@ -895,7 +895,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             hand_skeleton_helper.inject_custom_bones_into_blender_armature(
                 ped_armature,
                 custom_blink_bones,
-                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+                bone_tag_func=physbone_helper.compute_gtav_bone_tag,
             )
             valid_gtav_bones.update(item["name"] for item in custom_blink_bones)
         bpy.context.view_layer.update()
@@ -924,20 +924,20 @@ def build_trevor_miltina_avatar(cli_args=None):
     gtav_valid_bone_names = {bone_item.name for bone_item in ped_armature.data.bones}
     skirt_meshes = {"Milltina_cloth_skirt", "Milltina_cloth_apron", "Milltina_cloth_tail_slit"}
 
-    def _add_anatomical_skirt_follow(weight_dict, v_co, skirt_w):
-        if skirt_w <= 1e-6:
+    def _add_anatomical_skirt_follow(weight_dict, vert_coord_arg, skirt_weight):
+        if skirt_weight <= 1e-6:
             return
-        vert_t = max(0.0, min(1.0, (0.05 - v_co.z) / 0.14))
-        thigh_cap = vert_t * 0.45
-        thigh_w = skirt_w * thigh_cap
-        pelvis_w = skirt_w - thigh_w
-        if pelvis_w > 1e-6:
-            weight_dict["SKEL_Pelvis"] = weight_dict.get("SKEL_Pelvis", 0.0) + pelvis_w
-        lr_mix = max(0.0, min(1.0, (v_co.x + 0.035) / 0.070))
-        if thigh_w * lr_mix > 1e-6:
-            weight_dict["SKEL_L_Thigh"] = weight_dict.get("SKEL_L_Thigh", 0.0) + thigh_w * lr_mix
-        if thigh_w * (1.0 - lr_mix) > 1e-6:
-            weight_dict["SKEL_R_Thigh"] = weight_dict.get("SKEL_R_Thigh", 0.0) + thigh_w * (1.0 - lr_mix)
+        vert_factor = max(0.0, min(1.0, (0.05 - vert_coord_arg.z) / 0.14))
+        thigh_cap = vert_factor * 0.45
+        thigh_weight = skirt_weight * thigh_cap
+        pelvis_weight = skirt_weight - thigh_weight
+        if pelvis_weight > 1e-6:
+            weight_dict["SKEL_Pelvis"] = weight_dict.get("SKEL_Pelvis", 0.0) + pelvis_weight
+        left_right_mix = max(0.0, min(1.0, (vert_coord_arg.x + 0.035) / 0.070))
+        if thigh_weight * left_right_mix > 1e-6:
+            weight_dict["SKEL_L_Thigh"] = weight_dict.get("SKEL_L_Thigh", 0.0) + thigh_weight * left_right_mix
+        if thigh_weight * (1.0 - left_right_mix) > 1e-6:
+            weight_dict["SKEL_R_Thigh"] = weight_dict.get("SKEL_R_Thigh", 0.0) + thigh_weight * (1.0 - left_right_mix)
 
     for cloth_obj in meshes_to_keep:
         if cloth_obj in custom_hair_meshes:
@@ -961,7 +961,7 @@ def build_trevor_miltina_avatar(cli_args=None):
             tgt = resolve_target_bone(
                 vgroup.name,
                 cloth_obj.name,
-                bone_mapping_ci=pb_resolution.get("bone_mapping_ci"),
+                bone_mapping_lower=pb_resolution.get("bone_mapping_ci"),
             )
             if tgt not in gtav_valid_bone_names:
                 tgt = "SKEL_Pelvis"
@@ -969,7 +969,7 @@ def build_trevor_miltina_avatar(cli_args=None):
 
         vert_weights = {vert_idx: {} for vert_idx in range(len(cloth_obj.data.vertices))}
         for vert_item in cloth_obj.data.vertices:
-            w_map = vert_weights[vert_item.index]
+            weight_map = vert_weights[vert_item.index]
             for group_elem in vert_item.groups:
                 if group_elem.weight <= 0.001 or group_elem.group not in group_targets:
                     continue
@@ -979,19 +979,19 @@ def build_trevor_miltina_avatar(cli_args=None):
                 if is_skirt_mesh and low_raw.startswith("skirt7."):
                     seg_num = int("".join(chr_item for chr_item in low_raw if chr_item.isdigit()) or "7") % 10
                     tier = 0 if seg_num <= 3 else (1 if seg_num <= 5 else 2)
-                    pb_bl = f"PB_MT_SkirtBL_{tier}"
-                    pb_br = f"PB_MT_SkirtBR_{tier}"
-                    if pb_bl in gtav_valid_bone_names and pb_br in gtav_valid_bone_names:
-                        w_map[pb_bl] = w_map.get(pb_bl, 0.0) + group_elem.weight * 0.375
-                        w_map[pb_br] = w_map.get(pb_br, 0.0) + group_elem.weight * 0.375
-                        _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight * 0.25)
+                    physbone_skirt_back_left = f"PB_MT_SkirtBL_{tier}"
+                    physbone_skirt_back_right = f"PB_MT_SkirtBR_{tier}"
+                    if physbone_skirt_back_left in gtav_valid_bone_names and physbone_skirt_back_right in gtav_valid_bone_names:
+                        weight_map[physbone_skirt_back_left] = weight_map.get(physbone_skirt_back_left, 0.0) + group_elem.weight * 0.375
+                        weight_map[physbone_skirt_back_right] = weight_map.get(physbone_skirt_back_right, 0.0) + group_elem.weight * 0.375
+                        _add_anatomical_skirt_follow(weight_map, vert_item.co, group_elem.weight * 0.25)
                     else:
-                        _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight)
+                        _add_anatomical_skirt_follow(weight_map, vert_item.co, group_elem.weight)
                 elif is_skirt_mesh and tgt_bone.startswith("PB_MT_Skirt"):
-                    w_map[tgt_bone] = w_map.get(tgt_bone, 0.0) + group_elem.weight * 0.75
-                    _add_anatomical_skirt_follow(w_map, vert_item.co, group_elem.weight * 0.25)
+                    weight_map[tgt_bone] = weight_map.get(tgt_bone, 0.0) + group_elem.weight * 0.75
+                    _add_anatomical_skirt_follow(weight_map, vert_item.co, group_elem.weight * 0.25)
                 else:
-                    w_map[tgt_bone] = w_map.get(tgt_bone, 0.0) + group_elem.weight
+                    weight_map[tgt_bone] = weight_map.get(tgt_bone, 0.0) + group_elem.weight
 
         cloth_obj.vertex_groups.clear()
 
@@ -1054,7 +1054,7 @@ def build_trevor_miltina_avatar(cli_args=None):
         specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
+        micromovement_global_params=(0.0, 0.0, 0.0, 0.0),
     )
     miltina_cutout_mat = None
     miltina_alpha_mat = None
@@ -1180,11 +1180,11 @@ def build_trevor_miltina_avatar(cli_args=None):
 
     for poly_item in unified_obj.data.polygons:
         for loop_idx in poly_item.loop_indices:
-            vert_co = mesh_verts[mesh_loops[loop_idx].vertex_index].co
-            if vert_co.y < -0.015 and 0.42 <= vert_co.z <= 0.72 and abs(vert_co.x) <= 0.12:
-                norm_x = vert_co.x * 2.2
+            vert_coord = mesh_verts[mesh_loops[loop_idx].vertex_index].co
+            if vert_coord.y < -0.015 and 0.42 <= vert_coord.z <= 0.72 and abs(vert_coord.x) <= 0.12:
+                norm_x = vert_coord.x * 2.2
                 norm_y = -1.0
-                norm_z = (vert_co.z - 0.57) * 1.4
+                norm_z = (vert_coord.z - 0.57) * 1.4
                 vec_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z)
                 if vec_len > 1e-4:
                     split_normals[loop_idx] = (

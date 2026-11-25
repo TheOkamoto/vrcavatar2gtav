@@ -340,7 +340,7 @@ def prepare_universal_avatar_job(
     save_cfg_file = cfg_base_dir / f"{safe_avatar_slug}_{chosen_target_char}_blendshapes.cfg"
 
     with err_helper.guarded_stage("resolve_blendshapes", logger=active_logger):
-        bs_result = blendshape_helper.resolve_character_blendshapes(
+        blendshape_result = blendshape_helper.resolve_character_blendshapes(
             char_cfg,
             fbx_paths=[primary_fbx] if primary_fbx else all_fbx_paths,
             extra_fbx_paths=extra_outfit_fbxs,
@@ -409,9 +409,9 @@ def prepare_universal_avatar_job(
     resolved_mouth_strength = eye_blink_helper.resolve_mouth_open_strength(
         mouth_open_strength, char_cfg
     )
-    body_bs_weights = (bs_result.get("mesh_weights") or {}).get("Body") or {}
+    body_blendshape_weights = (blendshape_result.get("mesh_weights") or {}).get("Body") or {}
     blink_conflict = (
-        eye_blink_helper.detect_custom_eye_expression_conflict(body_bs_weights)
+        eye_blink_helper.detect_custom_eye_expression_conflict(body_blendshape_weights)
         if resolved_blink_mode == "auto"
         else None
     )
@@ -431,8 +431,8 @@ def prepare_universal_avatar_job(
         "import_face_blendshapes": use_face,
         "import_body_blendshapes": use_body,
         "blendshapes_cfg_path": str(save_cfg_file),
-        "blendshapes_source_used": bs_result.get("source_used", "none"),
-        "blendshapes_mesh_count": len(bs_result.get("mesh_weights", {})),
+        "blendshapes_source_used": blendshape_result.get("source_used", "none"),
+        "blendshapes_mesh_count": len(blendshape_result.get("mesh_weights", {})),
         "ma_armature_merges": len(ma_plan.get("armature_merges", ())),
         "ma_bone_proxies": len(ma_plan.get("bone_proxies", ())),
         "ma_blendshape_syncs": len(ma_plan.get("blendshape_syncs", ())),
@@ -482,7 +482,7 @@ def prepare_universal_avatar_job(
         "manifest": manifest_data,
         "manifest_path": manifest_path,
         "ma_plan": ma_plan,
-        "blendshapes_result": bs_result,
+        "blendshapes_result": blendshape_result,
         "physbones_result": pb_cfg,
         "discovered_avatars": discovered_avatars,
         "log_path": active_logger.log_path,

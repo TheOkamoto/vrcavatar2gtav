@@ -87,40 +87,40 @@ def extract_unity_scene_physbones(
     doc_cache: Dict[Path, Dict[str, Any]] = {resolved_unity: scene_doc}
 
     # Find target avatar root Transform
-    root_tf_id: Optional[str] = None
+    root_transform_id: Optional[str] = None
     selected_name = str(avatar_name or "").strip()
     top_roots: List[Tuple[str, str]] = []
-    for tf_id, tf_data in scene_doc["tfs"].items():
-        father_ref = tf_data.get("father")
+    for transform_id, transform_data in scene_doc["tfs"].items():
+        father_ref = transform_data.get("father")
         if not father_ref or father_ref[0] == "0":
-            go_ref = tf_data.get("go")
-            go_name = scene_doc["gos"].get(go_ref[0], {}).get("name", "") if go_ref else ""
-            top_roots.append((tf_id, go_name))
+            game_object_ref = transform_data.get("go")
+            game_object_name = scene_doc["gos"].get(game_object_ref[0], {}).get("name", "") if game_object_ref else ""
+            top_roots.append((transform_id, game_object_name))
 
     if selected_name:
-        for tf_id, go_name in top_roots:
-            if go_name == selected_name:
-                root_tf_id = tf_id
+        for transform_id, game_object_name in top_roots:
+            if game_object_name == selected_name:
+                root_transform_id = transform_id
                 break
-        if root_tf_id is None:
-            for tf_id, tf_data in scene_doc["tfs"].items():
-                go_ref = tf_data.get("go")
-                go_name = scene_doc["gos"].get(go_ref[0], {}).get("name", "") if go_ref else ""
-                if go_name == selected_name:
-                    root_tf_id = tf_id
+        if root_transform_id is None:
+            for transform_id, transform_data in scene_doc["tfs"].items():
+                game_object_ref = transform_data.get("go")
+                game_object_name = scene_doc["gos"].get(game_object_ref[0], {}).get("name", "") if game_object_ref else ""
+                if game_object_name == selected_name:
+                    root_transform_id = transform_id
                     break
-    if root_tf_id is None and top_roots:
+    if root_transform_id is None and top_roots:
         # Prefer first root matching hints
         hint_lows = [str(hint_item).strip().lower() for hint_item in character_hints if str(hint_item).strip()]
-        for tf_id, go_name in top_roots:
-            if any(hint_tok in go_name.lower() for hint_tok in hint_lows):
-                root_tf_id = tf_id
-                selected_name = go_name
+        for transform_id, game_object_name in top_roots:
+            if any(hint_tok in game_object_name.lower() for hint_tok in hint_lows):
+                root_transform_id = transform_id
+                selected_name = game_object_name
                 break
-        if root_tf_id is None:
-            root_tf_id, selected_name = top_roots[0]
+        if root_transform_id is None:
+            root_transform_id, selected_name = top_roots[0]
 
-    if root_tf_id is None:
+    if root_transform_id is None:
         return {
             "loaded": False,
             "chains": [],
@@ -132,55 +132,55 @@ def extract_unity_scene_physbones(
 
     children_tfs: Dict[str, List[str]] = {}
     children_pis: Dict[str, List[str]] = {}
-    tfs_by_pi: Dict[str, List[str]] = {}
-    for tf_id, tf_data in scene_doc["tfs"].items():
-        father_ref = tf_data.get("father")
+    transforms_by_prefab_instance: Dict[str, List[str]] = {}
+    for transform_id, transform_data in scene_doc["tfs"].items():
+        father_ref = transform_data.get("father")
         if father_ref and father_ref[0] != "0":
-            children_tfs.setdefault(father_ref[0], []).append(tf_id)
-        pi_ref = tf_data.get("pi")
-        if pi_ref and pi_ref[0] != "0":
-            tfs_by_pi.setdefault(pi_ref[0], []).append(tf_id)
-    for pi_id, pi_data in scene_doc["pis"].items():
-        ptf_ref = pi_data.get("parent_tf")
+            children_tfs.setdefault(father_ref[0], []).append(transform_id)
+        prefab_instance_ref = transform_data.get("pi")
+        if prefab_instance_ref and prefab_instance_ref[0] != "0":
+            transforms_by_prefab_instance.setdefault(prefab_instance_ref[0], []).append(transform_id)
+    for prefab_instance_id, prefab_instance_data in scene_doc["pis"].items():
+        ptf_ref = prefab_instance_data.get("parent_tf")
         if ptf_ref and ptf_ref[0] != "0":
-            children_pis.setdefault(ptf_ref[0], []).append(pi_id)
+            children_pis.setdefault(ptf_ref[0], []).append(prefab_instance_id)
 
     visited_tfs: Set[str] = set()
     visited_pis: Set[str] = set()
-    bfs_queue = collections_module.deque([root_tf_id])
+    bfs_queue = collections_module.deque([root_transform_id])
     while bfs_queue:
-        cur_tf = bfs_queue.popleft()
-        if cur_tf in visited_tfs:
+        cur_transform = bfs_queue.popleft()
+        if cur_transform in visited_tfs:
             continue
-        visited_tfs.add(cur_tf)
-        for child_tf in children_tfs.get(cur_tf, []):
-            bfs_queue.append(child_tf)
-        for child_pi in children_pis.get(cur_tf, []):
-            if child_pi not in visited_pis:
-                visited_pis.add(child_pi)
-                for tf_id in tfs_by_pi.get(child_pi, []):
-                    if tf_id not in visited_tfs:
-                        bfs_queue.append(tf_id)
+        visited_tfs.add(cur_transform)
+        for child_transform in children_tfs.get(cur_transform, []):
+            bfs_queue.append(child_transform)
+        for child_prefab_instance in children_pis.get(cur_transform, []):
+            if child_prefab_instance not in visited_pis:
+                visited_pis.add(child_prefab_instance)
+                for transform_id in transforms_by_prefab_instance.get(child_prefab_instance, []):
+                    if transform_id not in visited_tfs:
+                        bfs_queue.append(transform_id)
 
     # Collect GUIDs needed from PIs, SkinnedMeshRenderers, and FBX/prefab refs
     needed_guids: Set[str] = set()
-    for pi_id in visited_pis:
-        pi_entry = scene_doc["pis"][pi_id]
-        sp_ref = pi_entry.get("source_prefab")
-        if sp_ref and sp_ref[1]:
-            needed_guids.add(sp_ref[1])
-        for mod_item in pi_entry.get("mods", []):
+    for prefab_instance_id in visited_pis:
+        prefab_instance_entry = scene_doc["pis"][prefab_instance_id]
+        stripped_prefab_ref = prefab_instance_entry.get("source_prefab")
+        if stripped_prefab_ref and stripped_prefab_ref[1]:
+            needed_guids.add(stripped_prefab_ref[1])
+        for mod_item in prefab_instance_entry.get("mods", []):
             obj_ref = mod_item.get("objref")
             if obj_ref and obj_ref[1]:
                 needed_guids.add(obj_ref[1])
             tgt_ref = mod_item.get("target")
             if tgt_ref and tgt_ref[1]:
                 needed_guids.add(tgt_ref[1])
-        for rem_item in list(pi_entry.get("removed_gos", ())) + list(pi_entry.get("removed_comps", ())):
+        for rem_item in list(prefab_instance_entry.get("removed_gos", ())) + list(prefab_instance_entry.get("removed_comps", ())):
             if rem_item and rem_item[1]:
                 needed_guids.add(rem_item[1])
-    for tf_id in visited_tfs:
-        src_ref = scene_doc["tfs"][tf_id].get("src")
+    for transform_id in visited_tfs:
+        src_ref = scene_doc["tfs"][transform_id].get("src")
         if src_ref and src_ref[1]:
             needed_guids.add(src_ref[1])
     for smr_data in scene_doc.get("smrs", {}).values():
@@ -201,24 +201,24 @@ def extract_unity_scene_physbones(
         unity_scene_helper = None
     fbx_name_cache: Dict[Path, Dict[str, str]] = {}
 
-    def _get_doc(doc_p: Path) -> Dict[str, Any]:
-        if doc_p not in doc_cache:
-            doc_cache[doc_p] = _stream_parse_unity_physbone_doc(doc_p)
-        return doc_cache[doc_p]
+    def _get_doc(doc_path: Path) -> Dict[str, Any]:
+        if doc_path not in doc_cache:
+            doc_cache[doc_path] = _stream_parse_unity_physbone_doc(doc_path)
+        return doc_cache[doc_path]
 
     # Index any extra mesh FBX GUIDs declared inside visited child .prefab documents
     extra_prefab_guids: Set[str] = set()
-    for pi_id in visited_pis:
-        sp_ref = scene_doc["pis"][pi_id].get("source_prefab")
-        if not sp_ref or not sp_ref[1]:
+    for prefab_instance_id in visited_pis:
+        stripped_prefab_ref = scene_doc["pis"][prefab_instance_id].get("source_prefab")
+        if not stripped_prefab_ref or not stripped_prefab_ref[1]:
             continue
-        cand_pref = guid_map.get(sp_ref[1])
+        cand_pref = guid_map.get(stripped_prefab_ref[1])
         if cand_pref and cand_pref.is_file() and cand_pref.suffix.lower() == ".prefab":
             pref_doc_scan = _get_doc(cand_pref)
             for smr_item in pref_doc_scan.get("smrs", {}).values():
-                m_ref = smr_item.get("mesh")
-                if m_ref and m_ref[1] and m_ref[1] not in guid_map:
-                    extra_prefab_guids.add(m_ref[1])
+                nested_mesh_ref = smr_item.get("mesh")
+                if nested_mesh_ref and nested_mesh_ref[1] and nested_mesh_ref[1] not in guid_map:
+                    extra_prefab_guids.add(nested_mesh_ref[1])
     if extra_prefab_guids:
         guid_map.update(
             _index_unity_asset_guids(
@@ -239,94 +239,94 @@ def extract_unity_scene_physbones(
             return str(fbx_name_cache[asset_path].get(node_fid, "") or "")
         if low_suf == ".prefab":
             ext_doc = _get_doc(asset_path)
-            ext_tf = ext_doc["tfs"].get(node_fid)
-            if ext_tf and ext_tf.get("go"):
-                return str(ext_doc["gos"].get(ext_tf["go"][0], {}).get("name", "") or "")
-            ext_go = ext_doc["gos"].get(node_fid)
-            if ext_go:
-                return str(ext_go.get("name", "") or "")
+            ext_transform = ext_doc["tfs"].get(node_fid)
+            if ext_transform and ext_transform.get("go"):
+                return str(ext_doc["gos"].get(ext_transform["go"][0], {}).get("name", "") or "")
+            ext_game_object = ext_doc["gos"].get(node_fid)
+            if ext_game_object:
+                return str(ext_game_object.get("name", "") or "")
         return ""
 
-    def _resolve_tf_name(doc_obj: Dict[str, Any], tf_id: str) -> str:
-        tf_entry = doc_obj["tfs"].get(tf_id)
-        if not tf_entry:
+    def _resolve_transform_name(doc_obj: Dict[str, Any], transform_id: str) -> str:
+        transform_entry = doc_obj["tfs"].get(transform_id)
+        if not transform_entry:
             return ""
-        go_ref = tf_entry.get("go")
-        if go_ref:
-            go_entry = doc_obj["gos"].get(go_ref[0])
-            if go_entry and go_entry.get("name"):
-                return str(go_entry["name"])
-        src_ref = tf_entry.get("src")
+        game_object_ref = transform_entry.get("go")
+        if game_object_ref:
+            game_object_entry = doc_obj["gos"].get(game_object_ref[0])
+            if game_object_entry and game_object_entry.get("name"):
+                return str(game_object_entry["name"])
+        src_ref = transform_entry.get("src")
         if src_ref and src_ref[1]:
-            asset_p = guid_map.get(src_ref[1])
-            if asset_p and asset_p.is_file():
-                resolved_nm = _resolve_fbx_node_name(asset_p, src_ref[0])
-                if resolved_nm:
-                    return resolved_nm
+            fbx_asset_path = guid_map.get(src_ref[1])
+            if fbx_asset_path and fbx_asset_path.is_file():
+                resolved_name = _resolve_fbx_node_name(fbx_asset_path, src_ref[0])
+                if resolved_name:
+                    return resolved_name
         return ""
 
-    def _is_scene_tf_active(tf_id: str) -> bool:
-        cur_id = tf_id
-        while cur_id and cur_id != "0" and cur_id != root_tf_id:
-            tf_entry = scene_doc["tfs"].get(cur_id)
-            if not tf_entry:
+    def _is_scene_transform_active(transform_id: str) -> bool:
+        cur_id = transform_id
+        while cur_id and cur_id != "0" and cur_id != root_transform_id:
+            transform_entry = scene_doc["tfs"].get(cur_id)
+            if not transform_entry:
                 break
-            go_ref = tf_entry.get("go")
-            if go_ref:
-                go_entry = scene_doc["gos"].get(go_ref[0])
-                if go_entry:
-                    if go_entry.get("active") is False or go_entry.get("tag") == "EditorOnly":
+            game_object_ref = transform_entry.get("go")
+            if game_object_ref:
+                game_object_entry = scene_doc["gos"].get(game_object_ref[0])
+                if game_object_entry:
+                    if game_object_entry.get("active") is False or game_object_entry.get("tag") == "EditorOnly":
                         return False
-            father_ref = tf_entry.get("father")
+            father_ref = transform_entry.get("father")
             cur_id = father_ref[0] if father_ref else ""
         return True
 
-    def _scene_ancestor_names(tf_id: str) -> List[str]:
+    def _scene_ancestor_names(transform_id: str) -> List[str]:
         ancestors: List[str] = []
-        cur_id = tf_id
+        cur_id = transform_id
         for _step in range(32):
-            tf_entry = scene_doc["tfs"].get(cur_id)
-            if not tf_entry:
+            transform_entry = scene_doc["tfs"].get(cur_id)
+            if not transform_entry:
                 break
-            father_ref = tf_entry.get("father")
+            father_ref = transform_entry.get("father")
             cur_id = father_ref[0] if father_ref else ""
             if not cur_id or cur_id == "0":
                 break
-            anc_name = _resolve_tf_name(scene_doc, cur_id)
+            anc_name = _resolve_transform_name(scene_doc, cur_id)
             if anc_name:
                 ancestors.append(anc_name)
         return ancestors
 
     # Identify disabled / replaced / MA-toggled-off / deleted old outfit meshes and removed overrides
-    excluded_meshes_ci: Set[str] = {
+    excluded_meshes_lower: Set[str] = {
         str(name_item).strip().lower() for name_item in excluded_meshes if str(name_item).strip()
     }
-    active_scene_meshes_ci: Set[str] = {
+    active_scene_meshes_lower: Set[str] = {
         str(name_item).strip().lower() for name_item in active_meshes if str(name_item).strip()
     }
     active_mesh_fbx_guids: Set[str] = set()
-    opaque_fbx_pi_guids: Set[str] = set()
+    opaque_fbx_prefab_guids: Set[str] = set()
     ma_active_by_fbx_norm: Dict[str, Set[str]] = {}
     ma_discovered_fbxs: List[Path] = []
     orphaned_physbones: List[Dict[str, Any]] = []
     orphaned_seen_keys: Set[Tuple[str, str]] = set()
 
     def _record_orphan(root_name_str: str, reason_tok: str, parent_bone_str: str = "SKEL_Pelvis") -> None:
-        clean_rt = str(root_name_str or "").strip() or "unknown"
-        dedup_key = (clean_rt.lower(), reason_tok)
+        clean_root = str(root_name_str or "").strip() or "unknown"
+        dedup_key = (clean_root.lower(), reason_tok)
         if dedup_key in orphaned_seen_keys:
             return
         orphaned_seen_keys.add(dedup_key)
         orphaned_physbones.append(
             {
-                "root_bone": clean_rt,
+                "root_bone": clean_root,
                 "parent_bone": parent_bone_str,
                 "reason": reason_tok,
             }
         )
 
-    def _is_fallback_hair_protected(mesh_nm: str) -> bool:
-        return bool(fallback_prefab_paths) and "hair" in str(mesh_nm).lower()
+    def _is_fallback_hair_protected(mesh_name: str) -> bool:
+        return bool(fallback_prefab_paths) and "hair" in str(mesh_name).lower()
 
     try:
         import modular_avatar_helper as ma_helper
@@ -346,165 +346,165 @@ def extract_unity_scene_physbones(
                 for dis_mesh in ma_plan.get("disabled_meshes", ()):
                     low_mesh = str(dis_mesh).strip().lower()
                     if low_mesh and not _is_fallback_hair_protected(low_mesh):
-                        excluded_meshes_ci.add(low_mesh)
+                        excluded_meshes_lower.add(low_mesh)
                 for act_mesh in ma_plan.get("active_meshes", ()):
                     low_mesh = str(act_mesh).strip().lower()
                     if low_mesh:
-                        active_scene_meshes_ci.add(low_mesh)
+                        active_scene_meshes_lower.add(low_mesh)
                 for raw_ma_fbx in list(ma_plan.get("base_fbx_paths", ())) + list(ma_plan.get("extra_fbx_paths", ())):
                     if raw_ma_fbx:
                         fbx_obj = Path(raw_ma_fbx)
                         if fbx_obj.is_file() and fbx_obj not in ma_discovered_fbxs:
                             ma_discovered_fbxs.append(fbx_obj)
-                for fbx_key, m_names in (ma_plan.get("active_meshes_by_fbx") or {}).items():
-                    low_m_set = {str(item_n).strip().lower() for item_n in (m_names or ()) if str(item_n).strip()}
-                    if low_m_set:
-                        ma_active_by_fbx_norm[str(fbx_key).replace("\\", "/").strip().lower()] = low_m_set
+                for fbx_key, mesh_names_list in (ma_plan.get("active_meshes_by_fbx") or {}).items():
+                    lower_mesh_set = {str(mesh_item_name).strip().lower() for mesh_item_name in (mesh_names_list or ()) if str(mesh_item_name).strip()}
+                    if lower_mesh_set:
+                        ma_active_by_fbx_norm[str(fbx_key).replace("\\", "/").strip().lower()] = lower_mesh_set
         except Exception:
             pass
 
-    go_to_tf = {
-        tf_data["go"][0]: tf_id
-        for tf_id, tf_data in scene_doc["tfs"].items()
-        if tf_data.get("go")
+    game_object_to_transform = {
+        transform_data["go"][0]: transform_id
+        for transform_id, transform_data in scene_doc["tfs"].items()
+        if transform_data.get("go")
     }
 
     # Check direct SkinnedMeshRenderers in scene subtree
     for _smr_id, smr_data in scene_doc.get("smrs", {}).items():
         if smr_data.get("stripped"):
             continue
-        smr_go = smr_data.get("go")
-        if not smr_go:
+        skinned_mesh_game_object = smr_data.get("go")
+        if not skinned_mesh_game_object:
             continue
-        smr_tf = go_to_tf.get(smr_go[0])
-        if smr_tf not in visited_tfs:
+        skinned_mesh_transform = game_object_to_transform.get(skinned_mesh_game_object[0])
+        if skinned_mesh_transform not in visited_tfs:
             continue
-        go_info = scene_doc["gos"].get(smr_go[0], {})
-        go_name = str(go_info.get("name", "") or "").strip()
+        game_object_info = scene_doc["gos"].get(skinned_mesh_game_object[0], {})
+        game_object_name = str(game_object_info.get("name", "") or "").strip()
         mesh_ref = smr_data.get("mesh")
-        mesh_asset_nm = ""
+        mesh_asset_name = ""
         if mesh_ref and mesh_ref[1] and mesh_ref[1] in guid_map:
-            mesh_asset_nm = _resolve_fbx_node_name(guid_map[mesh_ref[1]], mesh_ref[0])
-        smr_active = _is_scene_tf_active(smr_tf) and bool(smr_data.get("enabled", True))
+            mesh_asset_name = _resolve_fbx_node_name(guid_map[mesh_ref[1]], mesh_ref[0])
+        smr_active = _is_scene_transform_active(skinned_mesh_transform) and bool(smr_data.get("enabled", True))
         if smr_active:
-            for cand_nm in (go_name, mesh_asset_nm):
-                if cand_nm:
-                    active_scene_meshes_ci.add(cand_nm.lower())
+            for candidate_name in (game_object_name, mesh_asset_name):
+                if candidate_name:
+                    active_scene_meshes_lower.add(candidate_name.lower())
             if mesh_ref and mesh_ref[1]:
                 active_mesh_fbx_guids.add(mesh_ref[1])
         else:
-            for cand_nm in (go_name, mesh_asset_nm):
-                if cand_nm and not _is_fallback_hair_protected(cand_nm):
-                    excluded_meshes_ci.add(cand_nm.lower())
+            for candidate_name in (game_object_name, mesh_asset_name):
+                if candidate_name and not _is_fallback_hair_protected(candidate_name):
+                    excluded_meshes_lower.add(candidate_name.lower())
 
     # Inspect PrefabInstances for opaque FBX modifications, removed GOs, and prefab SMRs
-    for pi_id in sorted(visited_pis, key=lambda val_s: int(val_s)):
-        pi_data = scene_doc["pis"][pi_id]
-        ptf_ref = pi_data.get("parent_tf")
+    for prefab_instance_id in sorted(visited_pis, key=lambda value_str: int(value_str)):
+        prefab_instance_data = scene_doc["pis"][prefab_instance_id]
+        ptf_ref = prefab_instance_data.get("parent_tf")
         ptf_id = ptf_ref[0] if ptf_ref else "0"
         if ptf_id not in visited_tfs:
             continue
-        pi_parent_active = _is_scene_tf_active(ptf_id)
-        sp_ref = pi_data.get("source_prefab")
-        if not sp_ref or not sp_ref[1]:
+        prefab_instance_parent_active = _is_scene_transform_active(ptf_id)
+        stripped_prefab_ref = prefab_instance_data.get("source_prefab")
+        if not stripped_prefab_ref or not stripped_prefab_ref[1]:
             continue
-        asset_target = guid_map.get(sp_ref[1])
+        asset_target = guid_map.get(stripped_prefab_ref[1])
         if not asset_target or not asset_target.is_file():
             continue
 
         # Record disabled/removed child nodes even on opaque .fbx PrefabInstances
-        for rem_item in pi_data.get("removed_gos", ()):
-            rem_guid = rem_item[1] or sp_ref[1]
+        for rem_item in prefab_instance_data.get("removed_gos", ()):
+            rem_guid = rem_item[1] or stripped_prefab_ref[1]
             rem_asset = guid_map.get(rem_guid, asset_target)
             rem_name = _resolve_fbx_node_name(rem_asset, rem_item[0])
             if rem_name and not _is_fallback_hair_protected(rem_name):
-                excluded_meshes_ci.add(rem_name.lower())
+                excluded_meshes_lower.add(rem_name.lower())
 
-        for mod_item in pi_data.get("mods", ()):
-            m_path = mod_item.get("path", "")
-            m_val = mod_item.get("value", "")
+        for mod_item in prefab_instance_data.get("mods", ()):
+            mod_path = mod_item.get("path", "")
+            mod_value = mod_item.get("value", "")
             if (
-                (m_path == "m_IsActive" and m_val == "0")
-                or (m_path == "m_Enabled" and m_val == "0")
-                or (m_path == "m_TagString" and m_val == "EditorOnly")
+                (mod_path == "m_IsActive" and mod_value == "0")
+                or (mod_path == "m_Enabled" and mod_value == "0")
+                or (mod_path == "m_TagString" and mod_value == "EditorOnly")
             ):
                 tgt_ref = mod_item.get("target")
                 if tgt_ref and tgt_ref[0]:
-                    tgt_asset = guid_map.get(tgt_ref[1] or sp_ref[1], asset_target)
-                    dis_node_nm = _resolve_fbx_node_name(tgt_asset, tgt_ref[0])
-                    if dis_node_nm and not _is_fallback_hair_protected(dis_node_nm):
-                        excluded_meshes_ci.add(dis_node_nm.lower())
+                    tgt_asset = guid_map.get(tgt_ref[1] or stripped_prefab_ref[1], asset_target)
+                    disabled_node_name = _resolve_fbx_node_name(tgt_asset, tgt_ref[0])
+                    if disabled_node_name and not _is_fallback_hair_protected(disabled_node_name):
+                        excluded_meshes_lower.add(disabled_node_name.lower())
 
         if asset_target.suffix.lower() == ".fbx":
-            opaque_fbx_pi_guids.add(sp_ref[1])
+            opaque_fbx_prefab_guids.add(stripped_prefab_ref[1])
             continue
         if asset_target.suffix.lower() != ".prefab":
             continue
 
         pref_scan_doc = _get_doc(asset_target)
         scan_mods_by_target: Dict[str, List[Dict[str, Any]]] = {}
-        for mod_item in pi_data.get("mods", []):
+        for mod_item in prefab_instance_data.get("mods", []):
             tgt_ref = mod_item.get("target")
             if tgt_ref:
                 scan_mods_by_target.setdefault(tgt_ref[0], []).append(mod_item)
         scan_removed_gos = {
-            (rem_ref[0], rem_ref[1] or sp_ref[1]) for rem_ref in pi_data.get("removed_gos", ())
+            (rem_ref[0], rem_ref[1] or stripped_prefab_ref[1]) for rem_ref in prefab_instance_data.get("removed_gos", ())
         }
-        scan_removed_go_fids = {pair[0] for pair in scan_removed_gos}
-        scan_pref_go_to_tf = {
-            tf_d["go"][0]: tid for tid, tf_d in pref_scan_doc["tfs"].items() if tf_d.get("go")
+        scan_removed_game_object_file_ids = {pair[0] for pair in scan_removed_gos}
+        scan_prefab_game_object_to_transform = {
+            transform_dict["go"][0]: tid for tid, transform_dict in pref_scan_doc["tfs"].items() if transform_dict.get("go")
         }
 
         for _smr_id, smr_raw in pref_scan_doc.get("smrs", {}).items():
-            smr_go_ref = smr_raw.get("go")
-            if not smr_go_ref:
+            skinned_mesh_game_object_ref = smr_raw.get("go")
+            if not skinned_mesh_game_object_ref:
                 continue
-            smr_go_id = smr_go_ref[0]
-            smr_go_info = pref_scan_doc["gos"].get(smr_go_id, {})
-            smr_go_name = str(smr_go_info.get("name", "") or "").strip()
+            skinned_mesh_game_object_id = skinned_mesh_game_object_ref[0]
+            skinned_mesh_game_object_info = pref_scan_doc["gos"].get(skinned_mesh_game_object_id, {})
+            skinned_mesh_game_object_name = str(skinned_mesh_game_object_info.get("name", "") or "").strip()
             mesh_ref = smr_raw.get("mesh")
-            mesh_asset_nm = ""
+            mesh_asset_name = ""
             if mesh_ref and mesh_ref[1] and mesh_ref[1] in guid_map:
-                mesh_asset_nm = _resolve_fbx_node_name(guid_map[mesh_ref[1]], mesh_ref[0])
+                mesh_asset_name = _resolve_fbx_node_name(guid_map[mesh_ref[1]], mesh_ref[0])
 
             smr_enabled = bool(smr_raw.get("enabled", True))
             for mod_item in scan_mods_by_target.get(_smr_id, ()):
                 if mod_item.get("path") == "m_Enabled":
                     smr_enabled = mod_item.get("value") != "0"
 
-            chain_active = pi_parent_active and smr_enabled and (smr_go_id not in scan_removed_go_fids)
-            cur_pt = scan_pref_go_to_tf.get(smr_go_id, "")
-            while chain_active and cur_pt and cur_pt != "0":
-                pt_entry = pref_scan_doc["tfs"].get(cur_pt)
-                if not pt_entry:
+            chain_active = prefab_instance_parent_active and smr_enabled and (skinned_mesh_game_object_id not in scan_removed_game_object_file_ids)
+            cur_point = scan_prefab_game_object_to_transform.get(skinned_mesh_game_object_id, "")
+            while chain_active and cur_point and cur_point != "0":
+                point_entry = pref_scan_doc["tfs"].get(cur_point)
+                if not point_entry:
                     break
-                cgo_id = pt_entry.get("go", ("0",))[0]
-                if cgo_id in scan_removed_go_fids:
+                cgo_id = point_entry.get("go", ("0",))[0]
+                if cgo_id in scan_removed_game_object_file_ids:
                     chain_active = False
                     break
                 cgo = pref_scan_doc["gos"].get(cgo_id, {})
-                c_active = cgo.get("active", True)
-                c_tag = cgo.get("tag", "")
+                child_active = cgo.get("active", True)
+                child_tag = cgo.get("tag", "")
                 for mod_item in scan_mods_by_target.get(cgo_id, ()):
                     if mod_item.get("path") == "m_IsActive":
-                        c_active = mod_item.get("value") != "0"
+                        child_active = mod_item.get("value") != "0"
                     elif mod_item.get("path") == "m_TagString":
-                        c_tag = mod_item.get("value", "")
-                if not c_active or c_tag == "EditorOnly":
+                        child_tag = mod_item.get("value", "")
+                if not child_active or child_tag == "EditorOnly":
                     chain_active = False
                     break
-                cur_pt = pt_entry.get("father", ("0",))[0]
+                cur_point = point_entry.get("father", ("0",))[0]
 
             if chain_active:
-                for cand_nm in (smr_go_name, mesh_asset_nm):
-                    if cand_nm:
-                        active_scene_meshes_ci.add(cand_nm.lower())
+                for candidate_name in (skinned_mesh_game_object_name, mesh_asset_name):
+                    if candidate_name:
+                        active_scene_meshes_lower.add(candidate_name.lower())
                 if mesh_ref and mesh_ref[1]:
                     active_mesh_fbx_guids.add(mesh_ref[1])
             else:
-                for cand_nm in (smr_go_name, mesh_asset_nm):
-                    if cand_nm and not _is_fallback_hair_protected(cand_nm):
-                        excluded_meshes_ci.add(cand_nm.lower())
+                for candidate_name in (skinned_mesh_game_object_name, mesh_asset_name):
+                    if candidate_name and not _is_fallback_hair_protected(candidate_name):
+                        excluded_meshes_lower.add(candidate_name.lower())
 
     # Resolve active avatar FBXs (explicit inputs + MA outfit FBXs + active SkinnedMeshRenderer .fbx refs)
     effective_fbxs: List[Union[str, Path]] = []
@@ -530,50 +530,50 @@ def extract_unity_scene_physbones(
         if act_asset is not None:
             _add_effective_fbx(act_asset)
     if not effective_fbxs:
-        for asset_p in guid_map.values():
-            _add_effective_fbx(asset_p)
+        for fbx_asset_path in guid_map.values():
+            _add_effective_fbx(fbx_asset_path)
 
-    if active_scene_meshes_ci:
-        excluded_meshes_ci.difference_update(active_scene_meshes_ci)
+    if active_scene_meshes_lower:
+        excluded_meshes_lower.difference_update(active_scene_meshes_lower)
 
     all_fbx_bones, _init_weighted, fbx_parent_map, mesh_weights_by_file, has_skin_clusters = (
-        _inspect_fbx_weights_detailed(effective_fbxs, excluded_meshes=sorted(excluded_meshes_ci))
+        _inspect_fbx_weights_detailed(effective_fbxs, excluded_meshes=sorted(excluded_meshes_lower))
     )
 
     # For YAML-expanded FBXs (or MA-enumerated FBXs), exclude any mesh deleted from the active hierarchy
     # so leftover old-dress bones cannot keep their skin weights alive in weighted_fbx_bones.
-    for fbx_item_p, file_mesh_map in mesh_weights_by_file.items():
-        fbx_guid = _read_unity_meta_guid(fbx_item_p)
-        norm_fbx_p = str(fbx_item_p).replace("\\", "/").strip().lower()
-        ma_fbx_set = ma_active_by_fbx_norm.get(norm_fbx_p)
+    for fbx_item_path, file_mesh_map in mesh_weights_by_file.items():
+        fbx_guid = _read_unity_meta_guid(fbx_item_path)
+        normalized_fbx_path = str(fbx_item_path).replace("\\", "/").strip().lower()
+        ma_fbx_set = ma_active_by_fbx_norm.get(normalized_fbx_path)
         if ma_fbx_set is not None:
             for mesh_low in file_mesh_map:
-                if mesh_low not in ma_fbx_set and mesh_low not in active_scene_meshes_ci and not _is_fallback_hair_protected(mesh_low):
-                    excluded_meshes_ci.add(mesh_low)
-        elif fbx_guid and fbx_guid in active_mesh_fbx_guids and fbx_guid not in opaque_fbx_pi_guids:
+                if mesh_low not in ma_fbx_set and mesh_low not in active_scene_meshes_lower and not _is_fallback_hair_protected(mesh_low):
+                    excluded_meshes_lower.add(mesh_low)
+        elif fbx_guid and fbx_guid in active_mesh_fbx_guids and fbx_guid not in opaque_fbx_prefab_guids:
             for mesh_low in file_mesh_map:
-                if mesh_low not in active_scene_meshes_ci and not _is_fallback_hair_protected(mesh_low):
-                    excluded_meshes_ci.add(mesh_low)
+                if mesh_low not in active_scene_meshes_lower and not _is_fallback_hair_protected(mesh_low):
+                    excluded_meshes_lower.add(mesh_low)
 
-    if active_scene_meshes_ci:
-        excluded_meshes_ci.difference_update(active_scene_meshes_ci)
+    if active_scene_meshes_lower:
+        excluded_meshes_lower.difference_update(active_scene_meshes_lower)
 
     weighted_fbx_bones: Set[str] = set()
     disabled_mesh_all_bones: Set[str] = set()
     for file_mesh_map in mesh_weights_by_file.values():
         for mesh_low, weight_set in file_mesh_map.items():
-            if mesh_low in excluded_meshes_ci:
+            if mesh_low in excluded_meshes_lower:
                 disabled_mesh_all_bones.update(weight_set)
             else:
                 weighted_fbx_bones.update(weight_set)
-    disabled_only_bones_ci: Set[str] = disabled_mesh_all_bones - weighted_fbx_bones
+    disabled_only_bones_lower: Set[str] = disabled_mesh_all_bones - weighted_fbx_bones
 
     if not prune_orphaned:
-        allowed_bones_ci: Optional[Set[str]] = None
+        allowed_bones_lower: Optional[Set[str]] = None
     elif has_skin_clusters:
-        allowed_bones_ci = weighted_fbx_bones
+        allowed_bones_lower = weighted_fbx_bones
     else:
-        allowed_bones_ci = all_fbx_bones or None
+        allowed_bones_lower = all_fbx_bones or None
 
     def _pb_to_record(
         pb_raw: Dict[str, Any],
@@ -635,8 +635,8 @@ def extract_unity_scene_physbones(
             "is_animated": _ival("is_animated", 1),
         }
 
-    fbx_parent_targets_ci: Set[str] = set(fbx_parent_map.values())
-    humanoid_structural_roots_ci = frozenset(
+    fbx_parent_targets_lower: Set[str] = set(fbx_parent_map.values())
+    humanoid_structural_roots_lower = frozenset(
         {"hips", "pelvis", "spine", "chest", "upperchest", "upper_chest", "neck", "head"}
     )
 
@@ -670,7 +670,7 @@ def extract_unity_scene_physbones(
             if not all_fbx_bones:
                 cleaned_spokes.append(list(spoke_seq))
                 continue
-            kept_fbx = [bone_nm for bone_nm in spoke_seq if _is_fbx_bone(bone_nm)]
+            kept_fbx = [bone_name for bone_name in spoke_seq if _is_fbx_bone(bone_name)]
             if not kept_fbx:
                 continue
             # Drop dead branches like [UN_Ribbon, RibbonRoot] when RibbonRoot is a non-FBX
@@ -678,7 +678,7 @@ def extract_unity_scene_physbones(
             if (
                 len(spoke_seq) >= 2
                 and len(kept_fbx) == 1
-                and kept_fbx[0].strip().lower() in fbx_parent_targets_ci
+                and kept_fbx[0].strip().lower() in fbx_parent_targets_lower
             ):
                 continue
             cleaned_spokes.append(kept_fbx)
@@ -708,104 +708,104 @@ def extract_unity_scene_physbones(
     for pb_id, pb_data in scene_doc["pbs"].items():
         if pb_data.get("stripped") or pb_data.get("enabled", True) is False:
             continue
-        go_ref = pb_data.get("go")
-        if not go_ref:
+        game_object_ref = pb_data.get("go")
+        if not game_object_ref:
             continue
-        tf_id = go_to_tf.get(go_ref[0])
-        if tf_id not in visited_tfs or not _is_scene_tf_active(tf_id):
+        transform_id = game_object_to_transform.get(game_object_ref[0])
+        if transform_id not in visited_tfs or not _is_scene_transform_active(transform_id):
             continue
-        comp_go_name = _resolve_tf_name(scene_doc, tf_id)
-        rt_ref = pb_data.get("root_tf")
-        if rt_ref and rt_ref[0] != "0":
-            if rt_ref[1] or rt_ref[0] not in scene_doc["tfs"]:
-                _record_orphan(comp_go_name or pb_id, "dangling_root_transform")
+        component_game_object_name = _resolve_transform_name(scene_doc, transform_id)
+        root_ref = pb_data.get("root_tf")
+        if root_ref and root_ref[0] != "0":
+            if root_ref[1] or root_ref[0] not in scene_doc["tfs"]:
+                _record_orphan(component_game_object_name or pb_id, "dangling_root_transform")
                 continue
-            rt_tid = rt_ref[0]
-            rt_name = _resolve_tf_name(scene_doc, rt_tid) or comp_go_name
-            if rt_tid not in visited_tfs or not _is_scene_tf_active(rt_tid):
+            resolved_root_transform_id = root_ref[0]
+            chain_root_name = _resolve_transform_name(scene_doc, resolved_root_transform_id) or component_game_object_name
+            if resolved_root_transform_id not in visited_tfs or not _is_scene_transform_active(resolved_root_transform_id):
                 _record_orphan(
-                    rt_name or pb_id,
+                    chain_root_name or pb_id,
                     "inactive_root_transform",
-                    resolve_parent_bone_from_unity_chain(_scene_ancestor_names(rt_tid))[0],
+                    resolve_parent_bone_from_unity_chain(_scene_ancestor_names(resolved_root_transform_id))[0],
                 )
                 continue
         else:
-            rt_tid = tf_id
-            rt_name = comp_go_name
-        if not rt_name or rt_name.strip().lower() in humanoid_structural_roots_ci:
+            resolved_root_transform_id = transform_id
+            chain_root_name = component_game_object_name
+        if not chain_root_name or chain_root_name.strip().lower() in humanoid_structural_roots_lower:
             continue
         ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
-        if rt_tid in ignored_ids:
+        if resolved_root_transform_id in ignored_ids:
             continue
         spokes, all_desc = _collect_linear_spokes(
-            rt_tid,
+            resolved_root_transform_id,
             children_tfs,
-            lambda tid_arg: _resolve_tf_name(scene_doc, tid_arg),
+            lambda tid_arg: _resolve_transform_name(scene_doc, tid_arg),
             ignored_ids,
-            allowed_bones_ci=allowed_bones_ci,
+            allowed_bones_lower=allowed_bones_lower,
         )
-        ancestors = _scene_ancestor_names(rt_tid)
-        parent_nm_diag, _parent_tag_diag = resolve_parent_bone_from_unity_chain(ancestors)
+        ancestors = _scene_ancestor_names(resolved_root_transform_id)
+        parent_name_diag, _parent_tag_diag = resolve_parent_bone_from_unity_chain(ancestors)
         # Skip gimmick or old-dress orphaned PBs whose bones have zero active skin weights
-        if allowed_bones_ci is not None and not any(
-            bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+        if allowed_bones_lower is not None and not any(
+            bone_str.strip().lower() in allowed_bones_lower for bone_str in all_desc
         ):
             orphan_reason = (
                 "disabled_old_outfit_mesh"
-                if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in all_desc)
+                if any(bone_str.strip().lower() in disabled_only_bones_lower for bone_str in all_desc)
                 else "no_active_mesh_weights"
             )
-            _record_orphan(rt_name, orphan_reason, parent_nm_diag)
+            _record_orphan(chain_root_name, orphan_reason, parent_name_diag)
             continue
         spokes, unwrapped = _unwrap_container_spokes(spokes)
         for spoke_bones in spokes:
-            if allowed_bones_ci is not None and not any(
-                bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
+            if allowed_bones_lower is not None and not any(
+                bone_str.strip().lower() in allowed_bones_lower for bone_str in spoke_bones
             ):
-                spoke_rt = spoke_bones[0] if spoke_bones else rt_name
+                spoke_root = spoke_bones[0] if spoke_bones else chain_root_name
                 orphan_reason = (
                     "disabled_old_outfit_mesh"
-                    if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in spoke_bones)
+                    if any(bone_str.strip().lower() in disabled_only_bones_lower for bone_str in spoke_bones)
                     else "no_active_mesh_weights"
                 )
-                _record_orphan(spoke_rt, orphan_reason, parent_nm_diag)
+                _record_orphan(spoke_root, orphan_reason, parent_name_diag)
                 continue
-            eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
-            extracted_spokes.append(_pb_to_record(pb_data, eff_rt_name, spoke_bones, all_desc, ancestors))
+            effective_root_name = spoke_bones[0] if unwrapped and spoke_bones else chain_root_name
+            extracted_spokes.append(_pb_to_record(pb_data, effective_root_name, spoke_bones, all_desc, ancestors))
 
     # 2. Active child PrefabInstance VRCPhysBones (e.g. MA Shinano hair, outfits)
-    for pi_id in sorted(visited_pis, key=lambda val_s: int(val_s)):
-        pi_data = scene_doc["pis"][pi_id]
-        ptf_ref = pi_data.get("parent_tf")
+    for prefab_instance_id in sorted(visited_pis, key=lambda value_str: int(value_str)):
+        prefab_instance_data = scene_doc["pis"][prefab_instance_id]
+        ptf_ref = prefab_instance_data.get("parent_tf")
         ptf_id = ptf_ref[0] if ptf_ref else "0"
-        if ptf_id not in visited_tfs or not _is_scene_tf_active(ptf_id):
+        if ptf_id not in visited_tfs or not _is_scene_transform_active(ptf_id):
             continue
-        sp_ref = pi_data.get("source_prefab")
-        if not sp_ref or not sp_ref[1]:
+        stripped_prefab_ref = prefab_instance_data.get("source_prefab")
+        if not stripped_prefab_ref or not stripped_prefab_ref[1]:
             continue
-        prefab_path = guid_map.get(sp_ref[1])
+        prefab_path = guid_map.get(stripped_prefab_ref[1])
         if not prefab_path or not prefab_path.is_file() or prefab_path.suffix.lower() != ".prefab":
             continue
         pref_doc = _get_doc(prefab_path)
         mods_by_target: Dict[str, List[Dict[str, Any]]] = {}
-        for mod_item in pi_data.get("mods", []):
+        for mod_item in prefab_instance_data.get("mods", []):
             target_ref = mod_item.get("target")
             if target_ref:
                 mods_by_target.setdefault(target_ref[0], []).append(mod_item)
-        pi_removed_go_fids = {
+        prefab_removed_game_object_file_ids = {
             rem_ref[0]
-            for rem_ref in pi_data.get("removed_gos", ())
-            if rem_ref and (not rem_ref[1] or rem_ref[1] == sp_ref[1])
+            for rem_ref in prefab_instance_data.get("removed_gos", ())
+            if rem_ref and (not rem_ref[1] or rem_ref[1] == stripped_prefab_ref[1])
         }
-        pi_removed_comp_fids = {
+        prefab_removed_comp_file_ids = {
             rem_ref[0]
-            for rem_ref in pi_data.get("removed_comps", ())
-            if rem_ref and (not rem_ref[1] or rem_ref[1] == sp_ref[1])
+            for rem_ref in prefab_instance_data.get("removed_comps", ())
+            if rem_ref and (not rem_ref[1] or rem_ref[1] == stripped_prefab_ref[1])
         }
 
         # Check root GO override in PI (active/EditorOnly)
         pref_root_tid = next(
-            (tid for tid, tf_d in pref_doc["tfs"].items() if not tf_d.get("father") or tf_d["father"][0] == "0"),
+            (tid for tid, transform_dict in pref_doc["tfs"].items() if not transform_dict.get("father") or transform_dict["father"][0] == "0"),
             None,
         )
         if pref_root_tid and pref_doc["tfs"][pref_root_tid].get("go"):
@@ -818,54 +818,54 @@ def extract_unity_scene_physbones(
                     root_active = mod_item.get("value") != "0"
                 elif mod_item.get("path") == "m_TagString":
                     root_tag = mod_item.get("value", "")
-            if not root_active or root_tag == "EditorOnly" or rgo_id in pi_removed_go_fids:
+            if not root_active or root_tag == "EditorOnly" or rgo_id in prefab_removed_game_object_file_ids:
                 continue
 
         pref_children: Dict[str, List[str]] = {}
-        for tid, tf_d in pref_doc["tfs"].items():
-            fref = tf_d.get("father")
+        for tid, transform_dict in pref_doc["tfs"].items():
+            fref = transform_dict.get("father")
             if fref and fref[0] != "0":
                 pref_children.setdefault(fref[0], []).append(tid)
-        pref_go_to_tf = {
-            tf_d["go"][0]: tid for tid, tf_d in pref_doc["tfs"].items() if tf_d.get("go")
+        prefab_game_object_to_transform = {
+            transform_dict["go"][0]: tid for tid, transform_dict in pref_doc["tfs"].items() if transform_dict.get("go")
         }
-        pi_ancestors = [_resolve_tf_name(scene_doc, ptf_id)] + _scene_ancestor_names(ptf_id)
+        prefab_instance_ancestors = [_resolve_transform_name(scene_doc, ptf_id)] + _scene_ancestor_names(ptf_id)
 
-        def _is_pref_tf_chain_active(start_tid: str) -> bool:
-            cur_pt = start_tid
-            while cur_pt and cur_pt != "0":
-                pt_entry = pref_doc["tfs"].get(cur_pt)
-                if not pt_entry:
+        def _is_prefab_transform_chain_active(start_tid: str) -> bool:
+            cur_point = start_tid
+            while cur_point and cur_point != "0":
+                point_entry = pref_doc["tfs"].get(cur_point)
+                if not point_entry:
                     break
-                cgo_id = pt_entry.get("go", ("0",))[0]
-                if cgo_id in pi_removed_go_fids:
+                cgo_id = point_entry.get("go", ("0",))[0]
+                if cgo_id in prefab_removed_game_object_file_ids:
                     return False
                 cgo = pref_doc["gos"].get(cgo_id, {})
-                c_active = cgo.get("active", True)
-                c_tag = cgo.get("tag", "")
+                child_active = cgo.get("active", True)
+                child_tag = cgo.get("tag", "")
                 for mod_item in mods_by_target.get(cgo_id, []):
                     if mod_item.get("path") == "m_IsActive":
-                        c_active = mod_item.get("value") != "0"
+                        child_active = mod_item.get("value") != "0"
                     elif mod_item.get("path") == "m_TagString":
-                        c_tag = mod_item.get("value", "")
-                if not c_active or c_tag == "EditorOnly":
+                        child_tag = mod_item.get("value", "")
+                if not child_active or child_tag == "EditorOnly":
                     return False
-                cur_pt = pt_entry.get("father", ("0",))[0]
+                cur_point = point_entry.get("father", ("0",))[0]
             return True
 
         for pb_id, pb_raw in pref_doc["pbs"].items():
-            if pb_id in pi_removed_comp_fids:
-                go_ref_rem = pb_raw.get("go")
-                rem_name = str(pref_doc["gos"].get(go_ref_rem[0], {}).get("name", pb_id)) if go_ref_rem else pb_id
+            if pb_id in prefab_removed_comp_file_ids:
+                game_object_ref_removed = pb_raw.get("go")
+                rem_name = str(pref_doc["gos"].get(game_object_ref_removed[0], {}).get("name", pb_id)) if game_object_ref_removed else pb_id
                 _record_orphan(rem_name, "removed_prefab_override")
                 continue
             eff_pb = dict(pb_raw)
             eff_enabled = eff_pb.get("enabled", True)
             for mod_item in mods_by_target.get(pb_id, []):
-                m_path = mod_item.get("path", "")
-                if m_path == "m_Enabled":
+                mod_path = mod_item.get("path", "")
+                if mod_path == "m_Enabled":
                     eff_enabled = mod_item.get("value") != "0"
-                elif m_path in (
+                elif mod_path in (
                     "pull", "spring", "stiffness", "gravity", "immobile",
                     "limitType", "maxAngleX", "maxAngleZ",
                 ):
@@ -873,214 +873,214 @@ def extract_unity_scene_physbones(
                         "limitType": "limit_type",
                         "maxAngleX": "max_angle_x",
                         "maxAngleZ": "max_angle_z",
-                    }.get(m_path, m_path)
+                    }.get(mod_path, mod_path)
                     eff_pb[key_map] = mod_item.get("value")
             if not eff_enabled:
                 continue
-            go_ref = eff_pb.get("go")
-            if not go_ref:
+            game_object_ref = eff_pb.get("go")
+            if not game_object_ref:
                 continue
-            if go_ref[0] in pi_removed_go_fids:
-                _record_orphan(str(pref_doc["gos"].get(go_ref[0], {}).get("name", pb_id)), "removed_prefab_override")
+            if game_object_ref[0] in prefab_removed_game_object_file_ids:
+                _record_orphan(str(pref_doc["gos"].get(game_object_ref[0], {}).get("name", pb_id)), "removed_prefab_override")
                 continue
-            pref_tid = pref_go_to_tf.get(go_ref[0])
-            if not pref_tid or not _is_pref_tf_chain_active(pref_tid):
+            pref_tid = prefab_game_object_to_transform.get(game_object_ref[0])
+            if not pref_tid or not _is_prefab_transform_chain_active(pref_tid):
                 continue
 
-            comp_pref_name = _resolve_tf_name(pref_doc, pref_tid)
-            rt_ref = eff_pb.get("root_tf")
-            if rt_ref and rt_ref[0] != "0":
-                if rt_ref[0] in {pref_doc["tfs"][tid_k].get("go", ("0",))[0] for tid_k in ()} or (
-                    rt_ref[0] in pref_doc["tfs"] and pref_doc["tfs"][rt_ref[0]].get("go", ("0",))[0] in pi_removed_go_fids
+            comp_pref_name = _resolve_transform_name(pref_doc, pref_tid)
+            root_ref = eff_pb.get("root_tf")
+            if root_ref and root_ref[0] != "0":
+                if root_ref[0] in {pref_doc["tfs"][transform_id_key].get("go", ("0",))[0] for transform_id_key in ()} or (
+                    root_ref[0] in pref_doc["tfs"] and pref_doc["tfs"][root_ref[0]].get("go", ("0",))[0] in prefab_removed_game_object_file_ids
                 ):
-                    _record_orphan(_resolve_tf_name(pref_doc, rt_ref[0]) or comp_pref_name or pb_id, "removed_prefab_override")
+                    _record_orphan(_resolve_transform_name(pref_doc, root_ref[0]) or comp_pref_name or pb_id, "removed_prefab_override")
                     continue
-                if (rt_ref[1] and rt_ref[1] != sp_ref[1]) or rt_ref[0] not in pref_doc["tfs"]:
+                if (root_ref[1] and root_ref[1] != stripped_prefab_ref[1]) or root_ref[0] not in pref_doc["tfs"]:
                     _record_orphan(comp_pref_name or pb_id, "dangling_root_transform")
                     continue
-                rt_tid = rt_ref[0]
-                rt_name = _resolve_tf_name(pref_doc, rt_tid) or comp_pref_name
-                if not _is_pref_tf_chain_active(rt_tid):
-                    _record_orphan(rt_name or pb_id, "inactive_root_transform")
+                resolved_root_transform_id = root_ref[0]
+                chain_root_name = _resolve_transform_name(pref_doc, resolved_root_transform_id) or comp_pref_name
+                if not _is_prefab_transform_chain_active(resolved_root_transform_id):
+                    _record_orphan(chain_root_name or pb_id, "inactive_root_transform")
                     continue
             else:
-                rt_tid = pref_tid
-                rt_name = comp_pref_name
-            if not rt_name or rt_name.strip().lower() in humanoid_structural_roots_ci:
+                resolved_root_transform_id = pref_tid
+                chain_root_name = comp_pref_name
+            if not chain_root_name or chain_root_name.strip().lower() in humanoid_structural_roots_lower:
                 continue
             ignored_ids = {ref[0] for ref in eff_pb.get("ignored", []) if ref and ref[0] != "0"}
-            if rt_tid in ignored_ids:
+            if resolved_root_transform_id in ignored_ids:
                 continue
             spokes, all_desc = _collect_linear_spokes(
-                rt_tid,
+                resolved_root_transform_id,
                 pref_children,
-                lambda tid_arg, pd_ref=pref_doc: _resolve_tf_name(pd_ref, tid_arg),
+                lambda tid_arg, prefab_doc_ref=pref_doc: _resolve_transform_name(prefab_doc_ref, tid_arg),
                 ignored_ids,
-                allowed_bones_ci=allowed_bones_ci,
+                allowed_bones_lower=allowed_bones_lower,
             )
             anc_names: List[str] = []
-            cur_anc = rt_tid
+            cur_anc = resolved_root_transform_id
             for _step in range(16):
                 cur_anc = pref_doc["tfs"].get(cur_anc, {}).get("father", ("0",))[0]
                 if not cur_anc or cur_anc == "0":
                     break
-                aname = _resolve_tf_name(pref_doc, cur_anc)
+                aname = _resolve_transform_name(pref_doc, cur_anc)
                 if aname:
                     anc_names.append(aname)
-            anc_names.extend(pi_ancestors)
+            anc_names.extend(prefab_instance_ancestors)
             pref_parent_diag, _pref_ptag_diag = resolve_parent_bone_from_unity_chain(anc_names)
-            if allowed_bones_ci is not None and not any(
-                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            if allowed_bones_lower is not None and not any(
+                bone_str.strip().lower() in allowed_bones_lower for bone_str in all_desc
             ):
                 orphan_reason = (
                     "disabled_old_outfit_mesh"
-                    if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in all_desc)
+                    if any(bone_str.strip().lower() in disabled_only_bones_lower for bone_str in all_desc)
                     else "no_active_mesh_weights"
                 )
-                _record_orphan(rt_name, orphan_reason, pref_parent_diag)
+                _record_orphan(chain_root_name, orphan_reason, pref_parent_diag)
                 continue
             spokes, unwrapped = _unwrap_container_spokes(spokes)
             for spoke_bones in spokes:
-                if allowed_bones_ci is not None and not any(
-                    bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
+                if allowed_bones_lower is not None and not any(
+                    bone_str.strip().lower() in allowed_bones_lower for bone_str in spoke_bones
                 ):
-                    spoke_rt = spoke_bones[0] if spoke_bones else rt_name
+                    spoke_root = spoke_bones[0] if spoke_bones else chain_root_name
                     orphan_reason = (
                         "disabled_old_outfit_mesh"
-                        if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in spoke_bones)
+                        if any(bone_str.strip().lower() in disabled_only_bones_lower for bone_str in spoke_bones)
                         else "no_active_mesh_weights"
                     )
-                    _record_orphan(spoke_rt, orphan_reason, pref_parent_diag)
+                    _record_orphan(spoke_root, orphan_reason, pref_parent_diag)
                     continue
-                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
-                extracted_spokes.append(_pb_to_record(eff_pb, eff_rt_name, spoke_bones, all_desc, anc_names))
+                effective_root_name = spoke_bones[0] if unwrapped and spoke_bones else chain_root_name
+                extracted_spokes.append(_pb_to_record(eff_pb, effective_root_name, spoke_bones, all_desc, anc_names))
 
     # 3. Fallback prefabs (e.g. Shinano.prefab when vrc2gtav.cfg sets custom_hair = default while scene had EditorOnly hair)
-    seen_root_bones_ci = {rec["root_bone"].strip().lower() for rec in extracted_spokes}
-    for fb_pref_path in fallback_prefab_paths:
-        fb_p = Path(fb_pref_path)
-        if not fb_p.is_file():
+    seen_root_bones_lower = {rec["root_bone"].strip().lower() for rec in extracted_spokes}
+    for fallback_prefab_path in fallback_prefab_paths:
+        fallback_path = Path(fallback_prefab_path)
+        if not fallback_path.is_file():
             continue
-        fb_doc = _get_doc(fb_p)
-        fb_children: Dict[str, List[str]] = {}
-        fb_go_to_tf: Dict[str, str] = {}
-        for tid, tf_d in fb_doc["tfs"].items():
-            fref = tf_d.get("father")
+        fallback_doc = _get_doc(fallback_path)
+        fallback_children: Dict[str, List[str]] = {}
+        fallback_game_object_to_transform: Dict[str, str] = {}
+        for tid, transform_dict in fallback_doc["tfs"].items():
+            fref = transform_dict.get("father")
             if fref and fref[0] != "0":
-                fb_children.setdefault(fref[0], []).append(tid)
-            if tf_d.get("go"):
-                fb_go_to_tf[tf_d["go"][0]] = tid
+                fallback_children.setdefault(fref[0], []).append(tid)
+            if transform_dict.get("go"):
+                fallback_game_object_to_transform[transform_dict["go"][0]] = tid
         # Also resolve .fbx.meta fileIDs used inside fallback prefab
-        for tid, tf_d in fb_doc["tfs"].items():
-            sref = tf_d.get("src")
+        for tid, transform_dict in fallback_doc["tfs"].items():
+            sref = transform_dict.get("src")
             if sref and sref[1] and sref[1] not in guid_map and fbx_paths:
                 for cand_fbx in fbx_paths:
                     if cand_fbx and Path(cand_fbx).is_file():
                         guid_map[sref[1]] = Path(cand_fbx)
                         break
 
-        for pb_id, pb_raw in fb_doc["pbs"].items():
+        for pb_id, pb_raw in fallback_doc["pbs"].items():
             if not pb_raw.get("enabled", True):
                 continue
-            go_ref = pb_raw.get("go")
-            if not go_ref:
+            game_object_ref = pb_raw.get("go")
+            if not game_object_ref:
                 continue
-            tid = fb_go_to_tf.get(go_ref[0])
+            tid = fallback_game_object_to_transform.get(game_object_ref[0])
             if not tid:
                 continue
-            rt_ref = pb_raw.get("root_tf")
-            rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and rt_ref[0] in fb_doc["tfs"]) else tid
-            rt_name = _resolve_tf_name(fb_doc, rt_tid) or _resolve_tf_name(fb_doc, tid)
+            root_ref = pb_raw.get("root_tf")
+            resolved_root_transform_id = root_ref[0] if (root_ref and root_ref[0] != "0" and root_ref[0] in fallback_doc["tfs"]) else tid
+            chain_root_name = _resolve_transform_name(fallback_doc, resolved_root_transform_id) or _resolve_transform_name(fallback_doc, tid)
             if (
-                not rt_name
-                or rt_name.strip().lower() in seen_root_bones_ci
-                or rt_name.strip().lower() in humanoid_structural_roots_ci
+                not chain_root_name
+                or chain_root_name.strip().lower() in seen_root_bones_lower
+                or chain_root_name.strip().lower() in humanoid_structural_roots_lower
             ):
                 continue
-            if "physbone_" in rt_name.lower() or "breast" in rt_name.lower():
+            if "physbone_" in chain_root_name.lower() or "breast" in chain_root_name.lower():
                 continue
             spokes, all_desc = _collect_linear_spokes(
-                rt_tid,
-                fb_children,
-                lambda tid_arg, fd_ref=fb_doc: _resolve_tf_name(fd_ref, tid_arg),
+                resolved_root_transform_id,
+                fallback_children,
+                lambda tid_arg, fbx_doc_ref=fallback_doc: _resolve_transform_name(fbx_doc_ref, tid_arg),
                 set(),
-                allowed_bones_ci=allowed_bones_ci,
+                allowed_bones_lower=allowed_bones_lower,
             )
-            if allowed_bones_ci is not None and not any(
-                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            if allowed_bones_lower is not None and not any(
+                bone_str.strip().lower() in allowed_bones_lower for bone_str in all_desc
             ):
                 continue
             spokes, unwrapped = _unwrap_container_spokes(spokes)
-            seen_root_bones_ci.add(rt_name.strip().lower())
+            seen_root_bones_lower.add(chain_root_name.strip().lower())
             anc_names = []
-            cur_anc = rt_tid
+            cur_anc = resolved_root_transform_id
             for _step in range(16):
-                cur_anc = fb_doc["tfs"].get(cur_anc, {}).get("father", ("0",))[0]
+                cur_anc = fallback_doc["tfs"].get(cur_anc, {}).get("father", ("0",))[0]
                 if not cur_anc or cur_anc == "0":
                     break
-                aname = _resolve_tf_name(fb_doc, cur_anc)
+                aname = _resolve_transform_name(fallback_doc, cur_anc)
                 if aname:
                     anc_names.append(aname)
-            fb_parent_diag, _fb_ptag_diag = resolve_parent_bone_from_unity_chain(anc_names)
+            fallback_parent_diag, _fallback_parent_tag_diag = resolve_parent_bone_from_unity_chain(anc_names)
             for spoke_bones in spokes:
-                if allowed_bones_ci is not None and not any(
-                    bone_str.strip().lower() in allowed_bones_ci for bone_str in spoke_bones
+                if allowed_bones_lower is not None and not any(
+                    bone_str.strip().lower() in allowed_bones_lower for bone_str in spoke_bones
                 ):
-                    spoke_rt = spoke_bones[0] if spoke_bones else rt_name
-                    reason_fb = (
+                    spoke_root = spoke_bones[0] if spoke_bones else chain_root_name
+                    fallback_reason = (
                         "disabled_old_outfit_mesh"
-                        if any(bone_str.strip().lower() in disabled_only_bones_ci for bone_str in spoke_bones)
+                        if any(bone_str.strip().lower() in disabled_only_bones_lower for bone_str in spoke_bones)
                         else "no_active_mesh_weights"
                     )
-                    _record_orphan(spoke_rt, reason_fb, fb_parent_diag)
+                    _record_orphan(spoke_root, fallback_reason, fallback_parent_diag)
                     continue
-                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
-                seen_root_bones_ci.add(eff_rt_name.strip().lower())
-                extracted_spokes.append(_pb_to_record(pb_raw, eff_rt_name, spoke_bones, all_desc, anc_names))
+                effective_root_name = spoke_bones[0] if unwrapped and spoke_bones else chain_root_name
+                seen_root_bones_lower.add(effective_root_name.strip().lower())
+                extracted_spokes.append(_pb_to_record(pb_raw, effective_root_name, spoke_bones, all_desc, anc_names))
 
     # 3b. Recover direct base-armature PBs tagged EditorOnly when custom_hair=default fallback is active
     if fallback_prefab_paths:
         for pb_id, pb_data in scene_doc["pbs"].items():
             if pb_data.get("stripped") or pb_data.get("enabled", True) is False:
                 continue
-            go_ref = pb_data.get("go")
-            if not go_ref:
+            game_object_ref = pb_data.get("go")
+            if not game_object_ref:
                 continue
-            go_info = scene_doc["gos"].get(go_ref[0], {})
+            game_object_info = scene_doc["gos"].get(game_object_ref[0], {})
             # Only recover direct base armature objects (not disabled third-party PrefabInstance objects)
-            if go_info.get("pi") and go_info["pi"][0] != "0":
+            if game_object_info.get("pi") and game_object_info["pi"][0] != "0":
                 continue
-            tf_id = go_to_tf.get(go_ref[0])
-            if tf_id not in visited_tfs or go_info.get("active") is False:
+            transform_id = game_object_to_transform.get(game_object_ref[0])
+            if transform_id not in visited_tfs or game_object_info.get("active") is False:
                 continue
-            rt_ref = pb_data.get("root_tf")
-            rt_tid = rt_ref[0] if (rt_ref and rt_ref[0] != "0" and not rt_ref[1] and rt_ref[0] in scene_doc["tfs"]) else tf_id
-            rt_name = _resolve_tf_name(scene_doc, rt_tid) or _resolve_tf_name(scene_doc, tf_id)
+            root_ref = pb_data.get("root_tf")
+            resolved_root_transform_id = root_ref[0] if (root_ref and root_ref[0] != "0" and not root_ref[1] and root_ref[0] in scene_doc["tfs"]) else transform_id
+            chain_root_name = _resolve_transform_name(scene_doc, resolved_root_transform_id) or _resolve_transform_name(scene_doc, transform_id)
             if (
-                not rt_name
-                or rt_name.strip().lower() in seen_root_bones_ci
-                or rt_name.strip().lower() in humanoid_structural_roots_ci
+                not chain_root_name
+                or chain_root_name.strip().lower() in seen_root_bones_lower
+                or chain_root_name.strip().lower() in humanoid_structural_roots_lower
             ):
                 continue
             ignored_ids = {ref[0] for ref in pb_data.get("ignored", []) if ref and ref[0] != "0"}
             spokes, all_desc = _collect_linear_spokes(
-                rt_tid,
+                resolved_root_transform_id,
                 children_tfs,
-                lambda tid_arg: _resolve_tf_name(scene_doc, tid_arg),
+                lambda tid_arg: _resolve_transform_name(scene_doc, tid_arg),
                 ignored_ids,
-                allowed_bones_ci=allowed_bones_ci,
+                allowed_bones_lower=allowed_bones_lower,
             )
-            if allowed_bones_ci is not None and not any(
-                bone_str.strip().lower() in allowed_bones_ci for bone_str in all_desc
+            if allowed_bones_lower is not None and not any(
+                bone_str.strip().lower() in allowed_bones_lower for bone_str in all_desc
             ):
                 continue
             spokes, unwrapped = _unwrap_container_spokes(spokes)
-            seen_root_bones_ci.add(rt_name.strip().lower())
-            ancestors = _scene_ancestor_names(rt_tid)
+            seen_root_bones_lower.add(chain_root_name.strip().lower())
+            ancestors = _scene_ancestor_names(resolved_root_transform_id)
             for spoke_bones in spokes:
-                eff_rt_name = spoke_bones[0] if unwrapped and spoke_bones else rt_name
-                seen_root_bones_ci.add(eff_rt_name.strip().lower())
-                extracted_spokes.append(_pb_to_record(pb_data, eff_rt_name, spoke_bones, all_desc, ancestors))
+                effective_root_name = spoke_bones[0] if unwrapped and spoke_bones else chain_root_name
+                seen_root_bones_lower.add(effective_root_name.strip().lower())
+                extracted_spokes.append(_pb_to_record(pb_data, effective_root_name, spoke_bones, all_desc, ancestors))
 
     # 4. Marshmallow PB overrides (Breast_1.L/R or Breast_L/R)
     marshmallow_breasts: List[Dict[str, Any]] = []
@@ -1091,14 +1091,14 @@ def extract_unity_scene_physbones(
             guid_map,
             doc_cache,
             unity_assets_root=unity_assets_root,
-            is_tf_active_fn=_is_scene_tf_active,
+            is_transform_active_func=_is_scene_transform_active,
         )
         for mb_rec in marshmallow_breasts:
             mb_root_low = mb_rec["root_bone"].strip().lower()
             child_chain = [mb_rec["root_bone"]]
-            for cand_b in sorted(all_fbx_bones):
-                if fbx_parent_map.get(cand_b) == mb_root_low:
-                    child_chain.append(cand_b)
+            for candidate_bone in sorted(all_fbx_bones):
+                if fbx_parent_map.get(candidate_bone) == mb_root_low:
+                    child_chain.append(candidate_bone)
                     break
             mb_rec["spoke_bones"] = child_chain
             mb_rec["all_descendants"] = list(child_chain)
@@ -1144,7 +1144,7 @@ def extract_unity_scene_physbones(
         "marshmallow_breasts": marshmallow_breasts,
         "fbx_weighted_bones": sorted(weighted_fbx_bones),
         "orphaned_physbones": orphaned_physbones,
-        "excluded_meshes": sorted(excluded_meshes_ci),
+        "excluded_meshes": sorted(excluded_meshes_lower),
         "warnings": [],
     }
 
@@ -1170,8 +1170,8 @@ def _match_extracted_unity_params(
         if rec_root in src_lows:
             return rec
     for rec in extracted_spokes:
-        desc_lows = {desc_b.strip().lower() for desc_b in rec.get("all_descendants", ())}
-        spoke_lows = {spk_b.strip().lower() for spk_b in rec.get("spoke_bones", ())}
+        desc_lows = {descendant_bone.strip().lower() for descendant_bone in rec.get("all_descendants", ())}
+        spoke_lows = {spoke_bone.strip().lower() for spoke_bone in rec.get("spoke_bones", ())}
         if root_low in desc_lows or root_low in spoke_lows:
             return rec
     # Prefix match fallback (e.g. Skirt_FrontB -> Skirt)

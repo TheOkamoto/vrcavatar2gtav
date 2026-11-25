@@ -280,8 +280,8 @@ def build_liltoon_er_textures(
         if source_key == "hair_main" and is_arbitrary_custom_hair:
             mats_list = hair_spec.get("materials", [])
             use_double_cell = len(mats_list) >= 2
-            quad_w = (2 * cell_dimension) if use_double_cell else cell_dimension
-            quad_h = cell_dimension
+            quad_width = (2 * cell_dimension) if use_double_cell else cell_dimension
+            quad_height = cell_dimension
             quad_uv = (0.5, 0.0, 0.5, 0.5) if use_double_cell else (0.5, 0.0, 0.25, 0.5)
             print(
                 i18n.translate(
@@ -293,18 +293,18 @@ def build_liltoon_er_textures(
             quad_diff, quad_norm, quad_spec, er_tile_entries = (
                 unity_hair_helper.pack_hair_materials_into_quadrant(
                     mats_list,
-                    quad_size=(quad_w, quad_h),
+                    quad_size=(quad_width, quad_height),
                     quad_uv_rect=quad_uv,
                     gutter_px=4,
                 )
             )
-            diffuse_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+            diffuse_array[start_y:end_y, start_x : start_x + quad_width] = numpy.array(
                 quad_diff.convert("RGBA")
             )
-            specular_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+            specular_array[start_y:end_y, start_x : start_x + quad_width] = numpy.array(
                 quad_spec.convert("RGBA")
             )
-            normal_array[start_y:end_y, start_x : start_x + quad_w] = numpy.array(
+            normal_array[start_y:end_y, start_x : start_x + quad_width] = numpy.array(
                 quad_norm.convert("RGBA")
             )
             unity_hair_helper.save_custom_hair_manifest(
@@ -371,11 +371,11 @@ def build_liltoon_er_textures(
             )
             if baked_face_res is not None:
                 composite_face, _face_norm, _face_spec, parsed_face_mat = baked_face_res
-                face_em_mask_dynamic = unity_hair_bake_layer.extract_liltoon_emission_mask(
+                face_emission_mask_dynamic = unity_hair_bake_layer.extract_liltoon_emission_mask(
                     parsed_face_mat, tile_size=(cell_dimension, cell_dimension), threshold=0.05
                 )
-                if face_em_mask_dynamic is not None:
-                    source_info["_extracted_em_mask"] = face_em_mask_dynamic
+                if face_emission_mask_dynamic is not None:
+                    source_info["_extracted_em_mask"] = face_emission_mask_dynamic
             else:
                 composite_face, missing_face_layers = (
                     calibration_helper.composite_shinano_face_with_fallback(
@@ -476,8 +476,8 @@ def build_liltoon_er_textures(
                     mask_img = Image.open(alpha_mask_path).convert("RGBA").resize(
                         (cell_dimension, cell_dimension), Image.Resampling.LANCZOS
                     )
-                    mask_r = numpy.array(mask_img, dtype=numpy.float32)[:, :, 0] / 255.0
-                    cell_diffuse_numpy[:, :, 3] = numpy.clip(cell_diffuse_numpy[:, :, 3] * mask_r, 0.0, 255.0)
+                    mask_red = numpy.array(mask_img, dtype=numpy.float32)[:, :, 0] / 255.0
+                    cell_diffuse_numpy[:, :, 3] = numpy.clip(cell_diffuse_numpy[:, :, 3] * mask_red, 0.0, 255.0)
 
             light_mask_path = source_info.get("light_mask")
             if light_mask_path and os.path.exists(light_mask_path):
@@ -650,13 +650,13 @@ def build_liltoon_er_textures(
                 (half_sub, sub_dimension), Image.Resampling.LANCZOS
             )
             diffuse_array[nails_sub_y : nails_sub_y + sub_dimension, nails_sub_x : nails_sub_x + half_sub] = numpy.array(nail_sheet)
-        ribbon_bg = Image.new("RGBA", (half_sub, half_sub), (255, 200, 222, 255))
+        ribbon_background = Image.new("RGBA", (half_sub, half_sub), (255, 200, 222, 255))
         if ribbon_tex_path and os.path.exists(ribbon_tex_path):
-            rib_fg = Image.open(ribbon_tex_path).convert("RGBA").resize(
+            ribbon_foreground = Image.open(ribbon_tex_path).convert("RGBA").resize(
                 (half_sub, half_sub), Image.Resampling.LANCZOS
             )
-            ribbon_bg = Image.alpha_composite(ribbon_bg, rib_fg)
-        diffuse_array[nails_sub_y : nails_sub_y + half_sub, nails_sub_x + half_sub : nails_sub_x + sub_dimension] = numpy.array(ribbon_bg)
+            ribbon_background = Image.alpha_composite(ribbon_background, ribbon_foreground)
+        diffuse_array[nails_sub_y : nails_sub_y + half_sub, nails_sub_x + half_sub : nails_sub_x + sub_dimension] = numpy.array(ribbon_background)
         specular_array[nails_sub_y : nails_sub_y + sub_dimension, nails_sub_x : nails_sub_x + sub_dimension] = [195, 205, 230, 210]
 
     # Bottom-right 128x128 quadrant (nails_sub_x + 128 .. +256, nails_sub_y + 128 .. +256):
@@ -669,13 +669,13 @@ def build_liltoon_er_textures(
     specular_array[blk_y : blk_y + quarter_sub, blk_x : blk_x + quarter_sub] = [38, 38, 42, 90]
 
     ear_y0 = blk_y + quarter_sub
-    half_q = quarter_sub // 2
+    half_quarter = quarter_sub // 2
     # Left 32x64 of Earrings 64x64: filigree dark bronze
-    diffuse_array[ear_y0 : ear_y0 + quarter_sub, blk_x : blk_x + half_q] = [104, 78, 72, 255]
+    diffuse_array[ear_y0 : ear_y0 + quarter_sub, blk_x : blk_x + half_quarter] = [104, 78, 72, 255]
     # Top-right 32x32 of Earrings 64x64: top silver-pearl ear stud
-    diffuse_array[ear_y0 : ear_y0 + half_q, blk_x + half_q : blk_x + quarter_sub] = [204, 208, 224, 255]
+    diffuse_array[ear_y0 : ear_y0 + half_quarter, blk_x + half_quarter : blk_x + quarter_sub] = [204, 208, 224, 255]
     # Bottom-right 32x32 of Earrings 64x64: deep sapphire chain beads
-    diffuse_array[ear_y0 + half_q : ear_y0 + quarter_sub, blk_x + half_q : blk_x + quarter_sub] = [48, 70, 148, 255]
+    diffuse_array[ear_y0 + half_quarter : ear_y0 + quarter_sub, blk_x + half_quarter : blk_x + quarter_sub] = [48, 70, 148, 255]
     specular_array[ear_y0 : ear_y0 + quarter_sub, blk_x : blk_x + quarter_sub] = [215, 200, 185, 245]
 
     diffuse_array[
@@ -930,38 +930,38 @@ def _generate_michael_vtoon_profile(
     )
 
     # Stamp exact iris eye emission/highlight mask inside Face quadrant
-    face_em_path = source_info_map.get("face", {}).get("emission_mask", "")
-    extracted_em_mask = source_info_map.get("face", {}).get("_extracted_em_mask")
+    face_emission_path = source_info_map.get("face", {}).get("emission_mask", "")
+    extracted_emission_mask = source_info_map.get("face", {}).get("_extracted_em_mask")
     if lut_path.is_file() and (
-        (face_em_path and os.path.exists(face_em_path)) or extracted_em_mask is not None
+        (face_emission_path and os.path.exists(face_emission_path)) or extracted_emission_mask is not None
     ):
         lut_img = Image.open(lut_path).convert("RGBA")
-        lut_w, lut_h = lut_img.size
-        face_w = lut_w // 4
-        face_h = lut_h // 2
-        em_mask = numpy.zeros((face_h, face_w), dtype=bool)
-        if face_em_path and os.path.exists(face_em_path):
-            em_mask |= numpy.array(
-                Image.open(face_em_path).convert("L").resize((face_w, face_h), Image.Resampling.BILINEAR)
+        lut_width, lut_height = lut_img.size
+        face_width = lut_width // 4
+        face_height = lut_height // 2
+        emission_mask = numpy.zeros((face_height, face_width), dtype=bool)
+        if face_emission_path and os.path.exists(face_emission_path):
+            emission_mask |= numpy.array(
+                Image.open(face_emission_path).convert("L").resize((face_width, face_height), Image.Resampling.BILINEAR)
             ) > 96
-        if extracted_em_mask is not None:
-            em_mask |= (
+        if extracted_emission_mask is not None:
+            emission_mask |= (
                 numpy.array(
-                    Image.fromarray((extracted_em_mask.astype(numpy.uint8) * 255)).resize(
-                        (face_w, face_h), Image.Resampling.BILINEAR
+                    Image.fromarray((extracted_emission_mask.astype(numpy.uint8) * 255)).resize(
+                        (face_width, face_height), Image.Resampling.BILINEAR
                     )
                 )
                 > 64
             )
         lut_arr = numpy.array(lut_img)
-        eye_region = lut_arr[0:face_h, 0:face_w]
-        eye_region[em_mask] = [
+        eye_region = lut_arr[0:face_height, 0:face_width]
+        eye_region[emission_mask] = [
             int(round((vtoon_profile_helper.SLOT_EYES / 15.0) * 255.0)),
             85,
             185,
             92,
         ]
-        lut_arr[0:face_h, 0:face_w] = eye_region
+        lut_arr[0:face_height, 0:face_width] = eye_region
         updated_lut = Image.fromarray(lut_arr, mode="RGBA")
         updated_lut.save(lut_path)
         for extra_dir in sync_dirs:

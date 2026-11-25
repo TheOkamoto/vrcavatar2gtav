@@ -43,7 +43,7 @@ try:
     resolve_progress_text,
     _find_humanoid_bone,
     _compute_target_yft_pose_metrics,
-    _pose_avatar_arms_to_gtav_a_pose,
+    _pose_avatar_arms_to_gtav_apose,
     _compute_universal_scale_and_offset,
     _strip_object_base_name,
     _resolve_universal_target_bone,
@@ -67,7 +67,7 @@ except ImportError:
     resolve_progress_text,
     _find_humanoid_bone,
     _compute_target_yft_pose_metrics,
-    _pose_avatar_arms_to_gtav_a_pose,
+    _pose_avatar_arms_to_gtav_apose,
     _compute_universal_scale_and_offset,
     _strip_object_base_name,
     _resolve_universal_target_bone,
@@ -310,13 +310,13 @@ def run_in_blender_build(manifest_path: Path) -> None:
             primary_base_fbx=source_fbx,
         )
 
-    disabled_ci = {str(name).strip().lower() for name in (manifest.get("disabled_meshes") or ())}
+    disabled_lower = {str(name).strip().lower() for name in (manifest.get("disabled_meshes") or ())}
     active_meshes: List[Any] = []
     for obj_item in bpy.data.objects:
         if obj_item.type != "MESH" or obj_item == ped_armature:
             continue
         clean_low = _strip_object_base_name(obj_item.name).lower()
-        if clean_low in disabled_ci:
+        if clean_low in disabled_lower:
             continue
         active_meshes.append(obj_item)
 
@@ -335,7 +335,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 flush=True,
             )
 
-    _pose_avatar_arms_to_gtav_a_pose(
+    _pose_avatar_arms_to_gtav_apose(
         bpy, mathutils, src_armature, target_drop_deg=float(yft_metrics["arm_drop_deg"])
     )
     scale_factor, z_offset = _compute_universal_scale_and_offset(
@@ -405,7 +405,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
     # 3. Load resolved PhysBones config and resolve chains against current armature
     pb_cfg = physbone_helper.load_physbone_config(project_paths.to_host_path(manifest["physbones_cfg"]))
-    pb_chain_specs, pb_parent_map, _pb_custom_names, pb_bmap_ci = (
+    pb_chain_specs, pb_parent_map, _pb_custom_names, pb_bone_map_lower = (
         physbone_helper.build_chain_specs_from_config(pb_cfg)
     )
 
@@ -430,7 +430,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         or {"u_offset": 0.0, "v_offset": 0.0, "u_scale": 1.0, "v_scale": 1.0}
     )
     ma_mesh_mats_map = ma_plan.get("mesh_materials") or {}
-    ma_mesh_mats_ci = {str(mesh_key).strip().lower(): val for mesh_key, val in ma_mesh_mats_map.items() if mesh_key}
+    ma_mesh_mats_lower = {str(mesh_key).strip().lower(): val for mesh_key, val in ma_mesh_mats_map.items() if mesh_key}
     tagged_mat_cache: Dict[Tuple[str, str], Any] = {}
 
     def _get_tagged_unity_mat(u_spec: Dict[str, Any], fallback_label: str) -> Any:
@@ -440,11 +440,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
         cached_mat = tagged_mat_cache.get(cache_key)
         if cached_mat is not None:
             return cached_mat
-        bl_mat = bpy.data.materials.new(name=f"vrc_{u_name[:40]}")
-        bl_mat["vrc2gtav_mat_path"] = u_path
-        bl_mat["vrc2gtav_mat_name"] = u_name
-        tagged_mat_cache[cache_key] = bl_mat
-        return bl_mat
+        blender_mat = bpy.data.materials.new(name=f"vrc_{u_name[:40]}")
+        blender_mat["vrc2gtav_mat_path"] = u_path
+        blender_mat["vrc2gtav_mat_name"] = u_name
+        tagged_mat_cache[cache_key] = blender_mat
+        return blender_mat
 
     for src_obj in active_meshes:
         eval_obj = src_obj.evaluated_get(depsgraph_eval)
@@ -461,17 +461,17 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 pass
         if not unity_mats_list:
             base_obj_name = _strip_object_base_name(src_obj.name)
-            fb_list = ma_mesh_mats_map.get(base_obj_name) or ma_mesh_mats_ci.get(base_obj_name.lower()) or []
-            unity_mats_list = [item for item in fb_list if isinstance(item, dict)]
+            fallback_list = ma_mesh_mats_map.get(base_obj_name) or ma_mesh_mats_lower.get(base_obj_name.lower()) or []
+            unity_mats_list = [item for item in fallback_list if isinstance(item, dict)]
 
-        bm_data = bmesh.new()
-        bm_data.from_mesh(new_mesh)
-        orig_vert_layer = bm_data.verts.layers.int.new("orig_vert_idx")
-        for vert_counter, vert_elem in enumerate(bm_data.verts):
+        bmesh_data = bmesh.new()
+        bmesh_data.from_mesh(new_mesh)
+        orig_vert_layer = bmesh_data.verts.layers.int.new("orig_vert_idx")
+        for vert_counter, vert_elem in enumerate(bmesh_data.verts):
             vert_elem[orig_vert_layer] = vert_counter
 
         blender_to_unity_slot = map_blender_slots_to_unity_submeshes(
-            [poly_elem.material_index for poly_elem in bm_data.faces],
+            [poly_elem.material_index for poly_elem in bmesh_data.faces],
             len(src_obj.data.materials),
         )
         strip_indices = []
@@ -500,16 +500,16 @@ def run_in_blender_build(manifest_path: Path) -> None:
         del_faces_set: set = set()
         if strip_indices:
             del_faces_set.update(
-                face_elem for face_elem in bm_data.faces if face_elem.material_index in strip_indices
+                face_elem for face_elem in bmesh_data.faces if face_elem.material_index in strip_indices
             )
         del_rules = blendshape_helper.collect_shape_deleted_vertex_rules(src_obj, ma_plan)
         any_del_verts = del_rules["any_verts"]
         all_del_verts = del_rules["all_verts"]
         shape_culled_count = 0
-        if len(bm_data.verts) == len(src_obj.data.vertices) and (any_del_verts or all_del_verts):
-            for face_elem in bm_data.faces:
-                if (any_del_verts and any(vert_el[orig_vert_layer] in any_del_verts for vert_el in face_elem.verts)) or (
-                    all_del_verts and all(vert_el[orig_vert_layer] in all_del_verts for vert_el in face_elem.verts)
+        if len(bmesh_data.verts) == len(src_obj.data.vertices) and (any_del_verts or all_del_verts):
+            for face_elem in bmesh_data.faces:
+                if (any_del_verts and any(group_vert_elem[orig_vert_layer] in any_del_verts for group_vert_elem in face_elem.verts)) or (
+                    all_del_verts and all(group_vert_elem[orig_vert_layer] in all_del_verts for group_vert_elem in face_elem.verts)
                 ):
                     if face_elem not in del_faces_set:
                         shape_culled_count += 1
@@ -521,18 +521,18 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 flush=True,
             )
         if del_faces_set:
-            bmesh.ops.delete(bm_data, geom=list(del_faces_set), context="FACES")
-            del_verts = [vert_elem for vert_elem in bm_data.verts if not vert_elem.link_faces]
+            bmesh.ops.delete(bmesh_data, geom=list(del_faces_set), context="FACES")
+            del_verts = [vert_elem for vert_elem in bmesh_data.verts if not vert_elem.link_faces]
             if del_verts:
-                bmesh.ops.delete(bm_data, geom=del_verts, context="VERTS")
+                bmesh.ops.delete(bmesh_data, geom=del_verts, context="VERTS")
 
-        bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
-        for face_elem in bm_data.faces:
+        bmesh.ops.triangulate(bmesh_data, faces=bmesh_data.faces)
+        for face_elem in bmesh_data.faces:
             face_elem.smooth = True
-        bm_data.verts.ensure_lookup_table()
-        kept_orig_indices = [vert_elem[orig_vert_layer] for vert_elem in bm_data.verts]
-        bm_data.to_mesh(new_mesh)
-        bm_data.free()
+        bmesh_data.verts.ensure_lookup_table()
+        kept_orig_indices = [vert_elem[orig_vert_layer] for vert_elem in bmesh_data.verts]
+        bmesh_data.to_mesh(new_mesh)
+        bmesh_data.free()
         new_mesh.update()
 
         if len(new_mesh.vertices) == 0:
@@ -565,8 +565,8 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 if unity_mats_list:
                     unity_slot_idx = blender_to_unity_slot.get(old_idx, old_idx)
                     u_spec = unity_mats_list[min(unity_slot_idx, len(unity_mats_list) - 1)]
-                    fb_label = mat_item.name if mat_item is not None else src_obj.name
-                    new_obj.data.materials.append(_get_tagged_unity_mat(u_spec, fb_label))
+                    default_mat_label = mat_item.name if mat_item is not None else src_obj.name
+                    new_obj.data.materials.append(_get_tagged_unity_mat(u_spec, default_mat_label))
                 else:
                     new_obj.data.materials.append(mat_item)
             for poly_elem, old_slot_idx in zip(new_obj.data.polygons, orig_poly_mats):
@@ -587,7 +587,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
             vgrp.index: _resolve_universal_target_bone(
                 vgrp.name,
                 src_obj.name,
-                pb_bmap_ci,
+                pb_bone_map_lower,
                 src_parent_lookup=src_parent_lookup,
             )
             for vgrp in src_obj.vertex_groups
@@ -596,7 +596,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         is_skirt_mesh = "skirt" in src_obj.name.lower() or "dress" in src_obj.name.lower()
         for new_idx, orig_idx in enumerate(kept_orig_indices):
             if is_skirt_mesh:
-                vert_w = _compute_soft_skirt_weights(
+                vert_weight = _compute_soft_skirt_weights(
                     src_obj,
                     orig_idx,
                     new_mesh.vertices[new_idx].co,
@@ -604,22 +604,22 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     vgroup_target_names,
                 )
             else:
-                vert_w = {}
+                vert_weight = {}
                 if orig_idx < len(src_obj.data.vertices):
                     for grp_elem in src_obj.data.vertices[orig_idx].groups:
                         if grp_elem.weight > 0.001 and grp_elem.group in vgroup_target_names:
                             tgt_name = vgroup_target_names[grp_elem.group]
-                            vert_w[tgt_name] = vert_w.get(tgt_name, 0.0) + grp_elem.weight
+                            vert_weight[tgt_name] = vert_weight.get(tgt_name, 0.0) + grp_elem.weight
 
-            total_w = sum(vert_w.values())
-            if total_w > 0.0:
-                for tgt_name, weight_val in vert_w.items():
+            total_weight = sum(vert_weight.values())
+            if total_weight > 0.0:
+                for tgt_name, weight_val in vert_weight.items():
                     vgroup = new_obj.vertex_groups.get(tgt_name) or new_obj.vertex_groups.new(name=tgt_name)
-                    vgroup.add([new_idx], weight_val / total_w, "ADD")
+                    vgroup.add([new_idx], weight_val / total_weight, "ADD")
             else:
-                low_src_nm = src_obj.name.lower()
+                lower_source_name = src_obj.name.lower()
                 is_head_mesh = src_obj == body_obj or any(
-                    tok in low_src_nm
+                    tok in lower_source_name
                     for tok in ("hair", "back", "side", "bang", "beret", "halo", "ear", "glasses", "pocky")
                 )
                 def_bone = "SKEL_Head" if is_head_mesh else "SKEL_Pelvis"
@@ -654,7 +654,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     print(f"[Skeleton] Relocated {relocated_arms} arm/hand/finger bones onto {ped_name}", flush=True)
 
     bpy.context.view_layer.update()
-    src_bones_ci = {pose_item.name.lower(): pose_item for pose_item in src_armature.pose.bones}
+    source_bones_lower = {pose_item.name.lower(): pose_item for pose_item in src_armature.pose.bones}
     ped_world_mats = {
         bone_item.name: (ped_armature.matrix_world @ bone_item.matrix_local).copy()
         for bone_item in ped_armature.data.bones
@@ -669,40 +669,40 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
     def _resolve_pb_mat(src_bone_name: str):
         raw_low = src_bone_name.strip().lower()
-        pose_item = src_bones_ci.get(raw_low)
+        pose_item = source_bones_lower.get(raw_low)
         if pose_item is None:
             dot_alias = re.sub(r"\s+(\d+)$", lambda match_obj: f".{int(match_obj.group(1)):03d}", raw_low)
-            pose_item = src_bones_ci.get(dot_alias)
+            pose_item = source_bones_lower.get(dot_alias)
         if pose_item is None:
             space_alias = re.sub(r"\.(\d{3})$", lambda match_obj: f" {int(match_obj.group(1))}", raw_low)
-            pose_item = src_bones_ci.get(space_alias)
+            pose_item = source_bones_lower.get(space_alias)
         if pose_item is None:
             return None
         return _map_world_mat(src_armature.matrix_world @ pose_item.matrix)
 
     # Prune any PhysBone chain whose mapped GTAV bones deform 0 vertices on the active Blender meshes
     # (catches forgotten loose dress PhysBones or outfits removed via alpha/transparent mesh strips).
-    active_pb_vgrps_ci: set = set()
+    active_pb_vgroups_lower: set = set()
     for proc_obj in processed_objs:
-        vg_names_by_i = {vgrp_obj.index: vgrp_obj.name.lower() for vgrp_obj in proc_obj.vertex_groups}
+        proc_vgroup_names_by_idx = {vgrp_obj.index: vgrp_obj.name.lower() for vgrp_obj in proc_obj.vertex_groups}
         for vert_item in proc_obj.data.vertices:
             for grp_elem in vert_item.groups:
                 if grp_elem.weight > 0.001:
-                    vg_nm = vg_names_by_i.get(grp_elem.group, "")
-                    if vg_nm.startswith("pb_"):
-                        active_pb_vgrps_ci.add(vg_nm)
+                    vgroup_name = proc_vgroup_names_by_idx.get(grp_elem.group, "")
+                    if vgroup_name.startswith("pb_"):
+                        active_pb_vgroups_lower.add(vgroup_name)
     kept_pb_specs = []
     skipped_unweighted_chains: List[str] = []
     for spec_item in pb_chain_specs:
-        if any(bone_nm.lower() in active_pb_vgrps_ci for bone_nm in spec_item[3]):
+        if any(bone_name.lower() in active_pb_vgroups_lower for bone_name in spec_item[3]):
             kept_pb_specs.append(spec_item)
         else:
             skipped_unweighted_chains.append(spec_item[0])
     if skipped_unweighted_chains:
         pb_chain_specs = kept_pb_specs
-        skip_ci = {tok.lower() for tok in skipped_unweighted_chains}
+        skip_lower = {tok.lower() for tok in skipped_unweighted_chains}
         pb_cfg["chains"] = {
-            ch_k: ch_v for ch_k, ch_v in pb_cfg.get("chains", {}).items() if ch_k.lower() not in skip_ci
+            chain_key: chain_cfg for chain_key, chain_cfg in pb_cfg.get("chains", {}).items() if chain_key.lower() not in skip_lower
         }
         print(
             f"[PhysBones] Pruned {len(skipped_unweighted_chains)} unweighted/loose chain(s) in Blender: "
@@ -716,7 +716,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         chain_specs=pb_chain_specs,
         parent_map=pb_parent_map,
         chain_cfgs=pb_cfg.get("chains", {}),
-        source_world_mat_fn=_resolve_pb_mat,
+        source_world_mat_func=_resolve_pb_mat,
         ped_world_matrices=ped_world_mats,
     )
     for chain_rec in physbone_chain_records:
@@ -726,7 +726,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         hand_skeleton_helper.inject_custom_bones_into_blender_armature(
             ped_armature,
             custom_physbones,
-            bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            bone_tag_func=physbone_helper.compute_gtav_bone_tag,
         )
         target_bones.update(item["name"] for item in custom_physbones)
         print(
@@ -735,27 +735,27 @@ def run_in_blender_build(manifest_path: Path) -> None:
         )
 
     # Guarantee no remapped vertex group references a skipped/missing PB_* bone.
-    target_bones_ci = {bname.lower(): bname for bname in target_bones}
+    target_bones_lower = {bname.lower(): bname for bname in target_bones}
     pb_fallback_parents: Dict[str, str] = {}
-    for _c_key, _c_gtav, _c_src_b, _c_gtav_b in pb_chain_specs:
-        par_cand = pb_parent_map.get(_c_gtav_b[0], "SKEL_Pelvis") if _c_gtav_b else "SKEL_Pelvis"
-        resolved_par = target_bones_ci.get(par_cand.lower(), "SKEL_Pelvis")
-        for gt_bone_nm in _c_gtav_b:
-            pb_fallback_parents[gt_bone_nm.lower()] = resolved_par
+    for _chain_key, _chain_gtav, _chain_source_bones, _chain_gtav_bones in pb_chain_specs:
+        par_cand = pb_parent_map.get(_chain_gtav_bones[0], "SKEL_Pelvis") if _chain_gtav_bones else "SKEL_Pelvis"
+        resolved_par = target_bones_lower.get(par_cand.lower(), "SKEL_Pelvis")
+        for gtav_bone_name in _chain_gtav_bones:
+            pb_fallback_parents[gtav_bone_name.lower()] = resolved_par
     for proc_obj in processed_objs:
         missing_vgrps = [
             vgrp for vgrp in list(proc_obj.vertex_groups)
-            if vgrp.name.lower() not in target_bones_ci and vgrp.name.startswith("PB_")
+            if vgrp.name.lower() not in target_bones_lower and vgrp.name.startswith("PB_")
         ]
-        for miss_vg in missing_vgrps:
-            fb_bone_name = pb_fallback_parents.get(miss_vg.name.lower(), "SKEL_Pelvis")
-            fb_vg = proc_obj.vertex_groups.get(fb_bone_name) or proc_obj.vertex_groups.new(name=fb_bone_name)
-            miss_idx = miss_vg.index
+        for missing_vgroup in missing_vgrps:
+            fallback_bone_name = pb_fallback_parents.get(missing_vgroup.name.lower(), "SKEL_Pelvis")
+            fallback_vgroup = proc_obj.vertex_groups.get(fallback_bone_name) or proc_obj.vertex_groups.new(name=fallback_bone_name)
+            miss_idx = missing_vgroup.index
             for vert_elem in proc_obj.data.vertices:
                 for grp_elem in vert_elem.groups:
                     if grp_elem.group == miss_idx and grp_elem.weight > 0.0:
-                        fb_vg.add([vert_elem.index], grp_elem.weight, "ADD")
-            proc_obj.vertex_groups.remove(miss_vg)
+                        fallback_vgroup.add([vert_elem.index], grp_elem.weight, "ADD")
+            proc_obj.vertex_groups.remove(missing_vgroup)
 
     custom_blink_bones = []
     blink_profiles_to_merge = []
@@ -771,7 +771,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
             hand_skeleton_helper.inject_custom_bones_into_blender_armature(
                 ped_armature,
                 custom_blink_bones,
-                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+                bone_tag_func=physbone_helper.compute_gtav_bone_tag,
             )
             target_bones.update(item["name"] for item in custom_blink_bones)
         bpy.context.view_layer.update()
@@ -794,7 +794,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         if obj_item != ped_armature and obj_item not in processed_objs:
             bpy.data.objects.remove(obj_item, do_unlink=True)
 
-    uv_regions_ci = {key.lower(): val for key, val in uv_regions_by_mat.items()}
+    uv_regions_lower = {key.lower(): val for key, val in uv_regions_by_mat.items()}
 
     def _resolve_mat_region(mat_obj: Any) -> Dict[str, Any]:
         if mat_obj is not None:
@@ -811,12 +811,12 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     pass
             u_name = str(mat_obj.get("vrc2gtav_mat_name", "") or "").strip()
             if u_name:
-                found_u = uv_regions_by_mat.get(u_name) or uv_regions_ci.get(u_name.lower())
+                found_u = uv_regions_by_mat.get(u_name) or uv_regions_lower.get(u_name.lower())
                 if found_u is not None:
                     return found_u
         mat_name_raw = _strip_object_base_name(mat_obj.name) if mat_obj else ""
         low_name = mat_name_raw.lower()
-        found = uv_regions_by_mat.get(mat_name_raw) or uv_regions_ci.get(low_name)
+        found = uv_regions_by_mat.get(mat_name_raw) or uv_regions_lower.get(low_name)
         if found is None:
             for key_tok, reg_val in uv_regions_by_stem.items():
                 if key_tok in low_name or low_name in key_tok:
@@ -830,13 +830,13 @@ def run_in_blender_build(manifest_path: Path) -> None:
         if getattr(proc_obj, "type", None) != "MESH" or getattr(proc_obj, "data", None) is None:
             continue
         obj_mats = list(proc_obj.data.materials)
-        ds_poly_count = sum(
+        double_sided_poly_count = sum(
             1
             for poly_item in proc_obj.data.polygons
             if 0 <= poly_item.material_index < len(obj_mats)
             and bool(_resolve_mat_region(obj_mats[poly_item.material_index]).get("is_double_sided"))
         )
-        proc_obj["vtoon_double_sided"] = ds_poly_count * 2 >= max(1, len(proc_obj.data.polygons))
+        proc_obj["vtoon_double_sided"] = double_sided_poly_count * 2 >= max(1, len(proc_obj.data.polygons))
 
     # 6. Join active meshes and map shader + 2x2/NxN Atlas UVs + ped blood decals
     enable_blood_decals = bool(manifest.get("blood_decals", True))
@@ -897,8 +897,8 @@ def run_in_blender_build(manifest_path: Path) -> None:
     fallback_head_vgrp = joined_mesh_obj.vertex_groups.get("SKEL_Head") or joined_mesh_obj.vertex_groups.new(name="SKEL_Head")
     fallback_pelvis_vgrp = joined_mesh_obj.vertex_groups.get("SKEL_Pelvis") or joined_mesh_obj.vertex_groups.new(name="SKEL_Pelvis")
     for vert_item in joined_mesh_obj.data.vertices:
-        total_vw = sum(grp_item.weight for grp_item in vert_item.groups)
-        if total_vw < 1e-4:
+        total_vert_weight = sum(grp_item.weight for grp_item in vert_item.groups)
+        if total_vert_weight < 1e-4:
             if float(vert_item.co.z) >= 0.45:
                 fallback_head_vgrp.add([vert_item.index], 1.0, "REPLACE")
             else:
@@ -940,7 +940,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
         specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
+        micromovement_global_params=(0.0, 0.0, 0.0, 0.0),
     )
     cutout_shader_mat = None
     alpha_shader_mat = None
@@ -1050,11 +1050,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
         for loop_idx in poly_item.loop_indices:
             vpos = mesh_verts[mesh_loops[loop_idx].vertex_index].co
             if vpos.y < head_world_pos.y + 0.025 and abs(vpos.x) < 0.095:
-                nx_val = vpos.x * 2.2
-                ny_val = -1.0
-                nz_val = (vpos.z - (head_world_pos.z + 0.05)) * 1.4
-                nlen = math.sqrt(nx_val * nx_val + ny_val * ny_val + nz_val * nz_val) or 1.0
-                custom_normals[loop_idx] = (nx_val / nlen, ny_val / nlen, nz_val / nlen)
+                normal_x_val = vpos.x * 2.2
+                normal_y_val = -1.0
+                normal_z_val = (vpos.z - (head_world_pos.z + 0.05)) * 1.4
+                nlen = math.sqrt(normal_x_val * normal_x_val + normal_y_val * normal_y_val + normal_z_val * normal_z_val) or 1.0
+                custom_normals[loop_idx] = (normal_x_val / nlen, normal_y_val / nlen, normal_z_val / nlen)
     joined_mesh_obj.data.normals_split_custom_set(custom_normals)
     joined_mesh_obj.data.update()
 
@@ -1121,11 +1121,11 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 bpy.ops.object.modifier_move_to_index(modifier=dec_mod.name, index=0)
                 bpy.ops.object.modifier_apply(modifier=dec_mod.name)
                 if any(len(poly.vertices) != 3 for poly in mesh_tgt.data.polygons):
-                    bm_tmp = bmesh.new()
-                    bm_tmp.from_mesh(mesh_tgt.data)
-                    bmesh.ops.triangulate(bm_tmp, faces=bm_tmp.faces)
-                    bm_tmp.to_mesh(mesh_tgt.data)
-                    bm_tmp.free()
+                    bmesh_temp = bmesh.new()
+                    bmesh_temp.from_mesh(mesh_tgt.data)
+                    bmesh.ops.triangulate(bmesh_temp, faces=bmesh_temp.faces)
+                    bmesh_temp.to_mesh(mesh_tgt.data)
+                    bmesh_temp.free()
                 mesh_tgt.data.update()
         ped_damage_helper.validate_rpf7_resource_file(ydd_out)
 

@@ -169,9 +169,9 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "Sem emojis: {name}",
     },
     "tests.vars_min_len": {
-        "en": "Identifiers >= 3 chars: {path}",
-        "ja": "識別子 >= 3 文字: {path}",
-        "pt": "Identificadores >= 3 caracteres: {path}",
+        "en": "Identifiers & underscore segments >= 3 chars: {path}",
+        "ja": "識別子・アンダースコア区切り >= 3 文字: {path}",
+        "pt": "Identificadores e segmentos com '_' >= 3 caracteres: {path}",
     },
     "tests.found_short_vars": {
         "en": "Found: {items}",

@@ -503,7 +503,7 @@ def build_shinano_er_for_gtav(cli_args):
         bpy,
         resolved_mesh_weights,
         exclude_meshes=() if hair_mode == "custom" else neko_hair_mesh_names,
-        lr_symmetry_meshes=(),
+        left_right_symmetry_meshes=(),
         reset_unlisted=True,
     )
     for mesh_label, counts_pair in applied_scene_summary.items():
@@ -732,7 +732,7 @@ def build_shinano_er_for_gtav(cli_args):
             hair_offset_override=eff_hair_offset,
         )
         use_double_cell = len(hair_spec.get("materials", [])) >= 2
-        er_quad_w = 1024 if use_double_cell else 512
+        er_quad_width = 1024 if use_double_cell else 512
         er_quad_uv = (0.5, 0.0, 0.5, 0.5) if use_double_cell else (0.5, 0.0, 0.25, 0.5)
         loaded_manifest = unity_hair_helper.load_custom_hair_manifest(cli_args.texture_dir)
         if (
@@ -742,7 +742,7 @@ def build_shinano_er_for_gtav(cli_args):
         ):
             loaded_manifest = unity_hair_helper.build_inmemory_manifest_fallback(
                 hair_spec,
-                quad_size=(er_quad_w, 512),
+                quad_size=(er_quad_width, 512),
                 quad_uv_rect=er_quad_uv,
             )
         body_ref_obj = bpy.data.objects.get("Body")
@@ -901,29 +901,29 @@ def build_shinano_er_for_gtav(cli_args):
     custom_ear_bones = []
     physbone_chain_records = []
 
-    hair_bones_ci = (
+    hair_bones_lower = (
         {pose_item.name.lower(): pose_item for pose_item in arm_hair.pose.bones}
         if is_calibrated_neko and arm_hair is not None and hair_root_rest_pos is not None
         else {}
     )
-    outfit_bones_ci = (
+    outfit_bones_lower = (
         {pose_item.name.lower(): pose_item for pose_item in arm_outfit.pose.bones}
         if arm_outfit is not None
         else {}
     )
-    watch_bones_ci = (
+    watch_bones_lower = (
         {pose_item.name.lower(): pose_item for pose_item in arm_watch.pose.bones}
         if arm_watch is not None
         else {}
     )
-    base_bones_ci = (
+    base_bones_lower = (
         {pose_item.name.lower(): pose_item for pose_item in arm_base.pose.bones}
         if arm_base is not None
         else {}
     )
 
-    map_hair_world_fn = None
-    if hair_bones_ci and hair_root_rest_pos is not None:
+    map_hair_world_func = None
+    if hair_bones_lower and hair_root_rest_pos is not None:
         baseline_neck_scale = 0.9
         baseline_hair_scale = 1.08696
         baseline_head_to_hair_offset = mathutils.Vector((0.000653, -0.002032, 0.074354))
@@ -950,13 +950,13 @@ def build_shinano_er_for_gtav(cli_args):
 
         def map_hair_world_mat(src_bone_pose) -> mathutils.Matrix:
             fbx_world = arm_hair.matrix_world @ src_bone_pose.matrix
-            rel_pt = (fbx_world.translation - hair_root_rest_pos) * neko_hair_scale
-            aligned_pt = neko_target_hair_root + (neko_hair_rot_matrix @ rel_pt)
+            rel_point = (fbx_world.translation - hair_root_rest_pos) * neko_hair_scale
+            aligned_point = neko_target_hair_root + (neko_hair_rot_matrix @ rel_point)
             gtav_pos = mathutils.Vector(
                 (
-                    aligned_pt.x * scale_factor,
-                    aligned_pt.y * scale_factor,
-                    aligned_pt.z * scale_factor + vertical_offset,
+                    aligned_point.x * scale_factor,
+                    aligned_point.y * scale_factor,
+                    aligned_point.z * scale_factor + vertical_offset,
                 )
             )
             gtav_rot_3x3 = (neko_hair_rot_matrix @ fbx_world.to_3x3().normalized()).normalized()
@@ -964,7 +964,7 @@ def build_shinano_er_for_gtav(cli_args):
             out_mat.translation = gtav_pos
             return out_mat
 
-        map_hair_world_fn = map_hair_world_mat
+        map_hair_world_func = map_hair_world_mat
 
     hat_pivot = mathutils.Vector((0.0, 0.0314, 1.2534))
     hat_rot_matrix = mathutils.Matrix.Rotation(math.radians(-11.464), 4, "X")
@@ -986,13 +986,13 @@ def build_shinano_er_for_gtav(cli_args):
 
     def resolve_michael_er_world_mat(src_bone_name):
         src_low = src_bone_name.strip().lower()
-        if map_hair_world_fn is not None and src_low.startswith(hair_bone_prefixes) and src_low in hair_bones_ci:
-            return map_hair_world_fn(hair_bones_ci[src_low])
-        if src_low.startswith("pocket watch") and src_low in watch_bones_ci and arm_watch is not None:
-            fbx_world = watch_transform_matrix @ (arm_watch.matrix_world @ watch_bones_ci[src_low].matrix)
+        if map_hair_world_func is not None and src_low.startswith(hair_bone_prefixes) and src_low in hair_bones_lower:
+            return map_hair_world_func(hair_bones_lower[src_low])
+        if src_low.startswith("pocket watch") and src_low in watch_bones_lower and arm_watch is not None:
+            fbx_world = watch_transform_matrix @ (arm_watch.matrix_world @ watch_bones_lower[src_low].matrix)
             return _to_gtav_world_mat(fbx_world)
-        if src_low in outfit_bones_ci and arm_outfit is not None:
-            fbx_world = (arm_outfit.matrix_world @ outfit_bones_ci[src_low].matrix).copy()
+        if src_low in outfit_bones_lower and arm_outfit is not None:
+            fbx_world = (arm_outfit.matrix_world @ outfit_bones_lower[src_low].matrix).copy()
             if src_low.startswith(("un_hatroot", "un_hat_")):
                 rel_pos = fbx_world.translation - hat_pivot
                 rotated_3x3 = (hat_rot_matrix.to_3x3() @ fbx_world.to_3x3().normalized()).normalized()
@@ -1000,8 +1000,8 @@ def build_shinano_er_for_gtav(cli_args):
                 adj_mat.translation = hat_pivot + (hat_rot_matrix @ rel_pos) + hat_pos_delta
                 fbx_world = adj_mat
             return _to_gtav_world_mat(fbx_world)
-        if src_low in base_bones_ci and arm_base is not None:
-            fbx_world = arm_base.matrix_world @ base_bones_ci[src_low].matrix
+        if src_low in base_bones_lower and arm_base is not None:
+            fbx_world = arm_base.matrix_world @ base_bones_lower[src_low].matrix
             return _to_gtav_world_mat(fbx_world)
         return None
 
@@ -1014,7 +1014,7 @@ def build_shinano_er_for_gtav(cli_args):
         chain_specs=pb_resolution["chain_specs"],
         parent_map=pb_resolution["parent_map"],
         chain_cfgs=pb_resolution["chains"],
-        source_world_mat_fn=resolve_michael_er_world_mat,
+        source_world_mat_func=resolve_michael_er_world_mat,
         ped_world_matrices=ped_world_matrices,
         default_limit_rotation=(14.12, 0.0, 0.0),
     )
@@ -1022,7 +1022,7 @@ def build_shinano_er_for_gtav(cli_args):
         injected_pb_count = hand_skeleton_helper.inject_custom_bones_into_blender_armature(
             ped_armature,
             custom_ear_bones,
-            bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+            bone_tag_func=physbone_helper.compute_gtav_bone_tag,
         )
         valid_gtav_bones.update(item["name"] for item in custom_ear_bones)
         print(
@@ -1045,7 +1045,7 @@ def build_shinano_er_for_gtav(cli_args):
             hand_skeleton_helper.inject_custom_bones_into_blender_armature(
                 ped_armature,
                 custom_blink_bones,
-                bone_tag_fn=physbone_helper.compute_gtav_bone_tag,
+                bone_tag_func=physbone_helper.compute_gtav_bone_tag,
             )
             valid_gtav_bones.update(item["name"] for item in custom_blink_bones)
         bpy.context.view_layer.update()
@@ -1104,7 +1104,7 @@ def build_shinano_er_for_gtav(cli_args):
         specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
-        um_global_params=(0.0, 0.0, 0.0, 0.0),
+        micromovement_global_params=(0.0, 0.0, 0.0, 0.0),
     )
     bucket_materials = {"ped": ped_material}
     for proc_obj in processed_objects:
