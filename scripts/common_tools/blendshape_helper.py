@@ -713,6 +713,154 @@ def export_character_blendshapes_to_cfg(
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
 
 
+def evaluate_ma_remap_curve(
+    weight_01: float,
+    remap_curve: Sequence[Sequence[float]],
+) -> float:
+    """Evaluate Modular Avatar `RemapCurve` keyframes (`0..100`) on a `[0..1]` weight."""
+    pts = sorted(
+        (float(pair[0]), float(pair[1]))
+        for pair in (remap_curve or ())
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2
+    )
+    if len(pts) < 2:
+        return float(weight_01)
+    val_100 = float(weight_01) * 100.0
+    if val_100 <= pts[0][0]:
+        seg_idx = 0
+    elif val_100 >= pts[-1][0]:
+        seg_idx = len(pts) - 2
+    else:
+        seg_idx = 0
+        for idx in range(len(pts) - 1):
+            if pts[idx][0] <= val_100 <= pts[idx + 1][0]:
+                seg_idx = idx
+                break
+    time_start, val_start = pts[seg_idx]
+    time_end, val_end = pts[seg_idx + 1]
+    if abs(time_end - time_start) < 1e-8:
+        return val_start / 100.0
+    mapped = val_start + ((val_end - val_start) / (time_end - time_start)) * (val_100 - time_start)
+    return float(mapped / 100.0)
+
+
+def _strip_blender_numeric_suffix(raw_name: str) -> str:
+    """Strip Blender `.001` duplicate suffixes without regex dependency."""
+    trimmed = str(raw_name or "").strip()
+    if len(trimmed) > 4 and trimmed[-4] == "." and trimmed[-3:].isdigit():
+        return trimmed[:-4].strip().lower()
+    return trimmed.lower()
+
+
+def apply_ma_shape_changers_and_syncs(
+    bpy_module: Any,
+    ma_plan: Dict[str, Any],
+    *,
+    allow_set: bool = True,
+    summary: Optional[Dict[str, int]] = None,
+) -> Dict[str, int]:
+    """
+    Apply Modular Avatar `ShapeChanger` (`Set`) weights and propagate `BlendshapeSync`
+    bindings across all matching scene meshes without being lost to base-weight resets.
+    """
+    res = {"set_applied": 0, "synced_blendshapes": 0}
+    if not ma_plan or not ma_plan.get("loaded"):
+        return res
+
+    meshes_by_low: Dict[str, List[Any]] = {}
+    for obj in bpy_module.data.objects:
+        if obj.type == "MESH":
+            base_low = _strip_blender_numeric_suffix(obj.name)
+            meshes_by_low.setdefault(base_low, []).append(obj)
+
+    if allow_set:
+        for mesh_key, shape_dict in (ma_plan.get("shape_changer_weights") or {}).items():
+            candidates = meshes_by_low.get(str(mesh_key).lower()) or meshes_by_low.get("body", [])
+            for target_obj in candidates:
+                if not getattr(target_obj.data, "shape_keys", None):
+                    continue
+                kblocks = target_obj.data.shape_keys.key_blocks
+                for shp_name, w_val in (shape_dict or {}).items():
+                    if shp_name in kblocks:
+                        kblocks[shp_name].value = float(w_val)
+                        res["set_applied"] += 1
+
+    for sync_item in ma_plan.get("blendshape_syncs") or ():
+        src_key = str(sync_item.get("source_shape", "") or "")
+        dst_key = str(sync_item.get("target_shape", "") or "")
+        if not src_key or not dst_key:
+            continue
+        src_candidates = (
+            meshes_by_low.get(str(sync_item.get("source_mesh", "")).lower())
+            or meshes_by_low.get("body")
+            or meshes_by_low.get("body_base")
+            or []
+        )
+        src_val: Optional[float] = None
+        for src_obj in src_candidates:
+            if getattr(src_obj.data, "shape_keys", None) and src_key in src_obj.data.shape_keys.key_blocks:
+                src_val = float(src_obj.data.shape_keys.key_blocks[src_key].value)
+                break
+        if src_val is None:
+            continue
+        mapped_val = evaluate_ma_remap_curve(src_val, sync_item.get("remap_curve") or ())
+        for dst_obj in meshes_by_low.get(str(sync_item.get("target_mesh", "")).lower(), ()):
+            if getattr(dst_obj.data, "shape_keys", None) and dst_key in dst_obj.data.shape_keys.key_blocks:
+                dst_obj.data.shape_keys.key_blocks[dst_key].value = mapped_val
+                res["synced_blendshapes"] += 1
+                if summary is not None:
+                    summary["synced_blendshapes"] = summary.get("synced_blendshapes", 0) + 1
+    return res
+
+
+def collect_shape_deleted_vertex_rules(
+    src_obj: Any,
+    ma_plan: Optional[Dict[str, Any]],
+    *,
+    manual_shrink_min_weight: float = 0.5,
+    manual_shrink_threshold: float = 0.00002,
+) -> Dict[str, Set[int]]:
+    """
+    Identify vertices marked for polygon deletion by either Modular Avatar `ShapeChanger`
+    (`ChangeType=0`, `any` vertex > threshold) or manual `Shrink_* > 0.5` (`all` verts).
+    """
+    any_verts: Set[int] = set()
+    all_verts: Set[int] = set()
+    if not src_obj or not getattr(src_obj.data, "shape_keys", None):
+        return {"any_verts": any_verts, "all_verts": all_verts}
+    kblocks = src_obj.data.shape_keys.key_blocks
+    if len(kblocks) < 2:
+        return {"any_verts": any_verts, "all_verts": all_verts}
+
+    basis = kblocks[0]
+    vert_count = len(src_obj.data.vertices)
+    base_low = _strip_blender_numeric_suffix(src_obj.name)
+
+    if ma_plan and ma_plan.get("loaded"):
+        for del_item in ma_plan.get("shape_changer_deletes") or ():
+            if str(del_item.get("mesh", "")).strip().lower() != base_low:
+                continue
+            key_block = kblocks.get(str(del_item.get("shape_name", "") or ""))
+            if key_block is None or len(key_block.data) != vert_count:
+                continue
+            thr = max(1e-6, float(del_item.get("threshold", 0.01)))
+            for idx in range(vert_count):
+                if (key_block.data[idx].co - basis.data[idx].co).length > thr:
+                    any_verts.add(idx)
+
+    if base_low in ("body_base", "body"):
+        for key_block in kblocks[1:]:
+            if not key_block.name.lower().startswith("shrink_") or float(key_block.value) <= manual_shrink_min_weight:
+                continue
+            if len(key_block.data) != vert_count:
+                continue
+            for idx in range(vert_count):
+                if (key_block.data[idx].co - basis.data[idx].co).length > manual_shrink_threshold:
+                    all_verts.add(idx)
+
+    return {"any_verts": any_verts, "all_verts": all_verts}
+
+
 def main() -> int:
     """CLI entrypoint for exporting Unity project & FBX blendshapes into `.cfg` files."""
     if project_i18n is not None:

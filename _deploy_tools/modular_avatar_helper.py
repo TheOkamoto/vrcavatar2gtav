@@ -300,6 +300,7 @@ def build_modular_avatar_bake_plan(
     scale_adjusters: List[Dict[str, Any]] = []
     blendshape_syncs: List[Dict[str, Any]] = []
     shape_changer_weights: Dict[str, Dict[str, float]] = {}
+    shape_changer_deletes: List[Dict[str, Any]] = []
     object_toggles: Dict[str, bool] = {}
     disabled_meshes: Set[str] = set()
     extra_fbx_paths: List[str] = []
@@ -684,7 +685,16 @@ def build_modular_avatar_bake_plan(
                 continue
             for item in shp_comp["shapes"]:
                 mesh_tail = str(item.get("reference_path", "") or "").rsplit("/", 1)[-1].strip() or "Body"
-                shape_changer_weights.setdefault(mesh_tail, {})[item["shape_name"]] = float(item["weight"])
+                if int(item.get("change_type", 1)) == 0:
+                    shape_changer_deletes.append(
+                        {
+                            "mesh": mesh_tail,
+                            "shape_name": item["shape_name"],
+                            "threshold": float(item.get("threshold", 0.01)),
+                        }
+                    )
+                else:
+                    shape_changer_weights.setdefault(mesh_tail, {})[item["shape_name"]] = float(item["weight"])
 
         for sync_comp in doc_data["blendshape_syncs"]:
             if filter_subtree and not _is_go_in_avatar_subtree(sync_comp["go_fid"]):
@@ -700,6 +710,7 @@ def build_modular_avatar_bake_plan(
                         "source_shape": bnd["source_shape"],
                         "target_mesh": local_mesh,
                         "target_shape": bnd["local_shape"],
+                        "remap_curve": list(bnd.get("remap_curve") or ()),
                     }
                 )
 
@@ -865,6 +876,7 @@ def build_modular_avatar_bake_plan(
         "fbx_instances": fbx_instances,
         "blendshape_syncs": blendshape_syncs,
         "shape_changer_weights": shape_changer_weights,
+        "shape_changer_deletes": shape_changer_deletes,
         "object_toggles": object_toggles,
         "disabled_meshes": sorted(disabled_meshes),
         "extra_fbx_paths": extra_fbx_paths,
@@ -1527,37 +1539,14 @@ def apply_modular_avatar_plan_in_blender(
                 summary["bound_proxies"] += 1
 
     # 5. Apply ShapeChanger weights & BlendshapeSync propagation across all meshes
-    mesh_by_name_low: Dict[str, Any] = {}
-    for obj in bpy_mod.data.objects:
-        if obj.type == "MESH":
-            mesh_by_name_low[re.sub(r"\.\d{3}$", "", obj.name).strip().lower()] = obj
+    import blendshape_helper
 
-    for mesh_key, shape_dict in bake_plan.get("shape_changer_weights", {}).items():
-        target_obj = mesh_by_name_low.get(mesh_key.lower()) or mesh_by_name_low.get("body")
-        if target_obj and getattr(target_obj.data, "shape_keys", None):
-            kblocks = target_obj.data.shape_keys.key_blocks
-            for shp_name, w_val in shape_dict.items():
-                if shp_name in kblocks:
-                    kblocks[shp_name].value = float(w_val)
-
-    for sync_item in bake_plan.get("blendshape_syncs", ()):
-        src_obj = (
-            mesh_by_name_low.get(str(sync_item.get("source_mesh", "")).lower())
-            or mesh_by_name_low.get("body")
-            or mesh_by_name_low.get("body_base")
-        )
-        dst_obj = mesh_by_name_low.get(str(sync_item.get("target_mesh", "")).lower())
-        if not (src_obj and dst_obj):
-            continue
-        if not (getattr(src_obj.data, "shape_keys", None) and getattr(dst_obj.data, "shape_keys", None)):
-            continue
-        src_key = sync_item.get("source_shape", "")
-        dst_key = sync_item.get("target_shape", "")
-        if src_key in src_obj.data.shape_keys.key_blocks and dst_key in dst_obj.data.shape_keys.key_blocks:
-            dst_obj.data.shape_keys.key_blocks[dst_key].value = (
-                src_obj.data.shape_keys.key_blocks[src_key].value
-            )
-            summary["synced_blendshapes"] += 1
+    blendshape_helper.apply_ma_shape_changers_and_syncs(
+        bpy_mod,
+        bake_plan,
+        allow_set=True,
+        summary=summary,
+    )
 
     # 6. Attach Unity material textures onto newly imported outfit meshes
     apply_unity_textures_to_blender_meshes(bpy_mod, all_imported_meshes, bake_plan.get("mesh_materials", {}))

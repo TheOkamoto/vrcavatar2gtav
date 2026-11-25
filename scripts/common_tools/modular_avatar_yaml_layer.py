@@ -549,7 +549,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                         {"go_fid": go_fid, "enabled": is_enabled, "scale": scale_xyz}
                     )
             elif script_guid == MA_BLENDSHAPE_SYNC_GUID and is_enabled:
-                bindings: List[Dict[str, str]] = []
+                bindings: List[Dict[str, Any]] = []
                 for bnd_match in re.finditer(
                     r"-\s*ReferenceMesh:[ \t]*\r?\n"
                     r"(?:[ \t]+[^\n]*\n)*?"
@@ -562,12 +562,21 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                     ref_mesh = _decode_scalar(bnd_match.group(1))
                     src_shape = _decode_scalar(bnd_match.group(2))
                     local_shape = _decode_scalar(bnd_match.group(3)) or src_shape
+                    tail_blk = block[bnd_match.end():].split("\n  - ReferenceMesh:", 1)[0]
+                    remap_pts = [
+                        (float(key_pair.group(1)), float(key_pair.group(2)))
+                        for key_pair in re.finditer(
+                            r"time:\s*([-+0-9.eE]+)\s*\r?\n\s*value:\s*([-+0-9.eE]+)",
+                            tail_blk,
+                        )
+                    ]
                     if src_shape:
                         bindings.append(
                             {
                                 "reference_mesh_path": ref_mesh,
                                 "source_shape": src_shape,
                                 "local_shape": local_shape,
+                                "remap_curve": remap_pts,
                             }
                         )
                 if bindings:
@@ -596,6 +605,8 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
             elif script_guid == MA_SHAPE_CHANGER_GUID and is_enabled:
                 inv_m = re.search(r"^\s*m_inverted:[ \t]*(\d+)", block, re.MULTILINE)
                 is_inverted = (int(inv_m.group(1)) != 0) if inv_m else False
+                thr_m = re.search(r"^\s*m_threshold:[ \t]*([-+0-9.eE]+)", block, re.MULTILINE)
+                threshold = float(thr_m.group(1)) if thr_m else 0.01
                 if not is_inverted:
                     shapes: List[Dict[str, Any]] = []
                     for shp_m in re.finditer(
@@ -622,6 +633,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                                     "shape_name": shape_name,
                                     "change_type": change_type,
                                     "weight": weight_norm,
+                                    "threshold": threshold,
                                 }
                             )
                     if shapes:

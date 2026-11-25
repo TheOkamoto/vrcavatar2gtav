@@ -326,6 +326,14 @@ def run_in_blender_build(manifest_path: Path) -> None:
     blendshape_weights = dict(manifest.get("blendshape_weights") or {})
     if blendshape_weights:
         blendshape_helper.apply_blendshapes_to_blender_scene(bpy, blendshape_weights)
+    if ma_plan.get("loaded"):
+        ma_sync_res = blendshape_helper.apply_ma_shape_changers_and_syncs(bpy, ma_plan)
+        if ma_sync_res["set_applied"] or ma_sync_res["synced_blendshapes"]:
+            print(
+                f"[MA Blendshapes] Applied {ma_sync_res['set_applied']} ShapeChanger Set key(s) "
+                f"and synced {ma_sync_res['synced_blendshapes']} BlendshapeSync target(s).",
+                flush=True,
+            )
 
     _pose_avatar_arms_to_gtav_a_pose(
         bpy, mathutils, src_armature, target_drop_deg=float(yft_metrics["arm_drop_deg"])
@@ -489,13 +497,34 @@ def run_in_blender_build(manifest_path: Path) -> None:
             ):
                 strip_indices.append(mat_idx)
 
+        del_faces_set: set = set()
         if strip_indices:
-            del_faces = [face_elem for face_elem in bm_data.faces if face_elem.material_index in strip_indices]
-            if del_faces:
-                bmesh.ops.delete(bm_data, geom=del_faces, context="FACES")
-                del_verts = [vert_elem for vert_elem in bm_data.verts if not vert_elem.link_faces]
-                if del_verts:
-                    bmesh.ops.delete(bm_data, geom=del_verts, context="VERTS")
+            del_faces_set.update(
+                face_elem for face_elem in bm_data.faces if face_elem.material_index in strip_indices
+            )
+        del_rules = blendshape_helper.collect_shape_deleted_vertex_rules(src_obj, ma_plan)
+        any_del_verts = del_rules["any_verts"]
+        all_del_verts = del_rules["all_verts"]
+        shape_culled_count = 0
+        if len(bm_data.verts) == len(src_obj.data.vertices) and (any_del_verts or all_del_verts):
+            for face_elem in bm_data.faces:
+                if (any_del_verts and any(vert_el[orig_vert_layer] in any_del_verts for vert_el in face_elem.verts)) or (
+                    all_del_verts and all(vert_el[orig_vert_layer] in all_del_verts for vert_el in face_elem.verts)
+                ):
+                    if face_elem not in del_faces_set:
+                        shape_culled_count += 1
+                    del_faces_set.add(face_elem)
+        if shape_culled_count:
+            print(
+                f"[ShapeCull] '{src_obj.name}': culled {shape_culled_count} hidden/deleted face(s) "
+                f"(MA Delete={len(any_del_verts)} verts, Shrink={len(all_del_verts)} verts).",
+                flush=True,
+            )
+        if del_faces_set:
+            bmesh.ops.delete(bm_data, geom=list(del_faces_set), context="FACES")
+            del_verts = [vert_elem for vert_elem in bm_data.verts if not vert_elem.link_faces]
+            if del_verts:
+                bmesh.ops.delete(bm_data, geom=del_verts, context="VERTS")
 
         bmesh.ops.triangulate(bm_data, faces=bm_data.faces)
         for face_elem in bm_data.faces:
