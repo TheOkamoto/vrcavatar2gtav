@@ -34,7 +34,7 @@ try:
 except ImportError:
     unity_hair_helper = None
 
-
+import blendshape_unity_yaml_layer
 
 try:
     from modular_avatar_yaml_layer import (
@@ -303,6 +303,7 @@ def build_modular_avatar_bake_plan(
     shape_changer_deletes: List[Dict[str, Any]] = []
     object_toggles: Dict[str, bool] = {}
     disabled_meshes: Set[str] = set()
+    explicit_disabled: Set[str] = set()
     extra_fbx_paths: List[str] = []
     base_fbx_paths: List[str] = []
     mesh_materials: Dict[str, List[Dict[str, Any]]] = {}
@@ -478,6 +479,7 @@ def build_modular_avatar_bake_plan(
         transform_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         renderer_overrides: Optional[Dict[str, Any]] = None,
         collect_base_scales: bool = False,
+        owner_tag: str = "",
     ) -> Dict[str, Dict[str, Any]]:
         doc_gos = doc_data["gameobjects"]
         doc_renderers = doc_data["renderers"]
@@ -663,11 +665,16 @@ def build_modular_avatar_bake_plan(
                 continue
             if not _is_game_object_active_in_doc(doc_data, toggle_comp["go_fid"], stop_transform=doc_stop_transform):
                 continue
+            menu_info = doc_data.get("menu_items", {}).get(toggle_comp["go_fid"])
+            if menu_info and not menu_info.get("is_default", False):
+                continue
             for item in toggle_comp["toggles"]:
                 ref_path = item["reference_path"]
                 object_toggles[ref_path] = bool(item["active"])
                 if not item["active"] and ref_path:
-                    disabled_meshes.add(ref_path.rsplit("/", 1)[-1])
+                    tail_name = ref_path.rsplit("/", 1)[-1]
+                    disabled_meshes.add(tail_name)
+                    explicit_disabled.add(tail_name)
 
         for rep_comp in doc_data["replace_objects"]:
             if filter_subtree and not _is_game_object_in_avatar_subtree(rep_comp["go_fid"]):
@@ -677,11 +684,14 @@ def build_modular_avatar_bake_plan(
             tgt_tail = str(rep_comp["target_path"]).rsplit("/", 1)[-1].strip()
             if tgt_tail:
                 disabled_meshes.add(tgt_tail)
+                explicit_disabled.add(tgt_tail)
 
         for shp_comp in doc_data["shape_changers"]:
             if filter_subtree and not _is_game_object_in_avatar_subtree(shp_comp["go_fid"]):
                 continue
             if not _is_game_object_active_in_doc(doc_data, shp_comp["go_fid"], stop_transform=doc_stop_transform):
+                continue
+            if not doc_data.get("menu_items", {}).get(shp_comp["go_fid"], {}).get("is_default", True):
                 continue
             for item in shp_comp["shapes"]:
                 mesh_tail = str(item.get("reference_path", "") or "").rsplit("/", 1)[-1].strip() or "Body"
@@ -740,6 +750,7 @@ def build_modular_avatar_bake_plan(
                     "mangle_names": merge_comp["mangle_names"],
                     "fbx_paths": list(local_fbx_paths),
                     "mesh_names": list(local_mesh_names),
+                    "_owner_tag": owner_tag,
                 }
             )
             if root_override_name and root_override_name not in outfit_roots:
@@ -768,6 +779,7 @@ def build_modular_avatar_bake_plan(
                     "match_scale": bool(proxy_comp.get("match_scale", False)),
                     "fbx_paths": list(local_fbx_paths),
                     "mesh_names": list(local_mesh_names),
+                    "_owner_tag": owner_tag,
                 }
             )
         return doc_transform_map
@@ -809,69 +821,81 @@ def build_modular_avatar_bake_plan(
                 )
             )
 
+    outfit_keywords = (
+        "dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket", "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair",
+        "ribbon", "casquette", "megane", "glass", "ring", "earring", "pierce", "pin", "nail", "circle", "radio", "eeg", "watch", "bag",
+        "necklace", "choker", "collar", "wing", "horn", "tail", "accessory", "prop",
+    )
     while prefab_queue:
         cur_prefab, cur_label, cur_base_world, cur_overrides, cur_rend_overrides, cur_pool_mods, visit_tag = prefab_queue.popleft()
         resolved_pref = cur_prefab.resolve()
         visit_key = (resolved_pref, visit_tag)
-        if visit_key in visited_prefabs or resolved_pref.suffix.lower() != ".prefab":
+        label_match = any(tok in cur_label.lower() or tok in cur_prefab.stem.lower() for tok in outfit_keywords)
+        if visit_key in visited_prefabs:
+            continue
+        if resolved_pref.suffix.lower() in (".fbx", ".dae", ".obj"):
+            visited_prefabs.add(visit_key)
+            has_parent_attach = any(item.get("_owner_tag") and visit_tag.startswith(item["_owner_tag"]) for item in armature_merges + bone_proxies)
+            model_payload = blendshape_unity_yaml_layer.collect_model_prefab_instance_payload(
+                cur_prefab, cur_pool_mods, cur_prefab,
+                lambda guids, anchor: _collect_guid_paths_for_ma(guids, anchor, resolved_assets, include_materials=bool(resolve_materials)),
+                _resolve_material_dicts,
+            )
+            plan_state = {
+                "active_meshes": active_meshes, "active_meshes_by_fbx": active_meshes_by_fbx,
+                "mesh_materials": mesh_materials, "active_mat_guids_set": active_mat_guids_set,
+                "explicit_disabled": explicit_disabled, "fbx_instances": fbx_instances,
+                "attach_items": armature_merges + bone_proxies,
+            }
+            blendshape_unity_yaml_layer.register_model_prefab_instance_in_plan(
+                cur_prefab, visit_tag, model_payload, unity_trs_to_blender_matrix_rows(cur_base_world, is_bone=False),
+                bool(has_parent_attach or label_match), _register_fbx_path, plan_state,
+            )
+            continue
+        if resolved_pref.suffix.lower() != ".prefab":
             continue
         visited_prefabs.add(visit_key)
         pref_doc = parse_unity_yaml_with_ma(cur_prefab)
-        is_outfit = any(
-            keyword_tok in cur_label.lower()
-            or keyword_tok in cur_prefab.stem.lower()
-            for keyword_tok in (
-                "dress", "cloth", "outfit", "maid", "coat", "skirt", "jacket",
-                "costume", "wear", "kisekae", "shoe", "boot", "hat", "hair",
-                "ribbon", "casquette", "megane", "glass", "ring", "earring",
-                "pierce", "pin", "nail", "circle", "radio", "eeg", "watch",
-                "bag", "necklace", "choker", "collar", "wing", "horn", "tail",
-                "accessory", "prop",
-            )
-        ) or bool(pref_doc["merge_armatures"] or pref_doc["bone_proxies"])
+        is_outfit = label_match or bool(pref_doc["merge_armatures"] or pref_doc["bone_proxies"])
         prefab_transform_map = _ingest_doc_ma_components(
-            pref_doc,
-            cur_prefab,
-            filter_subtree=False,
-            is_outfit_prefab=is_outfit,
-            root_override_name=cur_label,
-            base_world=cur_base_world,
-            transform_overrides=cur_overrides,
-            renderer_overrides=cur_rend_overrides,
+            pref_doc, cur_prefab, filter_subtree=False, is_outfit_prefab=is_outfit, root_override_name=cur_label,
+            base_world=cur_base_world, transform_overrides=cur_overrides, renderer_overrides=cur_rend_overrides, owner_tag=visit_tag,
         )
         nested_guids = {
             nested_prefab_instance.get("source_guid", "")
             for nested_prefab_instance in pref_doc["prefab_instances"].values()
             if nested_prefab_instance.get("active", True) and nested_prefab_instance.get("source_guid")
         }
-        nested_resolved = _collect_guid_paths_for_ma(nested_guids, cur_prefab, resolved_assets)
+        nested_resolved = _collect_guid_paths_for_ma(
+            nested_guids, cur_prefab, resolved_assets, name_hints=list(hint_tokens) + [resolved_avatar_name, cur_label, cur_prefab.stem],
+        )
+        sibling_ref_mods = [
+            mod_item
+            for sibling_inst in pref_doc["prefab_instances"].values()
+            if sibling_inst.get("active", True)
+            for mod_item in sibling_inst.get("mods", ())
+            if mod_item.get("property", "").endswith((".targetObject", ".referencePath"))
+        ]
         for nested_fid, nested_prefab_instance in pref_doc["prefab_instances"].items():
             if not nested_prefab_instance.get("active", True):
                 continue
             nested_path = nested_resolved.get(nested_prefab_instance.get("source_guid", ""))
             if nested_path and nested_path.is_file():
                 nested_parent_transform = str(nested_prefab_instance.get("parent_tr", "0") or "0")
-                nested_world = (
-                    prefab_transform_map[nested_parent_transform]["world"]
-                    if nested_parent_transform in prefab_transform_map
-                    else cur_base_world
-                )
+                nested_world = prefab_transform_map[nested_parent_transform]["world"] if nested_parent_transform in prefab_transform_map else cur_base_world
                 nested_src_guid = str(nested_prefab_instance.get("source_guid", "") or "")
-                nested_pool_mods = list(nested_prefab_instance.get("mods", ())) + list(cur_pool_mods)
+                nested_pool_mods = list(nested_prefab_instance.get("mods", ())) + list(cur_pool_mods) + sibling_ref_mods
                 nested_overrides = extract_transform_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
                 nested_rend_overrides = extract_renderer_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
-                prefab_queue.append(
-                    (
-                        nested_path,
-                        nested_prefab_instance.get("name", "") or nested_path.stem,
-                        nested_world,
-                        nested_overrides,
-                        nested_rend_overrides,
-                        nested_pool_mods,
-                        f"{visit_tag}_{nested_fid}",
-                    )
-                )
+                prefab_queue.append((
+                    nested_path, nested_prefab_instance.get("name", "") or nested_path.stem, nested_world,
+                    nested_overrides, nested_rend_overrides, nested_pool_mods, f"{visit_tag}_{nested_fid}",
+                ))
 
+    for attach_item in armature_merges + bone_proxies:
+        attach_item.pop("_owner_tag", None)
+    active_low = {name.lower() for name in active_meshes}
+    disabled_meshes = explicit_disabled | {name for name in disabled_meshes if name.lower() not in active_low}
     return {
         "loaded": True,
         "scene_path": str(src_path),
@@ -956,7 +980,9 @@ def _apply_unity_transform_deltas_to_outfit(
         bone.name: tuple(float(axis_val) for axis_val in (outfit_mat_world @ bone.head_local))
         for bone in outfit_arm_obj.data.bones
     }
-    unit_corr = compute_bone_unit_scale_correction(fbx_pts_map, bone_mats)
+    arm_scale = outfit_mat_world.to_scale()
+    fbx_col_norm = max(1e-6, (abs(float(arm_scale[0])) + abs(float(arm_scale[1])) + abs(float(arm_scale[2]))) / 3.0)
+    unit_corr = compute_bone_unit_scale_correction(fbx_pts_map, bone_mats, fbx_col_norm=fbx_col_norm)
 
     def _find_anchor_pose_inv(bone_obj: Any) -> Any:
         cur_bone = bone_obj

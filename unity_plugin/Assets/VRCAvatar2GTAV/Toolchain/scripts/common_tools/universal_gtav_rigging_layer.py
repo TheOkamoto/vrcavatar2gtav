@@ -153,22 +153,41 @@ def select_primary_avatar_fbx(
         anchor_tokens.append(Path(scene_str).stem.lower())
     if fallback_root is not None:
         anchor_tokens.append(Path(fallback_root).name.lower())
-    accessory_tokens = (
+    accessory_substrings = (
         "_for_", "wear", "dress", "outfit", "hair", "nail", "earring", "cloth",
-        "casquette", "megane", "glass", "ring", "pin", "circle", "radio", "eeg",
-        "ribbon", "watch", "bag", "shoe", "sock", "collar", "choker", "wing", "horn",
+        "casquette", "megane", "glass", "ribbon", "watch", "shoe", "sock",
+        "collar", "choker", "wing", "horn", "bunny", "monocle", "silk",
+        "sleeve", "tight", "gimmick", "zurashi",
+    )
+    accessory_exact_tokens = frozenset(
+        {
+            "ear", "ears", "hat", "cap", "card", "item", "prop", "ring", "pin",
+            "circle", "radio", "eeg", "bag", "tail", "halo", "love", "bra",
+            "bikini", "cuff", "cuffs", "fur", "strap", "chain", "charm", "pack",
+        }
     )
 
-    def _score_primary(fbx_file: Path) -> Tuple[int, int, int, int, int, int]:
+    def _score_primary(fbx_file: Path) -> Tuple[int, int, int, int, int, int, int]:
         resolved_str = str(fbx_file.resolve())
         stem_low = fbx_file.stem.lower()
+        stem_tokens = {tok for tok in re.split(r"[^a-z0-9]+", stem_low) if tok}
         owned_meshes = active_by_fbx.get(resolved_str, ())
-        owns_skin = 0 if any(blendshape_helper.is_body_or_face_skin_mesh(mesh_name) for mesh_name in owned_meshes) else 1
+        skin_count = sum(
+            1 for mesh_name in owned_meshes if blendshape_helper.is_body_or_face_skin_mesh(mesh_name)
+        )
+        owns_skin = 0 if skin_count > 0 else 1
         in_loose = 1 if "_ziploosefbx" in str(fbx_file).lower() else 0
-        is_accessory = 1 if any(tok in stem_low for tok in accessory_tokens) else 0
-        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest", "kisekae")) else 0
+        is_accessory = (
+            1
+            if (
+                any(tok in stem_low for tok in accessory_substrings)
+                or bool(stem_tokens & accessory_exact_tokens)
+            )
+            else 0
+        )
+        has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest")) else 0
         matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
-        return (owns_skin, in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
+        return (owns_skin, -skin_count, in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
 
     return sorted(candidates, key=_score_primary)[0]
 

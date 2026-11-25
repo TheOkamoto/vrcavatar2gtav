@@ -117,44 +117,23 @@ def _format_weight_value(weight_val: float) -> str:
     return formatted
 
 
-def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[str]]:
-    """
-    Read ordered BlendShapeChannel names per Model mesh directly from a binary FBX.
-
-    Skips decompressing heavy geometry vertex arrays so large character FBXs parse
-    in milliseconds in pure Python. Returns `{model_name: [shape_0, shape_1, ...]}`.
-    """
-    resolved_path = Path(fbx_path)
-    if not resolved_path.is_file():
-        return {}
-
-    try:
-        mtime_ns = resolved_path.stat().st_mtime_ns
-        cache_key = (str(resolved_path.resolve()), mtime_ns)
-    except OSError:
-        cache_key = (str(resolved_path), -1)
-
-    if cache_key[1] >= 0 and cache_key in _FBX_BLENDSHAPE_CACHE:
-        return {
-            mesh_key: list(shape_list)
-            for mesh_key, shape_list in _FBX_BLENDSHAPE_CACHE[cache_key].items()
-        }
-
+def _read_binary_fbx_objects_and_connections(
+    resolved_path: Path,
+) -> Optional[Tuple[List[Tuple[str, List[Any], List[Any]]], List[Tuple[str, List[Any], List[Any]]]]]:
+    """Read raw top-level `(object_nodes, connection_nodes)` cleanly from a binary FBX."""
     try:
         fbx_bytes = resolved_path.read_bytes()
     except OSError:
-        return {}
+        return None
     if len(fbx_bytes) < 27 or not fbx_bytes.startswith(b"Kaydara FBX Binary"):
-        return {}
-
+        return None
     try:
         fbx_version = struct.unpack_from("<I", fbx_bytes, 23)[0]
     except struct.error:
-        return {}
+        return None
     is_64bit = fbx_version >= 7500
     header_fmt = "<QQQB" if is_64bit else "<IIIB"
     header_size = 25 if is_64bit else 13
-    sentinel_len = header_size
     total_len = len(fbx_bytes)
 
     def read_property_fast(cursor_pos: int) -> Tuple[Any, int]:
@@ -212,7 +191,7 @@ def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[s
                 prop_values.append(parsed_val)
             cursor_pos = prop_end
             child_nodes: List[Any] = []
-            if recurse_children and cursor_pos + sentinel_len <= end_offset:
+            if recurse_children and cursor_pos + header_size <= end_offset:
                 child_nodes = parse_node_block(cursor_pos, end_offset, recurse_children=True)
             cursor_pos = end_offset
             node_list.append((node_name, prop_values, child_nodes))
@@ -221,7 +200,6 @@ def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[s
     top_cursor = 27
     object_nodes: List[Tuple[str, List[Any], List[Any]]] = []
     connection_nodes: List[Tuple[str, List[Any], List[Any]]] = []
-
     try:
         while top_cursor + header_size <= total_len:
             end_offset, prop_count, prop_byte_len, name_len = struct.unpack_from(
@@ -234,15 +212,289 @@ def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[s
                 "utf-8", errors="replace"
             )
             child_start = top_cursor + name_len + prop_byte_len
-            if section_name == "Objects" and child_start + sentinel_len <= end_offset:
+            if section_name == "Objects" and child_start + header_size <= end_offset:
                 object_nodes = parse_node_block(child_start, end_offset, recurse_children=False)
-            elif section_name == "Connections" and child_start + sentinel_len <= end_offset:
+            elif section_name == "Connections" and child_start + header_size <= end_offset:
                 connection_nodes = parse_node_block(
                     child_start, end_offset, recurse_children=False
                 )
             top_cursor = end_offset
     except (struct.error, ValueError):
+        return None
+    return object_nodes, connection_nodes
+
+
+def extract_fbx_model_meshes_and_materials(
+    fbx_path: Union[str, Path],
+) -> Dict[str, List[str]]:
+    """Return ordered `{mesh_node_name: [fbx_material_slot_names]}` for Mesh nodes in a binary FBX."""
+    resolved_path = Path(fbx_path)
+    if not resolved_path.is_file():
         return {}
+    parsed = _read_binary_fbx_objects_and_connections(resolved_path)
+    if parsed is None:
+        return {}
+    object_nodes, connection_nodes = parsed
+    mesh_models: Dict[int, str] = {}
+    materials_by_id: Dict[int, str] = {}
+    for node_name, prop_values, _child in object_nodes:
+        if len(prop_values) < 2 or not isinstance(prop_values[0], int) or isinstance(prop_values[0], bool):
+            continue
+        node_id = int(prop_values[0])
+        raw_name = str(prop_values[1]).split("\x00\x01")[0]
+        if node_name == "Model" and len(prop_values) >= 3 and prop_values[2] == "Mesh":
+            mesh_models[node_id] = raw_name
+        elif node_name == "Material":
+            materials_by_id[node_id] = raw_name
+    parent_to_children: Dict[int, List[int]] = {}
+    for node_name, prop_values, _child in connection_nodes:
+        if (
+            node_name == "C"
+            and len(prop_values) >= 3
+            and prop_values[0] == "OO"
+            and isinstance(prop_values[1], int)
+            and isinstance(prop_values[2], int)
+        ):
+            parent_to_children.setdefault(int(prop_values[2]), []).append(int(prop_values[1]))
+    mesh_to_mats: Dict[str, List[str]] = {}
+    for model_id, mesh_name in mesh_models.items():
+        if not mesh_name:
+            continue
+        ordered_mats = [
+            materials_by_id[child_id]
+            for child_id in parent_to_children.get(model_id, ())
+            if child_id in materials_by_id
+        ]
+        mesh_to_mats[mesh_name] = ordered_mats
+    return mesh_to_mats
+
+
+def _read_fbx_meta_external_materials(fbx_path: Path) -> Dict[str, str]:
+    """Parse `externalObjects` UnityEngine:Material mappings from `.fbx.meta`."""
+    meta_path = Path(str(fbx_path) + ".meta")
+    if not meta_path.is_file():
+        return {}
+    try:
+        raw_text = meta_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}
+    ext_map: Dict[str, str] = {}
+    for ext_match in re.finditer(
+        r"type:\s*UnityEngine:Material[^\n]*\r?\n(?:[ \t]+[^\n]*\r?\n)*?"
+        r"[ \t]*name:[ \t]*([^\r\n]+)\r?\n"
+        r"[ \t]*second:\s*\{[^\}]*guid:\s*([0-9a-fA-F]{32})",
+        raw_text,
+    ):
+        slot_name = ext_match.group(1).strip().strip("\"'")
+        mat_guid = ext_match.group(2).strip().lower()
+        if slot_name and mat_guid:
+            ext_map[slot_name] = mat_guid
+    return ext_map
+
+
+def collect_model_prefab_instance_payload(
+    fbx_path: Path,
+    pool_mods: Sequence[Dict[str, Any]],
+    doc_path: Path,
+    resolve_guids_callback: Any,
+    resolve_mats_callback: Any,
+) -> Dict[str, Any]:
+    """Extract active/disabled meshes and overridden `.mat` lists for an `.fbx` Model PrefabInstance."""
+    mesh_to_slots = extract_fbx_model_meshes_and_materials(fbx_path)
+    ext_mats = _read_fbx_meta_external_materials(fbx_path)
+    pair_ref_obj: Dict[str, str] = {}
+    pair_ref_path: Dict[str, str] = {}
+    ref_fid_to_mesh: Dict[str, str] = {}
+    inactive_fids: Set[str] = set()
+    transform_scales: Dict[str, float] = {}
+    override_mat_guids: List[str] = []
+    seen_ovr: Set[str] = set()
+    for mod_item in pool_mods or ():
+        tgt_fid = str(mod_item.get("target_fid", "") or "")
+        prop_name = str(mod_item.get("property", "") or "")
+        val_str = str(mod_item.get("value", "") or "").strip()
+        ref_fid = str(mod_item.get("ref_fid", "") or "")
+        ref_guid = str(mod_item.get("ref_guid", "") or "").lower()
+        pair_prefix = f"{tgt_fid}::{prop_name.rsplit('.', 1)[0]}" if "." in prop_name else tgt_fid
+        if prop_name.endswith(".referencePath") and val_str:
+            tail_mesh = val_str.rsplit("/", 1)[-1].strip()
+            if tail_mesh:
+                pair_ref_path[pair_prefix] = tail_mesh
+                if tgt_fid:
+                    ref_fid_to_mesh.setdefault(tgt_fid, tail_mesh)
+        elif prop_name.endswith(".targetObject") and ref_fid:
+            pair_ref_obj[pair_prefix] = ref_fid
+        elif prop_name.startswith("m_Materials.Array.data[") and ref_guid:
+            if ref_guid not in seen_ovr:
+                seen_ovr.add(ref_guid)
+                override_mat_guids.append(ref_guid)
+        elif (prop_name == "m_IsActive" and val_str == "0") or (
+            prop_name == "m_TagString" and val_str == "EditorOnly"
+        ):
+            if tgt_fid:
+                inactive_fids.add(tgt_fid)
+        elif prop_name == "m_LocalScale.x" and tgt_fid:
+            try:
+                transform_scales[tgt_fid] = abs(float(val_str))
+            except ValueError:
+                pass
+
+    for pair_key, tail_mesh in pair_ref_path.items():
+        target_obj_fid = pair_ref_obj.get(pair_key, "")
+        if target_obj_fid:
+            ref_fid_to_mesh[target_obj_fid] = tail_mesh
+    meta_path = Path(str(fbx_path) + ".meta")
+    if meta_path.is_file():
+        try:
+            meta_raw = meta_path.read_text(encoding="utf-8", errors="ignore")
+            rec_match = re.search(r"fileIDToRecycleName:(.*?)(?=^\s{2}[A-Za-z_]|^\S|\Z)", meta_raw, re.DOTALL | re.MULTILINE)
+            if rec_match:
+                for fid_str, obj_name in re.findall(r"(-?\d+):\s*([^\r\n]+)", rec_match.group(1)):
+                    clean_name = obj_name.split("/")[-1].strip().strip("\"'")
+                    if clean_name:
+                        ref_fid_to_mesh.setdefault(fid_str, clean_name)
+        except OSError:
+            pass
+    disabled_meshes: List[str] = []
+    unresolved_inactive = [fid_val for fid_val in inactive_fids if fid_val not in ref_fid_to_mesh]
+    zero_scale_count = sum(1 for scale_val in transform_scales.values() if scale_val <= 1e-4)
+    nonzero_scale_count = sum(1 for scale_val in transform_scales.values() if scale_val > 1e-4)
+    all_disabled = bool(
+        mesh_to_slots
+        and (
+            len(unresolved_inactive) >= len(mesh_to_slots)
+            or (zero_scale_count >= 2 and zero_scale_count >= nonzero_scale_count)
+        )
+    )
+    if all_disabled:
+        return {
+            "mesh_names": [],
+            "disabled_meshes": list(mesh_to_slots.keys()),
+            "mesh_materials": {},
+            "mat_guids": [],
+        }
+    for fid_val in inactive_fids:
+        mesh_label = ref_fid_to_mesh.get(fid_val, "")
+        if mesh_label and mesh_label not in disabled_meshes:
+            disabled_meshes.append(mesh_label)
+    disabled_low = {name.lower() for name in disabled_meshes}
+
+    all_mat_guids = set(ext_mats.values()) | set(override_mat_guids)
+    resolved_guids = resolve_guids_callback(all_mat_guids, doc_path) if all_mat_guids else {}
+    effective_slot_guid: Dict[str, str] = dict(ext_mats)
+    for slot_name, default_guid in ext_mats.items():
+        def_path = resolved_guids.get(default_guid)
+        if def_path is None:
+            continue
+        def_parent = str(def_path.parent).replace("\\", "/").lower()
+        for ovr_guid in override_mat_guids:
+            ovr_path = resolved_guids.get(ovr_guid)
+            if ovr_path is not None and str(ovr_path.parent).replace("\\", "/").lower() == def_parent:
+                effective_slot_guid[slot_name] = ovr_guid
+
+    slot_mat_dicts: Dict[str, List[Dict[str, Any]]] = {}
+    active_mat_guids: Set[str] = set()
+    for slot_name, chosen_guid in effective_slot_guid.items():
+        parsed_list = resolve_mats_callback([chosen_guid], doc_path, resolved_guids)
+        if parsed_list:
+            slot_mat_dicts[slot_name] = parsed_list
+            active_mat_guids.add(chosen_guid)
+
+    active_meshes: List[str] = []
+    mesh_materials: Dict[str, List[Dict[str, Any]]] = {}
+    for mesh_name, slot_names in mesh_to_slots.items():
+        if mesh_name.lower() in disabled_low:
+            continue
+        active_meshes.append(mesh_name)
+        per_mesh_mats: List[Dict[str, Any]] = []
+        for slot_item in slot_names:
+            if slot_item in slot_mat_dicts:
+                per_mesh_mats.extend(slot_mat_dicts[slot_item])
+        if per_mesh_mats:
+            mesh_materials[mesh_name] = per_mesh_mats
+
+    return {
+        "mesh_names": active_meshes,
+        "disabled_meshes": disabled_meshes,
+        "mesh_materials": mesh_materials,
+        "mat_guids": sorted(active_mat_guids),
+    }
+
+
+def register_model_prefab_instance_in_plan(
+    model_path: Path,
+    visit_tag: str,
+    model_payload: Dict[str, Any],
+    host_matrix_rows: Any,
+    is_outfit_model: bool,
+    register_fbx_callback: Any,
+    plan_state: Dict[str, Any],
+) -> None:
+    """Record an `.fbx`/`.dae`/`.obj` Model `PrefabInstance` into modular avatar plan collections."""
+    model_meshes = list(model_payload.get("mesh_names", ()))
+    if not model_meshes:
+        return
+    register_fbx_callback(model_path, is_outfit=is_outfit_model)
+    active_meshes = plan_state["active_meshes"]
+    for mesh_item in model_meshes:
+        if mesh_item and mesh_item not in active_meshes:
+            active_meshes.append(mesh_item)
+    if model_meshes:
+        fbx_bucket = plan_state["active_meshes_by_fbx"].setdefault(str(model_path), [])
+        fbx_bucket.extend(mesh_item for mesh_item in model_meshes if mesh_item not in fbx_bucket)
+    model_mats = dict(model_payload.get("mesh_materials", {}))
+    plan_state["mesh_materials"].update(model_mats)
+    plan_state["active_mat_guids_set"].update(model_payload.get("mat_guids", ()))
+    plan_state["explicit_disabled"].update(model_payload.get("disabled_meshes", ()))
+    plan_state["fbx_instances"].append(
+        {
+            "instance_id": f"{model_path.stem}_{visit_tag}",
+            "fbx_path": str(model_path),
+            "mesh_names": model_meshes,
+            "mesh_materials": model_mats,
+            "attach_parent_bone": "",
+            "is_skinned": True,
+            "host_matrix_rows": host_matrix_rows,
+            "bone_matrices": {},
+        }
+    )
+    for attach_item in plan_state["attach_items"]:
+        owner_tag = attach_item.get("_owner_tag", "")
+        if owner_tag and visit_tag.startswith(owner_tag):
+            if str(model_path) not in attach_item["fbx_paths"]:
+                attach_item["fbx_paths"].append(str(model_path))
+            attach_item["mesh_names"].extend(
+                mesh_item for mesh_item in model_meshes if mesh_item not in attach_item["mesh_names"]
+            )
+
+
+def extract_fbx_blendshape_names(fbx_path: Union[str, Path]) -> Dict[str, List[str]]:
+    """
+    Read ordered BlendShapeChannel names per Model mesh directly from a binary FBX.
+
+    Skips decompressing heavy geometry vertex arrays so large character FBXs parse
+    in milliseconds in pure Python. Returns `{model_name: [shape_0, shape_1, ...]}`.
+    """
+    resolved_path = Path(fbx_path)
+    if not resolved_path.is_file():
+        return {}
+
+    try:
+        mtime_ns = resolved_path.stat().st_mtime_ns
+        cache_key = (str(resolved_path.resolve()), mtime_ns)
+    except OSError:
+        cache_key = (str(resolved_path), -1)
+
+    if cache_key[1] >= 0 and cache_key in _FBX_BLENDSHAPE_CACHE:
+        return {
+            mesh_key: list(shape_list)
+            for mesh_key, shape_list in _FBX_BLENDSHAPE_CACHE[cache_key].items()
+        }
+
+    parsed_fbx = _read_binary_fbx_objects_and_connections(resolved_path)
+    if parsed_fbx is None:
+        return {}
+    object_nodes, connection_nodes = parsed_fbx
 
     models_by_id: Dict[int, str] = {}
     geometry_ids: Set[int] = set()

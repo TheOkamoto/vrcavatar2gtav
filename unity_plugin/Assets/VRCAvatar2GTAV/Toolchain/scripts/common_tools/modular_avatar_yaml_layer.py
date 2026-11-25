@@ -50,6 +50,7 @@ MA_OBJECT_TOGGLE_GUID = "a162bb8ec7e24a5abcf457887f1df3fa"
 MA_SHAPE_CHANGER_GUID = "2db441f589c3407bb6fb5f02ff8ab541"
 MA_SCALE_ADJUSTER_GUID = "09a660aa9d4e47d992adcac5a05dd808"
 MA_ACTIVATOR_GUID = "e41c5d0c41074360bc33887977722a4d"
+MA_MENU_ITEM_GUID = "3b29d45007c5493d926d2cd45a489529"
 VRC_PHYSBONE_GUID = "2a2c05204084d904aa4945ccff20d8e5"
 
 # Unity UnityEngine.HumanBodyBones enum -> ordered bone name aliases in VRChat/Blender rigs
@@ -323,6 +324,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
         "mesh_settings": [],
         "activators": [],
         "physbones": [],
+        "menu_items": {},
     }
     if not resolved_path.is_file():
         return empty_doc
@@ -359,6 +361,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
     mesh_settings: List[Dict[str, Any]] = []
     activators: List[Dict[str, Any]] = []
     physbones: List[Dict[str, Any]] = []
+    menu_items: Dict[str, Dict[str, Any]] = {}
 
     for block in blocks[1:]:
         newline_idx = block.find("\n")
@@ -375,10 +378,12 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
         if class_id == "1":
             name_match = re.search(r"^\s*m_Name:[ \t]*(.+)$", block, re.MULTILINE)
             active_match = re.search(r"^\s*m_IsActive:[ \t]*(\d+)", block, re.MULTILINE)
+            tag_match = re.search(r"^\s*m_TagString:[ \t]*(.+)$", block, re.MULTILINE)
+            is_editor_only = bool(tag_match and _decode_scalar(tag_match.group(1)) == "EditorOnly")
             prefab_instance_match = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", block)
             gameobjects[file_id] = {
                 "name": _decode_scalar(name_match.group(1)) if name_match else "",
-                "active": (int(active_match.group(1)) != 0) if active_match else True,
+                "active": ((int(active_match.group(1)) != 0) if active_match else True) and not is_editor_only,
                 "pi_fid": prefab_instance_match.group(1) if prefab_instance_match else "0",
             }
         elif class_id == "4":
@@ -475,6 +480,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                         "target_guid": tgt_guid,
                         "property": prop_path,
                         "value": raw_val,
+                        "ref_fid": _ref_fid,
                         "ref_guid": ref_guid,
                     }
                 )
@@ -660,6 +666,12 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
                 )
             elif script_guid == MA_ACTIVATOR_GUID:
                 activators.append({"go_fid": game_object_file_id, "enabled": is_enabled})
+            elif script_guid == MA_MENU_ITEM_GUID:
+                def_match = re.search(r"^\s*isDefault:[ \t]*(\d+)", block, re.MULTILINE)
+                menu_items[game_object_file_id] = {
+                    "enabled": is_enabled,
+                    "is_default": (int(def_match.group(1)) != 0) if def_match else False,
+                }
             elif script_guid == VRC_PHYSBONE_GUID and is_enabled:
                 root_match = re.search(r"rootTransform:\s*\{fileID:\s*(-?\d+)", block)
                 physbones.append(
@@ -686,6 +698,7 @@ def parse_unity_yaml_with_ma(yaml_path: Union[str, Path]) -> Dict[str, Any]:
         "mesh_settings": mesh_settings,
         "activators": activators,
         "physbones": physbones,
+        "menu_items": menu_items,
     }
     if cache_key is not None:
         _MA_PARSED_YAML_CACHE[cache_key] = parsed_doc
@@ -1329,11 +1342,12 @@ def is_identity_mat4(mat_val: Any, tol: float = 1e-4) -> bool:
 def compute_bone_unit_scale_correction(
     fbx_points_by_bone: Dict[str, Tuple[float, float, float]],
     bone_matrices: Dict[str, List[List[float]]],
+    fbx_col_norm: float = 1.0,
 ) -> float:
     """
-    Detect FBX cm-to-m unit import scale baked on Unity `Armature` (e.g. `scale=(100,100,100)`
-    while inter-bone spatial span matches Blender at `1.0x`), returning the scalar factor to
-    multiply into Unity target bone 3x3 columns (`~0.01` when 100x unit mismatch exists, else `1.0`).
+    Detect FBX cm-to-m unit import scale mismatch between Blender `Armature` matrix scale
+    and Unity `bone_matrices` column norm relative to inter-bone spatial span, returning
+    the scalar multiplier for Unity target bone 3x3 columns (`1.0` when scale already matches).
     """
     mats_low = {str(key).lower(): val for key, val in bone_matrices.items()}
     fbx_pts: List[Tuple[float, float, float]] = []
@@ -1375,9 +1389,11 @@ def compute_bone_unit_scale_correction(
     med_col = col_norms[len(col_norms) // 2]
     if med_col <= 1e-6:
         return 1.0
-    ratio = med_col / spatial_scale
+    eff_fbx_scale = float(fbx_col_norm) if float(fbx_col_norm) > 1e-6 else 1.0
+    expected_col = spatial_scale * eff_fbx_scale
+    ratio = med_col / expected_col
     if abs(ratio - 1.0) > 0.5:
-        return spatial_scale / med_col
+        return expected_col / med_col
     return 1.0
 
 
@@ -1415,6 +1431,8 @@ def extract_renderer_mod_overrides(
         elif prop_path == "m_IsActive":
             raw_val = str(mod_item.get("value", "1") or "1").strip()
             active_map[tgt_fid] = raw_val != "0"
+        elif prop_path == "m_TagString" and str(mod_item.get("value", "") or "").strip() == "EditorOnly":
+            active_map[tgt_fid] = False
     return {"materials": materials, "enabled": enabled_map, "active": active_map}
 
 

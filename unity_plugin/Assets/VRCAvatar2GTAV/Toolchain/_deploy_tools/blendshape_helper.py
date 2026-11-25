@@ -766,6 +766,10 @@ _SKIN_MESH_EXCLUDE_TOKENS = frozenset(
         "megane", "hat", "beret", "casquette", "corset", "bag", "watch",
         "lash", "lashes", "eye", "eyes", "brow", "teeth", "tongue", "band",
         "headband", "suit", "bodysuit", "harness", "acc", "accessory",
+        "item", "prop", "mask", "shield", "monocle", "card", "bunny", "silk",
+        "necktie", "armband", "wristband", "strap", "chain", "brooch",
+        "badge", "bell", "armor", "charm", "sleeve", "sleeves", "cuff",
+        "cuffs", "tight", "tights", "fur", "love", "bikini",
     }
 )
 _MANUAL_SHRINK_PREFIXES = ("shrink_", "kisekae_", "kesu_", "hide_", "erase_", "del_")
@@ -851,6 +855,55 @@ def apply_ma_shape_changers_and_syncs(
                 res["synced_blendshapes"] += 1
                 if summary is not None:
                     summary["synced_blendshapes"] = summary.get("synced_blendshapes", 0) + 1
+    contour_tokens = (
+        "breasts_big",
+        "breasts_flat",
+        "breasts_small",
+        "hip_big",
+        "hip_small",
+        "chest_up",
+        "chest_down",
+    )
+    contour_weights: Dict[str, float] = {}
+    for mesh_key, mesh_list in meshes_by_low.items():
+        if not is_body_or_face_skin_mesh(mesh_key):
+            continue
+        for skin_obj in mesh_list:
+            skin_keys = getattr(skin_obj.data, "shape_keys", None)
+            if not skin_keys:
+                continue
+            for key_block in skin_keys.key_blocks:
+                low_key = key_block.name.lower()
+                if low_key in contour_tokens and float(key_block.value) > 0.001:
+                    contour_weights.setdefault(low_key, float(key_block.value))
+    if contour_weights:
+        explicit_weight_targets: Set[str] = {
+            f"{str(mesh_name).lower()}::{str(shape_name).lower()}"
+            for mesh_name, shape_dict in (ma_plan.get("shape_changer_weights") or {}).items()
+            for shape_name in (shape_dict or {}).keys()
+        }
+        explicit_weight_targets.update(
+            f"{str(sync_item.get('target_mesh', '')).lower()}::{str(sync_item.get('target_shape', '')).lower()}"
+            for sync_item in (ma_plan.get("blendshape_syncs") or ())
+        )
+        for mesh_key, mesh_list in meshes_by_low.items():
+            if is_body_or_face_skin_mesh(mesh_key):
+                continue
+            for outfit_obj in mesh_list:
+                outfit_keys = getattr(outfit_obj.data, "shape_keys", None)
+                if not outfit_keys:
+                    continue
+                for key_block in outfit_keys.key_blocks:
+                    low_key = key_block.name.lower()
+                    if (
+                        low_key in contour_weights
+                        and f"{mesh_key}::{low_key}" not in explicit_weight_targets
+                        and abs(float(key_block.value)) <= 0.001
+                    ):
+                        key_block.value = contour_weights[low_key]
+                        res["synced_blendshapes"] += 1
+                        if summary is not None:
+                            summary["synced_blendshapes"] = summary.get("synced_blendshapes", 0) + 1
     return res
 
 

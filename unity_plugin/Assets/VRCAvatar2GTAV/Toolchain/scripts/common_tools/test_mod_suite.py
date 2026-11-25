@@ -299,10 +299,388 @@ def test_ma_shape_changer_and_manual_shrink() -> bool:
         and _has_invalid_short_identifier_parts("w_val")
         and _has_invalid_short_identifier_parts("act_m")
     )
+    extra_checks_passed = _verify_model_prefab_menu_toggle_and_skin_selection()
     return print_status_result(
         "MA ShapeChanger Delete/Set, BlendshapeSync RemapCurve & manual Shrink_* culling",
-        suite_ok and segment_guard_ok,
-        f"yaml={yaml_parse_ok} rules={blender_rules_ok} noctis={noctis_ok} seg_guard={segment_guard_ok}",
+        suite_ok and segment_guard_ok and extra_checks_passed,
+        f"yaml={yaml_parse_ok} rules={blender_rules_ok} noctis={noctis_ok} seg_guard={segment_guard_ok} extra={extra_checks_passed}",
+    )
+
+
+def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
+    """Verify skin/primary-FBX selection, MA MenuItem defaults, Model Prefab overrides, and contour sync."""
+    import tempfile
+    from types import SimpleNamespace
+    import blendshape_helper
+    import blendshape_unity_yaml_layer
+    import modular_avatar_helper
+    import modular_avatar_yaml_layer
+    import universal_gtav_rigging_layer
+
+    skin_checks_passed = (
+        not blendshape_helper.is_body_or_face_skin_mesh("Head Item Base")
+        and not blendshape_helper.is_body_or_face_skin_mesh("Attachable sleeves")
+        and not blendshape_helper.is_body_or_face_skin_mesh("Tights")
+        and not blendshape_helper.is_body_or_face_skin_mesh("Bunny Tail")
+        and blendshape_helper.is_body_or_face_skin_mesh("Body_base")
+        and blendshape_helper.is_body_or_face_skin_mesh("Head")
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root_dir = Path(temp_dir)
+        avatar_fbx = root_dir / "Avatar_kisekae.fbx"
+        accessory_fbx = root_dir / "Accessory_Ear.fbx"
+        avatar_fbx.write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
+        accessory_fbx.write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
+        orig_blendshape_reader = blendshape_unity_yaml_layer.extract_fbx_blendshape_names
+        try:
+            blendshape_unity_yaml_layer.extract_fbx_blendshape_names = lambda _path: {}
+            mock_plan = {
+                "active_meshes_by_fbx": {
+                    str(avatar_fbx): ["Body_base", "Body"],
+                    str(accessory_fbx): ["Head Item Base", "Accessory Ear"],
+                },
+            }
+            chosen_fbx = universal_gtav_rigging_layer.select_primary_avatar_fbx(
+                [accessory_fbx, avatar_fbx], ma_plan=mock_plan
+            )
+            primary_fbx_passed = chosen_fbx == avatar_fbx
+        finally:
+            blendshape_unity_yaml_layer.extract_fbx_blendshape_names = orig_blendshape_reader
+
+        menu_scene = root_dir / "MenuToggleScene.prefab"
+        menu_yaml = (
+            "%YAML 1.1\n"
+            "%TAG !u! tag:unity3d.com,2011:\n"
+            "--- !u!1 &101\n"
+            "GameObject:\n"
+            "  m_Name: TestAvatar\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &201\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 101}\n"
+            "  m_Father: {fileID: 0}\n"
+            "--- !u!1 &102\n"
+            "GameObject:\n"
+            "  m_Name: Tights\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &202\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 102}\n"
+            "  m_Father: {fileID: 201}\n"
+            "--- !u!137 &302\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 102}\n"
+            "  m_Enabled: 1\n"
+            "  m_Mesh: {fileID: 4300000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, type: 3}\n"
+            "--- !u!1 &103\n"
+            "GameObject:\n"
+            "  m_Name: StylingOffBtn\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &203\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 103}\n"
+            "  m_Father: {fileID: 201}\n"
+            "--- !u!114 &403\n"
+            "MonoBehaviour:\n"
+            "  m_GameObject: {fileID: 103}\n"
+            "  m_Enabled: 1\n"
+            f"  m_Script: {{fileID: 11500000, guid: {modular_avatar_yaml_layer.MA_MENU_ITEM_GUID}, type: 3}}\n"
+            "  isDefault: 0\n"
+            "--- !u!114 &503\n"
+            "MonoBehaviour:\n"
+            "  m_GameObject: {fileID: 103}\n"
+            "  m_Enabled: 1\n"
+            f"  m_Script: {{fileID: 11500000, guid: {modular_avatar_yaml_layer.MA_OBJECT_TOGGLE_GUID}, type: 3}}\n"
+            "  m_objects:\n"
+            "  - Object:\n"
+            "      referencePath: Tights\n"
+            "    Active: 0\n"
+            "--- !u!1 &104\n"
+            "GameObject:\n"
+            "  m_Name: SiblingDisabledOutfit\n"
+            "  m_IsActive: 0\n"
+            "--- !u!4 &204\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 104}\n"
+            "  m_Father: {fileID: 201}\n"
+            "--- !u!1 &105\n"
+            "GameObject:\n"
+            "  m_Name: Tights\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &205\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 105}\n"
+            "  m_Father: {fileID: 204}\n"
+            "--- !u!137 &305\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 105}\n"
+            "  m_Enabled: 1\n"
+            "  m_Mesh: {fileID: 4300000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, type: 3}\n"
+            "--- !u!1 &106\n"
+            "GameObject:\n"
+            "  m_Name: OptionalCuff\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &206\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 106}\n"
+            "  m_Father: {fileID: 201}\n"
+            "--- !u!137 &306\n"
+            "SkinnedMeshRenderer:\n"
+            "  m_GameObject: {fileID: 106}\n"
+            "  m_Enabled: 1\n"
+            "  m_Mesh: {fileID: 4300000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, type: 3}\n"
+            "--- !u!114 &506\n"
+            "MonoBehaviour:\n"
+            "  m_GameObject: {fileID: 103}\n"
+            "  m_Enabled: 1\n"
+            "  m_Name: DefaultDisabler\n"
+            "--- !u!114 &507\n"
+            "MonoBehaviour:\n"
+            "  m_GameObject: {fileID: 101}\n"
+            "  m_Enabled: 1\n"
+            f"  m_Script: {{fileID: 11500000, guid: {modular_avatar_yaml_layer.MA_OBJECT_TOGGLE_GUID}, type: 3}}\n"
+            "  m_objects:\n"
+            "  - Object:\n"
+            "      referencePath: OptionalCuff\n"
+            "    Active: 0\n"
+        )
+        menu_scene.write_text(menu_yaml, encoding="utf-8")
+        menu_plan = modular_avatar_helper.build_modular_avatar_bake_plan(
+            menu_scene, avatar_name="TestAvatar", assets_root=temp_dir, resolve_materials=False
+        )
+        menu_toggle_passed = (
+            "Tights" in menu_plan.get("active_meshes", ())
+            and "Tights" not in menu_plan.get("disabled_meshes", ())
+            and "OptionalCuff" in menu_plan.get("disabled_meshes", ())
+        )
+
+        mat_dir = root_dir / "1_Hoodie"
+        mat_dir.mkdir(parents=True, exist_ok=True)
+        default_mat_guid = "11111111111111111111111111111111"
+        override_mat_guid = "22222222222222222222222222222222"
+        default_mat = mat_dir / "DefaultMat.mat"
+        override_mat = mat_dir / "NavyMat.mat"
+        default_mat.write_text("%YAML 1.1\nMaterial:\n  m_Name: DefaultMat\n", encoding="utf-8")
+        override_mat.write_text("%YAML 1.1\nMaterial:\n  m_Name: NavyMat\n", encoding="utf-8")
+        (root_dir / "ModelOutfit.fbx.meta").write_text(
+            "fileFormatVersion: 2\nModelImporter:\n  externalObjects:\n"
+            "  - first:\n      type: UnityEngine:Material\n      assembly: UnityEngine.CoreModule\n"
+            "      name: HoodSlot\n"
+            f"    second: {{fileID: 2100000, guid: {default_mat_guid}, type: 2}}\n",
+            encoding="utf-8",
+        )
+        model_fbx = root_dir / "ModelOutfit.fbx"
+        model_fbx.write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
+        orig_mesh_slots = blendshape_unity_yaml_layer.extract_fbx_model_meshes_and_materials
+        try:
+            blendshape_unity_yaml_layer.extract_fbx_model_meshes_and_materials = lambda _path: {
+                "HoodMesh": ["HoodSlot"],
+                "PantiesMesh": ["HoodSlot"],
+            }
+            fake_mods = [
+                {"target_fid": "7001", "property": "m_objects.Array.data[0].Object.targetObject", "value": "", "ref_fid": "9901", "ref_guid": ""},
+                {"target_fid": "7001", "property": "m_objects.Array.data[0].Object.referencePath", "value": "OutfitRoot/PantiesMesh", "ref_fid": "0", "ref_guid": ""},
+                {"target_fid": "9901", "property": "m_TagString", "value": "EditorOnly", "ref_fid": "0", "ref_guid": ""},
+                {"target_fid": "8001", "property": "m_Materials.Array.data[0]", "value": "", "ref_fid": "2100000", "ref_guid": override_mat_guid},
+            ]
+            payload_res = blendshape_unity_yaml_layer.collect_model_prefab_instance_payload(
+                model_fbx,
+                fake_mods,
+                model_fbx,
+                lambda _guids, _anchor: {default_mat_guid: default_mat, override_mat_guid: override_mat},
+                lambda guids, _anchor, _resolved: [{"name": "NavyMat" if gid == override_mat_guid else "DefaultMat"} for gid in guids],
+            )
+            model_payload_passed = (
+                payload_res.get("mesh_names") == ["HoodMesh"]
+                and payload_res.get("disabled_meshes") == ["PantiesMesh"]
+                and payload_res.get("mesh_materials", {}).get("HoodMesh", [{}])[0].get("name") == "NavyMat"
+            )
+            blendshape_unity_yaml_layer.extract_fbx_model_meshes_and_materials = lambda _path: {
+                "HandleMesh": [],
+                "MoveMesh": [],
+            }
+            disabled_gizmo_mods = [
+                {"target_fid": "1001", "property": "m_IsActive", "value": "0", "ref_fid": "0", "ref_guid": ""},
+                {"target_fid": "1002", "property": "m_IsActive", "value": "0", "ref_fid": "0", "ref_guid": ""},
+                {"target_fid": "1003", "property": "m_LocalScale.x", "value": "0", "ref_fid": "0", "ref_guid": ""},
+                {"target_fid": "1004", "property": "m_LocalScale.x", "value": "0", "ref_fid": "0", "ref_guid": ""},
+            ]
+            gizmo_payload = blendshape_unity_yaml_layer.collect_model_prefab_instance_payload(
+                model_fbx,
+                disabled_gizmo_mods,
+                model_fbx,
+                lambda _guids, _anchor: {},
+                lambda _guids, _anchor, _resolved: [],
+            )
+            gizmo_state = {
+                "active_meshes": [],
+                "active_meshes_by_fbx": {},
+                "mesh_materials": {},
+                "active_mat_guids_set": set(),
+                "explicit_disabled": set(),
+                "fbx_instances": [],
+                "attach_items": [],
+            }
+            registered_fbx_list = []
+            blendshape_unity_yaml_layer.register_model_prefab_instance_in_plan(
+                model_fbx,
+                "scene_gizmo",
+                gizmo_payload,
+                None,
+                True,
+                lambda fbx_arg, is_outfit=False: registered_fbx_list.append(fbx_arg),
+                gizmo_state,
+            )
+            model_payload_passed = (
+                model_payload_passed
+                and gizmo_payload.get("mesh_names") == []
+                and set(gizmo_payload.get("disabled_meshes", ())) == {"HandleMesh", "MoveMesh"}
+                and not registered_fbx_list
+                and not gizmo_state["fbx_instances"]
+            )
+        finally:
+            blendshape_unity_yaml_layer.extract_fbx_model_meshes_and_materials = orig_mesh_slots
+
+    class _MockContourBlocks:
+        def __init__(self, entries: dict) -> None:
+            self.entries = {name: SimpleNamespace(name=name, value=float(val)) for name, val in entries.items()}
+
+        def __contains__(self, key_name: str) -> bool:
+            return key_name in self.entries
+
+        def __getitem__(self, key_name: str) -> object:
+            return self.entries[key_name]
+
+        def __iter__(self):
+            return iter(self.entries.values())
+
+    body_obj = SimpleNamespace(name="Body_base", type="MESH", data=SimpleNamespace(shape_keys=SimpleNamespace(key_blocks=_MockContourBlocks({"Breasts_big": 1.0, "Hip_big": 0.75}))))
+    jacket_obj = SimpleNamespace(name="HoodieMesh", type="MESH", data=SimpleNamespace(shape_keys=SimpleNamespace(key_blocks=_MockContourBlocks({"Breasts_big": 0.0, "Hip_big": 0.0}))))
+    explicit_obj = SimpleNamespace(name="OverrideCoat", type="MESH", data=SimpleNamespace(shape_keys=SimpleNamespace(key_blocks=_MockContourBlocks({"Breasts_big": 0.0}))))
+    contour_plan = {"loaded": True, "shape_changer_weights": {"OverrideCoat": {"Breasts_big": 0.0}}, "blendshape_syncs": []}
+    contour_bpy = SimpleNamespace(data=SimpleNamespace(objects=[body_obj, jacket_obj, explicit_obj]))
+    blendshape_helper.apply_ma_shape_changers_and_syncs(contour_bpy, contour_plan)
+    contour_passed = (
+        abs(float(jacket_obj.data.shape_keys.key_blocks["Breasts_big"].value) - 1.0) < 1e-6
+        and abs(float(jacket_obj.data.shape_keys.key_blocks["Hip_big"].value) - 0.75) < 1e-6
+        and abs(float(explicit_obj.data.shape_keys.key_blocks["Breasts_big"].value)) < 1e-6
+    )
+
+    fbx_points_sample = {"Head": (0.0, 0.0, 1.40), "BunnyEarL": (0.03, 0.0, 1.60)}
+    matched_arm_scale_corr = modular_avatar_yaml_layer.compute_bone_unit_scale_correction(
+        fbx_points_sample,
+        {
+            "Head": [[0.0615, 0.0, 0.0, 0.0], [0.0, 0.0615, 0.0, 0.0], [0.0, 0.0, 0.0615, 1.26], [0.0, 0.0, 0.0, 1.0]],
+            "BunnyEarL": [[0.0615, 0.0, 0.0, 0.027], [0.0, 0.0615, 0.0, 0.0], [0.0, 0.0, 0.0615, 1.44], [0.0, 0.0, 0.0, 1.0]],
+        },
+        fbx_col_norm=0.0683,
+    )
+    centimeter_mismatch_corr = modular_avatar_yaml_layer.compute_bone_unit_scale_correction(
+        fbx_points_sample,
+        {
+            "Head": [[100.0, 0.0, 0.0, 0.0], [0.0, 100.0, 0.0, 0.0], [0.0, 0.0, 100.0, 1.40], [0.0, 0.0, 0.0, 1.0]],
+            "BunnyEarL": [[100.0, 0.0, 0.0, 0.03], [0.0, 100.0, 0.0, 0.0], [0.0, 0.0, 100.0, 1.60], [0.0, 0.0, 0.0, 1.0]],
+        },
+        fbx_col_norm=1.0,
+    )
+    bone_unit_scale_passed = abs(matched_arm_scale_corr - 1.0) < 1e-6 and abs(centimeter_mismatch_corr - 0.01) < 1e-4
+
+    import subprocess
+    from PIL import Image as pil_image
+    import npc_registry_helper
+    import ped_damage_helper
+    import universal_atlas_builder
+
+    atlas_grid_passed = False
+    with tempfile.TemporaryDirectory() as atlas_temp_dir:
+        atlas_project_dir = Path(atlas_temp_dir) / "Proj"
+        tex_dir = atlas_project_dir / "Assets" / "Textures"
+        mats_dir = atlas_project_dir / "Assets" / "Materials"
+        out_atlas_dir = Path(atlas_temp_dir) / "Out"
+        tex_dir.mkdir(parents=True, exist_ok=True)
+        mats_dir.mkdir(parents=True, exist_ok=True)
+        source_dummy_fbx = atlas_project_dir / "Assets" / "Avatar.fbx"
+        source_dummy_fbx.write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
+        for idx in range(20):
+            tex_file = tex_dir / f"tex_{idx:02d}.png"
+            pil_image.new("RGB", (8, 8), ((idx * 11 + 20) % 255, (idx * 7 + 40) % 255, 180)).save(tex_file)
+            tex_guid = f"aaaa000000000000000000000000{idx:04x}"
+            (tex_dir / f"tex_{idx:02d}.png.meta").write_text(f"fileFormatVersion: 2\nguid: {tex_guid}\n", encoding="utf-8")
+            mat_file = mats_dir / f"mat_{idx:02d}.mat"
+            mat_file.write_text(
+                "%YAML 1.1\nMaterial:\n"
+                f"  m_Name: Mat_{idx:02d}\n"
+                "  m_SavedProperties:\n"
+                "    m_TexEnvs:\n"
+                "    - _MainTex:\n"
+                f"        m_Texture: {{fileID: 2800000, guid: {tex_guid}, type: 3}}\n"
+                "    m_Colors:\n"
+                "    - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+                encoding="utf-8",
+            )
+        orig_rage_cmd = npc_registry_helper.build_safe_rage_cmd
+        orig_subproc_run = subprocess.run
+        orig_enforce_ytd = ped_damage_helper.enforce_ytd_rpf7_size_budget
+        orig_val_rpf7 = ped_damage_helper.validate_rpf7_resource_file
+        try:
+            npc_registry_helper.build_safe_rage_cmd = lambda *args, **kwargs: ["mock_rage", *args]
+            subprocess.run = lambda *args, **kwargs: (out_atlas_dir / "test_npc_atlas.ytd").write_bytes(b"RSC7")
+            ped_damage_helper.enforce_ytd_rpf7_size_budget = lambda *_args, **_kwargs: None
+            ped_damage_helper.validate_rpf7_resource_file = lambda *_args, **_kwargs: None
+            atlas_res = universal_atlas_builder.build_universal_avatar_atlas(
+                ped_name="test_npc",
+                project_dir=atlas_project_dir,
+                scene_or_prefab=None,
+                source_fbx=source_dummy_fbx,
+                output_dir=out_atlas_dir,
+                atlas_size=512,
+                vtoon_char_id=0,
+                sync_to_game=False,
+            )
+            atlas_mats = atlas_res.get("materials", {})
+            atlas_grid_passed = (
+                atlas_res.get("grid_dim") == 5
+                and len(atlas_mats) == 20
+                and "Mat_19" in atlas_mats
+            )
+        finally:
+            npc_registry_helper.build_safe_rage_cmd = orig_rage_cmd
+            subprocess.run = orig_subproc_run
+            ped_damage_helper.enforce_ytd_rpf7_size_budget = orig_enforce_ytd
+            ped_damage_helper.validate_rpf7_resource_file = orig_val_rpf7
+
+    shinano_checks_passed = True
+    shinano_scene = Path("E:/waifuv4/Assets/Shinano.unity") if sys.platform.startswith("win") else Path("/mnt/e/waifuv4/Assets/Shinano.unity")
+    if shinano_scene.is_file():
+        hollow_plan = modular_avatar_helper.build_modular_avatar_bake_plan(shinano_scene, avatar_name="Shinano Hollow Boxer", resolve_materials=True)
+        bunny_plan = modular_avatar_helper.build_modular_avatar_bake_plan(shinano_scene, avatar_name="Shinano 断罪 Bunny", resolve_materials=False)
+        bunny_fbx = universal_gtav_rigging_layer.select_primary_avatar_fbx(
+            [Path(item) for item in list(bunny_plan.get("base_fbx_paths", ())) + list(bunny_plan.get("extra_fbx_paths", ()))],
+            ma_plan=bunny_plan,
+        )
+        shinano_checks_passed = (
+            {"Hollow1_Hoodie", "Hollow2_Bra", "Hollow2_Slippers", "Hollow3_HeadSet"}.issubset(set(hollow_plan.get("active_meshes", ())))
+            and {"Hollow2_Panties", "Hollow3_Headset_strap"}.issubset(set(hollow_plan.get("disabled_meshes", ())))
+            and "Hollow2_Panties" not in hollow_plan.get("active_meshes", ())
+            and "BodyModel" not in hollow_plan.get("active_meshes", ())
+            and "HandleMesh" not in hollow_plan.get("active_meshes", ())
+            and not any("APS_" in path_str for path_str in hollow_plan.get("extra_fbx_paths", ()))
+            and bool(bunny_fbx and bunny_fbx.name == "Shinano_kisekae.fbx")
+            and {"Tights", "Attachable sleeves", "Harness Belt 1"}.issubset(set(bunny_plan.get("active_meshes", ())))
+            and "Tights" not in bunny_plan.get("disabled_meshes", ())
+            and "BodyModel" not in bunny_plan.get("active_meshes", ())
+            and not any("APS_" in path_str for path_str in bunny_plan.get("extra_fbx_paths", ()))
+        )
+    return (
+        skin_checks_passed
+        and primary_fbx_passed
+        and menu_toggle_passed
+        and model_payload_passed
+        and contour_passed
+        and bone_unit_scale_passed
+        and atlas_grid_passed
+        and shinano_checks_passed
     )
 
 

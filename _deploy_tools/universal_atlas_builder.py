@@ -611,18 +611,8 @@ def build_universal_avatar_atlas(
         raise FileNotFoundError(f"No diffuse textures found for avatar in {project_dir}")
 
     tile_count = len(tile_entries)
-    if tile_count == 1:
-        grid_dim = 1
-    elif tile_count <= 4:
-        grid_dim = 2
-    elif tile_count <= 9:
-        grid_dim = 3
-    else:
-        grid_dim = 4
-        if tile_count > 16:
-            tile_entries = tile_entries[:16]
-
-    tile_size = atlas_size // grid_dim
+    grid_dim = max(1, int(math.ceil(math.sqrt(tile_count))))
+    tile_size = max(1, atlas_size // grid_dim)
     atlas_canvas = Image.new("RGBA", (atlas_size, atlas_size), (210, 195, 195, 255))
     normal_canvas = Image.new("RGBA", (atlas_size, atlas_size), (128, 128, 255, 255))
     has_bump_map = False
@@ -634,8 +624,12 @@ def build_universal_avatar_atlas(
     for tile_idx, entry_data in enumerate(tile_entries):
         col_idx = tile_idx % grid_dim
         row_idx = tile_idx // grid_dim
-        paste_x = col_idx * tile_size
-        paste_y = row_idx * tile_size
+        paste_x = int(round(col_idx * atlas_size / float(grid_dim)))
+        cell_end_x = int(round((col_idx + 1) * atlas_size / float(grid_dim)))
+        paste_y = int(round(row_idx * atlas_size / float(grid_dim)))
+        cell_end_y = int(round((row_idx + 1) * atlas_size / float(grid_dim)))
+        cell_width = max(1, cell_end_x - paste_x)
+        cell_height = max(1, cell_end_y - paste_y)
 
         entry_mat_path = entry_data.get("mat_path", "")
         is_opaque_tile = str(entry_data.get("alpha_mode", "opaque")) == "opaque"
@@ -646,7 +640,7 @@ def build_universal_avatar_atlas(
             assets_anchor = project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir
             baked_res = hair_bake_layer.bake_liltoon_mat_to_image(
                 entry_mat_path,
-                tile_size=(tile_size, tile_size),
+                tile_size=(cell_width, cell_height),
                 preserve_alpha=(not is_opaque_tile),
                 unity_assets_root=assets_anchor,
             )
@@ -658,7 +652,7 @@ def build_universal_avatar_atlas(
                 max(0, min(255, int(round(float(tint_vals[chan_idx]) * 255.0))))
                 for chan_idx in range(3)
             )
-            tile_img = Image.new("RGBA", (tile_size, tile_size), (*solid_rgb, 255))
+            tile_img = Image.new("RGBA", (cell_width, cell_height), (*solid_rgb, 255))
         if tile_img is None:
             tile_img = _load_tinted_tile(
                 Path(entry_data["main_tex"]),
@@ -671,6 +665,8 @@ def build_universal_avatar_atlas(
                 alpha_mask_val=float(entry_data.get("alpha_mask_val", 0.0)),
                 preserve_alpha=(not is_opaque_tile),
             )
+        if tile_img.size != (cell_width, cell_height):
+            tile_img = tile_img.resize((cell_width, cell_height), Image.Resampling.LANCZOS)
         if is_opaque_tile:
             tile_img = tile_img.convert("RGB").convert("RGBA")
         atlas_canvas.paste(tile_img, (paste_x, paste_y))
@@ -680,7 +676,7 @@ def build_universal_avatar_atlas(
             bump_img = (
                 Image.open(bump_tex)
                 .convert("RGBA")
-                .resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+                .resize((cell_width, cell_height), Image.Resampling.LANCZOS)
             )
             bump_arr = numpy_lib.array(bump_img, dtype=numpy_lib.float32)
             bscale = float(entry_data.get("bump_scale", 0.5))
@@ -694,17 +690,18 @@ def build_universal_avatar_atlas(
             normal_canvas.paste(normal_tile, (paste_x, paste_y))
             has_bump_map = True
 
-        # PIL top row (row_idx=0) corresponds to top V=[1 - 1/grid_dim, 1.0] in Blender/RAGE UV space
-        uv_scale = 1.0 / float(grid_dim)
-        u_offset = float(col_idx) * uv_scale
-        v_offset = 1.0 - float(row_idx + 1) * uv_scale
+        # PIL top row (row_idx=0) corresponds to top V=[1 - cell_end_y/atlas_size, ...] in Blender/RAGE UV space
+        u_offset = float(paste_x) / float(atlas_size)
+        u_scale = float(cell_width) / float(atlas_size)
+        v_offset = 1.0 - (float(cell_end_y) / float(atlas_size))
+        v_scale = float(cell_height) / float(atlas_size)
         region_spec = {
             "tile_index": tile_idx,
             "grid_dim": grid_dim,
             "u_offset": u_offset,
             "v_offset": v_offset,
-            "u_scale": uv_scale,
-            "v_scale": uv_scale,
+            "u_scale": u_scale,
+            "v_scale": v_scale,
             "diffuse_src": "" if entry_data["main_tex"] == "__SOLID_COLOR__" else entry_data["main_tex"],
             "alpha_mode": entry_data.get("alpha_mode", "opaque"),
             "is_double_sided": bool(entry_data.get("is_double_sided", False)),
