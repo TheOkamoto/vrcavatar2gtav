@@ -13,6 +13,7 @@ Aggregates all automated validation suites from:
 import argparse
 import sys
 from pathlib import Path
+from typing import Any, List
 
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_DIR = (
@@ -739,6 +740,375 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
             and "BodyModel" not in bunny_plan.get("active_meshes", ())
             and not any("APS_" in path_str for path_str in bunny_plan.get("extra_fbx_paths", ()))
         )
+    unicode_phys_passed = False
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_unicode_pb_") as phys_tmp_dir:
+        import physbone_scene_extractor_layer as phys_scene_layer
+        import unity_scene_helper as scene_helper_mod
+
+        phys_root = Path(phys_tmp_dir)
+        unicode_scene = phys_root / "UnicodeScene.unity"
+        unicode_scene.write_text(
+            "%YAML 1.1\n"
+            "%TAG !u! tag:unity3d.com,2011:\n"
+            "--- !u!1 &10\n"
+            "GameObject:\n"
+            '  m_Name: "Booth \\u9055 Audio"\n'
+            "  m_IsActive: 0\n"
+            "--- !u!4 &11\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 10}\n"
+            "  m_Father: {fileID: 0}\n"
+            "--- !u!1 &20\n"
+            "GameObject:\n"
+            '  m_Name: "Booth \\u65AD\\u7F6A Test"\n'
+            "  m_IsActive: 1\n"
+            "--- !u!4 &21\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 20}\n"
+            "  m_Father: {fileID: 0}\n"
+            "--- !u!1 &22\n"
+            "GameObject:\n"
+            "  m_Name: HairRoot\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &23\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 22}\n"
+            "  m_Father: {fileID: 21}\n"
+            "--- !u!1 &24\n"
+            "GameObject:\n"
+            "  m_Name: HairTip\n"
+            "  m_IsActive: 1\n"
+            "--- !u!4 &25\n"
+            "Transform:\n"
+            "  m_GameObject: {fileID: 24}\n"
+            "  m_Father: {fileID: 23}\n"
+            "--- !u!114 &26\n"
+            "MonoBehaviour:\n"
+            "  m_Enabled: 1\n"
+            "  m_GameObject: {fileID: 22}\n"
+            "  m_Script: {fileID: 1661641543, guid: 2a2c05204084d904aa4945ccff20d8e5, type: 3}\n"
+            "  rootTransform: {fileID: 23}\n"
+            "  pull: 0.25\n"
+            "  spring: 0.45\n",
+            encoding="utf-8",
+        )
+        phys_unicode_res = phys_scene_layer.extract_unity_scene_physbones(
+            unicode_scene,
+            avatar_name="Booth 断罪 Test",
+            unity_assets_root=phys_root,
+            character_hints=("booth",),
+            prune_orphaned=False,
+        )
+        unicode_phys_passed = (
+            scene_helper_mod.decode_unity_name('"あ\\u65AD"') == "あ断"
+            and phys_unicode_res.get("root_name") == "Booth 断罪 Test"
+            and any(item.get("root_bone") == "HairRoot" for item in phys_unicode_res.get("chains", ()))
+        )
+
+    safe_fbx_passed = False
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_safe_fbx_") as fbx_tmp_dir:
+        import types
+        import error_handler_helper as err_helper_mod
+
+        forwarded_calls: List[str] = []
+        created_placeholders: List[str] = []
+        fake_bpy_extras = types.ModuleType("bpy_extras")
+        fake_image_utils = types.ModuleType("bpy_extras.image_utils")
+
+        def _fake_load_img(imagepath: Any, dirname: str = "", place_holder: bool = False, *args: Any, **kwargs: Any) -> Any:
+            forwarded_calls.append(str(imagepath))
+            return {"loaded": str(imagepath)}
+
+        fake_image_utils.load_image = _fake_load_img
+        fake_bpy_extras.image_utils = fake_image_utils
+        saved_bpy_extras = sys.modules.get("bpy_extras")
+        saved_image_utils = sys.modules.get("bpy_extras.image_utils")
+        sys.modules["bpy_extras"] = fake_bpy_extras
+        sys.modules["bpy_extras.image_utils"] = fake_image_utils
+        try:
+            def _fake_import_scene_fbx(**_kwargs: Any) -> None:
+                fake_image_utils.load_image(".", dirname=fbx_tmp_dir, place_holder=True)
+                fake_image_utils.load_image(str(Path(fbx_tmp_dir) / "tex.png"), dirname=fbx_tmp_dir, place_holder=True)
+
+            def _fake_images_new(name: str, width: int, height: int) -> Any:
+                created_placeholders.append(f"{name}:{width}x{height}")
+                return {"placeholder": name}
+
+            fake_bpy_mod = types.SimpleNamespace(
+                ops=types.SimpleNamespace(import_scene=types.SimpleNamespace(fbx=_fake_import_scene_fbx)),
+                data=types.SimpleNamespace(images=types.SimpleNamespace(new=_fake_images_new)),
+            )
+            err_helper_mod.import_fbx_safely(fake_bpy_mod, filepath="dummy.fbx")
+            safe_fbx_passed = (
+                len(created_placeholders) == 1
+                and len(forwarded_calls) == 1
+                and forwarded_calls[0].endswith("tex.png")
+            )
+        finally:
+            if saved_bpy_extras is not None:
+                sys.modules["bpy_extras"] = saved_bpy_extras
+            else:
+                sys.modules.pop("bpy_extras", None)
+            if saved_image_utils is not None:
+                sys.modules["bpy_extras.image_utils"] = saved_image_utils
+            else:
+                sys.modules.pop("bpy_extras.image_utils", None)
+
+    # Check 12: Multi-FBX bone isolation + humanoid attach_parent_bone resolution
+    import struct as struct_mod
+
+    class _MockEuler:
+        def __init__(self) -> None:
+            self.y = 0.0
+
+    class _MockMatrix:
+        def __init__(self, rows_arg=None) -> None:
+            self.rows = rows_arg or [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+        def copy(self) -> "_MockMatrix":
+            return _MockMatrix([list(row) for row in self.rows])
+
+        def inverted(self) -> "_MockMatrix":
+            return _MockMatrix()
+
+        def to_3x3(self) -> "_MockMatrix":
+            return self
+
+        def to_euler(self) -> "_MockEuler":
+            return _MockEuler()
+
+        def __matmul__(self, other: object) -> object:
+            return other
+
+    class _MockVec:
+        def __init__(self, coord) -> None:
+            self.x, self.y, self.z = coord
+            self.length = (self.x * self.x + self.y * self.y + self.z * self.z) ** 0.5
+
+        def copy(self) -> "_MockVec":
+            return _MockVec((self.x, self.y, self.z))
+
+        def __sub__(self, other: "_MockVec") -> "_MockVec":
+            return _MockVec((self.x - other.x, self.y - other.y, self.z - other.z))
+
+    class _MockBone:
+        def __init__(self, name: str, parent_bone=None) -> None:
+            self.name = name
+            self.parent = parent_bone
+            self.head = _MockVec((0.0, 0.0, 0.0))
+            self.tail = _MockVec((0.0, 0.0, 0.1))
+            self.head_local = _MockVec((0.0, 0.0, 0.0))
+            self.tail_local = _MockVec((0.0, 0.0, 0.1))
+            self.roll = 0.0
+            self.matrix_local = _MockMatrix()
+
+    class _MockEditBones(dict):
+        def new(self, bone_name: str) -> _MockBone:
+            created = _MockBone(bone_name)
+            self[bone_name] = created
+            return created
+
+    class _MockArmData:
+        def __init__(self, bone_names) -> None:
+            self.bones = []
+            self.edit_bones = _MockEditBones()
+            for bone_name in bone_names:
+                bone_obj = _MockBone(bone_name)
+                self.bones.append(bone_obj)
+                self.edit_bones[bone_name] = bone_obj
+
+    class _MockArmObj:
+        def __init__(self, name: str, bone_names) -> None:
+            self.name = name
+            self.type = "ARMATURE"
+            self.matrix_world = _MockMatrix()
+            self.data = _MockArmData(bone_names)
+
+        def select_set(self, _flag: bool) -> None:
+            pass
+
+    class _MockVGroup:
+        def __init__(self, name: str, index_val: int) -> None:
+            self.name = name
+            self.index = index_val
+            self.added = []
+
+        def add(self, indices, weight_val: float, _mode: str) -> None:
+            self.added.append((list(indices), weight_val))
+
+    class _MockVGroups(list):
+        def get(self, name: str):
+            return next((grp for grp in self if grp.name == name), None)
+
+        def new(self, *, name: str) -> _MockVGroup:
+            grp = _MockVGroup(name, len(self))
+            self.append(grp)
+            return grp
+
+        def remove(self, grp: _MockVGroup) -> None:
+            super().remove(grp)
+
+    class _MockMeshData:
+        def __init__(self) -> None:
+            self.vertices = []
+            self.materials = []
+
+    class _MockModifiers(list):
+        def new(self, **kwargs):
+            mod_obj = types.SimpleNamespace(name=kwargs.get("name", "Armature"), type=kwargs.get("type", "ARMATURE"), object=None)
+            self.append(mod_obj)
+            return mod_obj
+
+    class _MockMeshObj:
+        def __init__(self, name: str, group_names) -> None:
+            self.name = name
+            self.type = "MESH"
+            self.matrix_world = _MockMatrix()
+            self.data = _MockMeshData()
+            self.parent = None
+            self.modifiers = _MockModifiers()
+            self.vertex_groups = _MockVGroups([_MockVGroup(grp, idx) for idx, grp in enumerate(group_names)])
+
+    class _MockOps:
+        class _ObjectOps:
+            def __init__(self, base_ref: _MockArmObj) -> None:
+                self._base = base_ref
+
+            def select_all(self, *, action: str) -> None:
+                pass
+
+            def mode_set(self, *, mode: str) -> None:
+                if mode == "OBJECT":
+                    self._base.data.bones = list(self._base.data.edit_bones.values())
+
+        def __init__(self, base_ref: _MockArmObj) -> None:
+            self.object = self._ObjectOps(base_ref)
+
+    class _MockBpy:
+        class _Data:
+            class _Objs(list):
+                def remove(self, item: object, do_unlink: bool = True) -> None:
+                    if item in self:
+                        super().remove(item)
+
+            def __init__(self, items) -> None:
+                self.objects = self._Objs(items)
+
+        class _ViewLayer:
+            class _LayerObjs:
+                active = None
+
+            def __init__(self) -> None:
+                self.objects = self._LayerObjs()
+
+        class _Context:
+            def __init__(self) -> None:
+                self.view_layer = _MockBpy._ViewLayer()
+
+        def __init__(self, base_ref: _MockArmObj, all_items) -> None:
+            self.ops = _MockOps(base_ref)
+            self.data = self._Data(all_items)
+            self.context = self._Context()
+
+    base_arm = _MockArmObj("Armature", ["Hips", "Upper_leg.R", "Little Distal.R"])
+    orig_base_names = [bone_item.name for bone_item in base_arm.data.bones]
+    first_arm = _MockArmObj("CardArm", ["Bone"])
+    first_mesh = _MockMeshObj("Card", ["Bone"])
+    second_arm = _MockArmObj("NailArm", ["Little Distal.R", "bone.002"])
+    second_mesh = _MockMeshObj("Ribbon.001", ["Little Distal.R", "bone.002"])
+    mock_bpy = _MockBpy(base_arm, [base_arm, first_arm, first_mesh, second_arm, second_mesh])
+
+    modular_avatar_helper._bake_merge_armature_in_blender(
+        mock_bpy,
+        base_arm,
+        first_arm,
+        [first_mesh],
+        instance_spec={"attach_parent_bone": "RightUpperLeg"},
+        instance_tag="inst1",
+        target_base_bones=orig_base_names,
+    )
+    modular_avatar_helper._bake_merge_armature_in_blender(
+        mock_bpy,
+        base_arm,
+        second_arm,
+        [second_mesh],
+        instance_tag="inst2",
+        target_base_bones=orig_base_names,
+    )
+    card_bone_parent = base_arm.data.edit_bones["Bone"].parent.name if base_arm.data.edit_bones["Bone"].parent else ""
+    bone_isolation_passed = (
+        card_bone_parent == "Upper_leg.R"
+        and "bone.002" in base_arm.data.edit_bones
+        and [grp.name for grp in second_mesh.vertex_groups] == ["Little Distal.R", "bone.002"]
+    )
+    if not bone_isolation_passed:
+        print(
+            f"    [FAIL] Multi-FBX bone isolation failed: card_parent={card_bone_parent!r}, "
+            f"bones={list(base_arm.data.edit_bones.keys())}, vgs={[grp.name for grp in second_mesh.vertex_groups]}"
+        )
+
+    # Check 13: Static FBX MeshFilter import matrix strips Model LclScaling & keeps UnitScaleFactor
+    with tempfile.TemporaryDirectory() as fbx_tmp:
+        def _pack_fbx_prop(prop_val: object) -> bytes:
+            if isinstance(prop_val, str):
+                raw_str = prop_val.encode("utf-8")
+                return b"S" + struct_mod.pack("<I", len(raw_str)) + raw_str
+            if isinstance(prop_val, float):
+                return b"D" + struct_mod.pack("<d", prop_val)
+            if isinstance(prop_val, int):
+                return b"I" + struct_mod.pack("<i", prop_val)
+            raise TypeError(type(prop_val))
+
+        def _pack_fbx_node(node_name: str, prop_items, children_bytes: bytes = b"", start_off: int = 0) -> bytes:
+            encoded_props = b"".join(_pack_fbx_prop(item) for item in prop_items)
+            name_bytes = node_name.encode("utf-8")
+            null_term = struct_mod.pack("<IIIB", 0, 0, 0, 0) if children_bytes else b""
+            total_size = 13 + len(name_bytes) + len(encoded_props) + len(children_bytes) + len(null_term)
+            return struct_mod.pack("<IIIB", start_off + total_size, len(prop_items), len(encoded_props), len(name_bytes)) + name_bytes + encoded_props + children_bytes + null_term
+
+        def _build_minimal_fbx(unit_scale_val: float) -> bytes:
+            fbx_hdr = b"Kaydara FBX Binary  \x00\x1a\x00" + struct_mod.pack("<I", 7400)
+            cur_off = len(fbx_hdr)
+            prop_rows = [
+                ("UnitScaleFactor", "double", "Number", "", float(unit_scale_val)),
+                ("UpAxis", "int", "Integer", "", 1),
+                ("UpAxisSign", "int", "Integer", "", 1),
+                ("FrontAxis", "int", "Integer", "", 2),
+                ("FrontAxisSign", "int", "Integer", "", 1),
+                ("CoordAxis", "int", "Integer", "", 0),
+                ("CoordAxisSign", "int", "Integer", "", 1),
+            ]
+            global_settings_head = cur_off + 13 + len("GlobalSettings")
+            props70_head = global_settings_head + 13 + len("Properties70")
+            prop_chunks = []
+            prop_cur = props70_head
+            for row_vals in prop_rows:
+                chunk = _pack_fbx_node("P", row_vals, b"", start_off=prop_cur)
+                prop_chunks.append(chunk)
+                prop_cur += len(chunk)
+            props70_node = _pack_fbx_node("Properties70", [], b"".join(prop_chunks), start_off=global_settings_head)
+            global_settings_node = _pack_fbx_node("GlobalSettings", [], props70_node, start_off=cur_off)
+            return fbx_hdr + global_settings_node + struct_mod.pack("<IIIB", 0, 0, 0, 0)
+
+        import unity_scene_helper as scene_helper_mod
+
+        synth_fbx = Path(fbx_tmp) / "ring.fbx"
+        synth_fbx.write_bytes(_build_minimal_fbx(1.0))
+        Path(str(synth_fbx) + ".meta").write_text("fileFormatVersion: 2\nguid: aaa11111111111111111111111111111\nModelImporter:\n  meshes:\n    globalScale: 1\n    useFileScale: 1\n", encoding="utf-8")
+        rows_metric = scene_helper_mod.compute_fbx_mesh_import_matrix_rows(synth_fbx)
+        Path(str(synth_fbx) + ".meta").write_text("fileFormatVersion: 2\nguid: aaa11111111111111111111111111111\nModelImporter:\n  meshes:\n    globalScale: 2\n    useFileScale: 0\n", encoding="utf-8")
+        rows_raw = scene_helper_mod.compute_fbx_mesh_import_matrix_rows(synth_fbx)
+        mesh_filter_matrix_passed = (
+            abs(rows_metric[0][0] - 0.01) < 1e-6
+            and abs(rows_metric[1][2] + 0.01) < 1e-6
+            and abs(rows_metric[2][1] - 0.01) < 1e-6
+            and abs(rows_raw[0][0] - 2.0) < 1e-6
+            and abs(rows_raw[1][2] + 2.0) < 1e-6
+            and abs(rows_raw[2][1] - 2.0) < 1e-6
+        )
+        if not mesh_filter_matrix_passed:
+            print(f"    [FAIL] MeshFilter import matrix mismatch: metric={rows_metric}, raw={rows_raw}")
+
     return (
         skin_checks_passed
         and primary_fbx_passed
@@ -749,6 +1119,10 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
         and atlas_grid_passed
         and glass_lens_passed
         and shinano_checks_passed
+        and unicode_phys_passed
+        and safe_fbx_passed
+        and bone_isolation_passed
+        and mesh_filter_matrix_passed
     )
 
 

@@ -21,6 +21,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import error_handler_helper as err_helper
 import eye_blink_helper
 import hand_skeleton_helper
 import physbone_helper
@@ -1169,7 +1170,7 @@ def import_and_place_er_earrings(
         return
 
     pre_objs = set(bpy_mod.data.objects)
-    bpy_mod.ops.import_scene.fbx(filepath=str(resolved_earring))
+    err_helper.import_fbx_safely(bpy_mod, filepath=str(resolved_earring))
     new_objs = [obj for obj in bpy_mod.data.objects if obj not in pre_objs]
     raw_ear_mesh = next((obj for obj in new_objs if obj.type == "MESH"), None)
     extra_ear_objs = [obj for obj in new_objs if obj != raw_ear_mesh]

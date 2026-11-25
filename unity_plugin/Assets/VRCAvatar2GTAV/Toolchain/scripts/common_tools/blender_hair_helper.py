@@ -15,6 +15,7 @@ import struct
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+import error_handler_helper as err_helper
 import unity_hair_helper
 import unity_scene_helper
 
@@ -459,7 +460,7 @@ def import_and_filter_custom_hair_meshes(
         if not fbx_str or not Path(fbx_str).is_file():
             continue
         pre_objects = set(bpy_module.data.objects)
-        bpy_module.ops.import_scene.fbx(filepath=fbx_str, use_anim=False)
+        err_helper.import_fbx_safely(bpy_module, filepath=fbx_str, use_anim=False)
         new_objects = [obj for obj in bpy_module.data.objects if obj not in pre_objects]
 
         new_armatures = [obj for obj in new_objects if obj.type == "ARMATURE"]

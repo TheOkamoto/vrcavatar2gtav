@@ -334,9 +334,7 @@ def compute_directory_total_bytes(target_directory: Path) -> int:
     total_size_bytes = 0
     if not target_directory.is_dir():
         return 0
-    for walk_root, dir_names, file_names in os.walk(target_directory):
-        # Preserve directory traversal list without short temporary identifiers
-        dir_names[:] = dir_names
+    for walk_root, _dir_names, file_names in os.walk(target_directory):
         for single_filename in file_names:
             candidate_path = Path(walk_root) / single_filename
             try:
@@ -353,6 +351,8 @@ def copy_file_with_progress(
     Copy a large archive in 4 MB chunks while displaying progress, throughput
     (MB/s), and ETA, preserving file metadata (equivalent to shutil.copy2).
     """
+    if not source_file_path.is_file():
+        raise FileNotFoundError(f"Missing RPF source archive: {source_file_path}")
     destination_file_path.parent.mkdir(parents=True, exist_ok=True)
     total_file_bytes = source_file_path.stat().st_size
     total_megabytes = total_file_bytes / (1024.0 * 1024.0)
@@ -830,79 +830,14 @@ def run_repack_and_deploy() -> None:
         # 7. Verify encryption flags and uncompressed TOC entries
         stage_tracker.begin_stage(project_i18n.translate("repack.stage_verifying"))
         print(project_i18n.translate("repack.verifying_header"), flush=True)
-        with open(target_dlc_rpf_path, "rb") as dlc_archive_file:
-            dlc_archive_file.seek(12)
-            dlc_encryption_flag = dlc_archive_file.read(4)
-
-        with open(target_x64v_rpf_path, "rb") as x64v_archive_file:
-            x64v_archive_file.seek(12)
-            x64v_encryption_flag = x64v_archive_file.read(4)
-
-        print(
-            project_i18n.translate(
-                "repack.verify_dlc_header", flag=dlc_encryption_flag
-            )
-        )
-        print(
-            project_i18n.translate(
-                "repack.verify_x64v_header", flag=x64v_encryption_flag
-            )
-        )
-
-        dlc_verification_output = subprocess.run(
-            [rage_cli_tool, "list", "-d", str(target_dlc_rpf_path)],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120.0,
-            check=True,
-        ).stdout
-        dlc_compressed_entries = [
-            line_content
-            for line_content in dlc_verification_output.splitlines()
-            if "Compressed:" in line_content
-            and "Compressed: 0" not in line_content
-        ]
-        print(
-            project_i18n.translate(
-                "repack.verify_dlc_compressed", count=len(dlc_compressed_entries)
-            )
-        )
-
-        x64v_verification_output = subprocess.run(
-            [rage_cli_tool, "list", "-d", str(target_x64v_rpf_path)],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120.0,
-            check=True,
-        ).stdout
-        x64v_compressed_entries = [
-            line_content
-            for line_content in x64v_verification_output.splitlines()
-            if "Compressed:" in line_content
-            and "Compressed: 0" not in line_content
-        ]
-        print(
-            project_i18n.translate(
-                "repack.verify_x64v_compressed", count=len(x64v_compressed_entries)
-            )
-        )
-
-        are_patchdays_valid = True
-        for pack_spec in active_patchday_specs:
-            pack_target_dlc = Path(pack_spec["target_dlc_path"])
-            if not pack_target_dlc.is_file():
-                continue
-            with open(pack_target_dlc, "rb") as pack_file_handle:
-                pack_file_handle.seek(12)
-                pack_flag = pack_file_handle.read(4)
-            pack_list_output = subprocess.run(
-                [rage_cli_tool, "list", "-d", str(pack_target_dlc)],
+        def _inspect_open_uncompressed_rpf(archive_file: Path) -> tuple[bytes, int]:
+            if not archive_file.is_file():
+                raise FileNotFoundError(f"Missing deployed RPF archive: {archive_file}")
+            with open(archive_file, "rb") as archive_handle:
+                archive_handle.seek(12)
+                enc_flag = archive_handle.read(4)
+            list_stdout = subprocess.run(
+                [rage_cli_tool, "list", "-d", str(archive_file)],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -911,20 +846,50 @@ def run_repack_and_deploy() -> None:
                 timeout=120.0,
                 check=True,
             ).stdout
-            pack_compressed_entries = [
+            compressed_list = [
                 line_item
-                for line_item in pack_list_output.splitlines()
+                for line_item in list_stdout.splitlines()
                 if "Compressed:" in line_item and "Compressed: 0" not in line_item
             ]
-            if len(pack_compressed_entries) != 0 or pack_flag != b"OPEN":
+            return enc_flag, len(compressed_list)
+
+        dlc_encryption_flag, dlc_compressed_count = _inspect_open_uncompressed_rpf(
+            target_dlc_rpf_path
+        )
+        print(
+            project_i18n.translate("repack.verify_dlc_header", flag=dlc_encryption_flag)
+        )
+        print(
+            project_i18n.translate(
+                "repack.verify_dlc_compressed", count=dlc_compressed_count
+            )
+        )
+
+        x64v_encryption_flag, x64v_compressed_count = _inspect_open_uncompressed_rpf(
+            target_x64v_rpf_path
+        )
+        print(
+            project_i18n.translate("repack.verify_x64v_header", flag=x64v_encryption_flag)
+        )
+        print(
+            project_i18n.translate(
+                "repack.verify_x64v_compressed", count=x64v_compressed_count
+            )
+        )
+
+        are_patchdays_valid = True
+        for pack_spec in active_patchday_specs:
+            pack_target_dlc = Path(pack_spec["target_dlc_path"])
+            if not pack_target_dlc.is_file():
+                continue
+            pack_flag, pack_compressed_count = _inspect_open_uncompressed_rpf(
+                pack_target_dlc
+            )
+            if pack_compressed_count != 0 or pack_flag != b"OPEN":
                 are_patchdays_valid = False
 
-        is_dlc_valid = (
-            len(dlc_compressed_entries) == 0 and dlc_encryption_flag == b"OPEN"
-        )
-        is_x64v_valid = (
-            len(x64v_compressed_entries) == 0 and x64v_encryption_flag == b"OPEN"
-        )
+        is_dlc_valid = dlc_compressed_count == 0 and dlc_encryption_flag == b"OPEN"
+        is_x64v_valid = x64v_compressed_count == 0 and x64v_encryption_flag == b"OPEN"
 
         rpf_limit_checks_ok = True
         archives_to_audit = [

@@ -476,3 +476,31 @@ def run_subprocess_safe(
             avatar=avatar_name,
             cause=sub_err,
         ) from sub_err
+
+
+def import_fbx_safely(bpy_module: Any, **fbx_kwargs: Any) -> Any:
+    """Import an FBX in Blender while skipping bogus directory texture paths like `Card/FBX/.`."""
+    try:
+        from bpy_extras import image_utils
+    except Exception:
+        image_utils = None
+    if image_utils is None or not hasattr(image_utils, "load_image"):
+        return bpy_module.ops.import_scene.fbx(**fbx_kwargs)
+
+    orig_load_image = image_utils.load_image
+
+    def _guarded_load_image(imagepath: Any, dirname: str = "", place_holder: bool = False, *load_args: Any, **load_kwargs: Any) -> Any:
+        raw_img = str(imagepath or "").strip()
+        joined_img = os.path.join(str(dirname or ""), raw_img) if dirname and raw_img else raw_img
+        if not raw_img or raw_img in (".", "..") or os.path.isdir(raw_img) or (joined_img and os.path.isdir(joined_img)):
+            if place_holder:
+                placeholder_name = os.path.basename(raw_img) or "fbx_placeholder"
+                return bpy_module.data.images.new(placeholder_name, 1, 1)
+            return None
+        return orig_load_image(imagepath, dirname=dirname, place_holder=place_holder, *load_args, **load_kwargs)
+
+    image_utils.load_image = _guarded_load_image
+    try:
+        return bpy_module.ops.import_scene.fbx(**fbx_kwargs)
+    finally:
+        image_utils.load_image = orig_load_image

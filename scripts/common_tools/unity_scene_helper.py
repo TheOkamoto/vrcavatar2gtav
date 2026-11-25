@@ -7,8 +7,10 @@ libraries. When no Unity scene is configured or present (default GitHub
 setup), every anatomical bone scale defaults cleanly to (1.0, 1.0, 1.0).
 """
 
+import json
 import math
 import os
+import re
 import time
 from collections import deque
 from pathlib import Path
@@ -99,13 +101,27 @@ def is_unit_scale(
 
 def decode_unity_name(raw_name: str) -> str:
     """Decode optional YAML unicode escapes and quotes from a Unity m_Name value."""
-    cleaned_name = raw_name.strip()
+    cleaned_name = str(raw_name or "").strip()
     if len(cleaned_name) >= 2 and cleaned_name.startswith('"') and cleaned_name.endswith('"'):
-        cleaned_name = cleaned_name[1:-1]
         try:
-            cleaned_name = bytes(cleaned_name, "utf-8").decode("unicode_escape")
+            decoded_json = json.loads(cleaned_name)
+            if isinstance(decoded_json, str):
+                return decoded_json.strip()
         except Exception:
-            pass
+            cleaned_name = cleaned_name[1:-1]
+    elif len(cleaned_name) >= 2 and cleaned_name.startswith("'") and cleaned_name.endswith("'"):
+        cleaned_name = cleaned_name[1:-1].replace("''", "'")
+    if "\\u" in cleaned_name or "\\U" in cleaned_name:
+        cleaned_name = re.sub(
+            r"\\u([0-9a-fA-F]{4})",
+            lambda hex_match: chr(int(hex_match.group(1), 16)),
+            cleaned_name,
+        )
+        cleaned_name = re.sub(
+            r"\\U([0-9a-fA-F]{8})",
+            lambda hex_match: chr(int(hex_match.group(1), 16)),
+            cleaned_name,
+        )
     return cleaned_name.strip()
 
 
@@ -984,3 +1000,146 @@ def compute_gtav_height_mapping(
         return computed_scale, computed_offset
 
     return default_scale, default_offset
+
+
+def _read_fbx_global_settings_properties(fbx_path: Path) -> Dict[str, float]:
+    """Read `UnitScaleFactor` and axis ints from binary or ASCII FBX `GlobalSettings`."""
+    props_out: Dict[str, float] = {
+        "UnitScaleFactor": 1.0,
+        "UpAxis": 1.0,
+        "UpAxisSign": 1.0,
+        "FrontAxis": 2.0,
+        "FrontAxisSign": 1.0,
+        "CoordAxis": 0.0,
+        "CoordAxisSign": 1.0,
+    }
+    try:
+        raw_bytes = fbx_path.read_bytes()
+    except OSError:
+        return props_out
+
+    if len(raw_bytes) < 27 or not raw_bytes.startswith(b"Kaydara FBX Binary"):
+        text_head = raw_bytes[:32768].decode("utf-8", errors="ignore")
+        for key_name in props_out:
+            match_val = re.search(rf'P:\s*"{key_name}"[^,\n]*,[^,\n]*,[^,\n]*,[^,\n]*,\s*([-+0-9.eE]+)', text_head)
+            if match_val:
+                try:
+                    props_out[key_name] = float(match_val.group(1))
+                except ValueError:
+                    pass
+        return props_out
+
+    import struct
+
+    fbx_ver = struct.unpack_from("<I", raw_bytes, 23)[0]
+    hdr_fmt = "<QQQB" if fbx_ver >= 7500 else "<IIIB"
+    hdr_size = 25 if fbx_ver >= 7500 else 13
+    total_len = len(raw_bytes)
+
+    def _read_prop_value(pos_cur: int) -> Tuple[object, int]:
+        type_code = chr(raw_bytes[pos_cur])
+        pos_cur += 1
+        if type_code == "Y":
+            return struct.unpack_from("<h", raw_bytes, pos_cur)[0], pos_cur + 2
+        if type_code == "C":
+            return bool(raw_bytes[pos_cur]), pos_cur + 1
+        if type_code == "I":
+            return struct.unpack_from("<i", raw_bytes, pos_cur)[0], pos_cur + 4
+        if type_code == "F":
+            return struct.unpack_from("<f", raw_bytes, pos_cur)[0], pos_cur + 4
+        if type_code == "D":
+            return struct.unpack_from("<d", raw_bytes, pos_cur)[0], pos_cur + 8
+        if type_code == "L":
+            return struct.unpack_from("<q", raw_bytes, pos_cur)[0], pos_cur + 8
+        if type_code in ("S", "R"):
+            str_len = struct.unpack_from("<I", raw_bytes, pos_cur)[0]
+            pos_cur += 4
+            txt_val = raw_bytes[pos_cur : pos_cur + str_len].decode("utf-8", errors="replace") if type_code == "S" else ""
+            return txt_val, pos_cur + str_len
+        if type_code in ("f", "d", "l", "i", "b"):
+            arr_len, enc_flag, comp_len = struct.unpack_from("<III", raw_bytes, pos_cur)
+            elem_size = {"f": 4, "d": 8, "l": 8, "i": 4, "b": 1}[type_code]
+            return None, pos_cur + 12 + (comp_len if enc_flag == 1 else arr_len * elem_size)
+        raise ValueError(type_code)
+
+    def _scan_props(start_pos: int, end_pos: int) -> None:
+        pos_cur = start_pos
+        while pos_cur + hdr_size <= end_pos:
+            end_off, prop_cnt, prop_len, name_len = struct.unpack_from(hdr_fmt, raw_bytes, pos_cur)
+            pos_cur += hdr_size
+            if end_off == 0 or end_off > end_pos:
+                break
+            node_name = raw_bytes[pos_cur : pos_cur + name_len].decode("utf-8", errors="replace")
+            pos_cur += name_len
+            prop_end = pos_cur + prop_len
+            vals: List[object] = []
+            while pos_cur < prop_end and len(vals) < prop_cnt:
+                parsed_val, pos_cur = _read_prop_value(pos_cur)
+                vals.append(parsed_val)
+            pos_cur = prop_end
+            if node_name == "P" and len(vals) >= 5 and isinstance(vals[0], str) and vals[0] in props_out:
+                if isinstance(vals[4], (int, float)) and not isinstance(vals[4], bool):
+                    props_out[vals[0]] = float(vals[4])
+            elif node_name == "Properties70" and pos_cur + hdr_size <= end_off:
+                _scan_props(pos_cur, end_off)
+            pos_cur = end_off
+
+    top_pos = 27
+    try:
+        while top_pos + hdr_size <= total_len:
+            end_off, _cnt, prop_len, name_len = struct.unpack_from(hdr_fmt, raw_bytes, top_pos)
+            top_pos += hdr_size
+            if end_off == 0 or end_off > total_len or end_off < top_pos:
+                break
+            sec_name = raw_bytes[top_pos : top_pos + name_len].decode("utf-8", errors="replace")
+            if sec_name == "GlobalSettings":
+                _scan_props(top_pos + name_len + prop_len, end_off)
+                break
+            top_pos = end_off
+    except (struct.error, ValueError):
+        pass
+    return props_out
+
+
+def compute_fbx_mesh_import_matrix_rows(fbx_path: object) -> List[List[float]]:
+    """
+    Compute the 4x4 Blender-space import matrix Unity `ModelImporter` applies to a raw
+    `Mesh` asset (`m_Mesh` in `MeshFilter`), excluding any FBX scene-node `Lcl` transform.
+    """
+    resolved_fbx = Path(str(fbx_path))
+    meta_global_scale = 1.0
+    meta_use_file_scale = True
+    meta_path = Path(str(resolved_fbx) + ".meta")
+    if meta_path.is_file():
+        try:
+            meta_txt = meta_path.read_text(encoding="utf-8", errors="ignore")
+            scl_match = re.search(r"^\s*globalScale:\s*([-+0-9.eE]+)", meta_txt, re.MULTILINE)
+            if scl_match:
+                meta_global_scale = float(scl_match.group(1))
+            ufs_match = re.search(r"^\s*useFileScale:\s*(\d+)", meta_txt, re.MULTILINE)
+            if ufs_match:
+                meta_use_file_scale = int(ufs_match.group(1)) != 0
+        except (OSError, ValueError):
+            pass
+
+    fbx_props = _read_fbx_global_settings_properties(resolved_fbx) if resolved_fbx.is_file() else {}
+    unit_scale = float(fbx_props.get("UnitScaleFactor", 1.0))
+    eff_scale = meta_global_scale * ((unit_scale * 0.01) if meta_use_file_scale else 1.0)
+    if abs(eff_scale) < 1e-8:
+        eff_scale = 0.01
+
+    coord_idx = max(0, min(2, int(round(fbx_props.get("CoordAxis", 0.0)))))
+    front_idx = max(0, min(2, int(round(fbx_props.get("FrontAxis", 2.0)))))
+    up_idx = max(0, min(2, int(round(fbx_props.get("UpAxis", 1.0)))))
+    if len({coord_idx, front_idx, up_idx}) != 3:
+        coord_idx, up_idx, front_idx = 0, 1, 2
+    coord_sign = -1.0 if fbx_props.get("CoordAxisSign", 1.0) < 0 else 1.0
+    front_sign = -1.0 if fbx_props.get("FrontAxisSign", 1.0) < 0 else 1.0
+    up_sign = -1.0 if fbx_props.get("UpAxisSign", 1.0) < 0 else 1.0
+
+    rows = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
+    rows[0][coord_idx] = coord_sign * eff_scale
+    rows[1][front_idx] = -front_sign * eff_scale
+    rows[2][up_idx] = up_sign * eff_scale
+    rows[3][3] = 1.0
+    return rows

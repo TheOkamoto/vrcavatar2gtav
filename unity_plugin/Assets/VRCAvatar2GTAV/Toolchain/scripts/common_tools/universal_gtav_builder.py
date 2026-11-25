@@ -118,6 +118,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     import hand_skeleton_helper
     import modular_avatar_helper
     import ped_damage_helper
+    import error_handler_helper as err_helper
     import physbone_helper
     import vrc2gtav_paths as project_paths
 
@@ -283,7 +284,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
     # 2. Import VRChat avatar FBX and bake Modular Avatar + blendshapes
     source_fbx = str(project_paths.to_host_path(manifest["source_fbx"]))
     before_objs = {obj_item.name for obj_item in bpy.data.objects}
-    bpy.ops.import_scene.fbx(filepath=source_fbx)
+    err_helper.import_fbx_safely(bpy, filepath=source_fbx)
     src_armature = next(
         (
             obj_item

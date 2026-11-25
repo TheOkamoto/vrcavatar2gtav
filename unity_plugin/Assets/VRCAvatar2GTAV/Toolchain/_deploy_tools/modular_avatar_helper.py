@@ -38,83 +38,35 @@ import blendshape_unity_yaml_layer
 
 try:
     from modular_avatar_yaml_layer import (
-        COMMON_TOOLS_DIR,
-    MA_MERGE_ARMATURE_GUID,
-    MA_BONE_PROXY_GUID,
-    MA_MESH_SETTINGS_GUID,
-    MA_BLENDSHAPE_SYNC_GUID,
-    MA_REPLACE_OBJECT_GUID,
-    MA_OBJECT_TOGGLE_GUID,
-    MA_SHAPE_CHANGER_GUID,
-    MA_SCALE_ADJUSTER_GUID,
-    MA_ACTIVATOR_GUID,
-    VRC_PHYSBONE_GUID,
-    HUMAN_BODY_BONES,
-    _SKIP_SCAN_DIRS,
-    _SKIP_GUID_DIRS,
-    _decode_scalar,
-    normalize_bone_match_key,
-    infer_armature_prefix_suffix,
-    resolve_ma_bone_mapping,
-    _extract_inline_ref,
-    _MA_PARSED_YAML_CACHE,
-    parse_unity_yaml_with_ma,
-    _MA_GUID_CACHE,
-    _MA_GUID_SCAN_STATE,
-    _is_builtin_unity_guid,
-    _collect_guid_paths_for_ma,
-    _is_game_object_active_in_doc,
-    IDENTITY_UNITY_TRS,
-    extract_transform_mod_overrides,
-    extract_renderer_mod_overrides,
-    resolve_overridden_renderer_mats,
-    stamp_unity_mats_on_blender_objects,
-    apply_unity_textures_to_blender_meshes,
-    _read_fbx_meta_mesh_fids,
-    compute_doc_unity_world_transforms,
-    unity_trs_to_blender_matrix_rows,
-    is_identity_mat4,
-    compute_bone_unit_scale_correction,
+        COMMON_TOOLS_DIR, MA_MERGE_ARMATURE_GUID, MA_BONE_PROXY_GUID, MA_MESH_SETTINGS_GUID,
+        MA_BLENDSHAPE_SYNC_GUID, MA_REPLACE_OBJECT_GUID, MA_OBJECT_TOGGLE_GUID,
+        MA_SHAPE_CHANGER_GUID, MA_SCALE_ADJUSTER_GUID, MA_ACTIVATOR_GUID, VRC_PHYSBONE_GUID,
+        HUMAN_BODY_BONES, _SKIP_SCAN_DIRS, _SKIP_GUID_DIRS, _decode_scalar,
+        normalize_bone_match_key, infer_armature_prefix_suffix, resolve_ma_bone_mapping,
+        _extract_inline_ref, _MA_PARSED_YAML_CACHE, parse_unity_yaml_with_ma, _MA_GUID_CACHE,
+        _MA_GUID_SCAN_STATE, _is_builtin_unity_guid, _collect_guid_paths_for_ma,
+        _is_game_object_active_in_doc, IDENTITY_UNITY_TRS, expand_humanoid_bone_candidates,
+        extract_transform_mod_overrides, extract_renderer_mod_overrides,
+        resolve_overridden_renderer_mats, stamp_unity_mats_on_blender_objects,
+        apply_unity_textures_to_blender_meshes, _read_fbx_meta_mesh_fids,
+        compute_doc_unity_world_transforms, unity_trs_to_blender_matrix_rows,
+        is_identity_mat4, compute_bone_unit_scale_correction,
     )
 except ImportError:
     from common_tools.modular_avatar_yaml_layer import (
-        COMMON_TOOLS_DIR,
-    MA_MERGE_ARMATURE_GUID,
-    MA_BONE_PROXY_GUID,
-    MA_MESH_SETTINGS_GUID,
-    MA_BLENDSHAPE_SYNC_GUID,
-    MA_REPLACE_OBJECT_GUID,
-    MA_OBJECT_TOGGLE_GUID,
-    MA_SHAPE_CHANGER_GUID,
-    MA_SCALE_ADJUSTER_GUID,
-    MA_ACTIVATOR_GUID,
-    VRC_PHYSBONE_GUID,
-    HUMAN_BODY_BONES,
-    _SKIP_SCAN_DIRS,
-    _SKIP_GUID_DIRS,
-    _decode_scalar,
-    normalize_bone_match_key,
-    infer_armature_prefix_suffix,
-    resolve_ma_bone_mapping,
-    _extract_inline_ref,
-    _MA_PARSED_YAML_CACHE,
-    parse_unity_yaml_with_ma,
-    _MA_GUID_CACHE,
-    _MA_GUID_SCAN_STATE,
-    _is_builtin_unity_guid,
-    _collect_guid_paths_for_ma,
-    _is_game_object_active_in_doc,
-    IDENTITY_UNITY_TRS,
-    extract_transform_mod_overrides,
-    extract_renderer_mod_overrides,
-    resolve_overridden_renderer_mats,
-    stamp_unity_mats_on_blender_objects,
-    apply_unity_textures_to_blender_meshes,
-    _read_fbx_meta_mesh_fids,
-    compute_doc_unity_world_transforms,
-    unity_trs_to_blender_matrix_rows,
-    is_identity_mat4,
-    compute_bone_unit_scale_correction,
+        COMMON_TOOLS_DIR, MA_MERGE_ARMATURE_GUID, MA_BONE_PROXY_GUID, MA_MESH_SETTINGS_GUID,
+        MA_BLENDSHAPE_SYNC_GUID, MA_REPLACE_OBJECT_GUID, MA_OBJECT_TOGGLE_GUID,
+        MA_SHAPE_CHANGER_GUID, MA_SCALE_ADJUSTER_GUID, MA_ACTIVATOR_GUID, VRC_PHYSBONE_GUID,
+        HUMAN_BODY_BONES, _SKIP_SCAN_DIRS, _SKIP_GUID_DIRS, _decode_scalar,
+        normalize_bone_match_key, infer_armature_prefix_suffix, resolve_ma_bone_mapping,
+        _extract_inline_ref, _MA_PARSED_YAML_CACHE, parse_unity_yaml_with_ma, _MA_GUID_CACHE,
+        _MA_GUID_SCAN_STATE, _is_builtin_unity_guid, _collect_guid_paths_for_ma,
+        _is_game_object_active_in_doc, IDENTITY_UNITY_TRS, expand_humanoid_bone_candidates,
+        extract_transform_mod_overrides, extract_renderer_mod_overrides,
+        resolve_overridden_renderer_mats, stamp_unity_mats_on_blender_objects,
+        apply_unity_textures_to_blender_meshes, _read_fbx_meta_mesh_fids,
+        compute_doc_unity_world_transforms, unity_trs_to_blender_matrix_rows,
+        is_identity_mat4, compute_bone_unit_scale_correction,
     )
 
 
@@ -381,11 +333,28 @@ def build_modular_avatar_bake_plan(
                     active_logger.debug(f"Material parse skip {mat_path}: {exc}")
         return mat_list
 
+    def _resolve_attach_bone_from_transform(
+        doc_transform_map: Dict[str, Dict[str, Any]],
+        start_transform: str,
+        fallback_bone: str = "",
+    ) -> str:
+        walk_transform = start_transform
+        for _step in range(16):
+            if walk_transform not in doc_transform_map:
+                break
+            walk_name = str(doc_transform_map[walk_transform].get("name", "") or "")
+            norm_tok = normalize_bone_match_key(walk_name)
+            if norm_tok in humanoid_anchor_keys:
+                return humanoid_anchor_keys[norm_tok]
+            walk_transform = str(doc_transform_map[walk_transform].get("father_tr", "0") or "0")
+        return fallback_bone
+
     def _find_arm_root_and_host(
         doc_data: Dict[str, Any],
         doc_transform_map: Dict[str, Dict[str, Any]],
         rend_info: Dict[str, Any],
         renderer_game_object_file_id: str,
+        inherited_attach_bone: str = "",
     ) -> Tuple[str, str, str]:
         """Resolve `(arm_root_tr, host_tr, attach_parent_bone)` for a renderer via its `m_RootBone`."""
         game_object_transform = doc_data.get("go_to_tr", {}).get(renderer_game_object_file_id, "0")
@@ -422,17 +391,9 @@ def build_modular_avatar_bake_plan(
             if arm_root_transform and arm_root_transform in doc_transform_map
             else game_object_transform
         )
-        attach_bone = ""
-        walk_transform = host_transform
-        for _step in range(12):
-            if walk_transform not in doc_transform_map:
-                break
-            walk_name = str(doc_transform_map[walk_transform].get("name", "") or "")
-            norm_tok = normalize_bone_match_key(walk_name)
-            if norm_tok in humanoid_anchor_keys:
-                attach_bone = humanoid_anchor_keys[norm_tok]
-                break
-            walk_transform = str(doc_transform_map[walk_transform].get("father_tr", "0") or "0")
+        attach_bone = _resolve_attach_bone_from_transform(
+            doc_transform_map, host_transform, fallback_bone=inherited_attach_bone
+        )
         return arm_root_transform, host_transform, attach_bone
 
     def _collect_arm_subtree_matrices(
@@ -480,6 +441,7 @@ def build_modular_avatar_bake_plan(
         renderer_overrides: Optional[Dict[str, Any]] = None,
         collect_base_scales: bool = False,
         owner_tag: str = "",
+        inherited_attach_bone: str = "",
     ) -> Dict[str, Dict[str, Any]]:
         doc_gos = doc_data["gameobjects"]
         doc_renderers = doc_data["renderers"]
@@ -601,7 +563,11 @@ def build_modular_avatar_bake_plan(
                     if item_name and item_name not in fbx_bucket:
                         fbx_bucket.append(item_name)
                 arm_root_transform, host_transform, attach_bone = _find_arm_root_and_host(
-                    doc_data, doc_transform_map, rend_info, game_object_file_id
+                    doc_data,
+                    doc_transform_map,
+                    rend_info,
+                    game_object_file_id,
+                    inherited_attach_bone=inherited_attach_bone,
                 )
                 if arm_root_transform:
                     doc_sub_arm_stops.add((arm_root_transform, host_transform))
@@ -637,6 +603,12 @@ def build_modular_avatar_bake_plan(
                     if arm_root_transform
                     else {}
                 )
+                is_mesh_filter_only = bool(rend_info.get("class_id") == "23" and not arm_root_transform)
+                mesh_asset_rows = (
+                    unity_scene_helper.compute_fbx_mesh_import_matrix_rows(mesh_asset)
+                    if (is_mesh_filter_only and hasattr(unity_scene_helper, "compute_fbx_mesh_import_matrix_rows"))
+                    else None
+                )
                 inst_buckets[bucket_key] = {
                     "instance_id": f"{doc_path.stem}_{group_transform}",
                     "fbx_path": str(mesh_asset),
@@ -644,6 +616,8 @@ def build_modular_avatar_bake_plan(
                     "mesh_materials": {},
                     "attach_parent_bone": attach_bone,
                     "is_skinned": is_skinned_flag,
+                    "uses_mesh_asset_only": is_mesh_filter_only,
+                    "mesh_asset_matrix_rows": mesh_asset_rows,
                     "host_matrix_rows": (
                         unity_trs_to_blender_matrix_rows(host_world, is_bone=False)
                         if use_host_mat
@@ -818,6 +792,7 @@ def build_modular_avatar_bake_plan(
                     prefab_instance_rend_overrides,
                     raw_mods,
                     f"scene_{prefab_instance_file_id}",
+                    _resolve_attach_bone_from_transform(scene_transform_map, parent_transform_id),
                 )
             )
 
@@ -827,7 +802,7 @@ def build_modular_avatar_bake_plan(
         "necklace", "choker", "collar", "wing", "horn", "tail", "accessory", "prop",
     )
     while prefab_queue:
-        cur_prefab, cur_label, cur_base_world, cur_overrides, cur_rend_overrides, cur_pool_mods, visit_tag = prefab_queue.popleft()
+        cur_prefab, cur_label, cur_base_world, cur_overrides, cur_rend_overrides, cur_pool_mods, visit_tag, cur_attach_bone = prefab_queue.popleft()
         resolved_pref = cur_prefab.resolve()
         visit_key = (resolved_pref, visit_tag)
         label_match = any(tok in cur_label.lower() or tok in cur_prefab.stem.lower() for tok in outfit_keywords)
@@ -860,6 +835,7 @@ def build_modular_avatar_bake_plan(
         prefab_transform_map = _ingest_doc_ma_components(
             pref_doc, cur_prefab, filter_subtree=False, is_outfit_prefab=is_outfit, root_override_name=cur_label,
             base_world=cur_base_world, transform_overrides=cur_overrides, renderer_overrides=cur_rend_overrides, owner_tag=visit_tag,
+            inherited_attach_bone=cur_attach_bone,
         )
         nested_guids = {
             nested_prefab_instance.get("source_guid", "")
@@ -887,9 +863,12 @@ def build_modular_avatar_bake_plan(
                 nested_pool_mods = list(nested_prefab_instance.get("mods", ())) + list(cur_pool_mods) + sibling_ref_mods
                 nested_overrides = extract_transform_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
                 nested_rend_overrides = extract_renderer_mod_overrides(nested_pool_mods, expected_guid=nested_src_guid)
+                nested_attach = _resolve_attach_bone_from_transform(
+                    prefab_transform_map, nested_parent_transform, fallback_bone=cur_attach_bone
+                )
                 prefab_queue.append((
                     nested_path, nested_prefab_instance.get("name", "") or nested_path.stem, nested_world,
-                    nested_overrides, nested_rend_overrides, nested_pool_mods, f"{visit_tag}_{nested_fid}",
+                    nested_overrides, nested_rend_overrides, nested_pool_mods, f"{visit_tag}_{nested_fid}", nested_attach,
                 ))
 
     for attach_item in armature_merges + bone_proxies:
@@ -1024,11 +1003,6 @@ def _apply_unity_transform_deltas_to_outfit(
     elif delta_by_bone:
         host_fallback = next(iter(delta_by_bone.values()))
 
-    # Only skip transformation when every computed delta matrix is close to Identity
-    has_non_ident = any(not is_identity_mat4(mat_val) for mat_val in delta_by_bone.values())
-    if not has_non_ident and is_identity_mat4(host_fallback):
-        return {}, {}
-
     # Disambiguate unmapped custom bone names colliding with already-grafted bones
     used_names = set(base_names_set)
     for bone in outfit_arm_obj.data.bones:
@@ -1044,6 +1018,17 @@ def _apply_unity_transform_deltas_to_outfit(
             used_names.add(cand_name)
         else:
             used_names.add(bone.name)
+
+    # Only skip mesh transformation when every computed delta matrix is close to Identity
+    has_non_ident = any(not is_identity_mat4(mat_val) for mat_val in delta_by_bone.values())
+    if not has_non_ident and is_identity_mat4(host_fallback):
+        if custom_renames:
+            for mesh_obj in outfit_meshes:
+                if mesh_obj.type == "MESH":
+                    for vgrp in mesh_obj.vertex_groups:
+                        if vgrp.name in custom_renames:
+                            vgrp.name = custom_renames[vgrp.name]
+        return {}, custom_renames
 
     zero_mat = mathutils.Matrix(((0.0, 0.0, 0.0, 0.0),) * 4)
     for mesh_obj in outfit_meshes:
@@ -1108,6 +1093,22 @@ def _apply_unity_transform_deltas_to_outfit(
     return delta_by_bone, custom_renames
 
 
+def _bind_mesh_object_to_bone(mesh_obj: Any, base_arm_obj: Any, target_bone: str) -> bool:
+    """Bind an unskinned mesh object rigidly (`weight=1.0`) to `target_bone` on `base_arm_obj`."""
+    if not target_bone or mesh_obj.vertex_groups:
+        return False
+    vgroup = mesh_obj.vertex_groups.new(name=target_bone)
+    vtx_indices = [vtx.index for vtx in mesh_obj.data.vertices]
+    if vtx_indices:
+        vgroup.add(vtx_indices, 1.0, "REPLACE")
+    arm_mod = next((mod_item for mod_item in mesh_obj.modifiers if mod_item.type == "ARMATURE"), None)
+    if arm_mod is None:
+        arm_mod = mesh_obj.modifiers.new(name="Armature", type="ARMATURE")
+    arm_mod.object = base_arm_obj
+    mesh_obj.parent = base_arm_obj
+    return True
+
+
 def _bake_merge_armature_in_blender(
     bpy_mod: Any,
     base_arm_obj: Any,
@@ -1119,6 +1120,7 @@ def _bake_merge_armature_in_blender(
     instance_spec: Optional[Dict[str, Any]] = None,
     pose_delta_inv: Optional[Dict[str, Any]] = None,
     instance_tag: str = "inst",
+    target_base_bones: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
     Reproduce ModularAvatarMergeArmature natively in Blender:
@@ -1131,7 +1133,8 @@ def _bake_merge_armature_in_blender(
     if outfit_arm_obj is None or outfit_arm_obj == base_arm_obj:
         return {"merged_bones": 0, "grafted_bones": 0}
 
-    base_bone_names = [bone.name for bone in base_arm_obj.data.bones]
+    current_arm_bones = [bone.name for bone in base_arm_obj.data.bones]
+    base_bone_names = list(target_base_bones) if target_base_bones is not None else current_arm_bones
     outfit_bone_names = [bone.name for bone in outfit_arm_obj.data.bones]
     bone_map = resolve_ma_bone_mapping(
         outfit_bone_names,
@@ -1139,15 +1142,25 @@ def _bake_merge_armature_in_blender(
         prefix=prefix,
         suffix=suffix,
     )
-
+    attach_parent_raw = str((instance_spec or {}).get("attach_parent_bone", "") or "")
+    resolved_attach_parent = (
+        (_find_bone_in_armature(base_arm_obj, expand_humanoid_bone_candidates(attach_parent_raw)) or "")
+        if attach_parent_raw
+        else ""
+    )
+    effective_spec = (
+        {**(instance_spec or {}), "attach_parent_bone": resolved_attach_parent}
+        if (instance_spec and resolved_attach_parent)
+        else instance_spec
+    )
     delta_by_bone, custom_renames = _apply_unity_transform_deltas_to_outfit(
         outfit_arm_obj,
         outfit_meshes,
         bone_map,
         base_arm_obj,
-        instance_spec=instance_spec,
+        instance_spec=effective_spec,
         pose_delta_inv=pose_delta_inv,
-        existing_base_bones=set(base_bone_names),
+        existing_base_bones=set(current_arm_bones),
         instance_tag=instance_tag,
     )
 
@@ -1182,7 +1195,6 @@ def _bake_merge_armature_in_blender(
     # Collect world-space rest geometry for unmapped custom outfit bones
     outfit_matrix = outfit_arm_obj.matrix_world.copy()
     base_inv_matrix = base_arm_obj.matrix_world.inverted()
-    attach_parent_bone = str((instance_spec or {}).get("attach_parent_bone", "") or "")
     custom_bone_specs: List[Dict[str, Any]] = []
     for bone in outfit_arm_obj.data.bones:
         if bone.name in bone_map:
@@ -1236,8 +1248,8 @@ def _bake_merge_armature_in_blender(
                 resolved_parent = custom_renames.get(parent_src) or bone_map.get(parent_src, parent_src)
                 if resolved_parent in edit_bones:
                     edit_bone_cur.parent = edit_bones[resolved_parent]
-                elif attach_parent_bone and attach_parent_bone in edit_bones:
-                    edit_bone_cur.parent = edit_bones[attach_parent_bone]
+                elif resolved_attach_parent and resolved_attach_parent in edit_bones:
+                    edit_bone_cur.parent = edit_bones[resolved_attach_parent]
                 elif "Hips" in edit_bones:
                     edit_bone_cur.parent = edit_bones["Hips"]
         finally:
@@ -1254,6 +1266,8 @@ def _bake_merge_armature_in_blender(
         if arm_mod is None:
             arm_mod = mesh_obj.modifiers.new(name="Armature", type="ARMATURE")
         arm_mod.object = base_arm_obj
+        if resolved_attach_parent and not mesh_obj.vertex_groups:
+            _bind_mesh_object_to_bone(mesh_obj, base_arm_obj, resolved_attach_parent)
 
     try:
         bpy_mod.data.objects.remove(outfit_arm_obj, do_unlink=True)
@@ -1426,7 +1440,8 @@ def apply_modular_avatar_plan_in_blender(
             covered_fbx_paths.add(resolved_str)
             before_names = {obj.name for obj in bpy_mod.data.objects}
             try:
-                bpy_mod.ops.import_scene.fbx(
+                err_helper.import_fbx_safely(
+                    bpy_mod,
                     filepath=str(fbx_file),
                     use_anim=False,
                     automatic_bone_orientation=False,
@@ -1460,7 +1475,8 @@ def apply_modular_avatar_plan_in_blender(
             seen_fallback_paths.add(resolved_str)
             before_names = {obj.name for obj in bpy_mod.data.objects}
             try:
-                bpy_mod.ops.import_scene.fbx(
+                err_helper.import_fbx_safely(
+                    bpy_mod,
                     filepath=str(fbx_file),
                     use_anim=False,
                     automatic_bone_orientation=False,
@@ -1473,7 +1489,8 @@ def apply_modular_avatar_plan_in_blender(
             imported_entries.append((str(fbx_file), newly_imported, None))
             summary["imported_fbxs"].append(str(fbx_file))
 
-    # 3. Bake MergeArmature rigs onto base_arm_obj
+    # 3. Bake MergeArmature rigs onto base_arm_obj (keep target bones isolated from prior custom grafts)
+    original_base_bones = [bone.name for bone in base_arm_obj.data.bones]
     all_imported_meshes: List[Any] = []
     for _fbx_str, imp_list, inst_spec in imported_entries:
         arm_objs = [obj for obj in imp_list if obj.type == "ARMATURE"]
@@ -1500,26 +1517,29 @@ def apply_modular_avatar_plan_in_blender(
                 instance_spec=inst_spec,
                 pose_delta_inv=pose_delta_inv,
                 instance_tag=inst_tag,
+                target_base_bones=original_base_bones,
             )
             summary["merged_armatures"] += 1
             summary["grafted_bones"] += res["grafted_bones"]
         if not arm_objs and mesh_objs and inst_spec and inst_spec.get("host_matrix_rows") and not inst_spec.get("is_skinned", True):
-            attach_bone = _find_bone_in_armature(
-                base_arm_obj, [str(inst_spec.get("attach_parent_bone", "") or ""), "Head", "Hips"]
-            )
+            attach_candidates = expand_humanoid_bone_candidates(str(inst_spec.get("attach_parent_bone", "") or "")) + ["Head", "Hips"]
+            attach_bone = _find_bone_in_armature(base_arm_obj, attach_candidates)
+            asset_rows = inst_spec.get("mesh_asset_matrix_rows") if inst_spec.get("uses_mesh_asset_only") else None
             try:
                 import bmesh
                 import mathutils
                 host_mat = mathutils.Matrix(inst_spec["host_matrix_rows"])
                 if attach_bone and attach_bone in pose_delta_inv:
                     host_mat = pose_delta_inv[attach_bone] @ host_mat
-                if not is_identity_mat4(host_mat):
-                    det_val = host_mat.to_3x3().determinant()
+                if not is_identity_mat4(host_mat) or asset_rows:
+                    asset_mat = mathutils.Matrix(asset_rows) if asset_rows else None
                     for mesh_obj in mesh_objs:
                         mesh_mat_world = mesh_obj.matrix_world.copy()
                         mesh_mwi = mesh_mat_world.inverted()
+                        src_mat = asset_mat if asset_mat is not None else mesh_mat_world
                         for vtx in mesh_obj.data.vertices:
-                            vtx.co = mesh_mwi @ (host_mat @ (mesh_mat_world @ vtx.co))
+                            vtx.co = mesh_mwi @ (host_mat @ (src_mat @ vtx.co))
+                        det_val = (mesh_mwi @ host_mat @ src_mat).to_3x3().determinant()
                         if det_val < 0.0:
                             bmesh_flip = bmesh.new()
                             bmesh_flip.from_mesh(mesh_obj.data)
@@ -1532,16 +1552,7 @@ def apply_modular_avatar_plan_in_blender(
                 pass
             if attach_bone:
                 for mesh_obj in mesh_objs:
-                    if not mesh_obj.vertex_groups:
-                        vgroup = mesh_obj.vertex_groups.new(name=attach_bone)
-                        vtx_indices = [vtx.index for vtx in mesh_obj.data.vertices]
-                        if vtx_indices:
-                            vgroup.add(vtx_indices, 1.0, "REPLACE")
-                        arm_mod = next((modifier_item for modifier_item in mesh_obj.modifiers if modifier_item.type == "ARMATURE"), None)
-                        if arm_mod is None:
-                            arm_mod = mesh_obj.modifiers.new(name="Armature", type="ARMATURE")
-                        arm_mod.object = base_arm_obj
-                        mesh_obj.parent = base_arm_obj
+                    if _bind_mesh_object_to_bone(mesh_obj, base_arm_obj, attach_bone):
                         summary["bound_proxies"] += 1
 
     # 4. Bake BoneProxy attachments (rigid props / hair accessories / unskinned parts)
@@ -1559,16 +1570,7 @@ def apply_modular_avatar_plan_in_blender(
             clean_low = re.sub(r"\.\d{3}$", "", mesh_obj.name).strip().lower()
             if clean_low not in target_mesh_names and source_game_object_lower not in clean_low:
                 continue
-            if not mesh_obj.vertex_groups:
-                vgroup = mesh_obj.vertex_groups.new(name=target_bone_name)
-                vtx_indices = [vtx.index for vtx in mesh_obj.data.vertices]
-                if vtx_indices:
-                    vgroup.add(vtx_indices, 1.0, "REPLACE")
-                arm_mod = next((mod_item for mod_item in mesh_obj.modifiers if mod_item.type == "ARMATURE"), None)
-                if arm_mod is None:
-                    arm_mod = mesh_obj.modifiers.new(name="Armature", type="ARMATURE")
-                arm_mod.object = base_arm_obj
-                mesh_obj.parent = base_arm_obj
+            if _bind_mesh_object_to_bone(mesh_obj, base_arm_obj, target_bone_name):
                 summary["bound_proxies"] += 1
 
     # 5. Apply ShapeChanger weights & BlendshapeSync propagation across all meshes

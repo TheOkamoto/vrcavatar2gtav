@@ -378,9 +378,15 @@ def apply_selected_characters(
                 Path(staging_base_path) == streamedpeds_extracted_dir
                 or target_yft_destination.exists()
             ):
-                shutil.copyfile(
-                    character_data["skeleton_yft_path"], target_yft_destination
-                )
+                skeleton_src_path = Path(character_data["skeleton_yft_path"])
+                if not skeleton_src_path.is_file():
+                    raise FileNotFoundError(
+                        project_i18n.translate(
+                            "apply.missing_skeleton_yft", path=skeleton_src_path
+                        )
+                    )
+                target_yft_destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(skeleton_src_path, target_yft_destination)
                 print(
                     project_i18n.translate(
                         "apply.skeleton_updated",

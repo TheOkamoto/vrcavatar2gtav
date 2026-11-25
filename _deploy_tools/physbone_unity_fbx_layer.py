@@ -10,6 +10,7 @@ overrides, and prunes orphaned PhysBone chains from inactive or deleted outfits.
 
 from configparser import ConfigParser
 import collections as collections_module
+import json
 import math
 import os as operating_system
 from pathlib import Path
@@ -80,7 +81,7 @@ def extract_unity_physbones_from_prefab(
         if class_id == "1":
             name_match = regex_module.search(r"^\s*m_Name:\s*(.+?)\s*$", doc_text, regex_module.MULTILINE)
             if name_match:
-                gameobject_names[file_id] = name_match.group(1).strip()
+                gameobject_names[file_id] = _decode_unity_scalar(name_match.group(1))
         elif (
             class_id == "114"
             and VRCHAT_PHYSBONE_SCRIPT_GUID in doc_text
@@ -731,6 +732,33 @@ def _index_unity_asset_guids(
 _STREAM_PHYSBONE_DOC_CACHE: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
 
+def _decode_unity_scalar(raw_text: str) -> str:
+    """Decode YAML quotes and \\uXXXX unicode escapes from Unity scalar values safely."""
+    try:
+        import unity_scene_helper
+        if hasattr(unity_scene_helper, "decode_unity_name"):
+            return unity_scene_helper.decode_unity_name(raw_text)
+    except ImportError:
+        pass
+    cleaned_text = str(raw_text or "").strip()
+    if len(cleaned_text) >= 2 and cleaned_text.startswith('"') and cleaned_text.endswith('"'):
+        try:
+            decoded_json = json.loads(cleaned_text)
+            if isinstance(decoded_json, str):
+                return decoded_json.strip()
+        except Exception:
+            cleaned_text = cleaned_text[1:-1]
+    elif len(cleaned_text) >= 2 and cleaned_text.startswith("'") and cleaned_text.endswith("'"):
+        cleaned_text = cleaned_text[1:-1].replace("''", "'")
+    if "\\u" in cleaned_text or "\\U" in cleaned_text:
+        cleaned_text = regex_module.sub(
+            r"\\u([0-9a-fA-F]{4})",
+            lambda hex_match: chr(int(hex_match.group(1), 16)),
+            cleaned_text,
+        )
+    return cleaned_text.strip()
+
+
 def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
     """O(N) streaming YAML parser extracting GO, Transform, VRCPhysBone, Marshmallow PB, and PrefabInstance."""
     try:
@@ -814,11 +842,11 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
             stripped = raw_line.strip()
             if cur_cls == "1":
                 if stripped.startswith("m_Name:"):
-                    cur_obj["name"] = stripped.split(":", 1)[1].strip()
+                    cur_obj["name"] = _decode_unity_scalar(stripped.split(":", 1)[1])
                 elif stripped.startswith("m_IsActive:"):
                     cur_obj["active"] = stripped.split(":", 1)[1].strip() != "0"
                 elif stripped.startswith("m_TagString:"):
-                    cur_obj["tag"] = stripped.split(":", 1)[1].strip()
+                    cur_obj["tag"] = _decode_unity_scalar(stripped.split(":", 1)[1])
                 elif stripped.startswith("m_PrefabInstance:"):
                     cur_obj["pi"] = _parse_unity_yaml_ref(stripped)
                 elif stripped.startswith("m_CorrespondingSourceObject:"):
@@ -886,7 +914,7 @@ def _stream_parse_unity_physbone_doc(doc_path: Path) -> Dict[str, Any]:
                         if stripped.startswith("propertyPath:"):
                             cur_mod["path"] = stripped.split(":", 1)[1].strip()
                         elif stripped.startswith("value:"):
-                            cur_mod["value"] = stripped.split(":", 1)[1].strip()
+                            cur_mod["value"] = _decode_unity_scalar(stripped.split(":", 1)[1])
                         elif stripped.startswith("objectReference:"):
                             cur_mod["objref"] = _parse_unity_yaml_ref(stripped)
             elif cur_cls == "114":

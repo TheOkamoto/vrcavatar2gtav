@@ -545,7 +545,8 @@ def _run_in_blender_bake(manifest_path: Union[str, Path], ma_plan_path: Optional
         )
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.fbx(
+    err_helper.import_fbx_safely(
+        bpy,
         filepath=str(primary_fbx),
         use_anim=False,
         automatic_bone_orientation=True,

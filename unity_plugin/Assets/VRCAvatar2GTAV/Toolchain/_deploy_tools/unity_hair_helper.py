@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import vrc2gtav_paths as project_paths
+try:
+    import unity_scene_helper
+except ImportError:
+    unity_scene_helper = None
 
 try:
     from unity_hair_bake_layer import (
@@ -269,10 +273,16 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
             tag_match = re.search(r"^\s*m_TagString:\s*(.*)$", body, re.MULTILINE)
             correction_match = re.search(r"m_CorrespondingSourceObject:\s*\{fileID:\s*(-?\d+)(?:,\s*guid:\s*([0-9a-f]{32}))?", body)
             prefab_instance_match = re.search(r"m_PrefabInstance:\s*\{fileID:\s*(-?\d+)", body)
+            decoded_name = name_match.group(1).strip() if name_match else ""
+            if decoded_name and unity_scene_helper is not None:
+                decoded_name = unity_scene_helper.decode_unity_name(decoded_name)
+            decoded_tag = tag_match.group(1).strip() if tag_match else "Untagged"
+            if decoded_tag and unity_scene_helper is not None:
+                decoded_tag = unity_scene_helper.decode_unity_name(decoded_tag)
             game_objects[current_fid] = {
-                "name": name_match.group(1).strip() if name_match else "",
+                "name": decoded_name,
                 "is_active": (int(active_match.group(1)) != 0) if active_match else True,
-                "tag": tag_match.group(1).strip() if tag_match else "Untagged",
+                "tag": decoded_tag,
                 "stripped": is_stripped,
                 "corr_fid": correction_match.group(1) if correction_match else "0",
                 "corr_guid": (correction_match.group(2) or "").lower() if correction_match else "",
@@ -351,7 +361,11 @@ def _parse_yaml_blocks(yaml_path: Path) -> Dict[str, Any]:
                         "target_fid": mod_match.group(1),
                         "target_guid": (mod_match.group(2) or "").lower(),
                         "property": mod_match.group(3).strip(),
-                        "value": mod_match.group(4).strip(),
+                        "value": (
+                            unity_scene_helper.decode_unity_name(mod_match.group(4))
+                            if unity_scene_helper is not None
+                            else mod_match.group(4).strip()
+                        ),
                         "ref_guid": _extract_ref_guid(mod_match.group(5)),
                         "ref_fid": (
                             re.search(r"fileID:\s*(-?\d+)", mod_match.group(5)).group(1)

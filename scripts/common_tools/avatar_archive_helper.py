@@ -104,13 +104,19 @@ def _decode_yaml_scalar(raw_text: str) -> str:
     """Decode YAML quotes and \\uXXXX unicode escape sequences from Unity fields."""
     if unity_scene_helper is not None and hasattr(unity_scene_helper, "decode_unity_name"):
         return unity_scene_helper.decode_unity_name(raw_text)
-    cleaned = raw_text.strip()
+    cleaned = str(raw_text or "").strip()
     if len(cleaned) >= 2 and cleaned.startswith('"') and cleaned.endswith('"'):
-        cleaned = cleaned[1:-1]
         try:
-            cleaned = bytes(cleaned, "utf-8").decode("unicode_escape")
+            decoded_json = json.loads(cleaned)
+            if isinstance(decoded_json, str):
+                return decoded_json.strip()
         except Exception:
-            pass
+            cleaned = cleaned[1:-1]
+    elif len(cleaned) >= 2 and cleaned.startswith("'") and cleaned.endswith("'"):
+        cleaned = cleaned[1:-1].replace("''", "'")
+    if "\\u" in cleaned or "\\U" in cleaned:
+        cleaned = re.sub(r"\\u([0-9a-fA-F]{4})", lambda hex_match: chr(int(hex_match.group(1), 16)), cleaned)
+        cleaned = re.sub(r"\\U([0-9a-fA-F]{8})", lambda hex_match: chr(int(hex_match.group(1), 16)), cleaned)
     return cleaned.strip()
 
 

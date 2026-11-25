@@ -81,17 +81,31 @@ HUMAN_BODY_BONES: Dict[int, Tuple[str, ...]] = {
     23: ("Jaw", "jaw"),
     54: ("UpperChest", "Upper_Chest", "Chest", "Spine2"),
 }
+for _side_idx, _side_long, _side_tag in ((0, "Left", "L"), (15, "Right", "R")):
+    for _fin_idx, _fin_name in enumerate(("Thumb", "Index", "Middle", "Ring", "Little")):
+        for _seg_idx, _seg_name in enumerate(("Proximal", "Intermediate", "Distal")):
+            HUMAN_BODY_BONES[24 + _side_idx + (_fin_idx * 3) + _seg_idx] = (
+                f"{_side_long}{_fin_name}{_seg_name}",
+                f"{_fin_name} {_seg_name}.{_side_tag}",
+                f"{_fin_name}{_seg_name}_{_side_tag}",
+                f"{_fin_name}.{_side_tag}" if _seg_idx == 0 else f"{_fin_name}{_seg_idx}.{_side_tag}",
+            )
 
-_SKIP_SCAN_DIRS: Set[str] = {
-    ".git",
-    "library",
-    "temp",
-    "obj",
-    "logs",
-    "usersettings",
-    "node_modules",
-    "__pycache__",
-}
+
+def expand_humanoid_bone_candidates(bone_name: str) -> List[str]:
+    """Expand a Unity `HumanBodyBones` name or alias into candidate rig bone names."""
+    clean_name = str(bone_name or "").strip()
+    if not clean_name:
+        return []
+    low_clean = clean_name.lower()
+    out_list: List[str] = [clean_name]
+    for alias_tuple in HUMAN_BODY_BONES.values():
+        if any(str(alias_item).lower() == low_clean for alias_item in alias_tuple):
+            out_list.extend(item for item in alias_tuple if item not in out_list)
+            break
+    return out_list
+
+_SKIP_SCAN_DIRS: Set[str] = {".git", "library", "temp", "obj", "logs", "usersettings", "node_modules", "__pycache__"}
 
 _SKIP_GUID_DIRS: Set[str] = _SKIP_SCAN_DIRS | {
     "texture",
@@ -125,13 +139,19 @@ def _decode_scalar(raw_val: str) -> str:
     """Decode YAML quotes and unicode escapes from a scalar string."""
     if unity_scene_helper is not None and hasattr(unity_scene_helper, "decode_unity_name"):
         return unity_scene_helper.decode_unity_name(raw_val)
-    cleaned = raw_val.strip()
+    cleaned = str(raw_val or "").strip()
     if len(cleaned) >= 2 and cleaned.startswith('"') and cleaned.endswith('"'):
-        cleaned = cleaned[1:-1]
         try:
-            cleaned = bytes(cleaned, "utf-8").decode("unicode_escape")
+            decoded_json = json.loads(cleaned)
+            if isinstance(decoded_json, str):
+                return decoded_json.strip()
         except Exception:
-            pass
+            cleaned = cleaned[1:-1]
+    elif len(cleaned) >= 2 and cleaned.startswith("'") and cleaned.endswith("'"):
+        cleaned = cleaned[1:-1].replace("''", "'")
+    if "\\u" in cleaned or "\\U" in cleaned:
+        cleaned = re.sub(r"\\u([0-9a-fA-F]{4})", lambda hex_match: chr(int(hex_match.group(1), 16)), cleaned)
+        cleaned = re.sub(r"\\U([0-9a-fA-F]{8})", lambda hex_match: chr(int(hex_match.group(1), 16)), cleaned)
     return cleaned.strip()
 
 
@@ -1568,9 +1588,4 @@ def _read_fbx_meta_mesh_fids(fbx_path: Path) -> Dict[str, str]:
             if fid_val and mesh_val:
                 fid_map[fid_val] = mesh_val
     return fid_map
-
-
-
-
-
 
