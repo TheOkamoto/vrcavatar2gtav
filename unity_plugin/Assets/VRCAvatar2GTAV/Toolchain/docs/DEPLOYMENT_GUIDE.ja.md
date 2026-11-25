@@ -82,9 +82,9 @@ vrc2gtav/
 4. **Windows / Linux (WSL) 自動変換:** ネイティブ Windows と WSL を判別し、`D:/GTAV` ↔ `/mnt/d/GTAV` を自動変換
 5. **等倍スケール `1.0` デフォルトと `.unity` 解析 (`unity_scene_helper.py`):** 初期構成 (`unity_scene =` 空欄) では体・頭・ボーン・小物のスケールを `1.0` に保ち、`unity_scene` 指定時は `Transform` / `PrefabInstance` 上書きや `PhysBone`/Marshmallow スケール打ち消しを自動抽出します
 6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `custom_hair` / `fbx_hair` や瞳・メイクパックが未指定でもベースアバター標準の髪と顔へ自動フォールバックします
-7. **Unity 抽出・`.cfg`・`.anim` 保持 (`blendshape_helper.py`, `universal_gtav_rigging_layer.py`):** `blendshapes_source = auto | unity | cfg`、`--blendshapes-cfg`、`--face-anim` 等で制御し、`--face-anim` が空または全ゼロ値の場合は Unity シーンや `.cfg` 側の顔ブレンドシェイプをそのまま保持します
+7. **Unity 抽出・MA `ShapeChanger`/`BlendshapeSync`・`.cfg`・`.anim` 保持 (`blendshape_helper.py`, `modular_avatar_helper.py`, `universal_gtav_rigging_layer.py`):** `blendshapes_source = auto | unity | cfg`、`--blendshapes-cfg`、`--face-anim` 等で制御し、`--face-anim` が空または全ゼロ値の場合は Unity シーンや `.cfg` 側の顔ブレンドシェイプを保持します。[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py) では `MA ShapeChanger` (`Delete` > `m_threshold` 面削除と `Set` ウェイト `Toe_highheels=1.0`/`Shrink_Foot=0.03` の分離) と `BlendshapeSync` (`RemapCurve`) を基本リセット後に再適用してネストプレハブを維持し、`Body_base`/`Body` の手動 `Shrink_* > 0.5`（全頂点移動面）も RPF7 ポリゴン予算前にカリングします
 8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `.prefab`・`PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`m_Materials` 上書き・`.fbx` + `.mat` を `--hair` (`auto | default | none | <パス>`) 等で指定でき、`preserve_alpha` で眼鏡レンズ透過を維持し、`_partition_component_by_z_bands` により下髪・頭頂帯を安定化しつつ `SKEL_Head` ウェイトと元ケモ耳を保持します
-9. **マルチ Ped 対応 VRChat PhysBones・下髪/リボン展開・優先度パッカー ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 標準 `79` チェーン・`182` カスタムボーン（Ped ごとに `<= 63` カスタム / `<= 128` 合計上限内・ELF 衝突 `0`）を `GTAVPhysBones.asi` で最大 **32 Ped 同時追跡 (`kMaxTrackedPeds = 32`)**・`model` / `modelHash` 分離・`Advanced` (`integrationType == 1`) 親基準 `stiffness` 付きで演算します（マイケル `30`/`62`、フランクリン `24`/`62`、トレバー `25`/`58` — **破棄 0**；`--physbones-marshmallow` で `81`/`186` 任意有効化）。`physbone_scene_extractor_layer.py` の `_unwrap_container_spokes` が下髪やリボンのコンテナー分岐を正しく展開し、`prune_orphaned_physbone_chains` が旧衣装の孤立チェーンを除去します
+9. **マルチ Ped 対応 VRChat PhysBones・下髪/リボン展開・優先度パッカー ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 標準 `79` チェーン・`182` カスタムボーン（Ped ごとに `<= 63` カスタム / `<= 128` 合計上限内・ELF 衝突 `0`）を `GTAVPhysBones.asi` で最大 **32 Ped 同時追跡 (`kMaxTrackedPeds = 32`)**・`model` / `modelHash` 分離・`Advanced` (`integrationType == 1`) 親基準 `stiffness` 付きで演算します（マイケル `30`/`62`、フランクリン `24`/`62`、トレバー `25`/`58` — **破棄 0**；`--physbones-marshmallow` で `81`/`186` 任意有効化）。`physbone_scene_extractor_layer.py` の `_unwrap_container_spokes` が下髪やリボンのコンテナー分岐を展開し、Unity 抽出時 (`prune_orphaned_physbone_chains`) と Blender 形状削除後 (`active_pb_vgrps_ci`) の二段階で孤立・無ウェイトチェーンを除外、`PHYSBONE_PRIORITY_TIERS` で**髪/耳 (`97–100`)・胸 (`94`)・スカート (`90`)**を尻尾 (`82`) や上着 (`68`)・装飾より最優先保持します
 
 ### 2.2 3か国語ローカライズ (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) および [`Vrc2GtavLocalization.cs`](../unity_plugin/Assets/VRCAvatar2GTAV/Editor/Vrc2GtavLocalization.cs) により **英語 (`en`)**・**日本語 (`ja`)**・**ポルトガル語 (`pt`)** に完全対応（`--lang` → `VRC2GTAV_LANG` → `vrc2gtav.cfg` → OS ロケール）。Blender 手動実行時は `--` 以降へ引数を渡します (`blender -b -P <script.py> -- --lang ja`)。
@@ -174,9 +174,9 @@ python unity_plugin/install_unity_plugin.py --unity-project "/path/to/UnityProje
 python unity_plugin/build_unitypackage.py
 ```
 9 本の C# エディタスクリプト (`unity_plugin/Assets/VRCAvatar2GTAV/Editor/`) の主な機能:
-- **共有モード vs 主人公別タブ (`PerProtagonistSlots`)**: 一括設定または `Michael`・`Franklin`・`Trevor` タブ別設定（シーン GameObject/`.prefab`/`.unity`/`.zip`/`.unitypackage`、マテリアル別 `_MainTex` 上書き、blendshape/PhysBones、`.anim` 上書き、口の開き `0.70` 既定 + リセットボタン、まばたき強度）を `configs/active_multi_slots.json` へ保存し、`--slots-json` で連続ビルド＆一括再パックします。
+- **共有モード vs 4 番目の主人公別個別設定 (`PerProtagonistSlots`)**: 一括設定のほか、4 番目の個別ボタンで他 2 人の導入済みキャラクターを残したまま **1 人だけ**（例: マイケルのみ）または `Michael`・`Franklin`・`Trevor` 個別タブでアバター（シーン GameObject/`.prefab`/`.unity`/`.zip`/`.unitypackage`、マテリアル別 `_MainTex` 上書き、blendshape/PhysBones、`.anim` 上書き、口の開き `0.70` 既定 + リセットボタン、まばたき強度）を設定し、`configs/active_multi_slots.json` + `--slots-json` で連続ビルド＆一括再パックします。
 - **テクスチャ & RPF7 予測パネル (`Vrc2GtavTexturesPanel`)**: プライマリアトラス (`512`–`4096`)、法線 (`Auto`, `Off (64 px)`, `256`–`1024`)、セカンダリ衣装 (`Auto <3.7 GiB`, `512`, `1024`, `2048`) 選択と想定 RPF 容量表示。
-- **バンドル Toolchain 分離 & ランタイム表示 (`Vrc2GtavConfigDiscovery`, `Vrc2GtavLogConsoleWidget`)**: 既定で `Assets/VRCAvatar2GTAV/Toolchain` を使用して作業生成物を `<ProjectRoot>/VRCAvatar2GTAV_Work/` へ分離。`dinput8.dll`・`PhysBones.asi`・`VToon.asi`・`ScriptHookV.dll`・`OpenIV.asi`/RageOpenV 状態バッジ、`Auto`/`Windows Native`/`WSL` 切替、リサイズ可能なログ、**バニラ復元ボタン**を装備。
+- **バンドル Toolchain・比例進捗バー & ランタイム表示 (`Vrc2GtavConfigDiscovery`, `Vrc2GtavProcessRunner`)**: 既定で `Assets/VRCAvatar2GTAV/Toolchain` を使用し作業生成物を `<ProjectRoot>/VRCAvatar2GTAV_Work/` へ分離。`[PROGRESS pct=...]`（`CultureInfo.InvariantCulture`）解析により `1–3` スロットの全体進捗（0–82% ビルド + 82–100% RPF7 配置）と簡潔な工程ラベルを表示し、`[VToon]` や `INFO:` で進捗表示が滞留しないようにします。`dinput8.dll`・`PhysBones.asi`・`VToon.asi`・`ScriptHookV.dll`・`OpenIV.asi`/RageOpenV 状態バッジ、`Auto`/`Windows Native`/`WSL` 切替、リサイズ可能なログ、**バニラ復元ボタン**を装備。
 
 ### 8.2 First-Run・`.zip`/Unity 読込 & Blender 4.0.2 自動取得
 ```bash
@@ -219,10 +219,10 @@ python run_mod_manager.py --check-env
 [`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) は Unity C# UI・`.unitypackage` & `Toolchain/` 同期・VToon LUT/ウォーターマーク・`--mips 1`・バニラ復元・マルチスロットとビルド済み出力を検証します:
 
 ```bash
-# フルスイート (13項目: First-Run・ビルド・導入済み環境向け):
+# フルスイート (14項目: First-Run・ビルド・導入済み環境向け):
 python scripts/common_tools/test_mod_suite.py --lang ja
 
-# ソースのみ検証 (10項目: クローン直後・First-Run 前の環境でも実行可能):
+# ソースのみ検証 (11項目: クローン直後・First-Run 前の環境でも実行可能):
 python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ```
 
