@@ -13,7 +13,7 @@
 
 [English](README.md) · [Português (BR)](README.pt-BR.md) · **日本語**
 
-📖 **[導入・技術ガイド全文 (`docs/DEPLOYMENT_GUIDE.ja.md`)](docs/DEPLOYMENT_GUIDE.ja.md)**
+📖 **[導入・技術ガイド全文 (`docs/DEPLOYMENT_GUIDE.ja.md`)](docs/DEPLOYMENT_GUIDE.ja.md)** · 🖼️ **[Unity Editor UI ガイド (`docs/UNITY_UI_GUIDE.ja.md`)](docs/UNITY_UI_GUIDE.ja.md)**
 
 </div>
 
@@ -79,19 +79,19 @@
 - **汎用カスタムヘア・PhysBones・主人公間自由切替**: Z 帯アイランド分割付き `.prefab`/`PrefabVariant`/`.fbx` ヘア移植、`VRCPhysBone` 自動抽出（標準 `79` チェーン・`Advanced` `integrationType == 1` 親基準 `stiffness`・下髪/リボン展開・Unity 抽出時＆Blender 形状削除後の二段階孤立/無ウェイトチェーン除外・`<= 63` ボーン優先度パッカーで**髪/耳 (`97–100`)・胸 (`94`)・スカート (`90`)**を尻尾/コート/フリルより最優先保持・`--physbones-marshmallow` 任意）、および主人公スロット入替 (`[7]`, `--avatar`) に対応。
 - **汎用 GTA V NPC・街中歩行者パイプライン**: [`scripts/common_tools/npc_registry_helper.py`](scripts/common_tools/npc_registry_helper.py) と [`scripts/common_tools/universal_gtav_builder.py`](scripts/common_tools/universal_gtav_builder.py) が `--npc` / `--all-npcs` / `--target-ped` 経由でストーリー/カットシーン NPC (`ig_*`, `cs_*`) や街中歩行者 (`a_f_*`, `a_m_*`) を直接変換し、最大 **32 Ped 同時追跡 (`kMaxTrackedPeds = 32`)** をサポートします。
 - **GTA V 出血・傷デカール (`ped.sps` + 6 ゾーン `UVMap 1`) & 自然なまばたき**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py)（`--blood-decals` 既定有効 / `--no-blood-decals`）および [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py)（`--eye-blink` `auto` / `--eye-blink-strength` / `--no-eye-blink`）。
-- **ログ・3 言語ローカライズ (`en`/`ja`/`pt`)・自動検証**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) による `logs/` 出力、[`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) による **11** 項目のソース検証 (`--source-only`) と **14** 項目のフル検証スイートを収録。
+- **ログ・3 言語ローカライズ (`en`/`ja`/`pt`)・自動検証**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) による `logs/` 出力、[`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) による **12** 項目のソース検証 (`--source-only`) と **15** 項目のフル検証スイートを収録。
 
 ---
 
 ## 対応主人公とアバター構成
 
-初期設定では下記の組み合わせが割り当てられていますが、すべての VRChat アバタープリセットや Unity アバターを `michael` (`player_zero`)・`franklin` (`player_one`)・`trevor` (`player_two`) へ自由に割り当てられます:
+特定のキャラクターに依存せず、あらゆる BOOTH / VRChat 人型アバター（例: *Shinano*・*Miltina*・*Airi*・*Manuka*・*Chocolat*）を Unity UI または汎用 CLI から `michael` (`player_zero`)・`franklin` (`player_one`)・`trevor` (`player_two`) および任意 NPC へ割り当てられます:
 
-| 既定 GTA V スロット | 主人公 | 既定 VRChat アバター (`avatar` ID) | 設定プリセット / 衣装 | 作業ディレクトリ |
+| GTA V スロット | 主人公 | 既定プロファイル (`avatar` ID) | リファレンス構成 | ステージングディレクトリ |
 | :--- | :--- | :--- | :--- | :--- |
-| `player_zero` | **マイケル (Michael)** | **しなの (Shinano)** (`shinano_er`) | *エターナル・リユニオン*（ゴシックドレス＋懐中時計＋任意のカスタム Unity ヘアまたは *ねこタイドボブヘア*、未指定時はしなの標準ヘアへフォールバック） | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
-| `player_one` | **フランクリン (Franklin)** | **しなの (Shinano)** (`shinano_casual`) | *カジュアル / 制服*（赤スカート＋色変え標準しなのヘア、または任意のカスタム Unity ヘア） | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
-| `player_two` | **トレバー (Trevor)** | **ミルティナ (Miltina)** (`miltina_maid`) | *クラシックメイド*（白黒メイドドレス＋エプロン＋ツインテール＋任意のカスタム Unity ヘア） | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
+| `player_zero` | **マイケル (Michael)** | **しなの (Shinano)** (`player_zero_michael`) | *エターナル・リユニオン*（ゴシックドレス＋懐中時計＋任意のカスタム Unity ヘア） | `player_zero/` |
+| `player_one` | **フランクリン (Franklin)** | **しなの (Shinano)** (`player_one_franklin`) | *カジュアル / 制服*（赤スカート＋色変えヘア、または任意のカスタム Unity ヘア） | `player_one/` |
+| `player_two` | **トレバー (Trevor)** | **ミルティナ (Miltina)** (`player_two_trevor`) | *クラシックメイド*（白黒メイドドレス＋エプロン＋ツインテール＋任意のカスタム Unity ヘア） | `player_two/` |
 
 ---
 
@@ -153,9 +153,9 @@
 
 - **外部設定 (`vrc2gtav.cfg`) & バンドル Toolchain**: [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) を `vrc2gtav.cfg` へコピー（または `--setup` / Unity UI で生成）してパスを設定します。`.unitypackage` 版では `Vrc2GtavConfigDiscovery` が既定で `Assets/VRCAvatar2GTAV/Toolchain` を優先利用し、作業出力先を `<ProjectRoot>/VRCAvatar2GTAV_Work` へ分離します。
 - **体格スケール (`1.0` 既定 + `.unity` 解析)**: 既定は `[1.0, 1.0, 1.0]`、`.unity` シーン指定時は `Transform` 階層からスケールを自動反映します。
-- **ブレンドシェイプ (`Unity` & `configs/*_blendshapes.cfg`)・MA Shape/Sync & `.anim` 保持**: [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) が `.unity` / ネスト `.prefab` / `.anim` または `.cfg` プリセット (`blendshapes_source = auto | unity | cfg`) から解決します。`--face-anim` が空または全ゼロ値の場合はシーン側の顔ブレンドシェイプを保持し、ベースウェイト適用後に `MA ShapeChanger` (`Delete` / `Set`) と `BlendshapeSync` (`RemapCurve`) を適用、さらに `Body_base` / `Body` の手動 `Shrink_* > 0.5` 内面ポリゴンを自動カリングします。
-- **PhysBones (`Unity` & `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) が有効 `VRCPhysBone`（`PrefabInstance`・下髪/リボン展開・Unity 抽出＆Blender 削除後の二重孤立チェーン除外）を `<= 63` カスタム / `<= 128` 合計ボーン内へ自動最適化パッキングします（既定 `79` チェーン / `182` ボーン、破棄 `0`；`--physbones-marshmallow` で `81` チェーン / `186` ボーン；`PHYSBONE_PRIORITY_TIERS` で**髪/耳 `97–100`・胸 `94`・スカート `90`**を最優先保持し、超過分を親ボーンへ固定バインド）。
-- **汎用カスタムヘア & フォールバック**: `shinano_casual`・`shinano_er`・`miltina_maid` すべてで `custom_hair = auto | default | none | <パス>`（`[8]` / `--hair`）をサポートし、未指定時はしなの標準ヘア＋`ShinanoDefAdultNewv5.anim` またはミルティナ標準ツインテール＋`Miltina_close eyes_Base_adult.anim` へ安全にフォールバックします。
+- **ブレンドシェイプ (`Unity` & `.cfg` シーン/アーカイブ命名)・MA Shape/Sync**: [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) が `.unity` / ネスト `.prefab` / `.anim` または `.cfg` (`blendshapes_source = auto | unity | cfg`) から解決します。任意の BOOTH アバターをビルドすると、出力 `.cfg` 名は **`.unity` シーン名**（CLI では `.zip`/`.unitypackage` 名）になり、先頭に `# Generated`・`# Project`・`# Scene`・`# FBX` の `#` コメント行が付与されます。`--face-anim` が空または全ゼロ値の場合はシーン側の顔ブレンドシェイプを保持し、ベース適用後に `MA ShapeChanger` (`Delete` / `Set`) と `BlendshapeSync` (`RemapCurve`) を適用します。
+- **PhysBones (`Unity` & `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) が有効 `VRCPhysBone`（`PrefabInstance`・下髪/リボン展開・Unity 抽出＆Blender 削除後の二重孤立チェーン除外）を `<= 63` カスタム / `<= 128` 合計ボーン内へ自動最適化パッキングします（`--physbones-marshmallow` 任意有効、`PHYSBONE_PRIORITY_TIERS` で**髪/耳 `97–100`・胸 `94`・スカート `90`**を最優先保持）。
+- **汎用カスタムヘア & フォールバック**: `player_zero_michael`・`player_one_franklin`・`player_two_trevor` および任意の BOOTH アバターで `custom_hair = auto | default | none | <パス>`（`[8]` / `--hair`）をサポートし、未指定時は各アバターの標準髪・標準表情へ安全にフォールバックします。
 - **言語の自動判定**: OS ロケールから `en` / `ja` / `pt` を自動選択（`--lang en|ja|pt` で明示指定可能）。
 
 ---
@@ -165,24 +165,25 @@
 | コマンド | 用途 |
 | :--- | :--- |
 | `RUN_MANAGER.bat` / `EXECUTAR_GERENCIADOR.bat` | First-Run・ビルド・配置を行う Windows 対話メニュー |
-| `python unity_plugin/install_unity_plugin.py --unity-project "/path/Project"` | Unity プロジェクトへ `Assets/VRCAvatar2GTAV/` を非破壊インストール |
+| `python unity_plugin/install_unity_plugin.py --unity-project "/path/Project"` | Unity プロジェクトへ `Assets/VRCAvatar2GTAV/` を非破壊インストール（古い不要ファイルも整理） |
 | `python unity_plugin/build_unitypackage.py` | `Toolchain/` を同期して `VRCAvatar2GTAV.unitypackage` を再生成 |
 | `python run_mod_manager.py --setup` | 対話型 First-Run ウィザードと `vrc2gtav.cfg` の設定 |
-| `python run_mod_manager.py --setup --avatar-zip "/path/Shinano.zip" --download-blender --verbose` | `.zip`/`.unitypackage` 展開・Blender `4.0.2` + Sollumz 導入・10 件ページ選択・`.cfg` 生成・`logs/` ログ保存 |
-| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Shinano.zip" --interactive --verbose` | Modular Avatar 対応汎用アバタービルダー（10 件ページ選択・詳細ログ対応） |
+| `python run_mod_manager.py --setup --avatar-zip "/path/Avatar.zip" --download-blender --verbose` | `.zip`/`.unitypackage` 展開・Blender `4.0.2` + Sollumz 導入・10 件ページ選択・`.cfg` 生成・`logs/` ログ保存 |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Avatar.zip" --interactive --verbose` | Modular Avatar 対応汎用アバタービルダー（あらゆる BOOTH アバター対応） |
 | `python scripts/common_tools/universal_gtav_builder.py --slots-json "configs/active_multi_slots.json"` | 主人公別マルチスロットを連続ビルドし 1 回の RPF7 再パックで導入（`--secondary-atlas-size`・`--atlas-size`・`--mouth-open-strength`・`--face-anim`） |
+| `python scripts/common_tools/universal_gtav_builder.py --target-character michael --atlas-only` | 指定主人公の 2K (`--mips 1`) `.ytd` アトラスのみ生成（`.ydd` のみは `--skip-atlas --no-deploy`） |
 | `python scripts/common_tools/universal_gtav_builder.py --restore-peds player_zero` | 他キャラクターを残したまま指定 Ped のみ Rockstar バニラへ復元（`--restore-all` で全復元） |
 | `python run_mod_manager.py --check-env` / `setup_first_run.py --check-only` | GTA V・Blender・`rage-cli`・アセットパスの検証 |
 | `python run_mod_manager.py --character {all,michael,franklin,trevor} --lang {en,ja,pt}` | Blender 再構築・YDD/YTD (`--mips 1`) 出力・ASI/VToon 同期・RPF7 配置を実行 |
-| `python run_mod_manager.py --character franklin --avatar miltina_maid` | 任意の VRChat プリセット (`shinano_casual`, `shinano_er`, `miltina_maid`) を任意の主人公へ適用 (`--save-assignment`) |
+| `python run_mod_manager.py --character franklin --avatar player_two_trevor` | 任意の構成プロファイル (`player_zero_michael`, `player_one_franklin`, `player_two_trevor`) を任意の主人公へ適用 (`--save-assignment`) |
 | `python run_mod_manager.py --character michael --hair "/path/Hair.prefab" --save-hair` | `.prefab` / `PrefabVariant` / `.fbx` ヘア移植 (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
 | `python run_mod_manager.py --export-blendshapes` / `--blendshapes-source cfg` | `.unity` シーンから `.cfg` 出力、または `.cfg` プリセットを使用 |
 | `python run_mod_manager.py --export-physbones` / `--physbones-source cfg` | VRCPhysBone の `.cfg` 同期 (`--physbones-marshmallow` / `--overwrite-physbones-from-unity`) |
 | `python run_mod_manager.py --character all --blood-decals --eye-blink` | 出血デカール (`--no-blood-decals`)・まばたき (`--eye-blink-strength`, `--no-eye-blink`)・`--mouth-open-strength` (`0.70` 既定) の指定 |
-| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/Karin.zip"` | `.zip`/`.unitypackage`/Unity から任意の NPC (`ig_*`, `cs_*`) や街中歩行者 (`a_f_*`, `a_m_*`) を直接ビルド＆配置 (`--all-npcs` / `--target-ped ... --deploy-npc`) |
+| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/Avatar.zip"` | `.zip`/`.unitypackage`/Unity から任意の NPC (`ig_*`, `cs_*`) や街中歩行者 (`a_f_*`, `a_m_*`) を直接ビルド＆配置 (`--all-npcs` / `--target-ped ... --deploy-npc`) |
 | `python run_mod_manager.py --deploy-only` | 既存ビルド・登録済み NPC・ASI プラグインを `mods/` へ再梱包・配置 |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | **11** 項目のソース/Unity/VToon/MA-Shape/Restore/i18n/AST 検証を実行（クローン直後対応） |
-| `python scripts/common_tools/test_mod_suite.py` | 全 **14** 項目の統合検証を実行（ビルド・配置済み環境が必要） |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | 全 **12** 項目のソース/Unity/VToon/MA-Shape/Cross-Avatar/i18n/AST 検証を実行（クローン直後対応） |
+| `python scripts/common_tools/test_mod_suite.py` | 全 **15** 項目の統合検証を実行（ビルド・配置済み環境が必要） |
 
 ---
 
@@ -202,18 +203,17 @@ vrcavatar2gtav/
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # 技術・導入ガイド全文 (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # 技術・導入ガイド全文 (PT-BR)
-│   └── DEPLOYMENT_GUIDE.ja.md       # 内部設計・Unity UI・VToon・Sollumz・RPF7 技術ガイド (JA)
+│   ├── DEPLOYMENT_GUIDE.ja.md       # 内部設計・Unity UI・VToon・Sollumz・RPF7 技術ガイド (JA)
+│   ├── UNITY_UI_GUIDE.md / .pt-BR.md / .ja.md # スクリーンショット付き Unity UI 操作ガイド
+│   └── images/                      # Unity Editor UI スクリーンショット
 ├── scripts/
-│   ├── common_tools/                # First-Run、.unity/ヘア/ブレンドシェイプ/PhysBones/VToon/Restore/NPC 解析、i18n、test_mod_suite.py
+│   ├── common_tools/                # 汎用ビルダー、First-Run、.unity/ヘア/ブレンドシェイプ/PhysBones/VToon/Restore/NPC 解析、i18n、test_mod_suite.py
 │   ├── physbones_asi/               # リアルタイム VRChat PhysBones ASI プラグイン (GTAVPhysBones.asi / .ini)
-│   ├── vtoon_asi/                   # リアルタイム D3D11 lilToon シェーダー ASI (GTAVVToon.asi / .ini / vtoon_profiles)
-│   ├── Shinano_Casual_Franklin/     # フランクリン (player_one) ビルドスクリプト
-│   ├── Shinano_EternalReunion_Michael/ # マイケル (player_zero) ビルドスクリプト
-│   └── Miltina_Maid_Trevor/         # トレバー (player_two) ビルドスクリプト
+│   └── vtoon_asi/                   # リアルタイム D3D11 lilToon シェーダー ASI (GTAVVToon.asi / .ini / vtoon_profiles)
 ├── _deploy_tools/                   # 汎用ダミースロット (head_000_r.ydd, p_eyes_dummy.ydd) および実行ヘルパー
-├── 1_Franklin_Shinano_Casual/       # player_one 出力ステージングフォルダ
-├── 2_Michael_Shinano_EternalReunion/# player_zero 出力ステージングフォルダ
-├── 3_Trevor_Miltina_Maid/           # player_two 出力ステージングフォルダ
+├── player_zero/                     # マイケル (player_zero) 出力ステージングフォルダ
+├── player_one/                      # フランクリン (player_one) 出力ステージングフォルダ
+├── player_two/                      # トレバー (player_two) 出力ステージングフォルダ
 ├── requirements.txt                 # Python 3.10+ 依存パッケージ (numpy, Pillow)
 ├── run_mod_manager.py               # メイン CLI / 対話型オーケストレーター
 ├── setup_first_run.py               # First-Run セットアップエントリポイント
@@ -223,7 +223,7 @@ vrcavatar2gtav/
 └── LICENSE                          # MIT ライセンス
 ```
 
-スケルトンボーンの軸合わせ、手指の握り補正、リップシンク合成（既定 `0.70`）、`GTAVVToon.asi` HLSL トゥーン描画、単一ミップ `.ytd`、`VRCAvatar2GTAV.unitypackage` の操作画面、選択的バニラ復元、RPF7 `4.00 GiB` 容量ガードの詳細は **[導入・技術ガイド (`docs/DEPLOYMENT_GUIDE.ja.md`)](docs/DEPLOYMENT_GUIDE.ja.md)** をご覧ください。
+Unity UI の詳細な操作手順、スケルトンボーンの軸合わせ、リップシンク合成（既定 `0.70`）、`GTAVVToon.asi` HLSL トゥーン描画、単一ミップ `.ytd`、選択的バニラ復元、RPF7 `4.00 GiB` 容量ガードの詳細は **[Unity UI ガイド (`docs/UNITY_UI_GUIDE.ja.md`)](docs/UNITY_UI_GUIDE.ja.md)** および **[導入・技術ガイド (`docs/DEPLOYMENT_GUIDE.ja.md`)](docs/DEPLOYMENT_GUIDE.ja.md)** をご覧ください。
 
 ---
 

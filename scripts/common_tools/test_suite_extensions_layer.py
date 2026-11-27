@@ -53,9 +53,9 @@ def test_avatar_interchangeability() -> bool:
         temp_cfg_path = temp_dir / "vrc2gtav.cfg"
         shutil.copy2(example_cfg_path, temp_cfg_path)
         for subdir_name in (
-            "1_Franklin_Shinano_Casual",
-            "2_Michael_Shinano_EternalReunion",
-            "3_Trevor_Miltina_Maid",
+            "player_one",
+            "player_zero",
+            "player_two",
             "configs",
             "scripts",
             "_deploy_tools",
@@ -105,29 +105,29 @@ def test_avatar_interchangeability() -> bool:
                 f"3x3={len(isolated_targets)} targets",
             )
 
-            project_paths.set_protagonist_avatar("michael", "miltina_maid", temp_cfg_path)
-            project_paths.set_protagonist_avatar("franklin", "shinano_er", temp_cfg_path)
-            project_paths.set_protagonist_avatar("trevor", "shinano_casual", temp_cfg_path)
+            project_paths.set_protagonist_avatar("michael", "player_two_trevor", temp_cfg_path)
+            project_paths.set_protagonist_avatar("franklin", "player_zero_michael", temp_cfg_path)
+            project_paths.set_protagonist_avatar("trevor", "player_one_franklin", temp_cfg_path)
 
             import blendshape_helper
 
             swapped_michael = project_paths.get_character_paths("michael")
             swapped_franklin = project_paths.get_character_paths("franklin")
             swapped_trevor = project_paths.get_character_paths("trevor")
-            miltina_preset_cfg = Path(project_paths.get_avatar_paths("miltina_maid")["blendshapes_cfg"])
+            miltina_preset_cfg = Path(project_paths.get_avatar_paths("player_two_trevor")["blendshapes_cfg"])
             presets_ok = (
-                swapped_michael["avatar_id"] == "miltina_maid"
+                swapped_michael["avatar_id"] == "player_two_trevor"
                 and swapped_michael["ped_name"] == "player_zero"
-                and swapped_franklin["avatar_id"] == "shinano_er"
+                and swapped_franklin["avatar_id"] == "player_zero_michael"
                 and swapped_franklin["ped_name"] == "player_one"
-                and swapped_trevor["avatar_id"] == "shinano_casual"
+                and swapped_trevor["avatar_id"] == "player_one_franklin"
                 and swapped_trevor["ped_name"] == "player_two"
-                and Path(swapped_michael["blendshapes_cfg"]).name == "miltina_blendshapes.cfg"
-                and Path(swapped_franklin["blendshapes_cfg"]).name == "shinano_er_blendshapes.cfg"
-                and Path(swapped_trevor["blendshapes_cfg"]).name == "shinano_blendshapes.cfg"
-                and miltina_preset_cfg.name == "miltina_blendshapes.cfg"
-                and blendshape_helper.AVATAR_PRESET_RELATIVE_PATHS["miltina_maid"].endswith(
-                    "miltina_blendshapes.cfg"
+                and Path(swapped_michael["blendshapes_cfg"]).name == "player_two_trevor_blendshapes.cfg"
+                and Path(swapped_franklin["blendshapes_cfg"]).name == "player_zero_michael_blendshapes.cfg"
+                and Path(swapped_trevor["blendshapes_cfg"]).name == "player_one_franklin_blendshapes.cfg"
+                and miltina_preset_cfg.name == "player_two_trevor_blendshapes.cfg"
+                and blendshape_helper.AVATAR_PRESET_RELATIVE_PATHS["player_two_trevor"].endswith(
+                    "player_two_trevor_blendshapes.cfg"
                 )
             )
             suite_passed &= print_status_result(
@@ -148,71 +148,33 @@ def test_avatar_interchangeability() -> bool:
         else PROJECT_ROOT_DIR / "scripts"
     )
     required_cli_tokens = [
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--target-character"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--target-character"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--target-character"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--target-character"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--target-character"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--target-character"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--target-character"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--atlas-only"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--skip-atlas"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--target-character"),
         (scripts_root / "common_tools" / "apply_characters.py", "--avatar"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--save-assignment"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--export-physbones"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--physbones-source"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--physbones-source"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--physbones-source"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--physbones-source"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-source"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-source"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-source"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--physbones-source"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--physbones-marshmallow"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--physbones-marshmallow"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--physbones-marshmallow"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--physbones-marshmallow"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--physbones-marshmallow"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--physbones-marshmallow"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--physbones-marshmallow"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--physbones-marshmallow"),
+        (scripts_root / "common_tools" / "build_universal_avatar.py", "--physbones-marshmallow"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--blood-decals"),
         (scripts_root / "common_tools" / "build_universal_avatar.py", "--blood-decals"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--blood-decals"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--blood-decals"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--blood-decals"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--blood-decals"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--blood-decals"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--blood-decals"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--blood-decals"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--eye-blink"),
         (scripts_root / "common_tools" / "build_universal_avatar.py", "--eye-blink"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--eye-blink"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--eye-blink"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--eye-blink"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--eye-blink"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--eye-blink-strength"),
         (scripts_root / "common_tools" / "build_universal_avatar.py", "--eye-blink-strength"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--eye-blink-strength"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--eye-blink-strength"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--eye-blink-strength"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--eye-blink-strength"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--eye-blink-strength"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--eye-blink-strength"),
+        (scripts_root / "common_tools" / "universal_gtav_builder.py", "--eye-blink-strength"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--mouth-open-strength"),
         (scripts_root / "common_tools" / "build_universal_avatar.py", "--mouth-open-strength"),
         (scripts_root / "common_tools" / "universal_gtav_builder.py", "--mouth-open-strength"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--mouth-open-strength"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--mouth-open-strength"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--mouth-open-strength"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--mouth-open-strength"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--mouth-open-strength"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--mouth-open-strength"),
         (scripts_root / "common_tools" / "universal_gtav_builder.py", "--face-anim"),
         (scripts_root / "common_tools" / "build_universal_avatar.py", "--face-anim"),
         (scripts_root / "common_tools" / "run_mod_manager.py", "--face-anim"),
-        (scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", "--face-anim"),
-        (scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py", "--face-anim"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py", "--face-anim"),
-        (scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py", "--face-anim"),
-        (scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", "--face-anim"),
-        (scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py", "--face-anim"),
     ]
     builders_ok = all(
         file_path.is_file() and expected_token in file_path.read_text(encoding="utf-8")
@@ -242,15 +204,6 @@ def test_custom_unity_hair_support() -> bool:
         else PROJECT_ROOT_DIR / "scripts"
     )
     required_hair_cli_files = [
-        scripts_root / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py",
-        scripts_root / "Shinano_Casual_Franklin" / "build_franklin_avatar.py",
-        scripts_root / "Shinano_Casual_Franklin" / "run_build_franklin.py",
-        scripts_root / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py",
-        scripts_root / "Shinano_EternalReunion_Michael" / "build_michael_er.py",
-        scripts_root / "Shinano_EternalReunion_Michael" / "run_build_er.py",
-        scripts_root / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py",
-        scripts_root / "Miltina_Maid_Trevor" / "build_trevor_miltina.py",
-        scripts_root / "Miltina_Maid_Trevor" / "run_pipeline.py",
         scripts_root / "common_tools" / "run_mod_manager.py",
     ]
     cli_ok = all(
@@ -1546,8 +1499,8 @@ def test_universal_npc_pipeline() -> bool:
             built_pkg.is_file()
             and "Assets/VRCAvatar2GTAV/Editor/Vrc2GtavTexturesPanel.cs" in packed_asset_paths
             and "Assets/VRCAvatar2GTAV/Toolchain/run_mod_manager.py" in packed_asset_paths
-            and "Assets/VRCAvatar2GTAV/Toolchain/2_Michael_Shinano_EternalReunion/5_rpf_package/GTAVPhysBones.asi" in packed_asset_paths
-            and "Assets/VRCAvatar2GTAV/Toolchain/2_Michael_Shinano_EternalReunion/5_rpf_package/GTAVVToon.asi" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/player_zero/5_rpf_package/GTAVPhysBones.asi" in packed_asset_paths
+            and "Assets/VRCAvatar2GTAV/Toolchain/player_zero/5_rpf_package/GTAVVToon.asi" in packed_asset_paths
             and "Assets/VRCAvatar2GTAV/Toolchain/_deploy_tools/head_000_r.ydd" in packed_asset_paths
             and not any(
                 pth.lower().endswith((".rpf", ".yft", ".ytd", ".dds", ".fbx", ".dll", ".exe"))
@@ -1594,6 +1547,124 @@ def test_universal_npc_pipeline() -> bool:
         jaw_obj, blink_list = _blink_mod.select_jaw_and_blink_candidates(mock_meshes)
         booth_helpers_ok = (jaw_obj.name == "Face.001" and blink_list[0].name == "Face.001" and _bshape_mod.is_body_or_face_skin_mesh("Body all") and not _bshape_mod.is_body_or_face_skin_mesh("Lolly_Dolly_Bodycon") and _bshape_mod.is_manual_shrink_shape_key("kisekae_Shoulder"))
         suite_passed &= print_status_result("Booth universal skin, shrink & jaw/blink helper regression", booth_helpers_ok, f"jaw={jaw_obj.name} blink0={blink_list[0].name}")
+
+        import blender_hair_helper as _hair_helper_mod
+
+        body_base_mock = _SimpleNamespace(name="Body_base", data=_SimpleNamespace(materials=[_SimpleNamespace(name="Lueur Body Pinkpresetreal")], shape_keys=_SimpleNamespace(key_blocks=[_SimpleNamespace(name="Shrink_Chest")])))
+        face_mesh_mock = _SimpleNamespace(name="Body", data=_SimpleNamespace(materials=[_SimpleNamespace(name="Shinano_face_eye_blue_new")], shape_keys=_SimpleNamespace(key_blocks=[_SimpleNamespace(name="vrc.v_aa")])))
+        manuka_body_mock = _SimpleNamespace(name="Manuka_body", data=_SimpleNamespace(materials=[_SimpleNamespace(name="Manuka_body")], shape_keys=None))
+        manuka_atama_mock = _SimpleNamespace(name="Manuka_atama", data=_SimpleNamespace(materials=[_SimpleNamespace(name="Manuka_hair")], shape_keys=None))
+        face_cand_ok = (
+            not _hair_helper_mod.is_face_mesh_or_material_candidate(body_base_mock)
+            and _hair_helper_mod.is_face_mesh_or_material_candidate(face_mesh_mock)
+            and not _hair_helper_mod.is_face_mesh_or_material_candidate(manuka_body_mock)
+            and not _hair_helper_mod.is_face_mesh_or_material_candidate(manuka_atama_mock)
+        )
+        role_ok = (
+            _hair_helper_mod.classify_skin_material_role("Lueur Body Pinkpresetreal", source_obj_name="Body_base", diffuse_src="Shinano_body.png", is_skin_source_obj=True) == "body_skin"
+            and _hair_helper_mod.classify_skin_material_role("Big_Body", source_obj_name="Body_base", diffuse_src="Shinano_body.png", is_skin_source_obj=True) == "body_skin"
+            and _hair_helper_mod.classify_skin_material_role("Manuka_body", source_obj_name="Manuka_body") == "body_skin"
+            and _hair_helper_mod.classify_skin_material_role("Manuka_hair", source_obj_name="Manuka_atama", is_skin_source_obj=True) == "other"
+            and _hair_helper_mod.classify_skin_material_role("Shinano_face_eye_blue_new", source_obj_name="Body") == "face"
+            and _hair_helper_mod.classify_skin_material_role("Shinano_face_eye_blue_newtest", source_obj_name="Body", diffuse_src="Shinano_face_blue.png", alpha_mode="transparent") == "face"
+            and _hair_helper_mod.classify_skin_material_role("Face_Blush_Alpha", source_obj_name="Body", alpha_mode="transparent") == "other"
+            and _hair_helper_mod.classify_skin_material_role("7_Outer", source_obj_name="Hoodie") == "other"
+        )
+        neck_up_norm = _hair_helper_mod.compute_smooth_neck_skin_normal((0.0, -0.022, 0.625), (-0.1, 0.3, -0.94), (0.0, 0.0288, 0.5316), (0.0, 0.0029, 0.6417))
+        neck_base_norm = _hair_helper_mod.compute_smooth_neck_skin_normal((0.0, -0.04, 0.51), (0.0, -0.78, 0.63), (0.0, 0.0288, 0.5316), (0.0, 0.0029, 0.6417))
+        neck_math_ok = (neck_up_norm[1] < -0.95 and abs(neck_up_norm[2]) < 0.15 and neck_base_norm == (0.0, -0.78, 0.63))
+        import vtoon_profile_helper as _vtoon_mod
+        import universal_atlas_builder as _atlas_mod
+        oil_mat_text = "m_Floats:\n  - _UseReflection: 1\n  - _Smoothness: 0.96\n  - _UseMatCap: 1\n  - _MatCapBlendMode: 1\n  - _MatCapBlend: 1\n  - _UseAnisotropy: 1\n  - _AnisotropyTangentWidth: 0.04\n  - _AnisotropyBitangentWidth: 0.38\n  - _UseBumpMap: 1\n  - _BumpScale: 0.75\nm_Colors:\n  - _MatCapColor: {r: 1, g: 1, b: 1, a: 0.491}\n"
+        matte_mat_text = "m_Floats:\n  - _UseReflection: 0\n  - _Smoothness: 0.0\n  - _UseMatCap: 0\n  - _UseBumpMap: 0\n"
+        with tempfile.TemporaryDirectory() as gloss_temp_raw:
+            gloss_temp = Path(gloss_temp_raw)
+            oil_mat_path = gloss_temp / "BoothOil_Body.mat"
+            matte_mat_path = gloss_temp / "BoothMatte_Cloth.mat"
+            oil_mat_path.write_text(oil_mat_text, encoding="utf-8")
+            matte_mat_path.write_text(matte_mat_text, encoding="utf-8")
+            oil_metrics = _vtoon_mod.compute_material_gloss_metrics(_vtoon_mod.parse_liltoon_mat_file(oil_mat_path), _vtoon_mod.SLOT_SKIN)
+            matte_metrics = _vtoon_mod.compute_material_gloss_metrics(_vtoon_mod.parse_liltoon_mat_file(matte_mat_path), _vtoon_mod.SLOT_CLOTH)
+            packed_matcap = _vtoon_mod.create_packed_matcap_atlas({"skin": [oil_mat_path], "cloth": [matte_mat_path]}, [oil_mat_path], None)
+            grouped_roles = _atlas_mod._collect_mat_paths_by_role([{"materials": ["Big_Body"], "mat_path": str(oil_mat_path)}, {"materials": ["Outer_Hoodie"], "mat_path": str(matte_mat_path)}, {"materials": ["Shinano_Eye"], "mat_path": str(matte_mat_path)}])
+        asi_dir = PROJECT_ROOT_DIR / "scripts" / "vtoon_asi"
+        hair_src = (PROJECT_ROOT_DIR / "scripts" / "common_tools" / "blender_hair_helper.py").read_text(encoding="utf-8")
+        gloss_alpha_passed = (bool(oil_metrics.get("has_gloss")) and float(oil_metrics.get("specular_intensity", 0.0)) > 0.7 and float(oil_metrics.get("anisotropy", 0.0)) > 0.8 and int(oil_metrics.get("spec_tile_luma", 0)) >= 180 and (not matte_metrics.get("has_gloss")) and float(matte_metrics.get("specular_intensity", 1.0)) == 0.0 and int(matte_metrics.get("spec_tile_luma", 1)) == 0 and packed_matcap.size == (512, 512) and _vtoon_mod._flatten_matcap_on_black(__import__("PIL.Image", fromlist=["Image"]).new("RGBA", (8, 8), (255, 255, 255, 0))).getpixel((0, 0)) == (0, 0, 0, 255) and oil_mat_path.name in [Path(pth).name for pth in grouped_roles.get("skin", [])] and "InputParameters >= 6" in (asi_dir / "vtoon_d3d11_hook.hpp").read_text(encoding="utf-8") and "VTOON_PED_STD" in (asi_dir / "vtoon_d3d11_hook.hpp").read_text(encoding="utf-8") and "anisotropy" in (asi_dir / "vtoon_config.hpp").read_text(encoding="utf-8") and "anisoTan" in (asi_dir / "vtoon_shaders_hlsl.hpp").read_text(encoding="utf-8") and "gbufSpecInt" in (asi_dir / "vtoon_shaders_hlsl.hpp").read_text(encoding="utf-8") and "ResyncKnownContexts" in (asi_dir / "gtav_vtoon.cpp").read_text(encoding="utf-8") and "exclude_polys=exclude_hair_trans" in hair_src and "lift_weight" in hair_src and '= "hair_alpha"' in hair_src)
+        suite_passed &= print_status_result("Booth oily skin metrics, 2x2 MatCap, bangs alpha & foreign draw hook regressions", gloss_alpha_passed, f"oil_spec={oil_metrics.get('specular_intensity'):.2f} matte={matte_metrics.get('has_gloss')} roles={len(grouped_roles)}")
+        suite_passed &= print_status_result(
+            "Cross-avatar body/face split-normal & smooth neck skin regression",
+            face_cand_ok and role_ok and neck_math_ok,
+            f"face_cand={face_cand_ok} role={role_ok} neck_up={tuple(round(coord, 3) for coord in neck_up_norm)}",
+        )
+
+        import numpy as numpy_mod
+        from PIL import Image as pil_image_cls
+        import universal_atlas_builder as atlas_builder_mod
+        import unity_hair_bake_layer as hair_bake_mod
+
+        with tempfile.TemporaryDirectory() as hair_test_root:
+            hair_test_dir = Path(hair_test_root)
+            main_tex_path = hair_test_dir / "hair_main.png"
+            mask_tex_path = hair_test_dir / "hair_mask.png"
+            white_mask_path = hair_test_dir / "white_mask.png"
+            mat_yaml_path = hair_test_dir / "hair_trans.mat"
+            pil_image_cls.new("RGBA", (8, 8), (60, 120, 220, 255)).save(main_tex_path)
+            pil_image_cls.new("RGBA", (8, 8), (218, 218, 218, 255)).save(mask_tex_path)
+            pil_image_cls.new("RGBA", (8, 8), (255, 255, 255, 255)).save(white_mask_path)
+            mask_meta_path = hair_test_dir / "hair_mask.png.meta"
+            mask_meta_path.write_text("fileFormatVersion: 2\nguid: bbbb2222bbbb2222bbbb2222bbbb2222\nsRGBTexture: 1\n", encoding="utf-8")
+            main_guid_hex = "aaaa1111aaaa1111aaaa1111aaaa1111"
+            mask_guid_hex = "bbbb2222bbbb2222bbbb2222bbbb2222"
+            mat_yaml_path.write_text(
+                "%YAML 1.1\n--- !u!21 &2100000\nMaterial:\n  m_Name: HairTransTest\n"
+                "  m_Shader: {fileID: 4800000, guid: 3c79b10c7e0b2784aaa4c2f8dd17d55e, type: 3}\n"
+                "  m_SavedProperties:\n    m_TexEnvs:\n"
+                f"    - _MainTex:\n        m_Texture: {{fileID: 2800000, guid: {main_guid_hex}, type: 3}}\n"
+                f"    - _AlphaMask:\n        m_Texture: {{fileID: 2800000, guid: {mask_guid_hex}, type: 3}}\n"
+                "    m_Floats:\n    - _TransparentMode: 0\n    - _AlphaMaskMode: 1\n    - _AlphaMaskScale: 1\n    - _AlphaMaskValue: 0\n"
+                "    m_Colors:\n    - _Color: {r: 1, g: 1, b: 1, a: 1}\n",
+                encoding="utf-8",
+            )
+            guid_lookup = {main_guid_hex: main_tex_path, mask_guid_hex: mask_tex_path}
+            parsed_trans_mat = atlas_builder_mod.parse_unity_material_file(mat_yaml_path, guid_lookup)
+            tinted_bangs_tile = atlas_builder_mod._load_tinted_tile(
+                main_tex_path, 8, (1.0, 1.0, 1.0, 1.0),
+                alpha_mask_tex=str(mask_tex_path), alpha_mask_scale=1.0, alpha_mask_val=0.0, preserve_alpha=True,
+            )
+            tinted_solid_tile = atlas_builder_mod._load_tinted_tile(
+                main_tex_path, 8, (1.0, 1.0, 1.0, 1.0),
+                alpha_mask_tex=str(white_mask_path), alpha_mask_scale=1.0, alpha_mask_val=0.0, preserve_alpha=True,
+            )
+            bake_mat_info = {
+                "alpha_mode": "transparent",
+                "shader_guid": "3c79b10c7e0b2784aaa4c2f8dd17d55e",
+                "tex_envs": {
+                    "_MainTex": {"path": str(main_tex_path), "scale": (1.0, 1.0), "offset": (0.0, 0.0)},
+                    "_AlphaMask": {"path": str(mask_tex_path), "scale": (1.0, 1.0), "offset": (0.0, 0.0)},
+                },
+                "floats": {"_UseEmission": 1.0, "_EmissionMainStrength": 1.0, "_EmissionBlend": 1.0, "_EmissionBlendMode": 1.0, "_AlphaMaskMode": 1.0, "_AlphaMaskScale": 1.0, "_AlphaMaskValue": 0.0},
+                "colors": {"_Color": [1.0, 1.0, 1.0, 1.0], "_EmissionColor": [0.0, 0.25, 1.0, 1.0]},
+            }
+            baked_diff_img, _, _ = hair_bake_mod.composite_unity_material_textures(bake_mat_info, tile_size=(8, 8), preserve_alpha=True)
+            baked_pixel_rgba = baked_diff_img.getpixel((4, 4))
+            alpha_sample_grid = numpy_mod.array([[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], [0.70, 0.70, 1.0, 1.0], [0.70, 0.70, 1.0, 1.0]], dtype=numpy_mod.float32)
+            translucent_uv_min = _hair_helper_mod.sample_uv_min_alpha([(0.125, 0.875), (0.375, 0.875)], alpha_sample_grid, 4, 4)
+            opaque_uv_min = _hair_helper_mod.sample_uv_min_alpha([(0.625, 0.125), (0.875, 0.125)], alpha_sample_grid, 4, 4)
+            hair_alpha_fix_ok = (
+                parsed_trans_mat.get("alpha_mode") == "transparent"
+                and hair_bake_mod.resolve_texture_srgb_flag(mask_tex_path) is True
+                and tinted_bangs_tile.getpixel((4, 4))[3] < 195
+                and tinted_solid_tile.getpixel((4, 4))[3] == 255
+                and baked_pixel_rgba[3] < 195
+                and baked_pixel_rgba[2] > 215
+                and translucent_uv_min < 0.98
+                and opaque_uv_min >= 0.98
+            )
+            suite_passed &= print_status_result(
+                "Cross-avatar hair transparency, sRGB alpha mask & UV split regression",
+                hair_alpha_fix_ok,
+                f"mode={parsed_trans_mat.get('alpha_mode')} tile_a={tinted_bangs_tile.getpixel((4, 4))[3]} bake_rgba={baked_pixel_rgba} uv_min=({translucent_uv_min:.2f},{opaque_uv_min:.2f})",
+            )
 
     return suite_passed
 

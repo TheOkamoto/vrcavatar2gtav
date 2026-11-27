@@ -10,16 +10,25 @@
 
 #include "vtoon_config.hpp"
 
+#include <atomic>
+#include <cstdio>
 #include <d3dcompiler.h>
 
 namespace gtav_vtoon {
 
 inline thread_local bool gVToonBypassDrawHook = false;
+inline thread_local bool gInVToonDrawDispatch = false;
 
 struct ScopedDrawHookBypass {
     bool prevValue = false;
     ScopedDrawHookBypass() : prevValue(gVToonBypassDrawHook) { gVToonBypassDrawHook = true; }
     ~ScopedDrawHookBypass() { gVToonBypassDrawHook = prevValue; }
+};
+
+struct ScopedDrawDispatchGuard {
+    bool prevValue = false;
+    ScopedDrawDispatchGuard() : prevValue(gInVToonDrawDispatch) { gInVToonDrawDispatch = true; }
+    ~ScopedDrawDispatchGuard() { gInVToonDrawDispatch = prevValue; }
 };
 
 /** Self-contained 2x1 GPU readback pass decoding VToon character ID watermarks. */
@@ -294,6 +303,243 @@ private:
     ID3D11BlendState* opaqueBlendState_ = nullptr;
     ID3D11RasterizerState* cullNoneRastState_ = nullptr;
     ID3D11DepthStencilState* depthDisabledState_ = nullptr;
+};
+
+/** Throttled live constant-buffer & render-target snapshot logger for runtime diagnostics. */
+class VToonLiveDiagDumper {
+public:
+    bool Initialize(ID3D11Device* d3dDevice) {
+        if (!d3dDevice || cbStageBuf_) return (cbStageBuf_ != nullptr);
+        D3D11_BUFFER_DESC stageDesc{1024u, D3D11_USAGE_STAGING, 0u, D3D11_CPU_ACCESS_READ, 0u, 0u};
+        return SUCCEEDED(d3dDevice->CreateBuffer(&stageDesc, nullptr, &cbStageBuf_)) && (cbStageBuf_ != nullptr);
+    }
+
+    static std::string FmtVec4(const float* ptr) {
+        char buf[96] = {};
+        std::snprintf(buf, sizeof(buf), "(%.3f,%.3f,%.3f,%.3f)", ptr[0], ptr[1], ptr[2], ptr[3]);
+        return std::string(buf);
+    }
+
+    bool ReadCbFloats(ID3D11DeviceContext* d3dCtx, UINT psSlot, float* outFloats, UINT maxFloats) {
+        std::memset(outFloats, 0, sizeof(float) * maxFloats);
+        if (!d3dCtx || !cbStageBuf_ || d3dCtx->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
+        ID3D11Buffer* srcCb = nullptr;
+        d3dCtx->PSGetConstantBuffers(psSlot, 1, &srcCb);
+        if (!srcCb) return false;
+        D3D11_BUFFER_DESC cbDesc{};
+        srcCb->GetDesc(&cbDesc);
+        UINT copyBytes = (cbDesc.ByteWidth < maxFloats * 4u) ? cbDesc.ByteWidth : (maxFloats * 4u);
+        copyBytes &= ~15u;
+        bool okRead = false;
+        if (copyBytes >= 16u) {
+            D3D11_BOX srcBox{0u, 0u, 0u, copyBytes, 1u, 1u};
+            d3dCtx->CopySubresourceRegion(cbStageBuf_, 0u, 0u, 0u, 0u, srcCb, 0u, &srcBox);
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (SUCCEEDED(d3dCtx->Map(cbStageBuf_, 0u, D3D11_MAP_READ, 0u, &mapped)) && mapped.pData) {
+                std::memcpy(outFloats, mapped.pData, copyBytes);
+                d3dCtx->Unmap(cbStageBuf_, 0u);
+                okRead = true;
+            }
+        }
+        srcCb->Release();
+        return okRead;
+    }
+
+    void LogPedGbufLive(ID3D11DeviceContext* d3dCtx, int charId, int miscShift, UINT numRtvs) {
+        float cbTwo[64] = {}, cbFive[20] = {}, cbThirteen[24] = {};
+        bool okTwo = ReadCbFloats(d3dCtx, 2u, cbTwo, 64u);
+        bool okFive = ReadCbFloats(d3dCtx, 5u, cbFive, 20u);
+        bool okThirteen = ReadCbFloats(d3dCtx, 13u, cbThirteen, 24u);
+        LogVToonMessage("LiveSnap PedGbuf char=" + std::to_string(charId) + " shift=" + std::to_string(miscShift) +
+            " rtvs=" + std::to_string(numRtvs) +
+            " cb2[11]=" + (okTwo ? FmtVec4(&cbTwo[44]) : "none") +
+            " cb2[12]=" + (okTwo ? FmtVec4(&cbTwo[48]) : "none") +
+            " cb2[13]=" + (okTwo ? FmtVec4(&cbTwo[52]) : "none") +
+            " cb2[14]=" + (okTwo ? FmtVec4(&cbTwo[56]) : "none") +
+            " cb5[3]=" + (okFive ? FmtVec4(&cbFive[12]) : "none") +
+            " cb13[4]=" + (okThirteen ? FmtVec4(&cbThirteen[16]) : "none"));
+    }
+
+    void LogOverlayLive(ID3D11DeviceContext* d3dCtx, int kindVal, int miscShift, bool depthOk, bool shdOk, bool specOk, bool stnOk) {
+        float cbTwo[64] = {}, cbThree[208] = {}, cbEleven[20] = {};
+        bool okTwo = ReadCbFloats(d3dCtx, 2u, cbTwo, 64u);
+        bool okThree = ReadCbFloats(d3dCtx, 3u, cbThree, 208u);
+        bool okEleven = ReadCbFloats(d3dCtx, 11u, cbEleven, 20u);
+        std::string rtvInfo = "none";
+        ID3D11RenderTargetView* curRtv = nullptr;
+        d3dCtx->OMGetRenderTargets(1u, &curRtv, nullptr);
+        if (curRtv) {
+            ID3D11Resource* rtRes = nullptr;
+            curRtv->GetResource(&rtRes);
+            curRtv->Release();
+            if (rtRes) {
+                ID3D11Texture2D* tex2d = nullptr;
+                if (SUCCEEDED(rtRes->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&tex2d))) && tex2d) {
+                    D3D11_TEXTURE2D_DESC rdesc{};
+                    tex2d->GetDesc(&rdesc);
+                    tex2d->Release();
+                    rtvInfo = std::to_string(rdesc.Width) + "x" + std::to_string(rdesc.Height) +
+                        " ms=" + std::to_string(rdesc.SampleDesc.Count) + " fmt=" + std::to_string(static_cast<int>(rdesc.Format));
+                }
+                rtRes->Release();
+            }
+        }
+        LogVToonMessage("LiveSnap Overlay kind=" + std::to_string(kindVal) + " shift=" + std::to_string(miscShift) +
+            " rt=" + rtvInfo + " flags=(" + std::to_string(depthOk ? 1 : 0) + std::to_string(shdOk ? 1 : 0) +
+            std::to_string(specOk ? 1 : 0) + std::to_string(stnOk ? 1 : 0) + ")" +
+            " cb2[12..14]=" + (okTwo ? (FmtVec4(&cbTwo[48]) + " " + FmtVec4(&cbTwo[52]) + " " + FmtVec4(&cbTwo[56])) : "none") +
+            " cb3[45]=" + (okThree ? FmtVec4(&cbThree[180]) : "none") +
+            " cb3[47]=" + (okThree ? FmtVec4(&cbThree[188]) : "none") +
+            " cb3[49]=" + (okThree ? FmtVec4(&cbThree[196]) : "none") +
+            " cb11[1]=" + (okEleven ? FmtVec4(&cbEleven[4]) : "none") +
+            " cb11[3]=" + (okEleven ? FmtVec4(&cbEleven[12]) : "none"));
+    }
+
+    void LogForwardAlphaLive(ID3D11DeviceContext* d3dCtx, int charId, int miscShift, bool hasCsm) {
+        float cbTwo[64] = {}, cbThree[208] = {}, cbFive[20] = {}, cbThirteen[24] = {};
+        bool okTwo = ReadCbFloats(d3dCtx, 2u, cbTwo, 64u);
+        bool okThree = ReadCbFloats(d3dCtx, 3u, cbThree, 208u);
+        bool okFive = ReadCbFloats(d3dCtx, 5u, cbFive, 20u);
+        bool okThirteen = ReadCbFloats(d3dCtx, 13u, cbThirteen, 24u);
+        int numFwdLights = 0;
+        if (okThree) std::memcpy(&numFwdLights, &cbThree[8], sizeof(int));
+        LogVToonMessage("LiveSnap FwdAlpha char=" + std::to_string(charId) + " shift=" + std::to_string(miscShift) +
+            " csm=" + std::to_string(hasCsm ? 1 : 0) +
+            " nL=" + std::to_string(numFwdLights) +
+            " cb2[12..14]=" + (okTwo ? (FmtVec4(&cbTwo[48]) + " " + FmtVec4(&cbTwo[52]) + " " + FmtVec4(&cbTwo[56])) : "none") +
+            " cb3[0..1]=" + (okThree ? (FmtVec4(&cbThree[0]) + " " + FmtVec4(&cbThree[4])) : "none") +
+            " cb3[3/19]=" + (okThree ? (FmtVec4(&cbThree[12]) + " " + FmtVec4(&cbThree[76])) : "none") +
+            " cb3[45/46]=" + (okThree ? (FmtVec4(&cbThree[180]) + " " + FmtVec4(&cbThree[184])) : "none") +
+            " cb5[3]=" + (okFive ? FmtVec4(&cbFive[12]) : "none") +
+            " cb13[4]=" + (okThirteen ? FmtVec4(&cbThirteen[16]) : "none"));
+    }
+
+private:
+    ID3D11Buffer* cbStageBuf_ = nullptr;
+};
+
+struct PendingProbeItem {
+    ID3D11ShaderResourceView* srvPtr = nullptr;
+    ID3D11Resource* resPtr = nullptr;
+    uint64_t sigHash = 0;
+};
+
+struct CachedTexCharEntry {
+    uint64_t sigHash = 0;
+    int charId = 0;
+};
+
+inline uint64_t ComputeTextureResourceSignature(ID3D11Resource* baseRes) {
+    if (!baseRes) return 0u;
+    ID3D11Texture2D* texObj = nullptr;
+    if (FAILED(baseRes->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&texObj))) || !texObj) return 0u;
+    D3D11_TEXTURE2D_DESC texDesc{};
+    texObj->GetDesc(&texDesc);
+    texObj->Release();
+    uint64_t sigVal = static_cast<uint64_t>(texDesc.Width & 0xFFFFu);
+    sigVal |= (static_cast<uint64_t>(texDesc.Height & 0xFFFFu) << 16);
+    sigVal |= (static_cast<uint64_t>(static_cast<uint32_t>(texDesc.Format) & 0xFFu) << 32);
+    sigVal |= (static_cast<uint64_t>(texDesc.MipLevels & 0xFFu) << 40);
+    sigVal |= (static_cast<uint64_t>(texDesc.ArraySize & 0xFFu) << 48);
+    return sigVal;
+}
+
+/** Per-frame and periodic diagnostic telemetry counters for VToon hooks. */
+struct VToonDiagTelemetry {
+    std::atomic<uint32_t> loggedMilestones{0u};
+    std::atomic<uint32_t> activeFrames{0u};
+    std::atomic<uint32_t> gbufCalls{0u};
+    std::atomic<uint32_t> minGbuf{9999u};
+    std::atomic<uint32_t> maxGbuf{0u};
+    std::atomic<uint32_t> defGbufCalls{0u};
+    std::atomic<uint32_t> skippedGbuf{0u};
+    std::atomic<uint32_t> skipRtv{0u};
+    std::atomic<uint32_t> indBlend{0u};
+    std::atomic<uint32_t> fwdAlphaCalls{0u};
+    std::atomic<uint32_t> overlayCalls{0u};
+    std::atomic<uint32_t> ovlSunCalls{0u};
+    std::atomic<uint32_t> ovlAmbCalls{0u};
+    std::atomic<uint32_t> maxOvlGap{0u};
+    std::atomic<uint32_t> additiveSkip{0u};
+    std::atomic<uint32_t> rehooks{0u};
+    std::atomic<uint32_t> rehookMask{0u};
+    std::atomic<uint32_t> postFlushCatches{0u};
+    std::atomic<uint32_t> periodFrames{0u};
+    std::atomic<bool> forceLiveDump{true};
+    std::atomic<bool> wantDumpGbuf{true};
+    std::atomic<bool> wantDumpOvl{true};
+    std::atomic<bool> wantDumpFwd{true};
+    std::atomic<uint32_t> gbufTid{0u};
+    std::atomic<uint32_t> ovlTid{0u};
+    std::atomic<uint32_t> presTid{0u};
+
+    void LogMilestoneOnce(uint32_t flagBit, const std::string& msgText) {
+        if ((loggedMilestones.fetch_or(flagBit, std::memory_order_relaxed) & flagBit) == 0u) LogVToonMessage(msgText);
+    }
+
+    void RecordVTableRehook(uint32_t patchedMask) {
+        if (patchedMask == 0u) return;
+        rehooks.fetch_add(1u, std::memory_order_relaxed);
+        rehookMask.fetch_or(patchedMask, std::memory_order_relaxed);
+    }
+
+    void RecordPostFlushCatch() { postFlushCatches.fetch_add(1u, std::memory_order_relaxed); }
+
+    void RecordFrameGbufStats(uint32_t prevCnt) {
+        if (prevCnt == 0u) return;
+        uint32_t curMin = minGbuf.load(std::memory_order_relaxed);
+        while (prevCnt < curMin && !minGbuf.compare_exchange_weak(curMin, prevCnt, std::memory_order_relaxed)) {}
+        uint32_t curMax = maxGbuf.load(std::memory_order_relaxed);
+        while (prevCnt > curMax && !maxGbuf.compare_exchange_weak(curMax, prevCnt, std::memory_order_relaxed)) {}
+    }
+
+    void RecordOvlGap(uint32_t gapVal) {
+        uint32_t curMaxGap = maxOvlGap.load(std::memory_order_relaxed);
+        while (gapVal > curMaxGap && !maxOvlGap.compare_exchange_weak(curMaxGap, gapVal, std::memory_order_relaxed)) {}
+    }
+
+    bool NeedsEndFrameDiag() const {
+        return activeFrames.load(std::memory_order_relaxed) < 60u && gbufCalls.load(std::memory_order_relaxed) > 0u;
+    }
+
+    void OnEndFramePresent(int miscShift, UINT swapWidth, UINT swapHeight) {
+        presTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+        const uint32_t gbufTotal = gbufCalls.load(std::memory_order_relaxed);
+        if (gbufTotal == 0u) return;
+        const uint32_t activeIdx = activeFrames.fetch_add(1u, std::memory_order_relaxed) + 1u;
+        const uint32_t perIdx = periodFrames.fetch_add(1u, std::memory_order_relaxed) + 1u;
+        if (forceLiveDump.exchange(false, std::memory_order_acq_rel) || activeIdx == 2u || perIdx == 180u) {
+            wantDumpGbuf.store(true, std::memory_order_release);
+            wantDumpOvl.store(true, std::memory_order_release);
+            wantDumpFwd.store(true, std::memory_order_release);
+        }
+        if (activeIdx == 60u || perIdx >= 180u) {
+            if (perIdx >= 180u) periodFrames.store(0u, std::memory_order_relaxed);
+            const uint32_t minVal = minGbuf.exchange(9999u, std::memory_order_relaxed);
+            const uint32_t maxVal = maxGbuf.exchange(0u, std::memory_order_relaxed);
+            const uint32_t rmask = rehookMask.exchange(0u, std::memory_order_relaxed);
+            char hexBuf[16] = {};
+            std::snprintf(hexBuf, sizeof(hexBuf), "0x%X", rmask);
+            LogVToonMessage((activeIdx == 60u ? std::string("VToon60 diag: f=") : std::string("VToonPer diag: f=")) + std::to_string(activeIdx) +
+                " gbuf=" + std::to_string(gbufTotal) + " minG=" + std::to_string(minVal < 9999u ? minVal : 0u) +
+                " maxG=" + std::to_string(maxVal) + " def=" + std::to_string(defGbufCalls.load(std::memory_order_relaxed)) +
+                " skipSize=" + std::to_string(skippedGbuf.load(std::memory_order_relaxed)) +
+                " skipRtv=" + std::to_string(skipRtv.load(std::memory_order_relaxed)) +
+                " indBlend=" + std::to_string(indBlend.load(std::memory_order_relaxed)) +
+                " fwd=" + std::to_string(fwdAlphaCalls.load(std::memory_order_relaxed)) +
+                " ovl=" + std::to_string(overlayCalls.load(std::memory_order_relaxed)) +
+                " sun=" + std::to_string(ovlSunCalls.load(std::memory_order_relaxed)) +
+                " amb=" + std::to_string(ovlAmbCalls.load(std::memory_order_relaxed)) +
+                " ovlGap=" + std::to_string(maxOvlGap.load(std::memory_order_relaxed)) +
+                " skipAdd=" + std::to_string(additiveSkip.load(std::memory_order_relaxed)) +
+                " rehooks=" + std::to_string(rehooks.load(std::memory_order_relaxed)) + " rmask=" + hexBuf +
+                " pfCatch=" + std::to_string(postFlushCatches.load(std::memory_order_relaxed)) +
+                " shift=" + std::to_string(miscShift) +
+                " tids=" + std::to_string(gbufTid.load(std::memory_order_relaxed)) + "/" +
+                std::to_string(ovlTid.load(std::memory_order_relaxed)) + "/" + std::to_string(presTid.load(std::memory_order_relaxed)) +
+                " swap=" + std::to_string(swapWidth) + "x" + std::to_string(swapHeight));
+        }
+    }
 };
 
 }  // namespace gtav_vtoon

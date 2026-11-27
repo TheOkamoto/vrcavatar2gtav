@@ -36,17 +36,51 @@ def install_plugin(unity_project: Path, plugin_source_root: Path | None = None) 
         legacy_meta.unlink()
 
     destination_root = assets_dir / "VRCAvatar2GTAV"
+    src_toolchain = source_root / "Toolchain"
     dest_toolchain = destination_root / "Toolchain"
-    if (source_root / "Toolchain").is_dir() and dest_toolchain.is_dir():
-        for existing_item in list(dest_toolchain.rglob("*")):
+    retired_cfg_names = {
+        "shinano_blendshapes.cfg",
+        "shinano_er_blendshapes.cfg",
+        "miltina_blendshapes.cfg",
+        "shinano_casual_physbones.cfg",
+        "michael_neko_mimi_physbones.cfg",
+        "miltina_maid_physbones.cfg",
+    }
+    if src_toolchain.is_dir() and dest_toolchain.is_dir():
+        def _is_preserved_rel(rel_path: Path) -> bool:
+            posix = rel_path.as_posix()
+            if posix == "vrc2gtav.cfg":
+                return True
+            if "configs" in rel_path.parts and rel_path.name not in retired_cfg_names:
+                return rel_path.suffix.lower() in (".json", ".cfg")
+            return False
+
+        for existing_item in sorted(dest_toolchain.rglob("*"), reverse=True):
             rel_existing = existing_item.relative_to(dest_toolchain)
-            if (
-                existing_item.is_file()
-                and not existing_item.name.endswith(".meta")
-                and existing_item.name != "vrc2gtav.cfg"
-                and "configs" not in rel_existing.parts
-            ):
+            if "__pycache__" in rel_existing.parts:
+                if existing_item.is_file():
+                    existing_item.unlink()
+                elif existing_item.is_dir():
+                    shutil.rmtree(existing_item, ignore_errors=True)
+                continue
+            if existing_item.is_file():
+                if existing_item.name.endswith(".meta"):
+                    asset_rel = Path(rel_existing.as_posix()[:-5])
+                    if _is_preserved_rel(asset_rel) or (src_toolchain / asset_rel).exists():
+                        continue
+                    existing_item.unlink()
+                    continue
+                if _is_preserved_rel(rel_existing):
+                    continue
                 existing_item.unlink()
+            elif existing_item.is_dir():
+                if rel_existing.parts == ("configs",):
+                    continue
+                if not (src_toolchain / rel_existing).is_dir() and not any(existing_item.iterdir()):
+                    existing_item.rmdir()
+                    dir_meta = Path(str(existing_item) + ".meta")
+                    if dir_meta.is_file():
+                        dir_meta.unlink()
 
     for src_item in source_root.rglob("*"):
         rel = src_item.relative_to(source_root)

@@ -44,13 +44,202 @@ except ImportError:
 
 
 _GUID_PATTERN = re.compile(r"^guid:\s*([0-9a-fA-F]{32})\b", re.MULTILINE)
+_ATLAS_GUID_CACHE: Dict[str, Dict[str, Path]] = {}
+
+
+def _import_vtoon_profile_helper():
+    """Import vtoon_profile_helper lazily from direct or package scope."""
+    try:
+        import vtoon_profile_helper
+        return vtoon_profile_helper
+    except ImportError:
+        from common_tools import vtoon_profile_helper
+        return vtoon_profile_helper
+
+
+def _guess_atlas_vtoon_slot(mat_names: Sequence[str], mat_path: str = "") -> int:
+    """Infer VToon material slot enum from material names and path context across Booth avatars."""
+    vtoon_mod = _import_vtoon_profile_helper()
+    joined = " ".join(str(name or "").lower() for name in mat_names)
+    if any(tok in joined for tok in ("face", "head", "mouth", "tongue", "tooth", "kao")):
+        return vtoon_mod.SLOT_FACE
+    if any(tok in joined for tok in ("eye", "iris", "pupil", "highlight", "lash", "brow", "cornea", "hitomi", "matsuge", "mayu")):
+        return vtoon_mod.SLOT_EYES
+    if any(tok in joined for tok in ("body", "skin", "hada")):
+        return vtoon_mod.SLOT_SKIN
+    hair_tokens = ("hair", "bang", "kami", "ahoge", "twin", "pony", "bob", "wig")
+    if any(tok in joined for tok in hair_tokens):
+        return vtoon_mod.SLOT_HAIR
+    if mat_path:
+        path_parts = Path(str(mat_path)).parts
+        path_hint = " ".join(path_parts[-4:-1] if len(path_parts) >= 2 else path_parts).lower()
+        if any(tok in path_hint for tok in hair_tokens) and not any(
+            skip_tok in path_hint or skip_tok in joined for skip_tok in ("accessories", "pin", "halo", "ribbon")
+        ):
+            return vtoon_mod.SLOT_HAIR
+    return vtoon_mod.SLOT_CLOTH
+
+
+def _collect_mat_paths_by_role(tile_entries: Sequence[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Group unique material file paths by VToon MatCap role (hair, skin, cloth, accent)."""
+    vtoon_mod = _import_vtoon_profile_helper()
+    grouped: Dict[str, List[str]] = {"hair": [], "skin": [], "cloth": [], "accent": []}
+    seen: Dict[str, set] = {key: set() for key in grouped}
+    skin_body_mats: List[str] = []
+    skin_face_mats: List[str] = []
+    accent_tokens = (
+        "metal", "acc", "ring", "chain", "buckle", "glass", "lens", "bell",
+        "pin", "clip", "pierce", "button", "zip", "jewel", "earring", "nail", "halo", "pearl",
+    )
+    for entry_data in tile_entries:
+        mat_path_str = str(entry_data.get("mat_path") or "").strip()
+        if not mat_path_str or not Path(mat_path_str).is_file():
+            continue
+        mat_names = [str(name or "") for name in (entry_data.get("materials") or [])]
+        joined = " ".join(mat_names).lower()
+        slot_guess = _guess_atlas_vtoon_slot(mat_names, mat_path=mat_path_str)
+        if slot_guess == vtoon_mod.SLOT_SKIN:
+            if mat_path_str not in seen["skin"]:
+                seen["skin"].add(mat_path_str)
+                skin_body_mats.append(mat_path_str)
+            continue
+        if slot_guess == vtoon_mod.SLOT_FACE:
+            if mat_path_str not in seen["skin"]:
+                seen["skin"].add(mat_path_str)
+                skin_face_mats.append(mat_path_str)
+            continue
+        if slot_guess == vtoon_mod.SLOT_HAIR:
+            role_key = "hair"
+        else:
+            parsed_mat = vtoon_mod.parse_liltoon_mat_file(Path(mat_path_str))
+            is_metallic = float(parsed_mat.get("floats", {}).get("_Metallic", 0.0) or 0.0) >= 0.45
+            role_key = "accent" if (is_metallic or any(tok in joined for tok in accent_tokens)) else "cloth"
+        if mat_path_str not in seen[role_key]:
+            seen[role_key].add(mat_path_str)
+            grouped[role_key].append(mat_path_str)
+    grouped["skin"] = skin_body_mats + skin_face_mats
+    return grouped
+
+
+def _paint_tile_spec_map(
+    entry_data: Dict[str, Any],
+    cell_width: int,
+    cell_height: int,
+    spec_canvas: Image.Image,
+    paste_x: int,
+    paste_y: int,
+    gloss_stats: Dict[str, Any],
+) -> None:
+    """Paint tile specular (R), smoothness (G), and skin flag (B) from Unity .mat properties."""
+    vtoon_mod = _import_vtoon_profile_helper()
+    mat_names = [str(name or "") for name in (entry_data.get("materials") or [])]
+    mat_path_str = str(entry_data.get("mat_path") or "").strip()
+    slot_guess = _guess_atlas_vtoon_slot(mat_names, mat_path=mat_path_str)
+    parsed_mat = (
+        vtoon_mod.parse_liltoon_mat_file(Path(mat_path_str))
+        if (mat_path_str and Path(mat_path_str).is_file())
+        else {}
+    )
+    metrics = vtoon_mod.compute_material_gloss_metrics(parsed_mat, slot_guess)
+    bump_tex = entry_data.get("bump_tex")
+    if bump_tex and Path(str(bump_tex)).is_file():
+        bscale = max(0.15, min(1.25, float(entry_data.get("bump_scale", 0.5))))
+        gloss_stats["max_bump"] = max(gloss_stats["max_bump"], bscale)
+    if metrics.get("has_gloss") or float(metrics.get("use_matcap", 0.0)) > 0.5:
+        for raw_name in mat_names:
+            cleaned = str(raw_name or "").strip().lower()
+            if cleaned:
+                gloss_stats["glossy_mats"].add(cleaned)
+        if mat_path_str:
+            gloss_stats["glossy_mats"].add(mat_path_str.lower())
+            gloss_stats["glossy_mats"].add(Path(mat_path_str).stem.lower())
+    if not metrics.get("has_gloss") or float(metrics.get("specular_intensity", 0.0)) <= 0.01:
+        return
+
+    gloss_stats["has_spec_map"] = True
+    gloss_stats["max_spec"] = max(gloss_stats["max_spec"], float(metrics.get("specular_intensity", 0.0)))
+    gloss_stats["max_smooth"] = max(gloss_stats["max_smooth"], float(metrics.get("smoothness", 0.0)))
+    resampling_enum = getattr(Image, "Resampling", Image)
+    lanczos_filter = getattr(resampling_enum, "LANCZOS", Image.LANCZOS)
+
+    base_red = max(0.0, min(255.0, float(metrics.get("spec_tile_luma", 0.0))))
+    base_green = max(0.0, min(255.0, float(metrics.get("smooth_tile_luma", 0.0))))
+    base_blue = 255.0 if slot_guess in (vtoon_mod.SLOT_SKIN, vtoon_mod.SLOT_FACE) else 0.0
+
+    tile_arr = numpy_lib.empty((cell_height, cell_width, 4), dtype=numpy_lib.float32)
+    tile_arr[:, :, 0] = base_red
+    tile_arr[:, :, 1] = base_green
+    tile_arr[:, :, 2] = base_blue
+    tile_arr[:, :, 3] = 255.0
+
+    spec_tex_path = entry_data.get("spec_gloss_tex") or entry_data.get("metallic_gloss_tex")
+    if spec_tex_path and Path(str(spec_tex_path)).is_file():
+        spec_rgb = numpy_lib.array(
+            Image.open(spec_tex_path).convert("RGBA").resize((cell_width, cell_height), lanczos_filter),
+            dtype=numpy_lib.float32,
+        )
+        spec_luma = (0.299 * spec_rgb[:, :, 0] + 0.587 * spec_rgb[:, :, 1] + 0.114 * spec_rgb[:, :, 2]) / 255.0
+        tile_arr[:, :, 0] *= spec_luma
+
+    smooth_tex_path = entry_data.get("smoothness_tex")
+    if smooth_tex_path and Path(str(smooth_tex_path)).is_file():
+        smooth_rgb = numpy_lib.array(
+            Image.open(smooth_tex_path).convert("RGBA").resize((cell_width, cell_height), lanczos_filter),
+            dtype=numpy_lib.float32,
+        )
+        smooth_luma = (0.299 * smooth_rgb[:, :, 0] + 0.587 * smooth_rgb[:, :, 1] + 0.114 * smooth_rgb[:, :, 2]) / 255.0
+        tile_arr[:, :, 1] *= smooth_luma
+
+    spec_tile = Image.fromarray(
+        numpy_lib.clip(tile_arr, 0.0, 255.0).astype(numpy_lib.uint8), "RGBA"
+    )
+    spec_canvas.paste(spec_tile, (paste_x, paste_y))
+
+
+def _encode_aux_dds(
+    png_path: Path,
+    dds_path: Path,
+    is_flat: bool,
+    flat_rgba: Tuple[int, int, int, int],
+) -> Path:
+    """Encode non-flat aux map as DXT1/BC1 .dds via rage CLI with solid DDS fallback."""
+    try:
+        import blender_hair_helper
+    except ImportError:
+        from common_tools import blender_hair_helper
+    dds_path.unlink(missing_ok=True)
+    if not is_flat:
+        try:
+            encode_cmd = npc_registry_helper.build_safe_rage_cmd(
+                "textures", "encode", "-f", "bc1", "--mips", "1", "-o", str(dds_path), str(png_path),
+            )
+            subprocess.run(encode_cmd, stdin=subprocess.DEVNULL, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+            pass
+    if not (dds_path.is_file() and dds_path.stat().st_size > 128):
+        blender_hair_helper.ensure_solid_rgba_dds(dds_path, rgba_color=flat_rgba, size=32)
+    return dds_path
 
 
 def _index_project_guids(assets_root: Path) -> Dict[str, Path]:
-    """Build a `{guid: file_path}` lookup from `.meta` files under `assets_root`."""
-    guid_map: Dict[str, Path] = {}
+    """Build or reuse a cached `{guid: file_path}` lookup from `.meta` files under `assets_root`."""
     if not assets_root.is_dir():
-        return guid_map
+        return {}
+    try:
+        root_key = str(assets_root.resolve())
+    except OSError:
+        root_key = str(assets_root)
+    if root_key in _ATLAS_GUID_CACHE:
+        return _ATLAS_GUID_CACHE[root_key]
+    if hasattr(hair_bake_layer, "_index_meta_tree"):
+        try:
+            cached_map = hair_bake_layer._index_meta_tree(assets_root, use_disk_cache=True)
+            if cached_map:
+                _ATLAS_GUID_CACHE[root_key] = cached_map
+                return cached_map
+        except Exception:
+            pass
+    guid_map: Dict[str, Path] = {}
     for dir_path, dir_names, file_names in os.walk(assets_root):
         dir_names[:] = [
             sub_dir for sub_dir in dir_names
@@ -69,6 +258,7 @@ def _index_project_guids(assets_root: Path) -> Dict[str, Path]:
                 asset_candidate = meta_file.with_suffix("")
                 if asset_candidate.exists():
                     guid_map[guid_match.group(1).lower()] = asset_candidate
+    _ATLAS_GUID_CACHE[root_key] = guid_map
     return guid_map
 
 
@@ -134,27 +324,37 @@ def parse_unity_material_file(
                 pass
         return default_val
 
+    main2nd_flag = _float_prop("_UseMain2ndTex", float(parent_info.get("use_main2nd", 0.0)))
+    direct_main = _tex_prop("_MainTex")
     main_tex = (
-        _tex_prop("_MainTex")
-        if _has_prop("_MainTex")
-        else (
-            parent_info.get("main_tex")
-            or _tex_prop("_BaseMap")
-            or _tex_prop("_BaseColorMap")
-            or _tex_prop("_Main2ndTex")
-        )
+        direct_main
+        or parent_info.get("main_tex")
+        or _tex_prop("_BaseMap")
+        or _tex_prop("_BaseColorMap")
+        or (_tex_prop("_Main2ndTex") if main2nd_flag >= 0.5 else None)
     )
-    bump_tex = _tex_prop("_BumpMap") if _has_prop("_BumpMap") else parent_info.get("bump_tex")
-    emission_tex = _tex_prop("_EmissionMap") if _has_prop("_EmissionMap") else parent_info.get("emission_tex")
-    alpha_mask_tex = _tex_prop("_AlphaMask") if _has_prop("_AlphaMask") else parent_info.get("alpha_mask_tex")
+    bump_tex = _tex_prop("_BumpMap") or parent_info.get("bump_tex")
+    smoothness_tex = _tex_prop("_SmoothnessTex") or parent_info.get("smoothness_tex")
+    spec_gloss_tex = _tex_prop("_SpecGlossMap") or parent_info.get("spec_gloss_tex")
+    metallic_gloss_tex = _tex_prop("_MetallicGlossMap") or parent_info.get("metallic_gloss_tex")
+    emission_tex = _tex_prop("_EmissionMap") or parent_info.get("emission_tex")
+    alpha_mask_tex = _tex_prop("_AlphaMask") or parent_info.get("alpha_mask_tex")
     parent_color = tuple(parent_info.get("color_rgba") or (1.0, 1.0, 1.0, 1.0))
     parent_emis = tuple(parent_info.get("emission_rgba") or (0.0, 0.0, 0.0, 1.0))
     parent_hsvg = tuple(parent_info.get("hsvg_rgba") or (0.0, 1.0, 1.0, 1.0))
     color_rgba = _color_prop("_Color", parent_color)  # type: ignore[arg-type]
     emission_rgba = _color_prop("_EmissionColor", parent_emis)  # type: ignore[arg-type]
     hsvg_rgba = _color_prop("_MainTexHSVG", parent_hsvg)  # type: ignore[arg-type]
-    main2nd_flag = _float_prop("_UseMain2ndTex", float(parent_info.get("use_main2nd", 0.0)))
-    bump_scale = _float_prop("_BumpScale", float(parent_info.get("bump_scale", 0.5)))
+    use_bump_map = _float_prop(
+        "_UseBumpMap",
+        float(parent_info.get("use_bump_map", 1.0 if bump_tex else 0.0)),
+    )
+    if use_bump_map < 0.5:
+        bump_tex = None
+    bump_scale = max(
+        0.15,
+        min(1.25, _float_prop("_BumpScale", float(parent_info.get("bump_scale", 0.5)))),
+    )
     cutoff_val = _float_prop("_Cutoff", float(parent_info.get("cutoff", 0.5)))
     cull_mode = _float_prop("_Cull", float(parent_info.get("cull_mode", 2.0)))
     transparent_mode = _float_prop(
@@ -195,7 +395,7 @@ def parse_unity_material_file(
     unbound_alpha_eff = max(0.0, min(1.0, 1.0 * alpha_mask_scale + alpha_mask_val))
     has_unbound_alpha_fade = (
         shader_is_trans
-        and (alpha_mask_mode in (1, 2))
+        and (alpha_mask_mode in (1, 2, 3, 4))
         and (not alpha_mask_tex)
         and (unbound_alpha_eff < 0.96)
     )
@@ -203,8 +403,10 @@ def parse_unity_material_file(
 
     if is_body_alpha_overlay:
         alpha_mode = "opaque"
-    elif shader_is_refract or has_unbound_alpha_fade or has_trans_color_alpha:
+    elif shader_is_refract or shader_is_trans or has_unbound_alpha_fade or has_trans_color_alpha:
         alpha_mode = "transparent"
+    elif shader_is_cutout:
+        alpha_mode = "cutout"
     elif transparent_mode >= 0.0:
         if transparent_mode >= 2.0 or "_ALPHABLEND_ON" in shader_keywords:
             alpha_mode = "transparent"
@@ -213,8 +415,7 @@ def parse_unity_material_file(
         else:
             alpha_mode = "opaque"
     elif (
-        shader_is_trans
-        or render_queue >= 2900
+        render_queue >= 2900
         or "_ALPHABLEND_ON" in shader_keywords
         or ("hair" in low_name and ("trans" in low_name or "alpha" in low_name or "bang" in low_name or "front" in low_name))
     ):
@@ -230,6 +431,10 @@ def parse_unity_material_file(
         "mat_path": str(mat_path),
         "main_tex": main_tex,
         "bump_tex": bump_tex,
+        "smoothness_tex": smoothness_tex,
+        "spec_gloss_tex": spec_gloss_tex,
+        "metallic_gloss_tex": metallic_gloss_tex,
+        "use_bump_map": use_bump_map,
         "emission_tex": emission_tex,
         "alpha_mask_tex": alpha_mask_tex,
         "alpha_mask_mode": alpha_mask_mode,
@@ -450,6 +655,12 @@ def _load_tinted_tile(
                 .resize((tile_size, tile_size), Image.Resampling.LANCZOS)
             )
             alpha_mask_red = numpy_lib.array(alpha_mask_img, dtype=numpy_lib.float32)[:, :, 0] / 255.0
+            if hair_bake_layer.resolve_texture_srgb_flag(alpha_mask_tex):
+                alpha_mask_red = numpy_lib.where(
+                    alpha_mask_red <= 0.04045,
+                    alpha_mask_red / 12.92,
+                    numpy_lib.power((alpha_mask_red + 0.055) / 1.055, 2.4),
+                )
             eff_mask = numpy_lib.clip(alpha_mask_red * float(alpha_mask_scale) + float(alpha_mask_val), 0.0, 1.0)
             arr_float[:, :, 3] *= eff_mask
     else:
@@ -567,6 +778,9 @@ def build_universal_avatar_atlas(
                     "color_rgba": mat_info["color_rgba"],
                     "bump_tex": mat_info.get("bump_tex"),
                     "bump_scale": mat_info.get("bump_scale", 0.5),
+                    "smoothness_tex": mat_info.get("smoothness_tex"),
+                    "spec_gloss_tex": mat_info.get("spec_gloss_tex"),
+                    "metallic_gloss_tex": mat_info.get("metallic_gloss_tex"),
                     "emission_tex": mat_info.get("emission_tex"),
                     "emission_rgba": mat_info.get("emission_rgba", [0.0, 0.0, 0.0, 1.0]),
                     "alpha_mask_tex": mat_info.get("alpha_mask_tex"),
@@ -615,7 +829,15 @@ def build_universal_avatar_atlas(
     tile_size = max(1, atlas_size // grid_dim)
     atlas_canvas = Image.new("RGBA", (atlas_size, atlas_size), (210, 195, 195, 255))
     normal_canvas = Image.new("RGBA", (atlas_size, atlas_size), (128, 128, 255, 255))
+    spec_canvas = Image.new("RGBA", (atlas_size, atlas_size), (0, 0, 0, 255))
     has_bump_map = False
+    gloss_stats: Dict[str, Any] = {
+        "has_spec_map": False,
+        "max_spec": 0.0,
+        "max_smooth": 0.0,
+        "max_bump": 0.0,
+        "glossy_mats": set(),
+    }
 
     uv_regions_by_mat: Dict[str, Dict[str, Any]] = {}
     uv_regions_by_mat_path: Dict[str, Dict[str, Any]] = {}
@@ -667,19 +889,25 @@ def build_universal_avatar_atlas(
             )
         if tile_img.size != (cell_width, cell_height):
             tile_img = tile_img.resize((cell_width, cell_height), Image.Resampling.LANCZOS)
-        if is_opaque_tile:
+        tile_alpha_min = int(numpy_lib.array(tile_img)[..., 3].min())
+        effective_alpha_mode = (
+            "opaque"
+            if (is_opaque_tile or tile_alpha_min >= 254)
+            else str(entry_data.get("alpha_mode", "opaque"))
+        )
+        if effective_alpha_mode == "opaque":
             tile_img = tile_img.convert("RGB").convert("RGBA")
         atlas_canvas.paste(tile_img, (paste_x, paste_y))
 
         bump_tex = entry_data.get("bump_tex")
-        if bump_tex and Path(bump_tex).is_file():
+        if bump_tex and Path(bump_tex).is_file() and effective_alpha_mode != "transparent":
             bump_img = (
                 Image.open(bump_tex)
                 .convert("RGBA")
                 .resize((cell_width, cell_height), Image.Resampling.LANCZOS)
             )
             bump_arr = numpy_lib.array(bump_img, dtype=numpy_lib.float32)
-            bscale = float(entry_data.get("bump_scale", 0.5))
+            bscale = max(0.15, min(1.0, float(entry_data.get("bump_scale", 0.5))))
             bump_arr[:, :, 0] = 128.0 + (bump_arr[:, :, 0] - 128.0) * bscale
             bump_arr[:, :, 1] = 128.0 + (bump_arr[:, :, 1] - 128.0) * bscale
             bump_arr[:, :, 2] = 255.0 - (255.0 - bump_arr[:, :, 2]) * bscale
@@ -689,6 +917,15 @@ def build_universal_avatar_atlas(
             )
             normal_canvas.paste(normal_tile, (paste_x, paste_y))
             has_bump_map = True
+        _paint_tile_spec_map(
+            entry_data,
+            cell_width,
+            cell_height,
+            spec_canvas,
+            paste_x,
+            paste_y,
+            gloss_stats,
+        )
 
         # PIL top row (row_idx=0) corresponds to top V=[1 - cell_end_y/atlas_size, ...] in Blender/RAGE UV space
         u_offset = float(paste_x) / float(atlas_size)
@@ -703,7 +940,7 @@ def build_universal_avatar_atlas(
             "u_scale": u_scale,
             "v_scale": v_scale,
             "diffuse_src": "" if entry_data["main_tex"] == "__SOLID_COLOR__" else entry_data["main_tex"],
-            "alpha_mode": entry_data.get("alpha_mode", "opaque"),
+            "alpha_mode": effective_alpha_mode,
             "is_double_sided": bool(entry_data.get("is_double_sided", False)),
             "cull_mode": float(entry_data.get("cull_mode", 2.0)),
             "cutoff": float(entry_data.get("cutoff", 0.5)),
@@ -737,14 +974,35 @@ def build_universal_avatar_atlas(
         lut_regions = []
         slot_materials = {}
         matcap_candidates = []
+        assets_anchor = project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir
+        metal_tokens = (
+            "metal", "silver", "gold", "halo", "pin", "acc", "chain",
+            "ring", "buckle", "zip", "button", "glass", "lens", "pearl",
+        )
         for reg_name, reg_data in uv_regions_by_mat.items():
             low_mat = reg_name.lower()
             low_path = str(reg_data.get("mat_path", "") or "").replace("\\", "/").lower()
+            reg_mat_path = reg_data.get("mat_path")
+            parsed_mat = vtoon_profile_helper.parse_liltoon_mat_file(
+                reg_mat_path,
+                assets_root=assets_anchor,
+            )
+            parsed_mat_metallic = float(parsed_mat.get("floats", {}).get("_Metallic", 0.0) or 0.0)
+            blend_mask_guid = parsed_mat.get("tex_guids", {}).get("_MatCapBlendMask")
+            resolved_blend_mask = None
+            if blend_mask_guid and reg_mat_path:
+                resolved_blend_mask = hair_bake_layer.resolve_unity_guid(
+                    blend_mask_guid, Path(reg_mat_path), unity_assets_root=assets_anchor
+                )
+            hair_path_tokens = ("hair", "bang", "kami", "ahoge", "twin", "pony", "bob", "wig")
+            is_skin_or_eye = any(tok in low_mat for tok in ("face", "head", "mouth", "body", "skin", "eye", "iris", "pupil", "lash", "brow"))
             is_hair_token = "hair" in low_mat or (
-                "hair" in low_path
+                not is_skin_or_eye
+                and any(tok in low_path for tok in hair_path_tokens)
                 and "accessories" not in low_path
                 and "pin" not in low_mat
                 and "halo" not in low_mat
+                and "ribbon" not in low_mat
             )
             if is_hair_token and str(reg_data.get("alpha_mode")) == "transparent":
                 slot_id = vtoon_profile_helper.SLOT_HAIR_ALPHA
@@ -754,10 +1012,18 @@ def build_universal_avatar_atlas(
                 rim_mask, preset_shadow_mask = 0.85, 0.95
             elif "face" in low_mat or "head" in low_mat:
                 slot_id = vtoon_profile_helper.SLOT_FACE
-                rim_mask, preset_shadow_mask = 0.20, 0.88
+                is_glossy_skin = low_mat in gloss_stats["glossy_mats"] or re.sub(r"(?:\s*\(instance\)|\.\d{3})+$", "", low_mat) in gloss_stats["glossy_mats"]
+                rim_mask, preset_shadow_mask = (0.85 if is_glossy_skin else 0.20), 0.88
             elif "body" in low_mat or "skin" in low_mat:
                 slot_id = vtoon_profile_helper.SLOT_SKIN
-                rim_mask, preset_shadow_mask = 0.25, 0.90
+                is_glossy_skin = low_mat in gloss_stats["glossy_mats"] or re.sub(r"(?:\s*\(instance\)|\.\d{3})+$", "", low_mat) in gloss_stats["glossy_mats"]
+                rim_mask, preset_shadow_mask = (1.0 if is_glossy_skin else 0.25), 0.90
+            elif "nail" in low_mat:
+                slot_id = vtoon_profile_helper.SLOT_NAILS
+                rim_mask, preset_shadow_mask = 0.85, 0.90
+            elif any(tok in low_mat for tok in metal_tokens) or parsed_mat_metallic >= 0.45:
+                slot_id = vtoon_profile_helper.SLOT_METAL
+                rim_mask, preset_shadow_mask = 0.85, 0.92
             elif str(reg_data.get("alpha_mode")) == "transparent":
                 slot_id = vtoon_profile_helper.SLOT_TRANSPARENT
                 rim_mask, preset_shadow_mask = 0.65, 0.15
@@ -773,16 +1039,12 @@ def build_universal_avatar_atlas(
                     slot_id=slot_id,
                     shadow_mask=preset_shadow_mask,
                     rim_mask=rim_mask,
+                    rim_mask_tex=resolved_blend_mask,
                 )
             )
             if slot_id not in slot_materials:
-                reg_mat_path = reg_data.get("mat_path")
                 if reg_mat_path:
                     matcap_candidates.append(reg_mat_path)
-                parsed_mat = vtoon_profile_helper.parse_liltoon_mat_file(
-                    reg_mat_path,
-                    assets_root=project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir,
-                )
                 slot_materials[slot_id] = vtoon_profile_helper.build_vtoon_slot_from_mat(
                     parsed_mat,
                     slot_type=slot_id,
@@ -805,22 +1067,31 @@ def build_universal_avatar_atlas(
             mat_paths_for_matcap=matcap_candidates,
             assets_root=project_dir / "Assets" if (project_dir / "Assets").is_dir() else project_dir,
             sync_dirs=sync_targets,
+            mat_paths_by_role=_collect_mat_paths_by_role(tile_entries),
         )
 
     resampling_enum = getattr(Image, "Resampling", Image)
     lanczos_filter = getattr(resampling_enum, "LANCZOS", Image.LANCZOS)
     flat_tex_size = max(256, min(512, atlas_size))
-    spec_img = Image.new("RGBA", (flat_tex_size, flat_tex_size), (0, 0, 0, 255))
+    use_flat_spec = not gloss_stats["has_spec_map"]
     if normal_size > 0:
         target_normal_size = min(atlas_size, normal_size)
         use_flat_normal = (not has_bump_map) or (target_normal_size <= 64)
+        if target_normal_size <= 64:
+            use_flat_spec = True
     else:
-        use_flat_normal = True
-        target_normal_size = flat_tex_size
+        use_flat_normal = not has_bump_map
+        target_normal_size = min(atlas_size, 512) if (has_bump_map or gloss_stats["has_spec_map"]) else flat_tex_size
     if use_flat_normal:
         normal_canvas = Image.new("RGBA", (target_normal_size, target_normal_size), (128, 128, 255, 255))
     elif normal_canvas.width != target_normal_size:
         normal_canvas = normal_canvas.resize((target_normal_size, target_normal_size), lanczos_filter)
+    if use_flat_spec:
+        spec_img = Image.new("RGBA", (target_normal_size, target_normal_size), (0, 0, 0, 255))
+    elif spec_canvas.width != target_normal_size:
+        spec_img = spec_canvas.resize((target_normal_size, target_normal_size), lanczos_filter)
+    else:
+        spec_img = spec_canvas
 
     has_alpha_tile = any(
         str(entry_item.get("alpha_mode", "opaque")) != "opaque"
@@ -835,6 +1106,21 @@ def build_universal_avatar_atlas(
     diffuse_to_save.save(atlas_png_path, format="PNG")
     normal_canvas.save(normal_png_path, format="PNG")
     spec_img.save(spec_png_path, format="PNG")
+    bump_dds_path = _encode_aux_dds(
+        normal_png_path,
+        normal_png_path.with_suffix(".dds"),
+        use_flat_normal,
+        (128, 128, 255, 255),
+    )
+    spec_dds_path = _encode_aux_dds(
+        spec_png_path,
+        spec_png_path.with_suffix(".dds"),
+        use_flat_spec,
+        (0, 0, 0, 255),
+    )
+    shader_bumpiness = 0.0 if use_flat_normal else 1.0
+    shader_specular_intensity = 0.0 if use_flat_spec else round(max(0.15, min(0.85, gloss_stats["max_spec"])), 4)
+    shader_specular_falloff = 1.0 if use_flat_spec else round(32.0 + 384.0 * max(0.0, min(1.0, gloss_stats["max_smooth"])), 1)
 
     # Build single-texture external .ytd matching vanilla GTA V streamed ped layout
     # so DiffuseSampler (index 0) always binds the diffuse atlas reliably in-game.
@@ -862,6 +1148,11 @@ def build_universal_avatar_atlas(
         "atlas_png": str(atlas_png_path),
         "normal_png": str(normal_png_path),
         "spec_png": str(spec_png_path),
+        "bump_dds": str(bump_dds_path),
+        "spec_dds": str(spec_dds_path),
+        "shader_bumpiness": shader_bumpiness,
+        "shader_specular_intensity": shader_specular_intensity,
+        "shader_specular_falloff": shader_specular_falloff,
         "ytd_file": str(ytd_path),
         "materials": uv_regions_by_mat,
         "materials_by_path": uv_regions_by_mat_path,
@@ -875,3 +1166,22 @@ def build_universal_avatar_atlas(
     )
     manifest_data["manifest_path"] = str(manifest_path)
     return manifest_data
+
+
+def _cli_main() -> int:
+    """Delegate CLI atlas builds to universal_gtav_builder in --atlas-only mode."""
+    import universal_gtav_builder
+
+    argv_tokens = list(sys.argv[1:])
+    if "--atlas-only" not in argv_tokens:
+        argv_tokens.append("--atlas-only")
+    saved_argv = list(sys.argv)
+    try:
+        sys.argv = [sys.argv[0], *argv_tokens]
+        return int(universal_gtav_builder._cli_main())
+    finally:
+        sys.argv = saved_argv
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli_main())

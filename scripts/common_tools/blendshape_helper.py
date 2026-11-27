@@ -243,24 +243,125 @@ except ImportError:
     is_nipple_blendshape_key,
     )
 
+def sanitize_cfg_base_name(raw_name: str, fallback: str = "avatar") -> str:
+    """Return a filesystem-safe `.cfg` stem preserving readable characters."""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(raw_name or "").strip())
+    cleaned = re.sub(r"\s+", "_", cleaned).strip("._ ")
+    return cleaned or fallback
+
+
+def resolve_cfg_base_name(
+    source_spec: Optional[Union[str, Path]] = None,
+    scene_or_prefab: Optional[Union[str, Path]] = None,
+    fbx_paths: Sequence[Union[str, Path]] = (),
+    avatar_name: str = "",
+    fallback: str = "avatar",
+) -> str:
+    """
+    Resolve `.cfg` base filename from CLI archive (`.zip`/`.unitypackage`) or Unity
+    scene (`.unity`), falling back to `.prefab`, primary `.fbx`, or avatar name.
+    """
+    source_text = str(source_spec or "").strip()
+    if source_text:
+        source_path = Path(source_text)
+        if source_path.suffix.lower() in (".zip", ".unitypackage"):
+            return sanitize_cfg_base_name(source_path.stem, fallback=fallback)
+
+    scene_text = str(scene_or_prefab or "").strip()
+    if scene_text:
+        scene_path = Path(scene_text)
+        if scene_path.suffix.lower() in (".unity", ".prefab"):
+            return sanitize_cfg_base_name(scene_path.stem, fallback=fallback)
+
+    if source_text:
+        source_path = Path(source_text)
+        if source_path.suffix.lower() in (".unity", ".prefab", ".fbx"):
+            return sanitize_cfg_base_name(source_path.stem, fallback=fallback)
+
+    for fbx_item in fbx_paths or ():
+        fbx_text = str(fbx_item or "").strip()
+        if fbx_text:
+            return sanitize_cfg_base_name(Path(fbx_text).stem, fallback=fallback)
+
+    return sanitize_cfg_base_name(avatar_name, fallback=fallback)
+
+
+def build_cfg_header_comments(
+    *,
+    cfg_kind: str = "Blendshape",
+    generated_at: Optional[str] = None,
+    project_path: Optional[Union[str, Path]] = None,
+    scene_path: Optional[Union[str, Path]] = None,
+    fbx_paths: Sequence[Union[str, Path]] = (),
+    archive_path: Optional[Union[str, Path]] = None,
+    extra_comments: Sequence[str] = (),
+) -> List[str]:
+    """Build leading `#` metadata comment lines indicating timestamp, project, scene, and FBX."""
+    import datetime
+
+    stamp_text = str(generated_at or "").strip()
+    if not stamp_text:
+        stamp_text = (
+            datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z").strip()
+        )
+    proj_text = str(project_path or "").strip() or "N/A"
+    scene_text = str(scene_path or "").strip()
+    arch_text = str(archive_path or "").strip()
+    unique_fbx: List[str] = []
+    for fbx_item in fbx_paths or ():
+        item_text = str(fbx_item or "").strip()
+        if item_text and item_text not in unique_fbx:
+            unique_fbx.append(item_text)
+    fbx_text = ", ".join(unique_fbx) if unique_fbx else "N/A"
+
+    header_lines: List[str] = [
+        f"# VRC2GTAV {cfg_kind} Configuration",
+        f"# Generated: {stamp_text}",
+        f"# Project: {proj_text}",
+    ]
+    if scene_text:
+        header_lines.append(f"# Scene: {scene_text}")
+    if arch_text:
+        header_lines.append(f"# Archive: {arch_text}")
+    header_lines.append(f"# FBX: {fbx_text}")
+
+    metadata_prefixes = (
+        "# vrc2gtav ",
+        "# generated:",
+        "# project:",
+        "# scene:",
+        "# archive:",
+        "# fbx:",
+    )
+    for raw_comment in extra_comments or ():
+        comment_text = str(raw_comment or "").strip()
+        if not comment_text:
+            continue
+        norm_comment = comment_text if comment_text.startswith("#") else f"# {comment_text}"
+        if norm_comment.lower().startswith(metadata_prefixes):
+            continue
+        header_lines.append(norm_comment)
+    return header_lines
+
+
 VALID_BLENDSHAPE_SOURCES: Tuple[str, ...] = ("auto", "unity", "cfg")
 
 AVATAR_PRESET_RELATIVE_PATHS: Dict[str, str] = {
-    "shinano_casual": "configs/shinano_blendshapes.cfg",
-    "shinano_er": "configs/shinano_er_blendshapes.cfg",
-    "miltina_maid": "configs/miltina_blendshapes.cfg",
+    "player_one_franklin": "configs/player_one_franklin_blendshapes.cfg",
+    "player_zero_michael": "configs/player_zero_michael_blendshapes.cfg",
+    "player_two_trevor": "configs/player_two_trevor_blendshapes.cfg",
 }
 
 DEFAULT_PRESET_RELATIVE_PATHS: Dict[str, str] = {
-    "franklin": "configs/shinano_blendshapes.cfg",
-    "michael": "configs/shinano_er_blendshapes.cfg",
-    "trevor": "configs/miltina_blendshapes.cfg",
+    "franklin": "configs/player_one_franklin_blendshapes.cfg",
+    "michael": "configs/player_zero_michael_blendshapes.cfg",
+    "trevor": "configs/player_two_trevor_blendshapes.cfg",
     **AVATAR_PRESET_RELATIVE_PATHS,
 }
 
 # Base Shinano.fbx meshes belonging solely to Shinano Casual (excluded when
 # generating Eternal Reunion presets, which supply ER_Shi + Neko Tied Bob).
-SHINANO_CASUAL_EXTRA_MESHES: Tuple[str, ...] = (
+PLAYER_ONE_FRANKLIN_EXTRA_MESHES: Tuple[str, ...] = (
     "Cloth_under_bra",
     "Cloth_under_shorts",
     "Cloth_dress",
@@ -630,8 +731,8 @@ def export_character_blendshapes_to_cfg(
     fill_missing_from_fbx: bool = True,
 ) -> Optional[Path]:
     """
-    Export or synchronize blendshape presets for an avatar preset (`shinano_casual`,
-    `shinano_er`, `miltina_maid`) or protagonist slot into a `.cfg` preset file.
+    Export or synchronize blendshape presets for an avatar preset (`player_one_franklin`,
+    `player_zero_michael`, `player_two_trevor`) or protagonist slot into a `.cfg` preset file.
 
     By default (`preserve_existing_cfg=True`), any existing `.cfg` values remain
     untouched while missing channels from configured FBX models are appended
@@ -656,7 +757,7 @@ def export_character_blendshapes_to_cfg(
     candidate_fbxs: List[Union[str, Path]] = []
     for fbx_key in (
         "source_fbx",
-        "fbx_shinano",
+        "fbx_base",
         "fbx_outfit",
         "fbx_watch",
         "fbx_hair",
@@ -677,17 +778,25 @@ def export_character_blendshapes_to_cfg(
 
     target_path_obj = Path(project_paths.to_host_path(str(target_out)))
     existing_comments = _read_leading_cfg_comments(target_path_obj)
+    resolved_scene = unity_scene_override or char_cfg.get("unity_scene") or ""
+    header_comments = build_cfg_header_comments(
+        cfg_kind="Blendshape Preset",
+        project_path=project_paths.get_project_root(),
+        scene_path=resolved_scene,
+        fbx_paths=candidate_fbxs,
+        extra_comments=existing_comments,
+    )
 
     hints_by_avatar = {
-        "shinano_casual": ["shinano"],
-        "shinano_er": ["shinano", "reunion"],
-        "miltina_maid": ["milltina", "miltina"],
+        "player_one_franklin": ["shinano"],
+        "player_zero_michael": ["shinano", "reunion"],
+        "player_two_trevor": ["milltina", "miltina"],
         "franklin": ["shinano"],
         "michael": ["shinano", "reunion"],
         "trevor": ["milltina", "miltina"],
     }
     excluded_fbx_meshes = (
-        SHINANO_CASUAL_EXTRA_MESHES if avatar_id == "shinano_er" else ()
+        PLAYER_ONE_FRANKLIN_EXTRA_MESHES if avatar_id == "player_zero_michael" else ()
     )
     should_preserve_cfg = (
         preserve_existing_cfg
@@ -708,7 +817,7 @@ def export_character_blendshapes_to_cfg(
         save_cfg_path=target_path_obj,
         fill_missing_from_fbx=fill_missing_from_fbx,
         fbx_excluded_meshes=excluded_fbx_meshes,
-        header_comments=existing_comments or None,
+        header_comments=header_comments,
     )
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
 
@@ -972,9 +1081,9 @@ def main() -> int:
             "franklin",
             "michael",
             "trevor",
-            "shinano_casual",
-            "shinano_er",
-            "miltina_maid",
+            "player_one_franklin",
+            "player_zero_michael",
+            "player_two_trevor",
             "all",
         ],
         default="all",
@@ -1006,7 +1115,7 @@ def main() -> int:
         project_i18n.set_active_language(parsed_args.lang)
 
     targets = (
-        ["shinano_casual", "shinano_er", "miltina_maid"]
+        ["player_one_franklin", "player_zero_michael", "player_two_trevor"]
         if parsed_args.character == "all"
         else [parsed_args.character]
     )

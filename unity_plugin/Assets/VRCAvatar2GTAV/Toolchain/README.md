@@ -80,7 +80,7 @@ Beyond Blender **4.0.2**, **Sollumz v2.9.0**, and **`rage-cli` 0.28.1** automati
 - **Universal GTA V NPC & Street Pedestrian Pipeline**: [`scripts/common_tools/npc_registry_helper.py`](scripts/common_tools/npc_registry_helper.py) and [`scripts/common_tools/universal_gtav_builder.py`](scripts/common_tools/universal_gtav_builder.py) port any Scene / `.prefab` / `.unity` / `.zip` / `.unitypackage` avatar directly onto any story/cutscene NPC (`ig_*`, `cs_*`) or street ped (`a_f_*`, `a_m_*`) via `--npc` / `--all-npcs` / `--target-ped`, with native jaw mapping (`FB_Jaw_000` / `FACIAL_C_Jaw` / `FACIAL_jaw`), `.001` vs `" 1"` bone suffix matching (`0` ungrouped vertices), dummy prop cleanup (`*_p` / `p_*.ydd`), and `GTAVPhysBones.asi` tracking up to **32 simultaneous peds (`kMaxTrackedPeds = 32`)**.
 - **GTA V Blood & Wound Decals (`ped.sps` + 6-Zone `UVMap 1`)**: [`scripts/common_tools/ped_damage_helper.py`](scripts/common_tools/ped_damage_helper.py) enables gunshot wounds, slashes, and blood overlays (`--blood-decals`, enabled by default; `--no-blood-decals` for `ped_default.sps`) while excluding tails and long back hair.
 - **Optional Natural Eye Blinking (`GTAVPhysBones.asi`)**: [`scripts/common_tools/eye_blink_helper.py`](scripts/common_tools/eye_blink_helper.py) drives smooth asymmetrical eyelid blinking (`2.6–6.0s` random intervals, curved-lash downward filter, eyebrow protection) across the four native `FACIAL_*_eyelidUpper*` bones (`0` PhysBone slots used), skipping avatars with custom closed-eye/winking expressions (`eye_blink = auto`, adjustable via `--eye-blink-strength` / `--no-eye-blink`).
-- **Dedicated Error Handling, Trilingual i18n (`en`/`ja`/`pt`) & Automated Verification**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) writes timestamped `--verbose` logs under `logs/`; [`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) runs **11** clean-clone source suites (`--source-only`) and **14** end-to-end validation suites.
+- **Dedicated Error Handling, Trilingual i18n (`en`/`ja`/`pt`) & Automated Verification**: [`scripts/common_tools/error_handler_helper.py`](scripts/common_tools/error_handler_helper.py) writes timestamped `--verbose` logs under `logs/`; [`scripts/common_tools/test_mod_suite.py`](scripts/common_tools/test_mod_suite.py) runs **12** clean-clone source suites (`--source-only`) and **15** end-to-end validation suites. See also the [Unity Editor UI Guide (`docs/UNITY_UI_GUIDE.md`)](docs/UNITY_UI_GUIDE.md).
 
 ---
 
@@ -90,9 +90,9 @@ By default each protagonist starts with the preset below, and any VRChat avatar 
 
 | Default GTA V Slot | Protagonist | Default VRChat Avatar (`avatar` ID) | Configured Preset / Outfit | Workspace Folder |
 | :--- | :--- | :--- | :--- | :--- |
-| `player_zero` | **Michael De Santa** | **Shinano** (`shinano_er`) | *Eternal Reunion* (Gothic Dress + Pocket Watch + optional custom Unity hair or *Neko Tied Bob Hair*, falls back to default Shinano hair) | [`2_Michael_Shinano_EternalReunion/`](2_Michael_Shinano_EternalReunion/) |
-| `player_one` | **Franklin Clinton** | **Shinano** (`shinano_casual`) | *Casual / Uniform* (Red Skirt + Recolored Default Shinano Hair, or optional custom Unity hair) | [`1_Franklin_Shinano_Casual/`](1_Franklin_Shinano_Casual/) |
-| `player_two` | **Trevor Philips** | **Miltina** (`miltina_maid`) | *Classic Maid* (Black & White Dress, Apron, Twintails + optional custom Unity hair) | [`3_Trevor_Miltina_Maid/`](3_Trevor_Miltina_Maid/) |
+| `player_zero` | **Michael De Santa** | **Shinano** (`player_zero_michael`) | *Eternal Reunion* (Gothic Dress + Pocket Watch + optional custom Unity hair or default fallback) | `player_zero/` |
+| `player_one` | **Franklin Clinton** | **Shinano** (`player_one_franklin`) | *Casual / Uniform* (Red Skirt + Recolored Hair, or optional custom Unity hair) | `player_one/` |
+| `player_two` | **Trevor Philips** | **Miltina** (`player_two_trevor`) | *Classic Maid* (Black & White Dress, Apron, Twintails + optional custom Unity hair) | `player_two/` |
 
 ---
 
@@ -154,12 +154,10 @@ By default each protagonist starts with the preset below, and any VRChat avatar 
 
 - **External Config (`vrc2gtav.cfg`) & Bundled Toolchain**: Copy [`vrc2gtav.cfg.example`](vrc2gtav.cfg.example) to `vrc2gtav.cfg` (or let `--setup` / the Unity Exporter generate it) to configure GTA V Legacy, Blender, `rage-cli`, and source assets. When installed via `.unitypackage`, `Vrc2GtavConfigDiscovery` prioritizes `Assets/VRCAvatar2GTAV/Toolchain` by default while redirecting generated builds into a clean `<ProjectRoot>/VRCAvatar2GTAV_Work` workspace.
 - **Scale Handling (`1.0` + `.unity` Parser)**: Character proportions default to `[1.0, 1.0, 1.0]`, and `.unity` scene transforms automatically apply custom hierarchy scales.
-- **Blendshape Presets, MA Shape/Sync & `.anim` Fallback (`Unity` & `configs/*_blendshapes.cfg`)**: Facial, body-shrink, outfit, accessory, and hair keys resolve via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) from `.unity` / nested `.prefab` / `.anim` or UTF-8 `.cfg` presets (`blendshapes_source = auto | unity | cfg`). Empty or all-zero `.anim` overrides preserve scene/preset facial blendshapes. Modular Avatar `ShapeChanger` (`Delete` vs `Set`) and `BlendshapeSync` (`RemapCurve`) run after base weight resets, while manual `Shrink_* > 0.5` keys on `Body_base` / `Body` automatically cull fully shrunk interior triangles before poly budgeting.
-- **Automatic VRChat PhysBones Importer & Priority Packer (`Unity` & `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) imports active standard `VRCPhysBone` components (`PrefabInstance` overrides, lower-hair/bow spoke unwrapping, orphaned/loose old-dress chain pruning in Unity extraction plus final post-cull active-vertex pruning in Blender), packs within RAGE's `<= 63` custom / `<= 128` total `.ydd` limit (`79` standard protagonist chains / `182` custom bones — **0 chains discarded**; optional `--physbones-marshmallow` enables `81` chains / `186` bones), and prioritizes **hair/ears (`97–100`), breasts (`94`), and skirts (`90`)** at top priority above tails/wings (`82`), outerwear (`68`), and minor ribbons/accessories (`PHYSBONE_PRIORITY_TIERS`).
+- **Blendshape Presets, MA Shape/Sync & Scene/Archive `.cfg` Naming (`Unity` & `configs/*_blendshapes.cfg`)**: Facial, body-shrink, outfit, accessory, and hair keys resolve via [`scripts/common_tools/blendshape_helper.py`](scripts/common_tools/blendshape_helper.py) from `.unity` / nested `.prefab` / `.anim` or UTF-8 `.cfg` presets (`blendshapes_source = auto | unity | cfg`). When exporting any Booth avatar automatically, generated `.cfg` files are named after the **Unity `.unity` scene** (or the user-supplied `.zip`/`.unitypackage` filename stem in CLI mode) and begin with `# Generated`, `# Project`, `# Scene`, and `# FBX` metadata comments. Empty or all-zero `.anim` overrides preserve scene/preset facial blendshapes. Modular Avatar `ShapeChanger` (`Delete` vs `Set`) and `BlendshapeSync` (`RemapCurve`) run after base weight resets, while manual `Shrink_* > 0.5` keys on `Body_base` / `Body` automatically cull fully shrunk interior triangles before poly budgeting.
+- **Automatic VRChat PhysBones Importer & Priority Packer (`Unity` & `configs/*_physbones.cfg`)**: [`scripts/common_tools/physbone_helper.py`](scripts/common_tools/physbone_helper.py) imports active `VRCPhysBone` components (`PrefabInstance` overrides, lower-hair/bow spoke unwrapping, orphaned/loose chain pruning in Unity extraction plus final post-cull active-vertex pruning in Blender), packs within RAGE's `<= 63` custom / `<= 128` total `.ydd` limit (`--physbones-marshmallow` optional), and prioritizes **hair/ears (`97–100`), breasts (`94`), and skirts (`90`)** at top priority above tails/wings (`82`), outerwear (`68`), and minor ribbons/accessories (`PHYSBONE_PRIORITY_TIERS`).
 - **Universal Custom Hair & Face Fallbacks**:
-  - **Any Avatar Preset**: Supports `custom_hair = auto | default | none | <path to .prefab or .fbx>` (`[8]` / `--hair`, `--hair-mat`, `--hair-tex`, `--hair-scale`, `--hair-offset`) via [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) & [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py).
-  - **Shinano**: Uses `custom_hair` / *Neko Tied Bob Hair* when provided; otherwise falls back to Shinano's base hair (`Hair_base`, `Hair_bang`, `Hair_side`, `Hair_back`, `Other_ear`, `Other_tail`), `ShinanoDefAdultNewv5.anim`, and base eye textures.
-  - **Miltina**: Uses `custom_hair` / `fbx_hair` when provided; otherwise falls back to base twintails (`Milltina_hair_*`), `Miltina_close eyes_Base_adult.anim`, and base eye textures.
+  - **Any Booth / VRChat Avatar**: Supports `custom_hair = auto | default | none | <path to .prefab or .fbx>` (`[8]` / `--hair`, `--hair-mat`, `--hair-tex`, `--hair-scale`, `--hair-offset`) via [`scripts/common_tools/unity_hair_helper.py`](scripts/common_tools/unity_hair_helper.py) & [`scripts/common_tools/blender_hair_helper.py`](scripts/common_tools/blender_hair_helper.py), falling back cleanly to native hair and expression animations when no custom override is specified.
 - **Language Detection**: Scripts auto-detect system locale (`en`, `ja`, `pt`) and accept `--lang en|ja|pt`.
 
 ---
@@ -169,24 +167,25 @@ By default each protagonist starts with the preset below, and any VRChat avatar 
 | Command | Purpose |
 | :--- | :--- |
 | `RUN_MANAGER.bat` / `EXECUTAR_GERENCIADOR.bat` | Interactive Windows launcher for First-Run, build, and deploy |
-| `python unity_plugin/install_unity_plugin.py --unity-project "/path/Project"` | Non-destructively install `Assets/VRCAvatar2GTAV/` UI + Toolchain into a Unity project |
+| `python unity_plugin/install_unity_plugin.py --unity-project "/path/Project"` | Non-destructively install `Assets/VRCAvatar2GTAV/` UI + Toolchain into a Unity project (cleaning legacy files/metas) |
 | `python unity_plugin/build_unitypackage.py` | Stage `Assets/VRCAvatar2GTAV/Toolchain/` and rebuild `VRCAvatar2GTAV.unitypackage` |
 | `python run_mod_manager.py --setup` | Interactive First-Run wizard & `vrc2gtav.cfg` setup |
-| `python run_mod_manager.py --setup --avatar-zip "/path/Shinano.zip" --download-blender --verbose` | Extract `.zip`/`.unitypackage`, download Blender `4.0.2` + Sollumz, paginate (`10`/page), configure MA/Face/Body `.cfg` & save log in `logs/` |
-| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Shinano.zip" --interactive --verbose` | Standalone universal Modular Avatar builder with 10-per-page picker & timestamped logs |
+| `python run_mod_manager.py --setup --avatar-zip "/path/Avatar.zip" --download-blender --verbose` | Extract `.zip`/`.unitypackage`, download Blender `4.0.2` + Sollumz, paginate (`10`/page), configure MA/Face/Body `.cfg` & save log in `logs/` |
+| `python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/Avatar.zip" --interactive --verbose` | Standalone universal Modular Avatar builder for any Booth avatar with 10-per-page picker & timestamped logs |
 | `python scripts/common_tools/universal_gtav_builder.py --slots-json "configs/active_multi_slots.json"` | Sequential multi-slot protagonist build (`PerProtagonistSlots`) with single shared RPF7 repack (`--secondary-atlas-size`, `--atlas-size`, `--mouth-open-strength`, `--face-anim`) |
+| `python scripts/common_tools/universal_gtav_builder.py --target-character michael --atlas-only` | Build only the single-mip 2K `.ytd` atlas via the universal pipeline (add `--skip-atlas --no-deploy` to compile `.ydd` only) |
 | `python scripts/common_tools/universal_gtav_builder.py --restore-peds player_zero` | Selectively restore a protagonist/NPC to Rockstar vanilla (`--restore-all` restores all modded peds) preserving all other modded slots |
 | `python run_mod_manager.py --check-env` / `setup_first_run.py --check-only` | Validate GTA V, Blender, `rage-cli`, and configured asset paths |
 | `python run_mod_manager.py --character {all,michael,franklin,trevor} --lang {en,ja,pt}` | Full 3D Blender rebuild, YDD/YTD export, `GTAVVToon`/`GTAVPhysBones` sync, and RPF7 deployment |
-| `python run_mod_manager.py --character franklin --avatar miltina_maid` | Build & deploy any VRChat preset (`shinano_casual`, `shinano_er`, `miltina_maid`) onto any protagonist (`--save-assignment`) |
+| `python run_mod_manager.py --character franklin --avatar player_two_trevor` | Assign any configured profile (`player_zero_michael`, `player_one_franklin`, `player_two_trevor`) onto any protagonist (`--save-assignment`) |
 | `python run_mod_manager.py --character michael --hair "/path/Hair.prefab" --save-hair` | Port any `.prefab` / `PrefabVariant` / `.fbx` custom hair (`--hair default` / `none` / `--hair-mat` / `--hair-tex` / `--hair-scale` / `--hair-offset`) |
 | `python run_mod_manager.py --export-blendshapes` / `--blendshapes-source cfg` | Export `.cfg` blendshapes from `.unity` scenes or build from portable `.cfg` presets |
 | `python run_mod_manager.py --export-physbones` / `--physbones-source cfg` | Sync VRCPhysBones presets (`--physbones-marshmallow`, `--overwrite-physbones-from-unity`) |
 | `python run_mod_manager.py --character all --blood-decals --eye-blink` | Configure blood/wound decals (`--no-blood-decals`), natural eye blink (`--eye-blink-strength`, `--no-eye-blink`), and `--mouth-open-strength` (`0.70` default) |
-| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/Karin.zip"` | Build & deploy any GTA V NPC (`ig_*`, `cs_*`) or street ped (`a_f_*`, `a_m_*`) directly (`--all-npcs` / `--target-ped ... --deploy-npc`) |
+| `python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/Avatar.zip"` | Build & deploy any GTA V NPC (`ig_*`, `cs_*`) or street ped (`a_f_*`, `a_m_*`) directly (`--all-npcs` / `--target-ped ... --deploy-npc`) |
 | `python run_mod_manager.py --deploy-only` | Repack and deploy already-built character, registered NPC folders, and ASI plugins to `mods/` |
-| `python scripts/common_tools/test_mod_suite.py --source-only` | Run all **11** clean-clone source/config/Unity/VToon/MA-Shape/Restore/i18n/AST suites |
-| `python scripts/common_tools/test_mod_suite.py` | Run all **14** end-to-end validation suites (requires built & deployed assets) |
+| `python scripts/common_tools/test_mod_suite.py --source-only` | Run all **12** clean-clone source/config/Unity/VToon/MA-Shape/Cross-Avatar/i18n/AST suites |
+| `python scripts/common_tools/test_mod_suite.py` | Run all **15** end-to-end validation suites (requires built & deployed assets) |
 
 ---
 
@@ -206,18 +205,17 @@ vrcavatar2gtav/
 ├── docs/
 │   ├── DEPLOYMENT_GUIDE.md          # Full architecture, Unity UI, VToon, rigging, Sollumz & RPF7 guide (EN)
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md    # Full technical guide (PT-BR)
-│   └── DEPLOYMENT_GUIDE.ja.md       # Full technical guide (JA)
+│   ├── DEPLOYMENT_GUIDE.ja.md       # Full technical guide (JA)
+│   ├── UNITY_UI_GUIDE.md / .pt-BR.md / .ja.md # Illustrated Unity Exporter UI guides (EN/PT-BR/JA)
+│   └── images/                      # Unity Editor UI screenshots
 ├── scripts/
-│   ├── common_tools/                # First-run, .unity/hair/blendshape/PhysBones/VToon/Restore/NPC helpers, i18n, test_mod_suite.py
+│   ├── common_tools/                # Universal builders, First-Run, .unity/hair/blendshape/PhysBones/VToon/Restore/NPC helpers, i18n, test_mod_suite.py
 │   ├── physbones_asi/               # Real-time VRChat PhysBones ASI plugin (GTAVPhysBones.asi / .ini)
-│   ├── vtoon_asi/                   # Real-time D3D11 lilToon shader ASI plugin (GTAVVToon.asi / .ini / vtoon_profiles)
-│   ├── Shinano_Casual_Franklin/     # Franklin (player_one) build scripts
-│   ├── Shinano_EternalReunion_Michael/ # Michael (player_zero) build scripts
-│   └── Miltina_Maid_Trevor/         # Trevor (player_two) build scripts
+│   └── vtoon_asi/                   # Real-time D3D11 lilToon shader ASI plugin (GTAVVToon.asi / .ini / vtoon_profiles)
 ├── _deploy_tools/                   # Universal slot dummies (head_000_r.ydd, p_eyes_dummy.ydd) & runtime helpers
-├── 1_Franklin_Shinano_Casual/       # Output staging folder for player_one
-├── 2_Michael_Shinano_EternalReunion/# Output staging folder for player_zero
-├── 3_Trevor_Miltina_Maid/           # Output staging folder for player_two
+├── player_zero/                     # Output staging folder for Michael (player_zero)
+├── player_one/                      # Output staging folder for Franklin (player_one)
+├── player_two/                      # Output staging folder for Trevor (player_two)
 ├── requirements.txt                 # Python 3.10+ dependencies (numpy, Pillow)
 ├── run_mod_manager.py               # Main CLI & interactive orchestrator
 ├── setup_first_run.py               # First-Run setup entrypoint
@@ -227,7 +225,7 @@ vrcavatar2gtav/
 └── LICENSE                          # MIT License
 ```
 
-For in-depth documentation on skeleton bone alignment, hand curl calibration, lip-sync morph synthesis (`0.70` default), `GTAVVToon.asi` HLSL cel shading, single-mip `.ytd`s, `VRCAvatar2GTAV.unitypackage` UI controls, selective Restore Vanilla, and RPF7 `4.00 GiB` safety, read the **[Deployment & Technical Guide](docs/DEPLOYMENT_GUIDE.md)**.
+For in-depth documentation on the Unity UI, skeleton bone alignment, hand curl calibration, lip-sync morph synthesis (`0.70` default), `GTAVVToon.asi` HLSL cel shading, single-mip `.ytd`s, selective Restore Vanilla, and RPF7 `4.00 GiB` safety, read the **[Unity Editor UI Guide](docs/UNITY_UI_GUIDE.md)** and the **[Deployment & Technical Guide](docs/DEPLOYMENT_GUIDE.md)**.
 
 ---
 

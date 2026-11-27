@@ -50,33 +50,33 @@ import vrc2gtav_i18n as project_i18n
 import vrc2gtav_paths as project_paths
 
 AVATAR_BLENDSHAPE_PRESETS = {
-    "shinano_casual": "shinano_blendshapes.cfg",
-    "shinano_er": "shinano_er_blendshapes.cfg",
-    "miltina_maid": "miltina_blendshapes.cfg",
+    "player_one_franklin": "player_one_franklin_blendshapes.cfg",
+    "player_zero_michael": "player_zero_michael_blendshapes.cfg",
+    "player_two_trevor": "player_two_trevor_blendshapes.cfg",
 }
 
 AVATAR_ANIM_FILES = {
-    "shinano_casual": ["ShinanoDefAdultNewv5.anim"],
-    "shinano_er": ["ShinanoDefAdultNewv5.anim"],
-    "miltina_maid": ["Miltina_close eyes_Base_adult.anim"],
+    "player_one_franklin": ["ShinanoDefAdultNewv5.anim"],
+    "player_zero_michael": ["ShinanoDefAdultNewv5.anim"],
+    "player_two_trevor": ["Miltina_close eyes_Base_adult.anim"],
 }
 
 AVATAR_SCENE_HINTS = {
-    "shinano_casual": ["shinano"],
-    "shinano_er": ["shinano"],
-    "miltina_maid": ["milltina", "miltina"],
+    "player_one_franklin": ["shinano"],
+    "player_zero_michael": ["shinano"],
+    "player_two_trevor": ["milltina", "miltina"],
 }
 
 DEFAULT_BLENDSHAPE_PRESETS = {
-    "franklin": AVATAR_BLENDSHAPE_PRESETS["shinano_casual"],
-    "michael": AVATAR_BLENDSHAPE_PRESETS["shinano_er"],
-    "trevor": AVATAR_BLENDSHAPE_PRESETS["miltina_maid"],
+    "franklin": AVATAR_BLENDSHAPE_PRESETS["player_one_franklin"],
+    "michael": AVATAR_BLENDSHAPE_PRESETS["player_zero_michael"],
+    "trevor": AVATAR_BLENDSHAPE_PRESETS["player_two_trevor"],
 }
 
 DEFAULT_CHARACTER_ANIM_FILES = {
-    "franklin": AVATAR_ANIM_FILES["shinano_casual"],
-    "michael": AVATAR_ANIM_FILES["shinano_er"],
-    "trevor": AVATAR_ANIM_FILES["miltina_maid"],
+    "franklin": AVATAR_ANIM_FILES["player_one_franklin"],
+    "michael": AVATAR_ANIM_FILES["player_zero_michael"],
+    "trevor": AVATAR_ANIM_FILES["player_two_trevor"],
 }
 
 
@@ -888,10 +888,10 @@ def configure_vrc2gtav_cfg(
         manifest_info = prep_res["manifest"]
         chosen_slot = str(manifest_info.get("target_character", "michael"))
         slot_avatar_id = {
-            "michael": "shinano_er",
-            "franklin": "shinano_casual",
-            "trevor": "miltina_maid",
-        }.get(chosen_slot, "shinano_er")
+            "michael": "player_zero_michael",
+            "franklin": "player_one_franklin",
+            "trevor": "player_two_trevor",
+        }.get(chosen_slot, "player_zero_michael")
         slot_section = f"avatar_{slot_avatar_id}"
         for cand_sec in (f"avatar_{slot_avatar_id}", f"avatar:{slot_avatar_id}", slot_avatar_id):
             if config_parser.has_section(cand_sec):
@@ -1206,7 +1206,7 @@ def extract_vanilla_gtav_assets(force_reextract: bool = False) -> bool:
         # Skip redundant re-extraction when legacy Franklin patchday3_work is already populated
         legacy_p3_dir = (
             project_paths.get_project_root()
-            / "1_Franklin_Shinano_Casual"
+            / "player_one"
             / "5_rpf_package"
             / "patchday3_work"
         )

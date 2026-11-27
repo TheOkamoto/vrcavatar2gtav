@@ -23,7 +23,7 @@ try:
         SKEL_HEAD_TAG,
         PARENT_BONE_TAGS,
         _chain_parent_map,
-        MICHAEL_ER_BONE_MAP,
+        PLAYER_ZERO_MICHAEL_BONE_MAP,
         VANILLA_RESERVED_BONE_TAGS,
         VRCHAT_PHYSBONE_SCRIPT_GUID,
     )
@@ -32,7 +32,7 @@ except ImportError:
         SKEL_HEAD_TAG,
         PARENT_BONE_TAGS,
         _chain_parent_map,
-        MICHAEL_ER_BONE_MAP,
+        PLAYER_ZERO_MICHAEL_BONE_MAP,
         VANILLA_RESERVED_BONE_TAGS,
         VRCHAT_PHYSBONE_SCRIPT_GUID,
     )
@@ -252,7 +252,7 @@ def save_physbone_config(
         lines.append(f"{meta_key} = {meta_val}")
 
     lines.extend(["", "[bone_mapping]"])
-    map_dict = bone_mapping or dict(MICHAEL_ER_BONE_MAP)
+    map_dict = bone_mapping or dict(PLAYER_ZERO_MICHAEL_BONE_MAP)
     for src_name, dst_name in map_dict.items():
         lines.append(f"{src_name} = {dst_name}")
 

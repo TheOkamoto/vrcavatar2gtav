@@ -71,6 +71,17 @@ BLINK_SHAPE_KEY_CANDIDATES: Tuple[str, ...] = (
     "mabataki",
 )
 
+BLINK_SHAPE_KEY_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("vrc.blink_left", "vrc.blink_right"),
+    ("vrc.v_blink_left", "vrc.v_blink_right"),
+    ("eye_close_l", "eye_close_r"),
+    ("eyes_close_l", "eyes_close_r"),
+    ("close_eye_l", "close_eye_r"),
+    ("blink_left", "blink_right"),
+    ("blink_l", "blink_r"),
+    ("まばたき_l", "まばたき_r"),
+)
+
 CLOSED_EYE_CONFLICT_EXACT: FrozenSet[str] = frozenset(
     {
         "vrc.blink",
@@ -137,9 +148,9 @@ def parse_eye_blink_mode(raw_value: Any, default: str = "auto") -> str:
 
 
 DEFAULT_BLINK_STRENGTH_BY_AVATAR: Dict[str, float] = {
-    "shinano_casual": 0.50,
-    "shinano_er": 0.50,
-    "miltina_maid": 0.60,
+    "player_one_franklin": 0.50,
+    "player_zero_michael": 0.50,
+    "player_two_trevor": 0.60,
 }
 
 
@@ -197,10 +208,10 @@ def resolve_eye_blink_strength(
             continue
         if norm_cand in DEFAULT_BLINK_STRENGTH_BY_AVATAR:
             return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR[norm_cand])
-        if "miltina" in norm_cand or "milltina" in norm_cand:
-            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["miltina_maid"])
-        if "shinano" in norm_cand:
-            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["shinano_casual"])
+        if "miltina" in norm_cand or "milltina" in norm_cand or "trevor" in norm_cand or "player_two" in norm_cand:
+            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["player_two_trevor"])
+        if "shinano" in norm_cand or "franklin" in norm_cand or "michael" in norm_cand or "player_one" in norm_cand or "player_zero" in norm_cand:
+            return float(DEFAULT_BLINK_STRENGTH_BY_AVATAR["player_one_franklin"])
     return float(default)
 
 
@@ -358,26 +369,28 @@ def detect_custom_eye_expression_conflict(
     return None
 
 
-def find_blink_shape_key(
+def find_blink_shape_key_group(
     key_blocks: Sequence[Any],
     base_positions: Optional[Sequence[Tuple[float, float, float]]] = None,
     min_moved_verts: int = 10,
-) -> Optional[Any]:
+) -> List[Any]:
     """
-    Find the best upper-eyelid blink shape key in `key_blocks`, normalizing trailing
-    spaces (e.g., Milltina's `'vrc.blink '`) and preferring canonical VRC blink keys.
+    Find combined blink shape key or matching left/right blink pair in `key_blocks`,
+    supporting Booth avatars with combined (`vrc.blink`) or split (`vrc.blink_left/right`) keys.
     """
     if not key_blocks:
-        return None
+        return []
 
     normalized_blocks: List[Tuple[str, Any]] = []
+    block_by_norm: Dict[str, Any] = {}
     for key_item in key_blocks:
         key_name = getattr(key_item, "name", "")
         norm_name = str(key_name).strip().lower()
         if norm_name and norm_name != "basis":
             normalized_blocks.append((norm_name, key_item))
+            block_by_norm.setdefault(norm_name, key_item)
 
-    def _has_enough_motion(key_item: Any) -> bool:
+    def _has_enough_motion(key_item: Any, min_req: int = min_moved_verts) -> bool:
         if not base_positions:
             return True
         key_data = getattr(key_item, "data", None)
@@ -391,21 +404,54 @@ def find_blink_shape_key(
             diff_z = float(key_coord.z) - base_pos[2]
             if (diff_x * diff_x + diff_y * diff_y + diff_z * diff_z) >= 2.5e-7:
                 moved += 1
-                if moved >= min_moved_verts:
+                if moved >= min_req:
                     return True
         return False
 
     for candidate in BLINK_SHAPE_KEY_CANDIDATES:
+        key_exact = block_by_norm.get(candidate)
+        if key_exact is not None and _has_enough_motion(key_exact):
+            return [key_exact]
+
+    per_side_min = max(4, min_moved_verts // 2)
+    for left_name, right_name in BLINK_SHAPE_KEY_PAIRS:
+        left_key = block_by_norm.get(left_name)
+        right_key = block_by_norm.get(right_name)
+        if (
+            left_key is not None
+            and right_key is not None
+            and _has_enough_motion(left_key, per_side_min)
+            and _has_enough_motion(right_key, per_side_min)
+        ):
+            return [left_key, right_key]
+
+    sided_tokens = ("_left", "_right", "_l", "_r", ".l", ".r")
+    for candidate in BLINK_SHAPE_KEY_CANDIDATES:
         for norm_name, key_item in normalized_blocks:
-            if norm_name == candidate and _has_enough_motion(key_item):
-                return key_item
+            if candidate in norm_name and not any(tok in norm_name for tok in sided_tokens) and _has_enough_motion(key_item):
+                return [key_item]
 
     for candidate in BLINK_SHAPE_KEY_CANDIDATES:
         for norm_name, key_item in normalized_blocks:
             if candidate in norm_name and _has_enough_motion(key_item):
-                return key_item
+                return [key_item]
 
-    return None
+    return []
+
+
+def find_blink_shape_key(
+    key_blocks: Sequence[Any],
+    base_positions: Optional[Sequence[Tuple[float, float, float]]] = None,
+    min_moved_verts: int = 10,
+) -> Optional[Any]:
+    """
+    Find the primary upper-eyelid blink shape key in `key_blocks`, normalizing trailing
+    spaces (e.g., Milltina's `'vrc.blink '`) and preferring canonical VRC blink keys.
+    """
+    group = find_blink_shape_key_group(
+        key_blocks, base_positions=base_positions, min_moved_verts=min_moved_verts
+    )
+    return group[0] if group else None
 
 
 def prepare_ydd_blink_bone_set(
@@ -960,11 +1006,11 @@ def extract_body_eyelid_blink_rig_data(
         (float(vert.co.x), float(vert.co.y), float(vert.co.z))
         for vert in body_obj.data.vertices
     ]
-    blink_key = find_blink_shape_key(key_blocks, base_positions=basis_positions)
-    if blink_key is None:
+    blink_keys = find_blink_shape_key_group(key_blocks, base_positions=basis_positions)
+    if not blink_keys:
         result["reason"] = "no_blink_shape_key"
         return result
-    result["shape_key"] = str(blink_key.name)
+    result["shape_key"] = "+".join(str(blink_key_item.name) for blink_key_item in blink_keys)
 
     excluded_set: Set[int] = set(exclude_vert_indices or ())
 
@@ -984,12 +1030,12 @@ def extract_body_eyelid_blink_rig_data(
     finally:
         eval_open.to_mesh_clear()
 
-    prev_value = float(blink_key.value)
-    prev_mute = bool(blink_key.mute)
+    prev_states = [(blk, float(blk.value), bool(blk.mute)) for blk in blink_keys]
     shut_coords: List[Tuple[float, float, float]] = []
     try:
-        blink_key.mute = False
-        blink_key.value = 1.0
+        for blk in blink_keys:
+            blk.mute = False
+            blk.value = 1.0
         bpy_mod.context.view_layer.update()
         eval_shut = body_obj.evaluated_get(depsgraph)
         shut_world_mat = eval_shut.matrix_world.copy()
@@ -1001,8 +1047,9 @@ def extract_body_eyelid_blink_rig_data(
         finally:
             eval_shut.to_mesh_clear()
     finally:
-        blink_key.value = prev_value
-        blink_key.mute = prev_mute
+        for blk, old_val, old_mute in prev_states:
+            blk.value = old_val
+            blk.mute = old_mute
         bpy_mod.context.view_layer.update()
 
     left_deltas: Dict[int, Tuple[float, float, float]] = {}

@@ -167,9 +167,10 @@ def select_primary_avatar_fbx(
         }
     )
 
-    def _score_primary(fbx_file: Path) -> Tuple[int, int, int, int, int, int, int]:
+    def _score_primary(fbx_file: Path) -> Tuple[int, int, int, int, int, int, int, int]:
         resolved_str = str(fbx_file.resolve())
         stem_low = fbx_file.stem.lower()
+        parent_low = str(fbx_file.parent).lower().replace("\\", "/")
         stem_tokens = {tok for tok in re.split(r"[^a-z0-9]+", stem_low) if tok}
         owned_meshes = active_by_fbx.get(resolved_str, ())
         skin_count = sum(
@@ -185,9 +186,26 @@ def select_primary_avatar_fbx(
             )
             else 0
         )
+        parent_is_accessory = (
+            1
+            if any(
+                tok in parent_low
+                for tok in ("hair", "costume", "outfit", "dress", "wear", "cloth", "acc")
+            )
+            else 0
+        )
         has_kaihen = 1 if any(tok in stem_low for tok in ("kaihen", "alt", "quest")) else 0
         matches_name = 0 if any(tok in stem_low or stem_low in tok for tok in anchor_tokens if tok) else 1
-        return (owns_skin, -skin_count, in_loose, is_accessory, has_kaihen, matches_name, -fbx_file.stat().st_size)
+        return (
+            owns_skin,
+            -skin_count,
+            in_loose,
+            is_accessory,
+            parent_is_accessory,
+            has_kaihen,
+            matches_name,
+            -fbx_file.stat().st_size,
+        )
 
     return sorted(candidates, key=_score_primary)[0]
 
@@ -430,6 +448,7 @@ def prepare_universal_npc_build(
     secondary_atlas_size: int = 0,
     texture_overrides: Optional[Dict[str, str]] = None,
     deploy: bool = True,
+    skip_atlas: bool = False,
     slot_index: int = 0,
     slot_total: int = 1,
     build_share: Optional[float] = None,
@@ -562,27 +581,51 @@ def prepare_universal_npc_build(
         ped_name=norm_ped,
         lang=active_lang,
     )
-    print(
-        f"[3/4] Compiling {resolved_atlas_size}px GTA V Texture Atlas & .ytd "
-        f"(VToon char_id={resolved_vtoon_id})...",
-        flush=True,
-    )
     textures_dir = Path(staging_info["textures_dir"])
-    atlas_manifest = universal_atlas_builder.build_universal_avatar_atlas(
-        ped_name=norm_ped,
-        project_dir=unity_proj_root,
-        scene_or_prefab=selected_scene_or_prefab,
-        source_fbx=main_fbx,
-        extra_fbxs=extra_fbxs,
-        output_dir=textures_dir,
-        atlas_size=resolved_atlas_size,
-        normal_size=resolved_normal_size,
-        ma_plan=ma_plan,
-        avatar_name=effective_avatar_name,
-        texture_overrides=texture_overrides,
-        vtoon_char_id=resolved_vtoon_id,
-        sync_to_game=bool(deploy),
-    )
+    existing_atlas_manifest_path = textures_dir / "atlas_manifest.json"
+    atlas_manifest: Optional[Dict[str, Any]] = None
+    if skip_atlas and existing_atlas_manifest_path.is_file():
+        try:
+            loaded_manifest = json.loads(
+                existing_atlas_manifest_path.read_text(encoding="utf-8")
+            )
+            if (
+                isinstance(loaded_manifest, dict)
+                and loaded_manifest.get("atlas_png")
+                and Path(str(loaded_manifest["atlas_png"])).is_file()
+                and loaded_manifest.get("ytd_file")
+                and Path(str(loaded_manifest["ytd_file"])).is_file()
+            ):
+                loaded_manifest["manifest_path"] = str(existing_atlas_manifest_path)
+                atlas_manifest = loaded_manifest
+                print(
+                    f"[3/4] Reusing compiled atlas & .ytd: {loaded_manifest['ytd_file']}",
+                    flush=True,
+                )
+        except Exception:
+            atlas_manifest = None
+
+    if atlas_manifest is None:
+        print(
+            f"[3/4] Compiling {resolved_atlas_size}px GTA V Texture Atlas & .ytd "
+            f"(VToon char_id={resolved_vtoon_id})...",
+            flush=True,
+        )
+        atlas_manifest = universal_atlas_builder.build_universal_avatar_atlas(
+            ped_name=norm_ped,
+            project_dir=unity_proj_root,
+            scene_or_prefab=selected_scene_or_prefab,
+            source_fbx=main_fbx,
+            extra_fbxs=extra_fbxs,
+            output_dir=textures_dir,
+            atlas_size=resolved_atlas_size,
+            normal_size=resolved_normal_size,
+            ma_plan=ma_plan,
+            avatar_name=effective_avatar_name,
+            texture_overrides=texture_overrides,
+            vtoon_char_id=resolved_vtoon_id,
+            sync_to_game=bool(deploy),
+        )
 
     anim_search_dir = (
         main_fbx.parent.parent
@@ -635,8 +678,34 @@ def prepare_universal_npc_build(
     package_dir.mkdir(parents=True, exist_ok=True)
     blender_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_blendshape_cfg = blender_dir / f"{norm_ped}_blendshapes.cfg"
-    saved_pb_cfg = blender_dir / f"{norm_ped}_physbones.cfg"
+    cfg_base_name = blendshape_helper.resolve_cfg_base_name(
+        source_spec=resolved_src,
+        scene_or_prefab=selected_scene_or_prefab,
+        fbx_paths=all_fbxs,
+        avatar_name=effective_avatar_name,
+        fallback=norm_ped,
+    )
+    saved_blendshape_cfg = blender_dir / f"{cfg_base_name}_blendshapes.cfg"
+    saved_pb_cfg = blender_dir / f"{cfg_base_name}_physbones.cfg"
+    archive_for_header = (
+        resolved_src
+        if resolved_src.suffix.lower() in (".zip", ".unitypackage")
+        else None
+    )
+    blendshape_headers = blendshape_helper.build_cfg_header_comments(
+        cfg_kind="Blendshape",
+        project_path=unity_proj_root,
+        scene_path=selected_scene_or_prefab or "",
+        fbx_paths=all_fbxs,
+        archive_path=archive_for_header,
+    )
+    physbone_headers = blendshape_helper.build_cfg_header_comments(
+        cfg_kind="PhysBone",
+        project_path=unity_proj_root,
+        scene_path=selected_scene_or_prefab or "",
+        fbx_paths=all_fbxs,
+        archive_path=archive_for_header,
+    )
 
     active_face_mesh = next(
         (active_mesh_name for active_mesh_name in active_meshes if active_mesh_name.lower() == "body"),
@@ -673,6 +742,7 @@ def prepare_universal_npc_build(
         override_avatar_name=effective_avatar_name,
         override_face_anim=face_anim_path,
         save_cfg_path=saved_blendshape_cfg,
+        header_comments=blendshape_headers,
         import_face=import_face_blendshapes,
         import_body=import_body_blendshapes,
     )
@@ -689,6 +759,7 @@ def prepare_universal_npc_build(
         override_avatar_name=effective_avatar_name,
         override_marshmallow=physbones_marshmallow,
         save_cfg_path=saved_pb_cfg,
+        header_comments=physbone_headers,
         max_custom_bones=physbone_helper.MAX_CUSTOM_PHYSBONES_PER_PED,
         override_excluded_meshes=disabled_meshes,
         override_active_meshes=active_meshes,
@@ -721,6 +792,11 @@ def prepare_universal_npc_build(
         "atlas_png": str(atlas_manifest["atlas_png"]),
         "normal_png": str(atlas_manifest["normal_png"]),
         "spec_png": str(atlas_manifest["spec_png"]),
+        "bump_dds": str(atlas_manifest.get("bump_dds") or ""),
+        "spec_dds": str(atlas_manifest.get("spec_dds") or ""),
+        "shader_bumpiness": float(atlas_manifest.get("shader_bumpiness", 0.0) or 0.0),
+        "shader_specular_intensity": float(atlas_manifest.get("shader_specular_intensity", 0.0) or 0.0),
+        "shader_specular_falloff": float(atlas_manifest.get("shader_specular_falloff", 1.0) or 1.0),
         "ytd_file": str(atlas_manifest["ytd_file"]),
         "blendshape_weights": blendshape_res["mesh_weights"],
         "physbones_cfg": str(saved_pb_cfg),

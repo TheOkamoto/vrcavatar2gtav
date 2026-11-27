@@ -480,7 +480,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 or {}
             )
             if mat_meta.get("is_body_alpha_overlay") or (
-                _strip_object_base_name(src_obj.name).lower() == "body"
+                blendshape_helper.is_body_or_face_skin_mesh(src_obj)
                 and "alpha" in mat_name_check.lower()
                 and "hair" not in mat_name_check.lower()
             ):
@@ -538,13 +538,20 @@ def run_in_blender_build(manifest_path: Path) -> None:
 
         new_obj = bpy.data.objects.new(f"proc_{src_obj.name}", new_mesh)
         bpy.context.collection.objects.link(new_obj)
-        if _strip_object_base_name(src_obj.name).lower() != "body" and new_mesh.has_custom_normals:
+        if (
+            not blender_hair_helper.is_face_mesh_or_material_candidate(
+                src_obj, strip_suffix_func=_strip_object_base_name
+            )
+            and new_mesh.has_custom_normals
+        ):
             bpy.context.view_layer.objects.active = new_obj
             bpy.ops.mesh.customdata_custom_splitnormals_clear()
 
         # Preserve Unity material assignments so every mesh/slot maps to its exact atlas tile
         kept_slots_map: Dict[int, int] = {}
         orig_poly_mats = [poly_elem.material_index for poly_elem in new_obj.data.polygons]
+        src_is_skin_mesh = blendshape_helper.is_body_or_face_skin_mesh(src_obj)
+        src_obj_label = _strip_object_base_name(src_obj.name)
         if src_obj.data.materials:
             new_obj.data.materials.clear()
             for old_idx, mat_item in enumerate(src_obj.data.materials):
@@ -555,14 +562,25 @@ def run_in_blender_build(manifest_path: Path) -> None:
                     unity_slot_idx = blender_to_unity_slot.get(old_idx, old_idx)
                     u_spec = unity_mats_list[min(unity_slot_idx, len(unity_mats_list) - 1)]
                     default_mat_label = mat_item.name if mat_item is not None else src_obj.name
-                    new_obj.data.materials.append(_get_tagged_unity_mat(u_spec, default_mat_label))
+                    tagged_mat = _get_tagged_unity_mat(u_spec, default_mat_label)
+                    tagged_mat["vrc2gtav_src_skin"] = bool(tagged_mat.get("vrc2gtav_src_skin")) or src_is_skin_mesh
+                    if not tagged_mat.get("vrc2gtav_src_obj_name"):
+                        tagged_mat["vrc2gtav_src_obj_name"] = src_obj_label
+                    new_obj.data.materials.append(tagged_mat)
                 else:
+                    if mat_item is not None:
+                        mat_item["vrc2gtav_src_skin"] = bool(mat_item.get("vrc2gtav_src_skin")) or src_is_skin_mesh
+                        if not mat_item.get("vrc2gtav_src_obj_name"):
+                            mat_item["vrc2gtav_src_obj_name"] = src_obj_label
                     new_obj.data.materials.append(mat_item)
             for poly_elem, old_slot_idx in zip(new_obj.data.polygons, orig_poly_mats):
                 poly_elem.material_index = kept_slots_map.get(old_slot_idx, 0)
         elif unity_mats_list:
             new_obj.data.materials.clear()
-            new_obj.data.materials.append(_get_tagged_unity_mat(unity_mats_list[0], src_obj.name))
+            tagged_mat = _get_tagged_unity_mat(unity_mats_list[0], src_obj.name)
+            tagged_mat["vrc2gtav_src_skin"] = bool(tagged_mat.get("vrc2gtav_src_skin")) or src_is_skin_mesh
+            tagged_mat["vrc2gtav_src_obj_name"] = src_obj_label
+            new_obj.data.materials.append(tagged_mat)
             for poly_elem in new_obj.data.polygons:
                 poly_elem.material_index = 0
 
@@ -609,9 +627,16 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 lower_source_name = src_obj.name.lower()
                 is_head_mesh = src_obj == body_obj or any(
                     tok in lower_source_name
-                    for tok in ("hair", "back", "side", "bang", "beret", "halo", "ear", "glasses", "pocky")
+                    for tok in (
+                        "hair", "back", "side", "bang", "beret", "halo", "ear",
+                        "glasses", "pocky", "horn", "face", "head", "eyelash", "eyebrow",
+                    )
                 )
-                def_bone = "SKEL_Head" if is_head_mesh else "SKEL_Pelvis"
+                def_bone = (
+                    "SKEL_Head"
+                    if (is_head_mesh or (new_idx < len(new_mesh.vertices) and float(new_mesh.vertices[new_idx].co.z) >= 0.45))
+                    else "SKEL_Pelvis"
+                )
                 vgroup = new_obj.vertex_groups.get(def_bone) or new_obj.vertex_groups.new(name=def_bone)
                 vgroup.add([new_idx], 1.0, "REPLACE")
 
@@ -900,32 +925,45 @@ def run_in_blender_build(manifest_path: Path) -> None:
     atlas_img = bpy.data.images.load(str(project_paths.to_host_path(manifest["atlas_png"])))
     norm_host_path = project_paths.to_host_path(manifest["normal_png"])
     spec_host_path = project_paths.to_host_path(manifest["spec_png"])
-    norm_dds_path = norm_host_path.with_suffix(".dds")
-    spec_dds_path = spec_host_path.with_suffix(".dds")
+    flat_norm_dds_path = norm_host_path.with_name(f"{ped_name}_alpha_flat_normal.dds")
+    flat_spec_dds_path = spec_host_path.with_name(f"{ped_name}_alpha_flat_spec.dds")
     blender_hair_helper.ensure_solid_rgba_dds(
-        norm_dds_path, rgba_color=(128, 128, 255, 255), size=32
+        flat_norm_dds_path, rgba_color=(128, 128, 255, 255), size=32
     )
     blender_hair_helper.ensure_solid_rgba_dds(
-        spec_dds_path, rgba_color=(0, 0, 0, 255), size=32
+        flat_spec_dds_path, rgba_color=(0, 0, 0, 255), size=32
     )
-    norm_img = bpy.data.images.load(str(norm_dds_path), check_existing=True)
-    spec_img = bpy.data.images.load(str(spec_dds_path), check_existing=True)
-    if hasattr(norm_img, "colorspace_settings"):
-        norm_img.colorspace_settings.name = "Non-Color"
-    if hasattr(spec_img, "colorspace_settings"):
-        spec_img.colorspace_settings.name = "Non-Color"
+    norm_img = bpy.data.images.load(str(flat_norm_dds_path), check_existing=True)
+    spec_img = bpy.data.images.load(str(flat_spec_dds_path), check_existing=True)
+    bump_dds_raw = str(manifest.get("bump_dds") or atlas_manifest.get("bump_dds") or "").strip()
+    spec_dds_raw = str(manifest.get("spec_dds") or atlas_manifest.get("spec_dds") or "").strip()
+    ped_bump_path = project_paths.to_host_path(bump_dds_raw) if bump_dds_raw else flat_norm_dds_path
+    ped_spec_path = project_paths.to_host_path(spec_dds_raw) if spec_dds_raw else flat_spec_dds_path
+    ped_norm_img = bpy.data.images.load(str(ped_bump_path), check_existing=True) if ped_bump_path.is_file() else norm_img
+    ped_spec_img = bpy.data.images.load(str(ped_spec_path), check_existing=True) if ped_spec_path.is_file() else spec_img
+    for img_obj in (norm_img, spec_img, ped_norm_img, ped_spec_img):
+        if hasattr(img_obj, "colorspace_settings"):
+            img_obj.colorspace_settings.name = "Non-Color"
+    shader_bumpiness = float(manifest.get("shader_bumpiness") or atlas_manifest.get("shader_bumpiness") or 0.0)
+    shader_spec_int = float(manifest.get("shader_specular_intensity") or atlas_manifest.get("shader_specular_intensity") or 0.0)
+    shader_spec_falloff = float(manifest.get("shader_specular_falloff") or atlas_manifest.get("shader_specular_falloff") or 1.0)
+    print(
+        f"[Materials] Ped aux maps: bump={ped_norm_img.name}{list(ped_norm_img.size)} (b={shader_bumpiness:.2f}), "
+        f"spec={ped_spec_img.name}{list(ped_spec_img.size)} (s={shader_spec_int:.2f}, f={shader_spec_falloff:.1f})",
+        flush=True,
+    )
 
     ped_shader_mat = ped_damage_helper.create_ped_material(
         create_shader,
         f"{ped_name}_atlas",
         enable_blood_decals=enable_blood_decals,
         diffuse_image=atlas_img,
-        bump_image=norm_img,
-        spec_image=spec_img,
+        bump_image=ped_norm_img,
+        spec_image=ped_spec_img,
         embed_bump_spec=True,
-        bumpiness=0.0,
-        specular_intensity=0.0,
-        specular_falloff=1.0,
+        bumpiness=shader_bumpiness,
+        specular_intensity=shader_spec_int,
+        specular_falloff=shader_spec_falloff,
         specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
         detail_settings=(0.0, 0.0, 0.0),
         stubble_control=(0.0, 0.0),
@@ -935,30 +973,47 @@ def run_in_blender_build(manifest_path: Path) -> None:
     alpha_shader_mat = None
 
     slot_regions: Dict[int, Dict[str, Any]] = {}
-    slot_is_face: Dict[int, bool] = {}
+    slot_roles: Dict[int, str] = {}
     double_sided_slots: List[int] = []
+    transparent_orig_slots: set[int] = set()
     for slot_idx, mat_item in enumerate(joined_mesh_obj.data.materials):
         u_name_slot = str(mat_item.get("vrc2gtav_mat_name", "") or "").strip() if mat_item else ""
         mat_name_raw = u_name_slot or (_strip_object_base_name(mat_item.name) if mat_item else "")
-        low_mat_name = mat_name_raw.lower()
         resolved_reg = _resolve_mat_region(mat_item)
         slot_regions[slot_idx] = resolved_reg
-        slot_is_face[slot_idx] = "face" in low_mat_name
         alpha_mode = str(resolved_reg.get("alpha_mode", "opaque"))
-        if resolved_reg.get("is_double_sided") and (alpha_mode != "transparent" or "hair" in low_mat_name):
+        slot_roles[slot_idx] = blender_hair_helper.classify_skin_material_role(
+            mat_name_raw,
+            source_obj_name=str(mat_item.get("vrc2gtav_src_obj_name", "") or "") if mat_item else "",
+            diffuse_src=str(resolved_reg.get("diffuse_src", "") or ""),
+            alpha_mode=alpha_mode,
+            is_skin_source_obj=bool(mat_item.get("vrc2gtav_src_skin")) if (mat_item and "vrc2gtav_src_skin" in mat_item) else None,
+        )
+        if resolved_reg.get("is_double_sided"):
             double_sided_slots.append(slot_idx)
 
-        if alpha_mode == "transparent":
+        if alpha_mode == "transparent" and slot_roles[slot_idx] not in ("face", "body_skin"):
+            transparent_orig_slots.add(slot_idx)
             if alpha_shader_mat is None:
                 alpha_shader_mat = ped_damage_helper.create_ped_alpha_material(
                     create_shader,
                     f"{ped_name}_hair_alpha",
                     diffuse_image=atlas_img,
                     bump_image=norm_img,
-                    spec_image=spec_img,
+                    spec_image=ped_spec_img,
                     embed_bump_spec=True,
+                    bumpiness=0.0,
+                    specular_intensity=shader_spec_int,
+                    specular_falloff=shader_spec_falloff,
+                    specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL,
                 )
-            joined_mesh_obj.data.materials[slot_idx] = alpha_shader_mat
+                if hasattr(alpha_shader_mat, "blend_method"):
+                    alpha_shader_mat.blend_method = "BLEND"
+                if hasattr(alpha_shader_mat, "shadow_method"):
+                    alpha_shader_mat.shadow_method = "NONE"
+                if hasattr(alpha_shader_mat, "use_backface_culling"):
+                    alpha_shader_mat.use_backface_culling = False
+            joined_mesh_obj.data.materials[slot_idx] = ped_shader_mat
         elif alpha_mode == "cutout":
             if cutout_shader_mat is None:
                 cutout_shader_mat = ped_damage_helper.create_ped_hair_cutout_material(
@@ -973,51 +1028,16 @@ def run_in_blender_build(manifest_path: Path) -> None:
         else:
             joined_mesh_obj.data.materials[slot_idx] = ped_shader_mat
 
-    if double_sided_slots:
-        dup_faces = blender_hair_helper.duplicate_double_sided_backfaces(
-            joined_mesh_obj,
-            material_indices=double_sided_slots,
-            normal_offset=0.00035,
-        )
-        print(f"[VToon] Duplicated {dup_faces} double-sided faces for slots {double_sided_slots}", flush=True)
-
-    # Deduplicate material slots down to active distinct GTA V shader buckets (ped / cutout / alpha)
-    unique_mats = []
-    mat_ptr_to_idx = {}
-    slot_remap = {}
-    for old_idx, mat_ref in enumerate(list(joined_mesh_obj.data.materials)):
-        mat_key_name = mat_ref.name if mat_ref is not None else ""
-        if mat_key_name not in mat_ptr_to_idx:
-            mat_ptr_to_idx[mat_key_name] = len(unique_mats)
-            unique_mats.append(mat_ref)
-        slot_remap[old_idx] = mat_ptr_to_idx[mat_key_name]
-    # Note: apply UVs and face flag per-original slot before collapsing material indices!
-
-    uv_layer = joined_mesh_obj.data.uv_layers[0]
-    uv_layer.name = "UVMap 0"
-    poly_is_face = [False] * len(joined_mesh_obj.data.polygons)
-    remapped_poly_mats: List[int] = [0] * len(joined_mesh_obj.data.polygons)
-    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
-        orig_slot = poly_item.material_index
-        reg_spec = slot_regions.get(orig_slot, default_region)
-        poly_is_face[poly_seq_idx] = bool(slot_is_face.get(orig_slot))
-        off_u = float(reg_spec["u_offset"])
-        off_v = float(reg_spec["v_offset"])
-        scl_u = float(reg_spec["u_scale"])
-        scl_v = float(reg_spec["v_scale"])
-        for loop_idx in poly_item.loop_indices:
-            uv_coord = uv_layer.data[loop_idx].uv
-            local_u = max(0.001, min(0.999, uv_coord.x % 1.0 if (uv_coord.x < 0.0 or uv_coord.x > 1.0) else uv_coord.x))
-            local_v = max(0.001, min(0.999, uv_coord.y % 1.0 if (uv_coord.y < 0.0 or uv_coord.y > 1.0) else uv_coord.y))
-            uv_coord.x = local_u * scl_u + off_u
-            uv_coord.y = local_v * scl_v + off_v
-        remapped_poly_mats[poly_seq_idx] = slot_remap.get(orig_slot, 0)
-
-    joined_mesh_obj.data.materials.clear()
-    for unique_mat in unique_mats:
-        joined_mesh_obj.data.materials.append(unique_mat)
-    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
-        poly_item.material_index = remapped_poly_mats[poly_seq_idx]
+    poly_roles = blender_hair_helper.apply_atlas_uv_and_alpha_routing(
+        joined_mesh_obj,
+        slot_regions=slot_regions,
+        slot_roles=slot_roles,
+        double_sided_slots=double_sided_slots,
+        transparent_orig_slots=transparent_orig_slots,
+        alpha_shader_mat=alpha_shader_mat,
+        atlas_img=atlas_img,
+        default_region=default_region,
+    )
 
     ped_damage_res = ped_damage_helper.apply_ped_damage_attributes_in_blender(
         bpy,
@@ -1027,25 +1047,17 @@ def run_in_blender_build(manifest_path: Path) -> None:
     )
     print(f"[PedDamage] {ped_damage_res}", flush=True)
 
-    # Apply soft spherical anime face normals dynamically anchored to SKEL_Head
-    head_world_pos = (ped_armature.matrix_world @ ped_armature.data.bones["SKEL_Head"].head_local).copy()
-    joined_mesh_obj.data.calc_normals_split()
-    custom_normals = [tuple(loop_item.normal) for loop_item in joined_mesh_obj.data.loops]
-    mesh_verts = joined_mesh_obj.data.vertices
-    mesh_loops = joined_mesh_obj.data.loops
-    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
-        if not poly_is_face[poly_seq_idx]:
-            continue
-        for loop_idx in poly_item.loop_indices:
-            vpos = mesh_verts[mesh_loops[loop_idx].vertex_index].co
-            if vpos.y < head_world_pos.y + 0.025 and abs(vpos.x) < 0.095:
-                normal_x_val = vpos.x * 2.2
-                normal_y_val = -1.0
-                normal_z_val = (vpos.z - (head_world_pos.z + 0.05)) * 1.4
-                nlen = math.sqrt(normal_x_val * normal_x_val + normal_y_val * normal_y_val + normal_z_val * normal_z_val) or 1.0
-                custom_normals[loop_idx] = (normal_x_val / nlen, normal_y_val / nlen, normal_z_val / nlen)
-    joined_mesh_obj.data.normals_split_custom_set(custom_normals)
-    joined_mesh_obj.data.update()
+    # Apply spherical anime face normals & smooth neck skin normals dynamically anchored to SKEL_Head / SKEL_Neck_1
+    normal_stats = blender_hair_helper.apply_face_and_neck_split_normals(
+        joined_mesh_obj,
+        ped_armature,
+        poly_roles,
+    )
+    print(
+        f"[Normals] Smoothed anime face ({normal_stats['face_loops']}) and neck skin "
+        f"({normal_stats['neck_loops']}) loops across {normal_stats['reset_loops']} non-face loops.",
+        flush=True,
+    )
 
     import sollumz.ydr.ydrexport as ydrexport
     ydrexport.triangulate_mesh = lambda mesh_data: mesh_data
@@ -1236,7 +1248,7 @@ def run_in_blender_build(manifest_path: Path) -> None:
                 seed_ini = (
                     gtav_ini
                     if gtav_ini.is_file()
-                    else repo_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini"
+                    else repo_root / "player_zero" / "5_rpf_package" / "GTAVPhysBones.ini"
                 )
                 primary_merge_ini = seed_ini if seed_ini.is_file() else local_ini
                 physbone_helper.merge_physbone_asi_ini(
@@ -1263,6 +1275,8 @@ def build_and_deploy_npc_from_source(
     deploy: bool = True,
     repack_archives: bool = True,
     force_reextract: bool = False,
+    skip_atlas: bool = False,
+    atlas_only: bool = False,
     blood_decals: bool = True,
     eye_blink: Optional[bool] = None,
     eye_blink_strength: Optional[float] = None,
@@ -1312,10 +1326,13 @@ def build_and_deploy_npc_from_source(
         secondary_atlas_size=secondary_atlas_size,
         texture_overrides=texture_overrides,
         deploy=deploy,
+        skip_atlas=skip_atlas,
         slot_index=slot_index,
         slot_total=slot_total,
         build_share=eff_build_share,
     )
+    if atlas_only:
+        return manifest
 
     emit_slot_progress(
         0.40,
@@ -1400,9 +1417,16 @@ def _cli_main() -> int:
         default="",
         help="GTA V ped/protagonist name or comma-separated list (e.g. player_zero,player_one or ig_lamardavis)",
     )
+    parser.add_argument(
+        "--target-character",
+        default="",
+        help="Configured protagonist alias (michael, franklin, trevor) resolving source & target ped from vrc2gtav.cfg",
+    )
     parser.add_argument("--avatar-name", default="")
     parser.add_argument("--no-deploy", action="store_true")
     parser.add_argument("--no-repack", action="store_true")
+    parser.add_argument("--atlas-only", action="store_true")
+    parser.add_argument("--skip-atlas", action="store_true")
     parser.add_argument("--force-reextract", action="store_true")
     parser.add_argument("--blood-decals", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--eye-blink", action=argparse.BooleanOptionalAction, default=None)
@@ -1512,11 +1536,26 @@ def _cli_main() -> int:
         )
         return 0
 
-    if not str(parsed.source or "").strip():
+    resolved_source = str(parsed.source or "").strip()
+    resolved_target_ped = str(parsed.target_ped or "").strip()
+    if parsed.target_character:
+        import vrc2gtav_paths as project_paths_cfg
+
+        char_cfg = project_paths_cfg.get_character_paths(parsed.target_character)
+        if not resolved_target_ped:
+            resolved_target_ped = str(char_cfg.get("ped_name") or "").strip()
+        if not resolved_source:
+            for key_name in ("unity_scene", "source_fbx", "avatar_dir"):
+                cand_val = str(char_cfg.get(key_name) or "").strip()
+                if cand_val and Path(cand_val).exists():
+                    resolved_source = cand_val
+                    break
+
+    if not resolved_source:
         raise ValueError("--source is required unless --slots-json, --restore-peds, or --restore-all is used")
 
     ped_targets = [
-        tok.strip() for tok in str(parsed.target_ped or "").split(",") if tok.strip()
+        tok.strip() for tok in resolved_target_ped.split(",") if tok.strip()
     ]
     if not ped_targets:
         raise ValueError("--target-ped must specify at least one target")
@@ -1526,12 +1565,14 @@ def _cli_main() -> int:
     cli_build_share = 0.82 if should_repack else 0.98
     for idx_ped, ped_slot in enumerate(ped_targets):
         result = build_and_deploy_npc_from_source(
-            source_spec=parsed.source,
+            source_spec=resolved_source,
             target_ped=ped_slot,
             avatar_name=parsed.avatar_name,
             deploy=should_deploy,
             repack_archives=False,
             force_reextract=(parsed.force_reextract if idx_ped == 0 else False),
+            skip_atlas=bool(parsed.skip_atlas),
+            atlas_only=bool(parsed.atlas_only),
             blood_decals=resolved_blood_decals,
             eye_blink=parsed.eye_blink,
             eye_blink_strength=parsed.eye_blink_strength,
@@ -1554,6 +1595,31 @@ def _cli_main() -> int:
             build_share=cli_build_share,
         )
         built_peds.append(str(result["ped_name"]))
+        if parsed.target_character:
+            import shutil as shutil_mod
+            import error_handler_helper as err_helper_mod
+            import vrc2gtav_paths as project_paths_cfg
+
+            proj_root_dir = project_paths_cfg.get_project_root()
+            if err_helper_mod.resolve_workspace_root(proj_root_dir) == proj_root_dir:
+                char_paths = project_paths_cfg.get_character_paths(parsed.target_character)
+                ped_dir_src = proj_root_dir / "npcs" / str(result["ped_name"])
+                src_ytd = Path(str(result.get("ytd_file") or (ped_dir_src / "3_textures_gtav" / f"{result['ped_name']}_atlas.ytd")))
+                dst_ytd = char_paths.get("ytd_file")
+                if src_ytd.is_file() and isinstance(dst_ytd, Path) and src_ytd.resolve() != dst_ytd.resolve():
+                    dst_ytd.parent.mkdir(parents=True, exist_ok=True)
+                    shutil_mod.copy2(src_ytd, dst_ytd)
+                exported_src = ped_dir_src / "4_exported_models"
+                src_yft = exported_src / f"{result['ped_name']}.yft"
+                dst_yft = char_paths.get("target_yft")
+                if src_yft.is_file() and isinstance(dst_yft, Path) and src_yft.resolve() != dst_yft.resolve():
+                    dst_yft.parent.mkdir(parents=True, exist_ok=True)
+                    shutil_mod.copy2(src_yft, dst_yft)
+                src_ydd = exported_src / "uppr_000_u.ydd"
+                for ydd_target in [char_paths.get("target_model_ydd"), *(char_paths.get("extra_model_ydds") or [])]:
+                    if src_ydd.is_file() and isinstance(ydd_target, Path) and src_ydd.resolve() != ydd_target.resolve():
+                        ydd_target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil_mod.copy2(src_ydd, ydd_target)
         print(f"[DONE] Build complete: {result['ped_name']} -> {result['avatar_name']}", flush=True)
         emit_slot_progress(
             0.98,

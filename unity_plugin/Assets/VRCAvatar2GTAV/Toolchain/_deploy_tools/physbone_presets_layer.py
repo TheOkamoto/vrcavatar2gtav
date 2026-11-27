@@ -642,14 +642,14 @@ def _chain_parent_map(
 
 
 # ---------------------------------------------------------------------------
-# Michael (Shinano Eternal Reunion - Full Hair + Outfit + Watch; opt-in Marshmallow PB)
+# Player Zero / Michael preset (Full Hair + Outfit + Watch; opt-in Marshmallow PB)
 # ---------------------------------------------------------------------------
 NEKO_MIMI_HALO_WEIGHT_SPLIT: Tuple[Tuple[str, float], ...] = (
     ("PB_Ear_L_0", 0.5),
     ("PB_Ear_L_1", 0.5),
 )
 
-MICHAEL_ER_BONE_MAP: Dict[str, str] = {
+PLAYER_ZERO_MICHAEL_BONE_MAP: Dict[str, str] = {
     "ear.l": "PB_Ear_L_0",
     "ear.l.001": "PB_Ear_L_1",
     "ear.l.002": "PB_Ear_L_2",
@@ -805,11 +805,11 @@ for _er_side in ("L", "R"):
     _er_low = _er_side.lower()
     for _spoke_idx in range(1, 12):
         _quad_key = "SkirtF" if _spoke_idx <= 5 else "SkirtB"
-        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}"] = f"PB_ER_{_quad_key}{_er_side}_0"
-        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_001"] = f"PB_ER_{_quad_key}{_er_side}_1"
-        MICHAEL_ER_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_002"] = f"PB_ER_{_quad_key}{_er_side}_1"
+        PLAYER_ZERO_MICHAEL_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}"] = f"PB_ER_{_quad_key}{_er_side}_0"
+        PLAYER_ZERO_MICHAEL_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_001"] = f"PB_ER_{_quad_key}{_er_side}_1"
+        PLAYER_ZERO_MICHAEL_BONE_MAP[f"un_skirt_{_er_low}.{_spoke_idx:02d}_002"] = f"PB_ER_{_quad_key}{_er_side}_1"
 
-MICHAEL_ER_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+PLAYER_ZERO_MICHAEL_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
     ("ear.L", "PB_Ear_L", ("ear.L", "ear.L.001", "ear.L.002"), ("PB_Ear_L_0", "PB_Ear_L_1", "PB_Ear_L_2")),
     ("ear.R", "PB_Ear_R", ("ear.R", "ear.R.001", "ear.R.002"), ("PB_Ear_R_0", "PB_Ear_R_1", "PB_Ear_R_2")),
     ("Halo", "PB_ER_Halo", ("Halo", "Halo.001"), ("PB_ER_Halo_0", "PB_ER_Halo_1")),
@@ -842,7 +842,7 @@ MICHAEL_ER_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]],
     ("UN_SkirtBR", "PB_ER_SkirtBR", ("UN_Skirt_R.08", "UN_Skirt_R.08_002"), ("PB_ER_SkirtBR_0", "PB_ER_SkirtBR_1")),
 )
 
-MICHAEL_ER_ROOT_PARENTS: Dict[str, str] = {
+PLAYER_ZERO_MICHAEL_ROOT_PARENTS: Dict[str, str] = {
     "ear.L": "SKEL_Head",
     "ear.R": "SKEL_Head",
     "Halo": "SKEL_Head",
@@ -875,20 +875,20 @@ MICHAEL_ER_ROOT_PARENTS: Dict[str, str] = {
     "UN_SkirtBR": "SKEL_Pelvis",
 }
 
-MICHAEL_ER_CUSTOM_BONES: Tuple[str, ...] = tuple(
+PLAYER_ZERO_MICHAEL_CUSTOM_BONES: Tuple[str, ...] = tuple(
     bone_name
-    for _key, _gtav_name, _src, gtav_bones in MICHAEL_ER_CHAIN_SPECS
+    for _key, _gtav_name, _src, gtav_bones in PLAYER_ZERO_MICHAEL_CHAIN_SPECS
     for bone_name in gtav_bones
 )
 
-MICHAEL_ER_PARENT_MAP: Dict[str, str] = _chain_parent_map(
-    MICHAEL_ER_CHAIN_SPECS, MICHAEL_ER_ROOT_PARENTS
+PLAYER_ZERO_MICHAEL_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    PLAYER_ZERO_MICHAEL_CHAIN_SPECS, PLAYER_ZERO_MICHAEL_ROOT_PARENTS
 )
 
 NEKO_MIMI_BONE_MAP: Dict[str, str] = {
-    key: val for key, val in MICHAEL_ER_BONE_MAP.items() if val.startswith("PB_Ear_")
+    key: val for key, val in PLAYER_ZERO_MICHAEL_BONE_MAP.items() if val.startswith("PB_Ear_")
 }
-NEKO_MIMI_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = MICHAEL_ER_CHAIN_SPECS[:2]
+NEKO_MIMI_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = PLAYER_ZERO_MICHAEL_CHAIN_SPECS[:2]
 NEKO_MIMI_CUSTOM_BONES: Tuple[str, ...] = tuple(
     bone_name for _key, _gtav_name, _src, gtav_bones in NEKO_MIMI_CHAIN_SPECS for bone_name in gtav_bones
 )
@@ -899,9 +899,9 @@ NEKO_MIMI_PARENT_MAP: Dict[str, str] = _chain_parent_map(
 
 
 # ---------------------------------------------------------------------------
-# Franklin (Shinano Casual: Full Ears, Tail, BeltA, BeltB, Ribbons, Hair, Skirt; opt-in Marshmallow PB)
+# Player One / Franklin preset (Full Ears, Tail, BeltA, BeltB, Ribbons, Hair, Skirt; opt-in Marshmallow PB)
 # ---------------------------------------------------------------------------
-SHINANO_CASUAL_BONE_MAP: Dict[str, str] = {
+PLAYER_ONE_FRANKLIN_BONE_MAP: Dict[str, str] = {
     "hair_ear_1.l": "PB_SC_Ear_L_0",
     "hair_ear_2.l": "PB_SC_Ear_L_1",
     "hair_ear_3.l": "PB_SC_Ear_L_2",
@@ -1042,12 +1042,12 @@ SHINANO_CASUAL_BONE_MAP: Dict[str, str] = {
 for _side_code in ("L", "R"):
     _side_low = _side_code.lower()
     for _prefix, _grp_code in (("fronta", "SkirtF"), ("frontb", "SkirtF"), ("frontc", "SkirtF"), ("sidea", "SkirtS"), ("sideb", "SkirtS"), ("sidec", "SkirtS"), ("sided", "SkirtS"), ("backa", "SkirtB"), ("backb", "SkirtB")):
-        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}1.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_0"
-        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}2.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_1"
-        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}3.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
-        SHINANO_CASUAL_BONE_MAP[f"skirt_{_prefix}4.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
+        PLAYER_ONE_FRANKLIN_BONE_MAP[f"skirt_{_prefix}1.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_0"
+        PLAYER_ONE_FRANKLIN_BONE_MAP[f"skirt_{_prefix}2.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_1"
+        PLAYER_ONE_FRANKLIN_BONE_MAP[f"skirt_{_prefix}3.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
+        PLAYER_ONE_FRANKLIN_BONE_MAP[f"skirt_{_prefix}4.{_side_low}"] = f"PB_SC_{_grp_code}{_side_code}_2"
 
-SHINANO_CASUAL_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+PLAYER_ONE_FRANKLIN_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
     ("ear.L", "PB_SC_Ear_L", ("Hair_ear_1.L", "Hair_ear_2.L", "Hair_ear_3.L"), ("PB_SC_Ear_L_0", "PB_SC_Ear_L_1", "PB_SC_Ear_L_2")),
     ("ear.R", "PB_SC_Ear_R", ("Hair_ear_1.R", "Hair_ear_2.R", "Hair_ear_3.R"), ("PB_SC_Ear_R_0", "PB_SC_Ear_R_1", "PB_SC_Ear_R_2")),
     ("tail", "PB_SC_Tail", ("Tail1", "Tail3", "Tail5", "Tail7"), ("PB_SC_Tail_0", "PB_SC_Tail_1", "PB_SC_Tail_2", "PB_SC_Tail_3")),
@@ -1074,7 +1074,7 @@ SHINANO_CASUAL_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ..
     ("skirt_back.R", "PB_SC_SkirtBR", ("Skirt_BackB1.R", "Skirt_BackB2.R", "Skirt_BackB4.R"), ("PB_SC_SkirtBR_0", "PB_SC_SkirtBR_1", "PB_SC_SkirtBR_2")),
 )
 
-SHINANO_CASUAL_ROOT_PARENTS: Dict[str, str] = {
+PLAYER_ONE_FRANKLIN_ROOT_PARENTS: Dict[str, str] = {
     "ear.L": "SKEL_Head",
     "ear.R": "SKEL_Head",
     "tail": "SKEL_Pelvis",
@@ -1101,21 +1101,21 @@ SHINANO_CASUAL_ROOT_PARENTS: Dict[str, str] = {
     "skirt_back.R": "SKEL_Pelvis",
 }
 
-SHINANO_CASUAL_CUSTOM_BONES: Tuple[str, ...] = tuple(
+PLAYER_ONE_FRANKLIN_CUSTOM_BONES: Tuple[str, ...] = tuple(
     bone_name
-    for _key, _gtav_name, _src, gtav_bones in SHINANO_CASUAL_CHAIN_SPECS
+    for _key, _gtav_name, _src, gtav_bones in PLAYER_ONE_FRANKLIN_CHAIN_SPECS
     for bone_name in gtav_bones
 )
 
-SHINANO_CASUAL_PARENT_MAP: Dict[str, str] = _chain_parent_map(
-    SHINANO_CASUAL_CHAIN_SPECS, SHINANO_CASUAL_ROOT_PARENTS
+PLAYER_ONE_FRANKLIN_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    PLAYER_ONE_FRANKLIN_CHAIN_SPECS, PLAYER_ONE_FRANKLIN_ROOT_PARENTS
 )
 
 
 # ---------------------------------------------------------------------------
-# Trevor (Miltina Maid: Full Twintails 1&2, Front/Side Hair, Ears, Breasts, Ruffles, Ribbons, Butt, 7-Sector Skirt, Tail)
+# Player Two / Trevor preset (Full Twintails 1&2, Front/Side Hair, Ears, Breasts, Ruffles, Ribbons, Butt, 7-Sector Skirt, Tail)
 # ---------------------------------------------------------------------------
-MILTINA_MAID_BONE_MAP: Dict[str, str] = {
+PLAYER_TWO_TREVOR_BONE_MAP: Dict[str, str] = {
     "cow ear_l.001": "PB_MT_Ear_L_0",
     "cow ear_l.002": "PB_MT_Ear_L_1",
     "cow ear_r.001": "PB_MT_Ear_R_0",
@@ -1146,49 +1146,49 @@ MILTINA_MAID_BONE_MAP: Dict[str, str] = {
 
 for _side_code in ("L", "R"):
     _side_low = _side_code.lower()
-    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_2"
-    MILTINA_MAID_BONE_MAP[f"twin tail1_{_side_low}.004"] = f"PB_MT_Twin1_{_side_code}_2"
-    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_2"
-    MILTINA_MAID_BONE_MAP[f"twin tail2_{_side_low}.004"] = f"PB_MT_Twin2_{_side_code}_2"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail1_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail1_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail1_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_2"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail1_{_side_low}.004"] = f"PB_MT_Twin1_{_side_code}_2"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail2_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail2_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail2_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_2"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail2_{_side_low}.004"] = f"PB_MT_Twin2_{_side_code}_2"
     for _rib_grp in ("a1", "a2"):
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_1"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin1_{_side_code}_0"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin1_{_side_code}_1"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin1_{_side_code}_1"
     for _rib_grp in ("b1", "b2"):
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
-        MILTINA_MAID_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.001"] = f"PB_MT_Side_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.002"] = f"PB_MT_Side_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.003"] = f"PB_MT_Side_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"front hair3_{_side_low}.004"] = f"PB_MT_Side_{_side_code}_1"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.001"] = f"PB_MT_Twin2_{_side_code}_0"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.002"] = f"PB_MT_Twin2_{_side_code}_1"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"twin tail ribbon{_rib_grp}_{_side_low}.003"] = f"PB_MT_Twin2_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"front hair3_{_side_low}.001"] = f"PB_MT_Side_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"front hair3_{_side_low}.002"] = f"PB_MT_Side_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"front hair3_{_side_low}.003"] = f"PB_MT_Side_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"front hair3_{_side_low}.004"] = f"PB_MT_Side_{_side_code}_1"
     for _ruffle_num in range(1, 7):
-        MILTINA_MAID_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}"] = f"PB_MT_Ruffle_{_side_code}_0"
-        MILTINA_MAID_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}_end"] = f"PB_MT_Ruffle_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"ribbona_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"ribbona_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"ribbonb_{_side_low}.003"] = f"PB_MT_NRib_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"apron ribbona_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
-    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.002"] = f"PB_MT_Apron_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.003"] = f"PB_MT_Apron_{_side_code}_1"
-    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.004"] = f"PB_MT_Apron_{_side_code}_2"
-    MILTINA_MAID_BONE_MAP[f"apron ribbon_{_side_low}.005"] = f"PB_MT_Apron_{_side_code}_2"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}"] = f"PB_MT_Ruffle_{_side_code}_0"
+        PLAYER_TWO_TREVOR_BONE_MAP[f"ruffle_{_side_low}.00{_ruffle_num}_end"] = f"PB_MT_Ruffle_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"ribbona_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"ribbona_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"ribbonb_{_side_low}.001"] = f"PB_MT_NRib_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"ribbonb_{_side_low}.002"] = f"PB_MT_NRib_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"ribbonb_{_side_low}.003"] = f"PB_MT_NRib_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbona_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbon_{_side_low}.001"] = f"PB_MT_Apron_{_side_code}_0"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbon_{_side_low}.002"] = f"PB_MT_Apron_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbon_{_side_low}.003"] = f"PB_MT_Apron_{_side_code}_1"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbon_{_side_low}.004"] = f"PB_MT_Apron_{_side_code}_2"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"apron ribbon_{_side_low}.005"] = f"PB_MT_Apron_{_side_code}_2"
     for _idx_num, _grp_code in ((1, "SkirtF"), (2, "SkirtF"), (3, "SkirtS"), (4, "SkirtS"), (5, "SkirtB"), (6, "SkirtB")):
         for _seg in range(1, 9):
             _tier = 0 if _seg <= 4 else 1
-            MILTINA_MAID_BONE_MAP[f"skirt{_idx_num}_{_side_low}.00{_seg}"] = f"PB_MT_{_grp_code}{_side_code}_{_tier}"
+            PLAYER_TWO_TREVOR_BONE_MAP[f"skirt{_idx_num}_{_side_low}.00{_seg}"] = f"PB_MT_{_grp_code}{_side_code}_{_tier}"
 
 for _seg7 in range(1, 9):
-    MILTINA_MAID_BONE_MAP[f"skirt7.00{_seg7}"] = f"PB_MT_SkirtBC_{0 if _seg7 <= 4 else 1}"
+    PLAYER_TWO_TREVOR_BONE_MAP[f"skirt7.00{_seg7}"] = f"PB_MT_SkirtBC_{0 if _seg7 <= 4 else 1}"
 
-MILTINA_MAID_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
+PLAYER_TWO_TREVOR_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
     ("twintail1.L", "PB_MT_Twin1_L", ("twin tail1_L.001", "twin tail1_L.002", "twin tail1_L.004"), ("PB_MT_Twin1_L_0", "PB_MT_Twin1_L_1", "PB_MT_Twin1_L_2")),
     ("twintail1.R", "PB_MT_Twin1_R", ("twin tail1_R.001", "twin tail1_R.002", "twin tail1_R.004"), ("PB_MT_Twin1_R_0", "PB_MT_Twin1_R_1", "PB_MT_Twin1_R_2")),
     ("twintail2.L", "PB_MT_Twin2_L", ("twin tail2_L.001", "twin tail2_L.002", "twin tail2_L.004"), ("PB_MT_Twin2_L_0", "PB_MT_Twin2_L_1", "PB_MT_Twin2_L_2")),
@@ -1218,7 +1218,7 @@ MILTINA_MAID_CHAIN_SPECS: Tuple[Tuple[str, str, Tuple[str, ...], Tuple[str, ...]
     ("tail", "PB_MT_Tail", ("tail.001", "tail.003", "tail.005", "tail.008"), ("PB_MT_Tail_0", "PB_MT_Tail_1", "PB_MT_Tail_2", "PB_MT_Tail_3")),
 )
 
-MILTINA_MAID_ROOT_PARENTS: Dict[str, str] = {
+PLAYER_TWO_TREVOR_ROOT_PARENTS: Dict[str, str] = {
     "twintail1.L": "SKEL_Head",
     "twintail1.R": "SKEL_Head",
     "twintail2.L": "SKEL_Head",
@@ -1248,14 +1248,14 @@ MILTINA_MAID_ROOT_PARENTS: Dict[str, str] = {
     "tail": "SKEL_Pelvis",
 }
 
-MILTINA_MAID_CUSTOM_BONES: Tuple[str, ...] = tuple(
+PLAYER_TWO_TREVOR_CUSTOM_BONES: Tuple[str, ...] = tuple(
     bone_name
-    for _key, _gtav_name, _src, gtav_bones in MILTINA_MAID_CHAIN_SPECS
+    for _key, _gtav_name, _src, gtav_bones in PLAYER_TWO_TREVOR_CHAIN_SPECS
     for bone_name in gtav_bones
 )
 
-MILTINA_MAID_PARENT_MAP: Dict[str, str] = _chain_parent_map(
-    MILTINA_MAID_CHAIN_SPECS, MILTINA_MAID_ROOT_PARENTS
+PLAYER_TWO_TREVOR_PARENT_MAP: Dict[str, str] = _chain_parent_map(
+    PLAYER_TWO_TREVOR_CHAIN_SPECS, PLAYER_TWO_TREVOR_ROOT_PARENTS
 )
 
 # Miltina natively has no breast VRCPhysBone; breast.L/R exist only when Marshmallow PB is enabled.
@@ -1275,12 +1275,15 @@ VRCHAT_PHYSBONE_CLASS_FILE_ID: str = "1661641543"
 VALID_PHYSBONE_SOURCES: Tuple[str, ...] = ("auto", "unity", "cfg")
 
 DEFAULT_PHYSBONE_PRESET_RELATIVE_PATHS: Dict[str, str] = {
-    "shinano_er": "configs/michael_neko_mimi_physbones.cfg",
-    "shinano_casual": "configs/shinano_casual_physbones.cfg",
-    "miltina_maid": "configs/miltina_maid_physbones.cfg",
-    "michael": "configs/michael_neko_mimi_physbones.cfg",
-    "franklin": "configs/shinano_casual_physbones.cfg",
-    "trevor": "configs/miltina_maid_physbones.cfg",
+    "player_zero_michael": "configs/player_zero_michael_physbones.cfg",
+    "player_one_franklin": "configs/player_one_franklin_physbones.cfg",
+    "player_two_trevor": "configs/player_two_trevor_physbones.cfg",
+    "player_zero": "configs/player_zero_michael_physbones.cfg",
+    "player_one": "configs/player_one_franklin_physbones.cfg",
+    "player_two": "configs/player_two_trevor_physbones.cfg",
+    "michael": "configs/player_zero_michael_physbones.cfg",
+    "franklin": "configs/player_one_franklin_physbones.cfg",
+    "trevor": "configs/player_two_trevor_physbones.cfg",
 }
 
 
@@ -1349,7 +1352,7 @@ def _build_marshmallow_pair_presets(
 
 
 MARSHMALLOW_PB_AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
-    "shinano_casual": _build_marshmallow_pair_presets(
+    "player_one_franklin": _build_marshmallow_pair_presets(
         "PB_SC",
         ("Breast_1.L", "Breast_2.L"),
         ("Breast_1.R", "Breast_2.R"),
@@ -1369,7 +1372,7 @@ MARSHMALLOW_PB_AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
             "stretch_motion": 0.75,
         },
     ),
-    "shinano_er": _build_marshmallow_pair_presets(
+    "player_zero_michael": _build_marshmallow_pair_presets(
         "PB_ER",
         ("Breast_1.L", "Breast_2.L"),
         ("Breast_1.R", "Breast_2.R"),
@@ -1389,7 +1392,7 @@ MARSHMALLOW_PB_AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
             "stretch_motion": 0.6,
         },
     ),
-    "miltina_maid": _build_marshmallow_pair_presets(
+    "player_two_trevor": _build_marshmallow_pair_presets(
         "PB_MT",
         ("Breast_L", "Breast_L.001"),
         ("Breast_R", "Breast_R.001"),
@@ -1420,12 +1423,12 @@ def apply_marshmallow_pb_presets(
 ) -> Dict[str, Any]:
     """Overlay opt-in Marshmallow PB breast presets onto a resolved PhysBones config dict."""
     preset_key = str(avatar_id_or_char).strip().lower()
-    if preset_key == "franklin":
-        preset_key = "shinano_casual"
-    elif preset_key == "michael":
-        preset_key = "shinano_er"
-    elif preset_key in ("trevor", "milltina", "miltina"):
-        preset_key = "miltina_maid"
+    if preset_key in ("franklin", "player_one"):
+        preset_key = "player_one_franklin"
+    elif preset_key in ("michael", "player_zero"):
+        preset_key = "player_zero_michael"
+    elif preset_key in ("trevor", "player_two", "milltina", "miltina"):
+        preset_key = "player_two_trevor"
 
     overlay = MARSHMALLOW_PB_AVATAR_PRESETS.get(preset_key)
     if not overlay:
@@ -1506,7 +1509,7 @@ def resolve_bone_from_mapping(
     return bone_mapping_lower.get(str(raw_group_name).strip().lower())
 
 
-def resolve_michael_er_gtav_bone(
+def resolve_player_zero_michael_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
     bone_mapping_lower: Optional[Dict[str, str]] = None,
@@ -1516,7 +1519,7 @@ def resolve_michael_er_gtav_bone(
     lowered_name = raw_group_name.strip().lower()
     if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
         return bone_mapping_lower[lowered_name]
-    return MICHAEL_ER_BONE_MAP.get(lowered_name)
+    return PLAYER_ZERO_MICHAEL_BONE_MAP.get(lowered_name)
 
 
 def resolve_neko_mimi_gtav_bone(raw_group_name: str) -> Optional[str]:
@@ -1525,25 +1528,25 @@ def resolve_neko_mimi_gtav_bone(raw_group_name: str) -> Optional[str]:
     return NEKO_MIMI_BONE_MAP.get(lowered_name)
 
 
-def resolve_shinano_casual_gtav_bone(
+def resolve_player_one_franklin_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
     bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
-    """Map a Shinano Casual Blender vertex group name to its PB_SC_* GTA V bone."""
+    """Map a Player One (Franklin) Blender vertex group name to its PB_SC_* GTA V bone."""
     lowered_name = raw_group_name.strip().lower()
     if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
         return bone_mapping_lower[lowered_name]
-    return SHINANO_CASUAL_BONE_MAP.get(lowered_name)
+    return PLAYER_ONE_FRANKLIN_BONE_MAP.get(lowered_name)
 
 
-def resolve_miltina_maid_gtav_bone(
+def resolve_player_two_trevor_gtav_bone(
     raw_group_name: str,
     mesh_name: Optional[str] = None,
     bone_mapping_lower: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
-    """Map a Miltina Maid Blender vertex group name to its PB_MT_* GTA V bone."""
+    """Map a Player Two (Trevor) Blender vertex group name to its PB_MT_* GTA V bone."""
     lowered_name = raw_group_name.strip().lower()
     if bone_mapping_lower is not None and lowered_name in bone_mapping_lower:
         return bone_mapping_lower[lowered_name]
-    return MILTINA_MAID_BONE_MAP.get(lowered_name)
+    return PLAYER_TWO_TREVOR_BONE_MAP.get(lowered_name)

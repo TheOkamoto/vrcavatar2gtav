@@ -211,9 +211,9 @@ def test_unity_scene_and_fallbacks() -> bool:
 
         presets_dir = PROJECT_ROOT_DIR / "configs"
         expected_presets = (
-            "shinano_blendshapes.cfg",
-            "shinano_er_blendshapes.cfg",
-            "miltina_blendshapes.cfg",
+            "player_one_franklin_blendshapes.cfg",
+            "player_zero_michael_blendshapes.cfg",
+            "player_two_trevor_blendshapes.cfg",
         )
         presets_ok = True
         total_preset_meshes = 0
@@ -472,7 +472,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         )
         reloaded_merged, _ = blendshape_helper.load_blendshapes_cfg(merged_cfg_path)
         shinano_tracked, _ = blendshape_helper.load_blendshapes_cfg(
-            presets_dir / "shinano_blendshapes.cfg"
+            presets_dir / "player_one_franklin_blendshapes.cfg"
         )
         fbx_merge_ok = (
             abs(merged_res["mesh_weights"]["Body"]["eye_joy"] - 0.35) < 1e-6
@@ -741,7 +741,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         )
         resolved_pb_cfg = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "shinano_casual",
+                "avatar_id": "player_one_franklin",
                 "physbones_source": "auto",
                 "physbones_cfg": str(saved_pb_cfg),
                 "unity_scene": "",
@@ -825,11 +825,11 @@ def test_unity_scene_and_fallbacks() -> bool:
             and idle_drift_mm < 0.5
         )
 
-        miltina_cfg_file = PROJECT_ROOT_DIR / "configs" / "miltina_maid_physbones.cfg"
-        casual_cfg_file = PROJECT_ROOT_DIR / "configs" / "shinano_casual_physbones.cfg"
+        miltina_cfg_file = PROJECT_ROOT_DIR / "configs" / "player_two_trevor_physbones.cfg"
+        casual_cfg_file = PROJECT_ROOT_DIR / "configs" / "player_one_franklin_physbones.cfg"
         miltina_std_resolved = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "miltina_maid",
+                "avatar_id": "player_two_trevor",
                 "physbones_source": "cfg",
                 "physbones_cfg": str(miltina_cfg_file),
                 "unity_scene": "",
@@ -839,7 +839,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         )
         miltina_marsh_resolved = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "miltina_maid",
+                "avatar_id": "player_two_trevor",
                 "physbones_source": "cfg",
                 "physbones_cfg": str(miltina_cfg_file),
                 "physbones_marshmallow": "true",
@@ -850,7 +850,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         )
         casual_std_resolved = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "shinano_casual",
+                "avatar_id": "player_one_franklin",
                 "physbones_source": "cfg",
                 "physbones_cfg": str(casual_cfg_file),
                 "unity_scene": "",
@@ -860,7 +860,7 @@ def test_unity_scene_and_fallbacks() -> bool:
         )
         casual_marsh_resolved = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "shinano_casual",
+                "avatar_id": "player_one_franklin",
                 "physbones_source": "cfg",
                 "physbones_cfg": str(casual_cfg_file),
                 "unity_scene": "",
@@ -907,10 +907,10 @@ def test_unity_scene_and_fallbacks() -> bool:
         # 3) Overloaded custom avatar (> 63 custom bones) preserves Tier 1-2 essential bones
         #    symmetrically, discards lower-tier non-essential props (including Earring/HairPin),
         #    and re-binds discarded vertices statically onto their rigid parent_bone.
-        michael_cfg_file = PROJECT_ROOT_DIR / "configs" / "michael_neko_mimi_physbones.cfg"
+        michael_cfg_file = PROJECT_ROOT_DIR / "configs" / "player_zero_michael_physbones.cfg"
         michael_std_resolved = physbone_helper.resolve_character_physbones(
             {
-                "avatar_id": "shinano_er",
+                "avatar_id": "player_zero_michael",
                 "physbones_source": "cfg",
                 "physbones_cfg": str(michael_cfg_file),
                 "unity_scene": "",

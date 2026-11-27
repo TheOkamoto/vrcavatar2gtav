@@ -9,9 +9,9 @@
 
 | GTA V 主人公 | Ped ID | VRChat アバター | 衣装・スタイル | フォルダ |
 | :--- | :--- | :--- | :--- | :--- |
-| **Michael De Santa** | `player_zero` | **Shinano** | Eternal Reunion (ゴシックドレス + 懐中時計) | `2_Michael_Shinano_EternalReunion/` |
-| **Franklin Clinton** | `player_one` | **Shinano** | カジュアル / 制服風 (赤スカート、青染めヘア) | `1_Franklin_Shinano_Casual/` |
-| **Trevor Philips** | `player_two` | **Miltina** | クラシックメイド (黒白ロングドレス、エプロン) | `3_Trevor_Miltina_Maid/` |
+| **Michael De Santa** | `player_zero` | `player_zero_michael` | 任意の BOOTH / VRChat アバター (例: *Shinano – Eternal Reunion*) | `player_zero/` |
+| **Franklin Clinton** | `player_one` | `player_one_franklin` | 任意の BOOTH / VRChat アバター (例: *Shinano – Casual*) | `player_one/` |
+| **Trevor Philips** | `player_two` | `player_two_trevor` | 任意の BOOTH / VRChat アバター (例: *Miltina – Classic Maid*) | `player_two/` |
 
 ---
 
@@ -53,17 +53,15 @@ vrc2gtav/
 │   ├── common_tools/                                # 共通ヘルパー・マネージャー・ビルダー・VToon/Restore ヘルパー・検証スイート
 │   ├── physbones_asi/                               # リアルタイム VRChat PhysBones ASI (GTAVPhysBones.asi / .ini)
 │   ├── vtoon_asi/                                   # リアルタイム D3D11 lilToon シェーダー ASI (GTAVVToon.asi / .ini / vtoon_profiles)
-│   ├── Shinano_Casual_Franklin/                     # Franklin テクスチャ・Blender ビルド
-│   ├── Shinano_EternalReunion_Michael/              # Michael テクスチャ・Blender・デプロイ
-│   └── Miltina_Maid_Trevor/                         # Trevor テクスチャ・Blender・ステージング
+│   └── common_tools/                                # 汎用ビルダー・マネージャー・VToon/Restore/NPC ヘルパー・i18n・検証スイート
 │
-├── 1_Franklin_Shinano_Casual/                       # 実行ミラー・ローカル生成物 (.gitignore)
-├── 2_Michael_Shinano_EternalReunion/                # 実行ミラー・ローカル生成物 (.gitignore)
-└── 3_Trevor_Miltina_Maid/                           # 実行ミラー・ローカル生成物 (.gitignore)
+├── player_zero/                                     # Michael (player_zero) 出力・ステージング (.gitignore)
+├── player_one/                                      # Franklin (player_one) 出力・ステージング (.gitignore)
+└── player_two/                                      # Trevor (player_two) 出力・ステージング (.gitignore)
 ```
 
 ### 著作権分離と `.gitignore` ルール
-著作権保護された GTA V のゲーム本体ファイル、BOOTH アセット、ローカルレンダー画像は Git および [`VRCAvatar2GTAV.unitypackage`](../VRCAvatar2GTAV.unitypackage) に一切含まれません。`staging/`、`renders/`、`backups/`、`imported_unity_projects/`、`npcs/`、`vtoon_profiles/`、`VRCAvatar2GTAV_Work/`、`vrc2gtav.cfg`、`configs/npc_registry.json`、`configs/active_multi_slots.json`、`3_Trevor_Miltina_Maid/3_textures_gtav/custom_hair_manifest.json`、`1_Franklin_Shinano_Casual/5_rpf_package/`、`3_Trevor_Miltina_Maid/5_rpf_package/`、および `.zip`・`.unitypackage`・`.yft`・`.ytd`・`.dds`・`.ydd.xml`・`.backup_*`・`.ydd` は除外され、**First-Run**・**Unity エクスポート**・**NPC 変換** 時にローカルで生成されます。
+著作権保護された GTA V のゲーム本体ファイル、BOOTH アセット、ローカルレンダー画像は Git および [`VRCAvatar2GTAV.unitypackage`](../VRCAvatar2GTAV.unitypackage) に一切含まれません。`staging/`、`renders/`、`backups/`、`imported_unity_projects/`、`npcs/`、`vtoon_profiles/`、`VRCAvatar2GTAV_Work/`、`vrc2gtav.cfg`、`configs/npc_registry.json`、`configs/active_multi_slots.json`、`player_*/3_textures_gtav/custom_hair_manifest.json`、`player_zero/5_rpf_package/`、`player_one/5_rpf_package/`、`player_two/5_rpf_package/`、および `.zip`・`.unitypackage`・`.yft`・`.ytd`・`.dds`・`.ydd.xml`・`.backup_*`・`.ydd` は除外され、**First-Run**・**Unity エクスポート**・**NPC 変換** 時にローカルで生成されます。
 
 `_deploy_tools/` に同梱されている `.ydd` は技術用の空ダミー 2 点のみです:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — 629 バイトの非表示ボディダミー。
@@ -82,8 +80,8 @@ vrc2gtav/
 4. **Windows / Linux (WSL) 自動変換:** ネイティブ Windows と WSL を判別し、`D:/GTAV` ↔ `/mnt/d/GTAV` を自動変換
 5. **等倍スケール `1.0` デフォルトと `.unity` 解析 (`unity_scene_helper.py`):** 初期構成 (`unity_scene =` 空欄) では体・頭・ボーン・小物のスケールを `1.0` に保ち、`unity_scene` 指定時は `Transform` / `PrefabInstance` 上書きや `PhysBone`/Marshmallow スケール打ち消しを自動抽出します
 6. **デフォルトヘアー & 基本顔テクスチャの自動フォールバック (`texture_calibration_helper.py`):** `custom_hair` / `fbx_hair` や瞳・メイクパックが未指定でもベースアバター標準の髪と顔へ自動フォールバックします
-7. **Unity 抽出・MA `ShapeChanger`/`BlendshapeSync`・`.cfg`・`.anim` 保持 (`blendshape_helper.py`, `modular_avatar_helper.py`, `universal_gtav_rigging_layer.py`):** `blendshapes_source = auto | unity | cfg`、`--blendshapes-cfg`、`--face-anim` 等で制御し、`--face-anim` が空または全ゼロ値の場合は Unity シーンや `.cfg` 側の顔ブレンドシェイプを保持します。[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py) では `MA ShapeChanger` (`Delete` > `m_threshold` 面削除と `Set` ウェイト `Toe_highheels=1.0`/`Shrink_Foot=0.03` の分離) と `BlendshapeSync` (`RemapCurve`) を基本リセット後に再適用してネストプレハブを維持し、`Body_base`/`Body` の手動 `Shrink_* > 0.5`（全頂点移動面）も RPF7 ポリゴン予算前にカリングします
-8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `.prefab`・`PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`m_Materials` 上書き・`.fbx` + `.mat` を `--hair` (`auto | default | none | <パス>`) 等で指定でき、`preserve_alpha` で眼鏡レンズ透過を維持し、`_partition_component_by_z_bands` により下髪・頭頂帯を安定化しつつ `SKEL_Head` ウェイトと元ケモ耳を保持します
+7. **Unity 抽出・MA `ShapeChanger`/`BlendshapeSync`・`.cfg`・`.anim` 保持 (`blendshape_helper.py`, `modular_avatar_helper.py`, `universal_gtav_rigging_layer.py`):** `blendshapes_source = auto | unity | cfg`、`--blendshapes-cfg`、`--face-anim` 等で制御し、各スロットプリセット (`configs/player_zero_michael_blendshapes.cfg`, `configs/player_one_franklin_blendshapes.cfg`, `configs/player_two_trevor_blendshapes.cfg`) または自動出力 `.cfg` を読み込みます。任意の BOOTH アバター出力時は **`.unity` シーン名**（CLI では `.zip`/`.unitypackage` 名）で `.cfg` を保存し、先頭に `# Generated`・`# Project`・`# Scene`・`# FBX` コメントを記載します。`--face-anim` が空または全ゼロ値の場合は Unity シーンや `.cfg` 側の顔ブレンドシェイプを保持します。[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py) では `MA ShapeChanger` (`Delete` > `m_threshold` 面削除と `Set` ウェイト `Toe_highheels=1.0`/`Shrink_Foot=0.03` の分離) と `BlendshapeSync` (`RemapCurve`) を基本リセット後に再適用してネストプレハブを維持し、`Body_base`/`Body` の手動 `Shrink_* > 0.5`（全頂点移動面）も RPF7 ポリゴン予算前にカリングします
+8. **汎用 Unity カスタムヘアー自動移植 (`unity_hair_helper.py` + `blender_hair_helper.py`):** `.prefab`・`PrefabVariant`・Modular Avatar (`MergeArmature`/`BoneProxy`)・`m_Materials` 上書き・`.fbx` + `.mat` を任意のプロフィール (`player_zero_michael`, `player_one_franklin`, `player_two_trevor`) や任意の BOOTH アバターで `--hair` (`auto | default | none | <パス>`) 等により指定でき、`preserve_alpha` で眼鏡レンズ透過を維持し、`_partition_component_by_z_bands` により下髪・頭頂帯を安定化しつつ `SKEL_Head` ウェイトと元ケモ耳を保持します
 9. **マルチ Ped 対応 VRChat PhysBones・下髪/リボン展開・優先度パッカー ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** 標準 `79` チェーン・`182` カスタムボーン（Ped ごとに `<= 63` カスタム / `<= 128` 合計上限内・ELF 衝突 `0`）を `GTAVPhysBones.asi` で最大 **32 Ped 同時追跡 (`kMaxTrackedPeds = 32`)**・`model` / `modelHash` 分離・`Advanced` (`integrationType == 1`) 親基準 `stiffness` 付きで演算します（マイケル `30`/`62`、フランクリン `24`/`62`、トレバー `25`/`58` — **破棄 0**；`--physbones-marshmallow` で `81`/`186` 任意有効化）。`physbone_scene_extractor_layer.py` の `_unwrap_container_spokes` が下髪やリボンのコンテナー分岐を展開し、Unity 抽出時 (`prune_orphaned_physbone_chains`) と Blender 形状削除後 (`active_pb_vgrps_ci`) の二段階で孤立・無ウェイトチェーンを除外、`PHYSBONE_PRIORITY_TIERS` で**髪/耳 (`97–100`)・胸 (`94`)・スカート (`90`)**を尻尾 (`82`) や上着 (`68`)・装飾より最優先保持します
 
 ### 2.2 3か国語ローカライズ (`en` / `ja` / `pt`)
@@ -101,7 +99,7 @@ vrc2gtav/
 2. **T ポーズから A ポーズへの変換 (-55°):** ウェイト転送前に腕を GTA V 基準の A ポーズへ回転させます。
 3. **Unity サブメッシュ順整合 (`map_blender_slots_to_unity_submeshes`):** Blender FBX のマテリアルスロットを Unity `Mesh` サブメッシュ初出順にマッピングし、`m_Materials` 上書きとの 1:1 整合を保証します（[`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py)）。
 4. **RAGE `uint16` 頂点上限分割 (`split_oversized_material_geometries`):** チャンクあたり `30000` 頂点超を自動分割し、`lod_dist_high = 9998.0` を設定します。
-5. **Michael Eternal Reunion — 腰ハート飾り・スカート & 懐中時計 ([`build_michael_er.py`](../scripts/Shinano_EternalReunion_Michael/build_michael_er.py)):** 腰ウェイトを `SKEL_Pelvis`・`SKEL_L_Thigh`・`SKEL_R_Thigh` に最適化し、`Pocket Watch` と 4×2 アトラス ([`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py)) を整合させます。
+5. **腰・スカート & 小物ウェイト最適化 ([`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py) + [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py)):** 腰ウェイトを `SKEL_Pelvis`・`SKEL_L_Thigh`・`SKEL_R_Thigh` に最適化し (`<= 4` 影響ボーン/頂点)、付属ルートボーンと単一外部アトラスを整合させます。
 
 ---
 
@@ -130,7 +128,7 @@ $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 ## 5. テクスチャ・単一ミップ `.ytd`・出血デカール & `GTAVVToon.asi`
 
 ### 5.1 単一ミップ (`--mips 1`) 2K `.ytd`・内蔵マップ・出血デカール
-- [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py)（および各主人公アトラス生成）は、既定 **2048×2048** (`--atlas-size` `512/1024/2048/4096`) の **DXT5 (BC3)** テクスチャを **`--mips 1`** 固定の**単一テクスチャ外部 `.ytd`** (`rage textures build --mips 1`) として書き出します。これにより、複数キャラクター同時登場シーンでも GTA V のテクスチャストリーマーによる解像度低下（ぼやけ）を防ぎます。
+- [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py) は、既定 **2048×2048** (`--atlas-size` `512/1024/2048/4096`) の **DXT5 (BC3)** テクスチャを **`--mips 1`** 固定の**単一テクスチャ外部 `.ytd`** (`rage textures build --mips 1`) として書き出します。これにより、複数キャラクター同時登場シーンでも GTA V のテクスチャストリーマーによる解像度低下（ぼやけ）を防ぎます。
 - 法線・スペキュラマップは内蔵マテリアル用に保持され（非バンプ時等は `blender_hair_helper.py` により有効な非圧縮 `A8R8G8B8` DX9 DDS として生成）、眼鏡/レンズ等の透過マテリアルは `preserve_alpha=True` でアルファを保ちます。
 - `ped.sps` + [`scripts/common_tools/ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py) により 6 ゾーン `UVMap 1` (`TexCoord1`) と標準頂点カラー (`Color 1 = #FF8000FF`, `Color 2 = #00000000`) を付与し、GTA V の出血・傷デカール（`--blood-decals` 既定有効 / `--no-blood-decals` で `ped_default.sps`）と `enforce_ped_rpf7_poly_budget`（16 MiB `0xFFFFFF` 保護）を両立します。
 
@@ -206,23 +204,23 @@ python scripts/common_tools/universal_gtav_builder.py --restore-all
 python run_mod_manager.py
 python run_mod_manager.py --character all
 python run_mod_manager.py --character michael --lang ja
-python run_mod_manager.py --character franklin --avatar miltina_maid --save-assignment
+python run_mod_manager.py --character franklin --avatar player_two_trevor --save-assignment
 python run_mod_manager.py --character michael --hair "/path/to/CustomHair.prefab" --save-hair
-python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Karin.zip"
-python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Karin.zip" --target-ped cs_lamardavis --deploy-npc
+python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Avatar.zip"
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Avatar.zip" --target-ped cs_lamardavis --deploy-npc
 python run_mod_manager.py --all-npcs
 python run_mod_manager.py --deploy-only
 python run_mod_manager.py --check-env
 ```
 
 ### 8.4 自動検証スイート
-[`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) は Unity C# UI・`.unitypackage` & `Toolchain/` 同期・VToon LUT/ウォーターマーク・`--mips 1`・バニラ復元・マルチスロットとビルド済み出力を検証します:
+[`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) は Unity C# UI・`.unitypackage` & `Toolchain/` 同期・VToon LUT/ウォーターマーク・`--mips 1`・バニラ復元・`.cfg` 命名/汎用 BOOTH 互換・マルチスロットとビルド済み出力を検証します:
 
 ```bash
-# フルスイート (14項目: First-Run・ビルド・導入済み環境向け):
+# フルスイート (15項目: First-Run・ビルド・導入済み環境向け):
 python scripts/common_tools/test_mod_suite.py --lang ja
 
-# ソースのみ検証 (11項目: クローン直後・First-Run 前の環境でも実行可能):
+# ソースのみ検証 (12項目: クローン直後・First-Run 前の環境でも実行可能):
 python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ```
 
@@ -231,20 +229,20 @@ python scripts/common_tools/test_mod_suite.py --source-only --lang ja
 ## 9. 手動ステップ実行リファレンス
 
 ```bash
-# ステップ 1: 単一ミップ 2K アトラス (.dds / .ytd) 生成
-python scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py
-python scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py
-python scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
+# ステップ 1: 単一ミップ 2K アトラス (.dds / .ytd) を汎用ビルダーで生成
+python scripts/common_tools/universal_atlas_builder.py --target-character michael --atlas-only
+python scripts/common_tools/universal_atlas_builder.py --target-character franklin --atlas-only
+python scripts/common_tools/universal_atlas_builder.py --target-character trevor --atlas-only
 
-# ステップ 2: Blender + Sollumz でコンパイル
-python scripts/Shinano_Casual_Franklin/run_build_franklin.py --target-character franklin
-python scripts/Shinano_EternalReunion_Michael/run_build_er.py --target-character michael
-python scripts/Miltina_Maid_Trevor/run_pipeline.py --target-character trevor
+# ステップ 2: Blender + Sollumz でコンパイル (--skip-atlas --no-deploy)
+python scripts/common_tools/universal_gtav_builder.py --target-character michael --skip-atlas --no-deploy
+python scripts/common_tools/universal_gtav_builder.py --target-character franklin --skip-atlas --no-deploy
+python scripts/common_tools/universal_gtav_builder.py --target-character trevor --skip-atlas --no-deploy
 
 # ステップ 3: ステージングスロット反映
 python scripts/common_tools/apply_characters.py --character player_zero
-python scripts/common_tools/apply_characters.py --character franklin --avatar miltina_maid
-python scripts/common_tools/apply_all_characters.py
+python scripts/common_tools/apply_characters.py --character franklin --avatar player_two_trevor
+python scripts/common_tools/apply_characters.py --character all
 
 # ステップ 4: RPF 再パック (OPEN + TOC 修正 + ASI/VToon/PhysBones 同期) して mods/ へ配置
 python scripts/common_tools/repack_and_deploy_everything.py

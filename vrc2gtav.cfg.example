@@ -45,7 +45,6 @@ dummy_ydd = ${directories:deploy_tools}/head_000_r.ydd
 prop_dummy_ydd = ${directories:deploy_tools}/p_eyes_dummy.ydd
 manager_script = ${directories:project_root}/run_mod_manager.py
 apply_characters_script = ${directories:common_tools}/apply_characters.py
-apply_all_characters_script = ${directories:common_tools}/apply_all_characters.py
 repack_deploy_script = ${directories:common_tools}/repack_and_deploy_everything.py
 test_suite_script = ${directories:common_tools}/test_mod_suite.py
 
@@ -85,7 +84,7 @@ streamedpedprops_backup_p_eyes = ${directories:staging}/backup_vanilla_streamedp
 # ==============================================================================
 # GTA V Protagonist Slots (Interchangeable VRChat Avatar Assignments)
 # Change `avatar` on any protagonist to swap characters freely:
-#   Options: shinano_casual | shinano_er | miltina_maid
+#   Options: player_one_franklin | player_zero_michael | player_two_trevor
 # Optional per-protagonist hair override:
 #   custom_hair = auto | default | none | <path to .prefab or .fbx>
 #   hair_mat    = <optional .mat override>
@@ -95,11 +94,11 @@ streamedpedprops_backup_p_eyes = ${directories:staging}/backup_vanilla_streamedp
 # ==============================================================================
 
 [franklin]
-avatar = shinano_casual
+avatar = player_one_franklin
 ped_name = player_one
 prop_ped_name = player_one_p
-skeleton_yft = ${avatar_shinano_casual:character_dir}/2_blender/player_one.yft
-physbones_cfg = ${directories:project_root}/configs/shinano_casual_physbones.cfg
+skeleton_yft = ${avatar_player_one_franklin:character_dir}/2_blender/player_one.yft
+physbones_cfg = ${directories:project_root}/configs/player_one_franklin_physbones.cfg
 target_z_min = -0.907
 target_z_max = 0.640
 arm_pose_degrees = -55.0
@@ -109,11 +108,11 @@ staging_patchday4_ped_dir = ${rpf_paths:patchday4ng_models_extracted}/player_one
 staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_one_p
 
 [michael]
-avatar = shinano_er
+avatar = player_zero_michael
 ped_name = player_zero
 prop_ped_name = player_zero_p
-skeleton_yft = ${avatar_shinano_er:character_dir}/2_blender/player_zero.yft
-physbones_cfg = ${directories:project_root}/configs/michael_neko_mimi_physbones.cfg
+skeleton_yft = ${avatar_player_zero_michael:character_dir}/2_blender/player_zero.yft
+physbones_cfg = ${directories:project_root}/configs/player_zero_michael_physbones.cfg
 target_z_min = -0.907
 target_z_max = 0.645
 arm_pose_degrees = -55.0
@@ -123,11 +122,11 @@ staging_patchday4_ped_dir = ${rpf_paths:patchday4ng_models_extracted}/player_zer
 staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_zero_p
 
 [trevor]
-avatar = miltina_maid
+avatar = player_two_trevor
 ped_name = player_two
 prop_ped_name = player_two_p
-skeleton_yft = ${avatar_miltina_maid:character_dir}/2_blender/player_two.yft
-physbones_cfg = ${directories:project_root}/configs/miltina_maid_physbones.cfg
+skeleton_yft = ${avatar_player_two_trevor:character_dir}/2_blender/player_two.yft
+physbones_cfg = ${directories:project_root}/configs/player_two_trevor_physbones.cfg
 target_z_min = -0.908
 target_z_max = 0.642
 arm_pose_degrees = -55.0
@@ -140,11 +139,11 @@ staging_streamed_props_dir = ${rpf_paths:streamedpedprops_extracted}/player_two_
 # VRChat Avatar Presets (Protagonist-Independent Assets, Textures & Builders)
 # ==============================================================================
 
-[avatar_shinano_casual]
+[avatar_player_one_franklin]
 unity_scene =
 unity_avatar_name = Shinano
 blendshapes_source = auto
-blendshapes_cfg = ${directories:project_root}/configs/shinano_blendshapes.cfg
+blendshapes_cfg = ${directories:project_root}/configs/player_one_franklin_blendshapes.cfg
 physbones_source = auto
 physbones_marshmallow = false
 eye_blink = auto
@@ -155,8 +154,8 @@ hair_mat =
 hair_tex =
 hair_scale = 1.0
 hair_offset = 0,0,0
-character_dir = ${directories:project_root}/1_Franklin_Shinano_Casual
-scripts_dir = ${directories:scripts_root}/Shinano_Casual_Franklin
+character_dir = ${directories:project_root}/player_one
+scripts_dir = ${directories:common_tools}
 source_fbx = ${directories:unity_assets}/Shinano/FBX/Shinano.fbx
 face_anim = ${directories:unity_assets}/ShinanoDefAdultNewv5.anim
 
@@ -174,22 +173,21 @@ tex_hair = ${tex_shinano_dir}/Shinano_hair.png
 
 staging_textures_src_dir = ${directories:staging}/textures_src
 textures_dir = ${character_dir}/3_textures_gtav/textures
-atlas_png = ${textures_dir}/shinano_atlas_2k.png
-normal_png = ${textures_dir}/shinano_flat_normal.png
-spec_png = ${textures_dir}/shinano_black_spec.png
+atlas_png = ${textures_dir}/player_one_franklin_atlas_2k.png
+normal_png = ${textures_dir}/player_one_franklin_flat_normal.png
+spec_png = ${textures_dir}/player_one_franklin_black_spec.png
 ytd_dir = ${character_dir}/3_textures_gtav
-ytd_name = shinano_franklin_2k.ytd
+ytd_name = player_one_franklin.ytd
 ytd_file = ${ytd_dir}/${ytd_name}
 
-blender_script = ${scripts_dir}/build_franklin_avatar.py
-blender_runner_script = ${scripts_dir}/run_build_franklin.py
-atlas_script = ${scripts_dir}/generate_franklin_atlas.py
+blender_script = ${directories:common_tools}/universal_gtav_builder.py
+atlas_script = ${directories:common_tools}/universal_atlas_builder.py
 
-[avatar_shinano_er]
+[avatar_player_zero_michael]
 unity_scene =
 unity_avatar_name = Shinano Eternal Reunion
 blendshapes_source = auto
-blendshapes_cfg = ${directories:project_root}/configs/shinano_er_blendshapes.cfg
+blendshapes_cfg = ${directories:project_root}/configs/player_zero_michael_blendshapes.cfg
 physbones_source = auto
 physbones_marshmallow = false
 eye_blink = auto
@@ -199,9 +197,9 @@ hair_mat =
 hair_tex =
 hair_scale = 1.0
 hair_offset = 0,0,0
-character_dir = ${directories:project_root}/2_Michael_Shinano_EternalReunion
-scripts_dir = ${directories:scripts_root}/Shinano_EternalReunion_Michael
-fbx_shinano = ${directories:unity_assets}/Shinano/FBX/Shinano.fbx
+character_dir = ${directories:project_root}/player_zero
+scripts_dir = ${directories:common_tools}
+source_fbx = ${directories:unity_assets}/Shinano/FBX/Shinano.fbx
 fbx_outfit = ${directories:unity_assets}/Vagrant Brand/Eternal Reunion/Avatars/Shinano/FBX/ER_Shi.fbx
 fbx_watch = ${directories:unity_assets}/Vagrant Brand/Eternal Reunion/Pocket Watch/FBX/ER_PW.fbx
 fbx_hair = ${directories:unity_assets}/Li-ne/Neko Tied Bob hair/_Fbx/Neko Tied Bob hair.fbx
@@ -252,26 +250,24 @@ tex_hair_acc_pin = ${tex_hair_dir}/Accessories/c/Pin Mat.png
 tex_hair_acc_mat = ${tex_hair_dir}/Accessories/c/Accessories Mat.png
 
 textures_dir = ${character_dir}/3_textures_gtav/textures_atlas
-atlas_png = ${textures_dir}/shinano_er_atlas.png
-normal_png = ${textures_dir}/shinano_flat_normal.png
-spec_png = ${textures_dir}/shinano_black_spec.png
-er_normal_png = ${textures_dir}/shinano_er_normal.png
-er_spec_png = ${textures_dir}/shinano_er_spec.png
+atlas_png = ${textures_dir}/player_zero_michael_atlas.png
+normal_png = ${textures_dir}/player_zero_michael_flat_normal.png
+spec_png = ${textures_dir}/player_zero_michael_black_spec.png
+er_normal_png = ${textures_dir}/player_zero_michael_normal.png
+er_spec_png = ${textures_dir}/player_zero_michael_spec.png
 ytd_dir = ${character_dir}/3_textures_gtav
-ytd_name = test_er.ytd
+ytd_name = player_zero_michael.ytd
 ytd_file = ${ytd_dir}/${ytd_name}
-ytd_backup_file = ${ytd_dir}/shinano_michael_er_2k.ytd
+ytd_backup_file = ${ytd_dir}/player_zero_michael_2k.ytd
 
-blender_script = ${scripts_dir}/build_michael_er.py
-blender_runner_script = ${scripts_dir}/run_build_er.py
-atlas_script = ${scripts_dir}/generate_er_atlas.py
-deploy_script = ${scripts_dir}/deploy_michael_er.py
+blender_script = ${directories:common_tools}/universal_gtav_builder.py
+atlas_script = ${directories:common_tools}/universal_atlas_builder.py
 
-[avatar_miltina_maid]
+[avatar_player_two_trevor]
 unity_scene =
 unity_avatar_name = Milltina
 blendshapes_source = auto
-blendshapes_cfg = ${directories:project_root}/configs/miltina_blendshapes.cfg
+blendshapes_cfg = ${directories:project_root}/configs/player_two_trevor_blendshapes.cfg
 physbones_source = auto
 physbones_marshmallow = false
 eye_blink = auto
@@ -282,8 +278,8 @@ hair_mat =
 hair_tex =
 hair_scale = 1.0
 hair_offset = 0,0,0
-character_dir = ${directories:project_root}/3_Trevor_Miltina_Maid
-scripts_dir = ${directories:scripts_root}/Miltina_Maid_Trevor
+character_dir = ${directories:project_root}/player_two
+scripts_dir = ${directories:common_tools}
 source_fbx = ${directories:unity_assets}/DOLOSart/1.Milltina/FBX/Milltina.fbx
 face_anim = ${directories:unity_assets}/Miltina_close eyes_Base_adult.anim
 
@@ -300,16 +296,14 @@ tex_costume_normal = ${tex_dolosart_normal_dir}/Milltina_Costume_Normal.png
 tex_hair = ${tex_dolosart_dir}/Milltina_Hair.png
 
 textures_dir = ${character_dir}/3_textures_gtav
-atlas_png = ${textures_dir}/miltina_atlas_2k.png
-normal_png = ${textures_dir}/miltina_normal.png
-spec_png = ${textures_dir}/miltina_spec.png
+atlas_png = ${textures_dir}/player_two_trevor_atlas_2k.png
+normal_png = ${textures_dir}/player_two_trevor_normal.png
+spec_png = ${textures_dir}/player_two_trevor_spec.png
 ytd_dir = ${character_dir}/3_textures_gtav
-ytd_name = miltina_maid.ytd
+ytd_name = player_two_trevor.ytd
 ytd_file = ${ytd_dir}/${ytd_name}
 
-blender_script = ${scripts_dir}/build_trevor_miltina.py
-atlas_script = ${scripts_dir}/generate_miltina_atlas.py
-pipeline_script = ${scripts_dir}/run_pipeline.py
-apply_script = ${scripts_dir}/apply_miltina_to_trevor.py
-preview_rpf = ${textures_dir}/miltina_preview.rpf
+blender_script = ${directories:common_tools}/universal_gtav_builder.py
+atlas_script = ${directories:common_tools}/universal_atlas_builder.py
+preview_rpf = ${textures_dir}/player_two_trevor_preview.rpf
 preview_renders_dir = ${directories:renders_output}

@@ -469,10 +469,23 @@ def execute_texture_generation(
             )
             return False
 
-        command_list = (
-            [PYTHON_EXECUTABLE, str(script_path), "--target-character", character_key]
-            + list(extra_atlas_args or [])
-        )
+        if script_path.name in ("universal_atlas_builder.py", "universal_gtav_builder.py"):
+            universal_builder_script = Path(__file__).resolve().parent / "universal_gtav_builder.py"
+            command_list = (
+                [
+                    PYTHON_EXECUTABLE,
+                    str(universal_builder_script),
+                    "--target-character",
+                    character_key,
+                    "--atlas-only",
+                ]
+                + list(extra_atlas_args or [])
+            )
+        else:
+            command_list = (
+                [PYTHON_EXECUTABLE, str(script_path), "--target-character", character_key]
+                + list(extra_atlas_args or [])
+            )
         task_label = project_i18n.translate(
             "manager.generating_atlas_task",
             display_name=character_data["display_name"],
@@ -504,13 +517,27 @@ def execute_blender_build(
             )
             return False
 
-        per_character_args = ["--target-character", character_key] + list(
-            extra_blender_args or []
-        )
-        blender_command_list, blender_env = project_paths.build_blender_command(
-            script_path,
-            extra_arguments=per_character_args,
-        )
+        if script_path.name == "universal_gtav_builder.py":
+            blender_command_list = (
+                [
+                    PYTHON_EXECUTABLE,
+                    str(script_path),
+                    "--target-character",
+                    character_key,
+                    "--skip-atlas",
+                    "--no-deploy",
+                ]
+                + list(extra_blender_args or [])
+            )
+            blender_env = None
+        else:
+            per_character_args = ["--target-character", character_key] + list(
+                extra_blender_args or []
+            )
+            blender_command_list, blender_env = project_paths.build_blender_command(
+                script_path,
+                extra_arguments=per_character_args,
+            )
         task_label = project_i18n.translate(
             "manager.building_blender_task",
             display_name=character_data["display_name"],

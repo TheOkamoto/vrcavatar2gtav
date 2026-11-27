@@ -63,25 +63,25 @@ try:
     resolve_parent_bone_from_unity_chain,
     _chain_parent_map,
     NEKO_MIMI_HALO_WEIGHT_SPLIT,
-    MICHAEL_ER_BONE_MAP,
-    MICHAEL_ER_CHAIN_SPECS,
-    MICHAEL_ER_ROOT_PARENTS,
-    MICHAEL_ER_CUSTOM_BONES,
-    MICHAEL_ER_PARENT_MAP,
+    PLAYER_ZERO_MICHAEL_BONE_MAP,
+    PLAYER_ZERO_MICHAEL_CHAIN_SPECS,
+    PLAYER_ZERO_MICHAEL_ROOT_PARENTS,
+    PLAYER_ZERO_MICHAEL_CUSTOM_BONES,
+    PLAYER_ZERO_MICHAEL_PARENT_MAP,
     NEKO_MIMI_BONE_MAP,
     NEKO_MIMI_CHAIN_SPECS,
     NEKO_MIMI_CUSTOM_BONES,
     NEKO_MIMI_PARENT_MAP,
-    SHINANO_CASUAL_BONE_MAP,
-    SHINANO_CASUAL_CHAIN_SPECS,
-    SHINANO_CASUAL_ROOT_PARENTS,
-    SHINANO_CASUAL_CUSTOM_BONES,
-    SHINANO_CASUAL_PARENT_MAP,
-    MILTINA_MAID_BONE_MAP,
-    MILTINA_MAID_CHAIN_SPECS,
-    MILTINA_MAID_ROOT_PARENTS,
-    MILTINA_MAID_CUSTOM_BONES,
-    MILTINA_MAID_PARENT_MAP,
+    PLAYER_ONE_FRANKLIN_BONE_MAP,
+    PLAYER_ONE_FRANKLIN_CHAIN_SPECS,
+    PLAYER_ONE_FRANKLIN_ROOT_PARENTS,
+    PLAYER_ONE_FRANKLIN_CUSTOM_BONES,
+    PLAYER_ONE_FRANKLIN_PARENT_MAP,
+    PLAYER_TWO_TREVOR_BONE_MAP,
+    PLAYER_TWO_TREVOR_CHAIN_SPECS,
+    PLAYER_TWO_TREVOR_ROOT_PARENTS,
+    PLAYER_TWO_TREVOR_CUSTOM_BONES,
+    PLAYER_TWO_TREVOR_PARENT_MAP,
     MILTINA_MARSHMALLOW_ONLY_CHAINS,
     CUSTOM_BONE_FLAGS,
     VRCHAT_PHYSBONE_SCRIPT_GUID,
@@ -95,10 +95,10 @@ try:
     compute_gtav_bone_tag,
     VANILLA_RESERVED_BONE_TAGS,
     resolve_bone_from_mapping,
-    resolve_michael_er_gtav_bone,
+    resolve_player_zero_michael_gtav_bone,
     resolve_neko_mimi_gtav_bone,
-    resolve_shinano_casual_gtav_bone,
-    resolve_miltina_maid_gtav_bone,
+    resolve_player_one_franklin_gtav_bone,
+    resolve_player_two_trevor_gtav_bone,
     )
 except ImportError:
     from common_tools.physbone_presets_layer import (
@@ -139,25 +139,25 @@ except ImportError:
     resolve_parent_bone_from_unity_chain,
     _chain_parent_map,
     NEKO_MIMI_HALO_WEIGHT_SPLIT,
-    MICHAEL_ER_BONE_MAP,
-    MICHAEL_ER_CHAIN_SPECS,
-    MICHAEL_ER_ROOT_PARENTS,
-    MICHAEL_ER_CUSTOM_BONES,
-    MICHAEL_ER_PARENT_MAP,
+    PLAYER_ZERO_MICHAEL_BONE_MAP,
+    PLAYER_ZERO_MICHAEL_CHAIN_SPECS,
+    PLAYER_ZERO_MICHAEL_ROOT_PARENTS,
+    PLAYER_ZERO_MICHAEL_CUSTOM_BONES,
+    PLAYER_ZERO_MICHAEL_PARENT_MAP,
     NEKO_MIMI_BONE_MAP,
     NEKO_MIMI_CHAIN_SPECS,
     NEKO_MIMI_CUSTOM_BONES,
     NEKO_MIMI_PARENT_MAP,
-    SHINANO_CASUAL_BONE_MAP,
-    SHINANO_CASUAL_CHAIN_SPECS,
-    SHINANO_CASUAL_ROOT_PARENTS,
-    SHINANO_CASUAL_CUSTOM_BONES,
-    SHINANO_CASUAL_PARENT_MAP,
-    MILTINA_MAID_BONE_MAP,
-    MILTINA_MAID_CHAIN_SPECS,
-    MILTINA_MAID_ROOT_PARENTS,
-    MILTINA_MAID_CUSTOM_BONES,
-    MILTINA_MAID_PARENT_MAP,
+    PLAYER_ONE_FRANKLIN_BONE_MAP,
+    PLAYER_ONE_FRANKLIN_CHAIN_SPECS,
+    PLAYER_ONE_FRANKLIN_ROOT_PARENTS,
+    PLAYER_ONE_FRANKLIN_CUSTOM_BONES,
+    PLAYER_ONE_FRANKLIN_PARENT_MAP,
+    PLAYER_TWO_TREVOR_BONE_MAP,
+    PLAYER_TWO_TREVOR_CHAIN_SPECS,
+    PLAYER_TWO_TREVOR_ROOT_PARENTS,
+    PLAYER_TWO_TREVOR_CUSTOM_BONES,
+    PLAYER_TWO_TREVOR_PARENT_MAP,
     MILTINA_MARSHMALLOW_ONLY_CHAINS,
     CUSTOM_BONE_FLAGS,
     VRCHAT_PHYSBONE_SCRIPT_GUID,
@@ -171,10 +171,10 @@ except ImportError:
     compute_gtav_bone_tag,
     VANILLA_RESERVED_BONE_TAGS,
     resolve_bone_from_mapping,
-    resolve_michael_er_gtav_bone,
+    resolve_player_zero_michael_gtav_bone,
     resolve_neko_mimi_gtav_bone,
-    resolve_shinano_casual_gtav_bone,
-    resolve_miltina_maid_gtav_bone,
+    resolve_player_one_franklin_gtav_bone,
+    resolve_player_two_trevor_gtav_bone,
     )
 
 try:
@@ -706,12 +706,12 @@ def _select_character_physbone_template(
 ]:
     """Return `(prefix, chain_specs, root_parents, bone_map)` for built-in presets."""
     low_id = str(avatar_id_or_char).strip().lower()
-    if low_id in ("shinano_er", "michael", "player_zero"):
-        return "PB_ER", MICHAEL_ER_CHAIN_SPECS, MICHAEL_ER_ROOT_PARENTS, MICHAEL_ER_BONE_MAP
-    if low_id in ("shinano_casual", "franklin", "player_one"):
-        return "PB_SC", SHINANO_CASUAL_CHAIN_SPECS, SHINANO_CASUAL_ROOT_PARENTS, SHINANO_CASUAL_BONE_MAP
-    if low_id in ("miltina_maid", "trevor", "player_two"):
-        return "PB_MT", MILTINA_MAID_CHAIN_SPECS, MILTINA_MAID_ROOT_PARENTS, MILTINA_MAID_BONE_MAP
+    if low_id in ("player_zero_michael", "michael", "player_zero"):
+        return "PB_ER", PLAYER_ZERO_MICHAEL_CHAIN_SPECS, PLAYER_ZERO_MICHAEL_ROOT_PARENTS, PLAYER_ZERO_MICHAEL_BONE_MAP
+    if low_id in ("player_one_franklin", "franklin", "player_one"):
+        return "PB_SC", PLAYER_ONE_FRANKLIN_CHAIN_SPECS, PLAYER_ONE_FRANKLIN_ROOT_PARENTS, PLAYER_ONE_FRANKLIN_BONE_MAP
+    if low_id in ("player_two_trevor", "trevor", "player_two"):
+        return "PB_MT", PLAYER_TWO_TREVOR_CHAIN_SPECS, PLAYER_TWO_TREVOR_ROOT_PARENTS, PLAYER_TWO_TREVOR_BONE_MAP
     return "PB_Auto", None, None, None
 
 
@@ -795,7 +795,7 @@ def resolve_character_physbones(
     scene_exists = bool(effective_scene) and Path(effective_scene).is_file()
     cfg_exists = bool(effective_cfg) and Path(effective_cfg).is_file()
 
-    avatar_id = str(char_cfg.get("avatar_id") or char_cfg.get("protagonist") or "shinano_er")
+    avatar_id = str(char_cfg.get("avatar_id") or char_cfg.get("protagonist") or "player_zero_michael")
     prefix_tok, tmpl_specs, tmpl_parents, tmpl_bmap = _select_character_physbone_template(avatar_id)
 
     fallback_prefabs: List[Path] = []
@@ -807,7 +807,7 @@ def resolve_character_physbones(
 
     candidate_fbxs = list(fbx_paths)
     if not candidate_fbxs:
-        for fbx_key in ("source_fbx", "fbx_shinano", "fbx_outfit", "fbx_watch", "fbx_hair"):
+        for fbx_key in ("source_fbx", "fbx_base", "fbx_outfit", "fbx_watch", "fbx_hair"):
             fbx_val = char_cfg.get(fbx_key)
             if fbx_val and fbx_val not in candidate_fbxs:
                 candidate_fbxs.append(fbx_val)
@@ -854,9 +854,9 @@ def resolve_character_physbones(
             discarded_list = list(packed.get("discarded_chains") or ())
             source_used = "unity"
             default_slot_by_avatar = {
-                "shinano_er": "player_zero",
-                "shinano_casual": "player_one",
-                "miltina_maid": "player_two",
+                "player_zero_michael": "player_zero",
+                "player_one_franklin": "player_one",
+                "player_two_trevor": "player_two",
             }
             loaded_data = {
                 "metadata": {
@@ -982,22 +982,25 @@ def resolve_character_physbones(
         max_custom_bones=max_custom_bones,
         strategy=str((loaded_data.get("metadata") or {}).get("source") or source_used),
     )
-    effective_headers = header_comments
-    if effective_headers is None and (effective_priority_report.get("discarded_chains") or orphaned_physbones):
-        auto_headers = [
-            "# VRC2GTAV PhysBone Preset - Auto-prioritized & orphan-filtered for RAGE skeleton budget",
-            f"# {format_physbone_priority_summary(effective_priority_report)}",
-        ]
+    base_headers: Optional[List[str]] = (
+        list(header_comments) if header_comments is not None else None
+    )
+    if effective_priority_report.get("discarded_chains") or orphaned_physbones:
+        if base_headers is None:
+            base_headers = [
+                "# VRC2GTAV PhysBone Preset - Auto-prioritized & orphan-filtered for RAGE skeleton budget",
+            ]
+        base_headers.append(f"# {format_physbone_priority_summary(effective_priority_report)}")
         for orphan_item in orphaned_physbones:
-            auto_headers.append(
+            base_headers.append(
                 f"#   ORPHANED REMOVED: {orphan_item['root_bone']} ({orphan_item['reason']})"
             )
         for disc_item in effective_priority_report.get("discarded_chains", ()):
-            auto_headers.append(
+            base_headers.append(
                 f"#   DISCARDED [Tier {disc_item['tier']} / {disc_item['priority']}]: "
                 f"{disc_item['chain_key']} -> rigid parent {disc_item['fallback_bone']} ({disc_item['reason']})"
             )
-        effective_headers = tuple(auto_headers)
+    effective_headers = tuple(base_headers) if base_headers is not None else None
     saved_path_str = ""
     if save_cfg_path and loaded_data.get("chains"):
         written = save_physbone_config(
@@ -1059,7 +1062,7 @@ def export_character_physbones_to_cfg(
         avatar_id = str(char_cfg.get("avatar_id") or character_section)
 
     candidate_fbxs: List[Union[str, Path]] = []
-    for fbx_key in ("source_fbx", "fbx_shinano", "fbx_outfit", "fbx_watch", "fbx_hair"):
+    for fbx_key in ("source_fbx", "fbx_base", "fbx_outfit", "fbx_watch", "fbx_hair"):
         fbx_val = char_cfg.get(fbx_key)
         if fbx_val and fbx_val not in candidate_fbxs:
             candidate_fbxs.append(fbx_val)
@@ -1081,10 +1084,22 @@ def export_character_physbones_to_cfg(
         and unity_scene_override is None
     )
 
+    import blendshape_helper
+
+    existing_comments = blendshape_helper._read_leading_cfg_comments(target_path_obj)
+    resolved_scene = unity_scene_override or char_cfg.get("unity_scene") or ""
+    export_headers = blendshape_helper.build_cfg_header_comments(
+        cfg_kind="PhysBone Preset",
+        project_path=project_paths.get_project_root(),
+        scene_path=resolved_scene,
+        fbx_paths=candidate_fbxs,
+        extra_comments=existing_comments,
+    )
+
     hints_by_avatar = {
-        "shinano_casual": ("shinano",),
-        "shinano_er": ("shinano", "reunion"),
-        "miltina_maid": ("milltina", "miltina"),
+        "player_one_franklin": ("shinano",),
+        "player_zero_michael": ("shinano", "reunion"),
+        "player_two_trevor": ("milltina", "miltina"),
         "franklin": ("shinano",),
         "michael": ("shinano", "reunion"),
         "trevor": ("milltina", "miltina"),
@@ -1099,6 +1114,7 @@ def export_character_physbones_to_cfg(
         override_avatar_name=avatar_name_override,
         override_marshmallow=override_marshmallow,
         save_cfg_path=target_path_obj,
+        header_comments=export_headers,
     )
     return Path(resolved["saved_cfg_path"]) if resolved["saved_cfg_path"] else None
 

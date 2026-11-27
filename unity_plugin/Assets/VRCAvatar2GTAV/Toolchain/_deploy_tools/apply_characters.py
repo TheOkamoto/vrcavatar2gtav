@@ -3,9 +3,9 @@
 apply_characters.py
 ===================
 Applies Universal Slot Replacement for all three Grand Theft Auto V protagonists:
-  - Michael De Santa (player_zero) -> Shinano Eternal Reunion
-  - Franklin Clinton (player_one)  -> Shinano Casual / Uniform
-  - Trevor Philips   (player_two)  -> Miltina Maid
+  - Michael De Santa (player_zero) -> Player Zero Preset (player_zero_michael)
+  - Franklin Clinton (player_one)  -> Player One Preset (player_one_franklin)
+  - Trevor Philips   (player_two)  -> Player Two Preset (player_two_trevor)
 
 Supports patching a single protagonist or all protagonists simultaneously.
 Replaces every torso drawable (uppr_*.ydd) with the full waifu model, every
@@ -124,8 +124,8 @@ def _load_apply_runtime_config(
     if patchday3ng_models_dir is not None:
         staging_target_dirs.append(patchday3ng_models_dir)
     for optional_work_dir in (
-        project_root_dir / "1_Franklin_Shinano_Casual" / "5_rpf_package" / "patchday3_work" / "patchday3_extracted",
-        project_root_dir / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "mppatches_work" / "mppatches_extracted",
+        project_root_dir / "player_one" / "5_rpf_package" / "patchday3_work" / "patchday3_extracted",
+        project_root_dir / "player_zero" / "5_rpf_package" / "mppatches_work" / "mppatches_extracted",
     ):
         if optional_work_dir.is_dir() and optional_work_dir not in staging_target_dirs:
             staging_target_dirs.append(optional_work_dir)

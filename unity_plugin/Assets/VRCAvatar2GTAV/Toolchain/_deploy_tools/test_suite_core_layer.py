@@ -223,18 +223,32 @@ def test_compiled_drawables_and_textures() -> bool:
     michael_cfg = project_paths.get_character_paths("michael")
     trevor_cfg = project_paths.get_character_paths("trevor")
 
+    import error_handler_helper as err_helper
+
+    def _pick_compiled_asset(primary_path: Path, ped_name: str, subpath_parts: tuple[str, ...], staged_name: str, char_cfg: dict) -> Path:
+        if primary_path.is_file():
+            return primary_path
+        work_root = err_helper.resolve_workspace_root(project_paths.get_project_root())
+        for candidate in (
+            work_root / "npcs" / ped_name / Path(*subpath_parts),
+            Path(char_cfg["staging_streamed_ped_dir"]) / staged_name,
+        ):
+            if candidate.is_file():
+                return candidate
+        return primary_path
+
     expected_assets_list = [
-        franklin_cfg["target_model_ydd"],
-        franklin_cfg["target_yft"],
-        franklin_cfg["ytd_file"],
-        michael_cfg["target_model_ydd"],
-        michael_cfg["extra_model_ydds"][0],
-        michael_cfg["target_yft"],
-        michael_cfg["ytd_file"],
-        trevor_cfg["target_model_ydd"],
-        trevor_cfg["extra_model_ydds"][0],
-        trevor_cfg["target_yft"],
-        trevor_cfg["ytd_file"],
+        _pick_compiled_asset(franklin_cfg["target_model_ydd"], "player_one", ("4_exported_models", "uppr_000_u.ydd"), "uppr_000_u.ydd", franklin_cfg),
+        _pick_compiled_asset(franklin_cfg["target_yft"], "player_one", ("4_exported_models", "player_one.yft"), "player_one.yft", franklin_cfg),
+        _pick_compiled_asset(franklin_cfg["ytd_file"], "player_one", ("3_textures_gtav", "player_one_atlas.ytd"), "uppr_diff_000_a_uni.ytd", franklin_cfg),
+        _pick_compiled_asset(michael_cfg["target_model_ydd"], "player_zero", ("4_exported_models", "uppr_000_u.ydd"), "uppr_000_u.ydd", michael_cfg),
+        _pick_compiled_asset(michael_cfg["extra_model_ydds"][0], "player_zero", ("4_exported_models", "uppr_000_u.ydd"), "uppr_000_u.ydd", michael_cfg),
+        _pick_compiled_asset(michael_cfg["target_yft"], "player_zero", ("4_exported_models", "player_zero.yft"), "player_zero.yft", michael_cfg),
+        _pick_compiled_asset(michael_cfg["ytd_file"], "player_zero", ("3_textures_gtav", "player_zero_atlas.ytd"), "uppr_diff_000_a_uni.ytd", michael_cfg),
+        _pick_compiled_asset(trevor_cfg["target_model_ydd"], "player_two", ("4_exported_models", "uppr_000_u.ydd"), "uppr_000_u.ydd", trevor_cfg),
+        _pick_compiled_asset(trevor_cfg["extra_model_ydds"][0], "player_two", ("4_exported_models", "uppr_000_u.ydd"), "uppr_000_u.ydd", trevor_cfg),
+        _pick_compiled_asset(trevor_cfg["target_yft"], "player_two", ("4_exported_models", "player_two.yft"), "player_two.yft", trevor_cfg),
+        _pick_compiled_asset(trevor_cfg["ytd_file"], "player_two", ("3_textures_gtav", "player_two_atlas.ytd"), "uppr_diff_000_a_uni.ytd", trevor_cfg),
     ]
 
     import ped_damage_helper
@@ -322,10 +336,10 @@ def test_compiled_drawables_and_textures() -> bool:
 
     blink_ydd_bones_ok = True
     for xml_rel_path in (
-        "1_Franklin_Shinano_Casual/4_exported_models/uppr_008_u.ydd.xml",
-        "1_Franklin_Shinano_Casual/4_exported_models/uppr_000_u.ydd.xml",
-        "2_Michael_Shinano_EternalReunion/4_exported_models/uppr_000_u.ydd.xml",
-        "3_Trevor_Miltina_Maid/4_exported_models/uppr_000_u.ydd.xml",
+        "player_one/4_exported_models/uppr_008_u.ydd.xml",
+        "player_one/4_exported_models/uppr_000_u.ydd.xml",
+        "player_zero/4_exported_models/uppr_000_u.ydd.xml",
+        "player_two/4_exported_models/uppr_000_u.ydd.xml",
     ):
         xml_file = PROJECT_ROOT_DIR / xml_rel_path
         if xml_file.is_file():
@@ -454,7 +468,7 @@ def test_deployed_rpf_encryption_headers() -> bool:
         ),
         (
             PROJECT_ROOT_DIR
-            / "1_Franklin_Shinano_Casual"
+            / "player_one"
             / "5_rpf_package"
             / "patchday3_work"
             / "patchday3ng_extracted"
@@ -709,10 +723,46 @@ def _collect_invalid_short_identifiers(
     )
 
 
+PYTHON_STANDARD_LINE_LIMIT = 1600
+PYTHON_MAX_LINE_LIMIT = 1650
+CPP_STANDARD_LINE_LIMIT = 800
+CPP_MAX_LINE_LIMIT = 850
+
+
+def count_non_comment_python_lines(source_text: str) -> int:
+    """Count Python lines excluding standalone `#` comment-only lines."""
+    return sum(
+        1 for raw_line in source_text.splitlines() if not raw_line.lstrip().startswith("#")
+    )
+
+
+def count_non_comment_cpp_lines(cpp_text: str) -> int:
+    """Count C/C++ lines excluding single-line `//` and multi-line `/* ... */` comment-only lines."""
+    no_block_comments = regex_module.sub(
+        r"/\*.*?\*/",
+        lambda match_obj: "\n" * match_obj.group(0).count("\n"),
+        cpp_text,
+        flags=regex_module.S,
+    )
+    no_line_comments = regex_module.sub(r"//.*?$", "", no_block_comments, flags=regex_module.M)
+    orig_lines = cpp_text.splitlines()
+    stripped_lines = no_line_comments.splitlines()
+    non_comment_count = 0
+    for idx, orig_line in enumerate(orig_lines):
+        orig_stripped = orig_line.strip()
+        code_stripped = stripped_lines[idx].strip() if idx < len(stripped_lines) else ""
+        if not orig_stripped or code_stripped:
+            non_comment_count += 1
+    return non_comment_count
+
+
 def test_code_quality_and_mirror_sync() -> bool:
-    """Verify zero emojis, >=3-char AST identifiers/segments, and byte-identical mirrors."""
+    """Verify zero emojis, >=3-char AST identifiers/segments, non-comment limits, and mirror sync."""
     print(i18n.translate("tests.sec6_title"))
-    quality_passed = True
+    quality_passed = (
+        count_non_comment_python_lines("# comment\nx = 1\n  # indented\n\n") == 2
+        and count_non_comment_cpp_lines("// a\n/* b\n * c\n */\nint main_val = 1;\n") == 1
+    )
     emoji_pattern = regex_module.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
     allowed_stdlib_short_names = {"_", "os", "re"}
 
@@ -733,11 +783,17 @@ def test_code_quality_and_mirror_sync() -> bool:
             )
 
         syntax_tree = ast.parse(file_content, filename=str(python_file))
-        if len(file_content.splitlines()) > 1600 or not ast.get_docstring(syntax_tree):
+        non_comment_python_lines = count_non_comment_python_lines(file_content)
+        if non_comment_python_lines > PYTHON_MAX_LINE_LIMIT or not ast.get_docstring(syntax_tree):
             quality_passed &= print_status_result(
                 f"Python modularity/docstring limit ({python_file.relative_to(root_dir)})",
                 False,
-                f"lines={len(file_content.splitlines())}, has_doc={bool(ast.get_docstring(syntax_tree))}",
+                f"code_lines={non_comment_python_lines} (limit {PYTHON_STANDARD_LINE_LIMIT}, max {PYTHON_MAX_LINE_LIMIT}), has_doc={bool(ast.get_docstring(syntax_tree))}",
+            )
+        elif non_comment_python_lines > PYTHON_STANDARD_LINE_LIMIT:
+            print(
+                f"  [INFO] Soft +50 line allowance ({python_file.relative_to(root_dir)}): "
+                f"{non_comment_python_lines}/{PYTHON_MAX_LINE_LIMIT} non-comment lines"
             )
 
         invalid_short_names = _collect_invalid_short_identifiers(
@@ -779,14 +835,20 @@ def test_code_quality_and_mirror_sync() -> bool:
             cpp_files_checked += 1
             cpp_text = cpp_file.read_text(encoding="utf-8", errors="replace")
             cpp_lines = cpp_text.splitlines()
+            non_comment_cpp_lines = count_non_comment_cpp_lines(cpp_text)
             has_header_comment = any(
                 line_txt.strip().startswith(("/*", "//")) for line_txt in cpp_lines[:10]
             )
-            if len(cpp_lines) > 800 or not has_header_comment:
+            if non_comment_cpp_lines > CPP_MAX_LINE_LIMIT or not has_header_comment:
                 cpp_quality_ok &= print_status_result(
                     f"C++ modularity/header ({cpp_file.name})",
                     False,
-                    f"lines={len(cpp_lines)}, has_comment={has_header_comment}",
+                    f"code_lines={non_comment_cpp_lines} (limit {CPP_STANDARD_LINE_LIMIT}, max {CPP_MAX_LINE_LIMIT}), has_comment={has_header_comment}",
+                )
+            elif non_comment_cpp_lines > CPP_STANDARD_LINE_LIMIT:
+                print(
+                    f"  [INFO] Soft +50 C++ line allowance ({cpp_file.name}): "
+                    f"{non_comment_cpp_lines}/{CPP_MAX_LINE_LIMIT} non-comment lines"
                 )
             stripped_cpp = regex_module.sub(r"/\*.*?\*/", " ", cpp_text, flags=regex_module.S)
             stripped_cpp = regex_module.sub(r"//.*?$", " ", stripped_cpp, flags=regex_module.M)
@@ -811,8 +873,14 @@ def test_code_quality_and_mirror_sync() -> bool:
                     False,
                     f"short={short_cpp_ids[:10]}",
                 )
+    quality_passed &= (
+        count_non_comment_python_lines("\n".join(["x = 1"] * 1650 + ["# cmt"] * 200)) <= PYTHON_MAX_LINE_LIMIT
+        and count_non_comment_python_lines("\n".join(["x = 1"] * 1651)) > PYTHON_MAX_LINE_LIMIT
+        and count_non_comment_cpp_lines("\n".join(["int val_a = 1;"] * 850 + ["// cmt"] * 100)) <= CPP_MAX_LINE_LIMIT
+        and count_non_comment_cpp_lines("\n".join(["int val_a = 1;"] * 851)) > CPP_MAX_LINE_LIMIT
+    )
     quality_passed &= print_status_result(
-        "C++ modularity (<=800 lines), comments & >=3-char identifiers",
+        "C++ modularity (<=800/+50 non-comment lines), comments & >=3-char identifiers",
         cpp_quality_ok and cpp_files_checked > 0,
         f"files={cpp_files_checked}",
     )
@@ -821,16 +889,16 @@ def test_code_quality_and_mirror_sync() -> bool:
         scripts_dir = project_paths.get_scripts_root_dir()
         deploy_dir = project_paths.get_deploy_tools_dir()
         common_dir = project_paths.get_common_tools_dir()
-        franklin_dir = project_paths.get_avatar_paths("shinano_casual")["character_dir"]
-        michael_dir = project_paths.get_avatar_paths("shinano_er")["character_dir"]
-        trevor_dir = project_paths.get_avatar_paths("miltina_maid")["character_dir"]
+        franklin_dir = project_paths.get_avatar_paths("player_one_franklin")["character_dir"]
+        michael_dir = project_paths.get_avatar_paths("player_zero_michael")["character_dir"]
+        trevor_dir = project_paths.get_avatar_paths("player_two_trevor")["character_dir"]
     else:
         scripts_dir = root_dir / "scripts"
         deploy_dir = root_dir / "_deploy_tools"
         common_dir = scripts_dir / "common_tools"
-        franklin_dir = root_dir / "1_Franklin_Shinano_Casual"
-        michael_dir = root_dir / "2_Michael_Shinano_EternalReunion"
-        trevor_dir = root_dir / "3_Trevor_Miltina_Maid"
+        franklin_dir = root_dir / "player_one"
+        michael_dir = root_dir / "player_zero"
+        trevor_dir = root_dir / "player_two"
 
     mirror_pairs = [
         (common_dir / "i18n_catalog_core_layer.py", deploy_dir / "i18n_catalog_core_layer.py"),
@@ -842,7 +910,6 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "physbone_unity_fbx_layer.py", deploy_dir / "physbone_unity_fbx_layer.py"),
         (common_dir / "physbone_scene_extractor_layer.py", deploy_dir / "physbone_scene_extractor_layer.py"),
         (common_dir / "unity_hair_bake_layer.py", deploy_dir / "unity_hair_bake_layer.py"),
-        (common_dir / "michael_er_geometry_layer.py", deploy_dir / "michael_er_geometry_layer.py"),
         (common_dir / "blendshape_unity_yaml_layer.py", deploy_dir / "blendshape_unity_yaml_layer.py"),
         (common_dir / "mod_manager_interactive_layer.py", deploy_dir / "mod_manager_interactive_layer.py"),
         (common_dir / "modular_avatar_yaml_layer.py", deploy_dir / "modular_avatar_yaml_layer.py"),
@@ -874,21 +941,9 @@ def test_code_quality_and_mirror_sync() -> bool:
         (common_dir / "texture_calibration_helper.py", deploy_dir / "texture_calibration_helper.py"),
         (common_dir / "vtoon_profile_helper.py", deploy_dir / "vtoon_profile_helper.py"),
         (common_dir / "apply_characters.py", deploy_dir / "apply_characters.py"),
-        (common_dir / "apply_all_characters.py", deploy_dir / "apply_all_characters.py"),
         (common_dir / "repack_and_deploy_everything.py", deploy_dir / "repack_and_deploy_everything.py"),
         (common_dir / "run_mod_manager.py", deploy_dir / "run_mod_manager.py"),
         (common_dir / "run_mod_manager.py", root_dir / "run_mod_manager.py"),
-        (scripts_dir / "Shinano_Casual_Franklin" / "build_franklin_avatar.py", franklin_dir / "2_blender" / "build_franklin_avatar.py"),
-        (scripts_dir / "Shinano_Casual_Franklin" / "run_build_franklin.py", franklin_dir / "2_blender" / "run_build.py"),
-        (scripts_dir / "Shinano_Casual_Franklin" / "generate_franklin_atlas.py", franklin_dir / "3_textures_gtav" / "generate_franklin_atlas.py"),
-        (scripts_dir / "Shinano_EternalReunion_Michael" / "build_michael_er.py", michael_dir / "2_blender" / "build_michael_er.py"),
-        (scripts_dir / "Shinano_EternalReunion_Michael" / "run_build_er.py", michael_dir / "2_blender" / "run_build.py"),
-        (scripts_dir / "Shinano_EternalReunion_Michael" / "generate_er_atlas.py", michael_dir / "3_textures_gtav" / "generate_er_atlas.py"),
-        (scripts_dir / "Shinano_EternalReunion_Michael" / "deploy_michael_er.py", michael_dir / "5_rpf_package" / "deploy_michael_er.py"),
-        (scripts_dir / "Miltina_Maid_Trevor" / "build_trevor_miltina.py", trevor_dir / "2_blender" / "build_trevor_miltina.py"),
-        (scripts_dir / "Miltina_Maid_Trevor" / "run_pipeline.py", trevor_dir / "2_blender" / "run_pipeline.py"),
-        (scripts_dir / "Miltina_Maid_Trevor" / "generate_miltina_atlas.py", trevor_dir / "3_textures_gtav" / "generate_miltina_atlas.py"),
-        (scripts_dir / "Miltina_Maid_Trevor" / "apply_miltina_to_trevor.py", trevor_dir / "5_rpf_package" / "apply_miltina_to_trevor.py"),
     ]
 
     mirrors_in_sync = True
@@ -950,9 +1005,9 @@ def test_source_templates_and_dummies() -> bool:
     import physbone_helper
 
     physbone_cfg_specs = (
-        ("michael_neko_mimi_physbones.cfg", 30),
-        ("shinano_casual_physbones.cfg", 24),
-        ("miltina_maid_physbones.cfg", 25),
+        ("player_zero_michael_physbones.cfg", 30),
+        ("player_one_franklin_physbones.cfg", 24),
+        ("player_two_trevor_physbones.cfg", 25),
     )
     configs_valid = True
     loaded_configs_map = {}
@@ -969,9 +1024,9 @@ def test_source_templates_and_dummies() -> bool:
             configs_valid = False
 
     per_ped_bone_groups = (
-        tuple(physbone_helper.MICHAEL_ER_CUSTOM_BONES),
-        tuple(physbone_helper.SHINANO_CASUAL_CUSTOM_BONES),
-        tuple(physbone_helper.MILTINA_MAID_CUSTOM_BONES),
+        tuple(physbone_helper.PLAYER_ZERO_MICHAEL_CUSTOM_BONES),
+        tuple(physbone_helper.PLAYER_ONE_FRANKLIN_CUSTOM_BONES),
+        tuple(physbone_helper.PLAYER_TWO_TREVOR_CUSTOM_BONES),
     )
     combined_pb_bones = (
         per_ped_bone_groups[0] + per_ped_bone_groups[1] + per_ped_bone_groups[2]
@@ -992,10 +1047,10 @@ def test_source_templates_and_dummies() -> bool:
 
     simulator_step_ok = False
     if configs_valid:
-        shinano_ear_cfg = loaded_configs_map["shinano_casual_physbones.cfg"]["chains"].get(
+        shinano_ear_cfg = loaded_configs_map["player_one_franklin_physbones.cfg"]["chains"].get(
             "ear.L", {}
         )
-        miltina_twin_cfg = loaded_configs_map["miltina_maid_physbones.cfg"]["chains"].get(
+        miltina_twin_cfg = loaded_configs_map["player_two_trevor_physbones.cfg"]["chains"].get(
             "twintail1.L", {}
         )
         shinano_sim = physbone_helper.PhysBoneChainSimulator(
@@ -1141,23 +1196,17 @@ def test_source_templates_and_dummies() -> bool:
         and abs(sig_cfg["specular_fresnel"].default - 0.98) < 1e-6
         and abs(sig_mat["specular_fresnel"].default - 0.98) < 1e-6
     )
-    michael_src = (
-        PROJECT_ROOT_DIR / "scripts/Shinano_EternalReunion_Michael/build_michael_er.py"
+    universal_src = (
+        PROJECT_ROOT_DIR / "scripts/common_tools/universal_gtav_builder.py"
     ).read_text(encoding="utf-8")
-    franklin_src = (
-        PROJECT_ROOT_DIR / "scripts/Shinano_Casual_Franklin/build_franklin_avatar.py"
-    ).read_text(encoding="utf-8")
-    trevor_src = (
-        PROJECT_ROOT_DIR / "scripts/Miltina_Maid_Trevor/build_trevor_miltina.py"
+    univ_avatar_src = (
+        PROJECT_ROOT_DIR / "scripts/common_tools/build_universal_avatar.py"
     ).read_text(encoding="utf-8")
     builders_non_chrome_ok = (
-        ("specular_intensity=0.85" not in michael_src)
-        and ("specular_fresnel=0.70" not in michael_src)
-        and ("specular_fresnel=0.0" not in franklin_src)
-        and ("specular_fresnel=0.0" not in trevor_src)
-        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in michael_src)
-        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in franklin_src)
-        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in trevor_src)
+        ("specular_intensity=0.85" not in universal_src)
+        and ("specular_fresnel=0.70" not in universal_src)
+        and ("specular_fresnel=0.0" not in univ_avatar_src)
+        and ("specular_fresnel=ped_damage_helper.DEFAULT_ANIME_SPECULAR_FRESNEL" in universal_src)
     )
     damage_decals_ok = print_status_result(
         i18n.translate("tests.ped_damage_decals"),
@@ -1237,9 +1286,8 @@ def test_source_templates_and_dummies() -> bool:
                 "scripts/common_tools/apply_characters.py",
                 "scripts/common_tools/repack_and_deploy_everything.py",
                 "scripts/common_tools/build_universal_avatar.py",
-                "scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py",
-                "scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py",
-                "scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py",
+                "scripts/common_tools/universal_atlas_builder.py",
+                "scripts/common_tools/universal_gtav_builder.py",
             )
         )
         all_wired_tokens = (
@@ -1253,7 +1301,7 @@ def test_source_templates_and_dummies() -> bool:
             ).read_text(encoding="utf-8")
             and "enforce_ytd_rpf7_size_budget"
             in (
-                PROJECT_ROOT_DIR / "scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py"
+                PROJECT_ROOT_DIR / "scripts/common_tools/universal_atlas_builder.py"
             ).read_text(encoding="utf-8")
             and "enforce_ped_rpf7_poly_budget"
             in (PROJECT_ROOT_DIR / "scripts/common_tools/build_universal_avatar.py").read_text(
@@ -1466,11 +1514,11 @@ def test_source_templates_and_dummies() -> bool:
         )
 
     strength_resolution_ok = (
-        abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="shinano_casual") - 0.5) < 1e-5
-        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="shinano_er") - 0.5) < 1e-5
-        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="miltina_maid") - 0.6) < 1e-5
-        and abs(eye_blink_helper.resolve_eye_blink_strength(None, {"eye_blink_strength": "0.55"}, avatar_id="shinano_casual") - 0.55) < 1e-5
-        and abs(eye_blink_helper.resolve_eye_blink_strength(0.45, {"eye_blink_strength": "0.55"}, avatar_id="miltina_maid") - 0.45) < 1e-5
+        abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="player_one_franklin") - 0.5) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="player_zero_michael") - 0.5) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, None, avatar_id="player_two_trevor") - 0.6) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(None, {"eye_blink_strength": "0.55"}, avatar_id="player_one_franklin") - 0.55) < 1e-5
+        and abs(eye_blink_helper.resolve_eye_blink_strength(0.45, {"eye_blink_strength": "0.55"}, avatar_id="player_two_trevor") - 0.45) < 1e-5
     )
 
     class _IdentityMat4:

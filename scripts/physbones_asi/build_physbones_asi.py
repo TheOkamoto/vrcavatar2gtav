@@ -113,7 +113,7 @@ def compile_physbones_asi(
             shutil.copy2(ini_source, dest_ini)
             print(f"Deployed INI -> {dest_ini}")
 
-    for pkg_folder in ("1_Franklin_Shinano_Casual", "3_Trevor_Miltina_Maid"):
+    for pkg_folder in ("player_one", "player_two"):
         pkg_dir = _REPO_ROOT / pkg_folder / "5_rpf_package"
         if pkg_dir.is_dir():
             pkg_asi = pkg_dir / output_asi.name
@@ -128,12 +128,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build GTAVPhysBones.asi with MSVC x64")
     parser.add_argument(
         "--output-asi",
-        default=str(_REPO_ROOT / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.asi"),
+        default=str(_REPO_ROOT / "player_zero" / "5_rpf_package" / "GTAVPhysBones.asi"),
     )
     parser.add_argument("--game-dir", default="")
     parser.add_argument(
         "--ini",
-        default=str(_REPO_ROOT / "2_Michael_Shinano_EternalReunion" / "5_rpf_package" / "GTAVPhysBones.ini"),
+        default=str(_REPO_ROOT / "player_zero" / "5_rpf_package" / "GTAVPhysBones.ini"),
     )
     cli_args = parser.parse_args()
 

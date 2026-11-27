@@ -1126,6 +1126,133 @@ def _verify_model_prefab_menu_toggle_and_skin_selection() -> bool:
     )
 
 
+def test_cross_avatar_and_cfg_naming_regressions() -> bool:
+    """Validate scene/.zip .cfg naming + headers, split blink keys, and Booth FBX/material fallbacks."""
+    print("\n--- Booth Cross-Avatar & CFG Header Regressions ---")
+    import tempfile
+    from types import SimpleNamespace
+    import blendshape_helper
+    import eye_blink_helper
+    import physbone_helper
+    import universal_atlas_builder
+    import universal_gtav_rigging_layer
+
+    suite_passed = True
+    with tempfile.TemporaryDirectory(prefix="vrc2gtav_booth_reg_") as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        scene_base = blendshape_helper.resolve_cfg_base_name(
+            source_spec=str(tmp_root / "Assets" / "Airi_Custom.unity"),
+            scene_or_prefab=str(tmp_root / "Assets" / "Airi_Custom.unity"),
+            fbx_paths=[str(tmp_root / "Airi.fbx")],
+            avatar_name="Airi",
+        )
+        zip_base = blendshape_helper.resolve_cfg_base_name(
+            source_spec=str(tmp_root / "Manuka_v1.2.zip"),
+            scene_or_prefab=str(tmp_root / "extracted" / "InnerScene.unity"),
+            fbx_paths=[str(tmp_root / "Manuka.fbx")],
+            avatar_name="Manuka",
+        )
+        blend_headers = blendshape_helper.build_cfg_header_comments(
+            cfg_kind="Blendshape",
+            project_path=tmp_root,
+            scene_path=tmp_root / "Assets" / "Airi_Custom.unity",
+            fbx_paths=[tmp_root / "Airi.fbx"],
+        )
+        blend_cfg_path = tmp_root / f"{scene_base}_blendshapes.cfg"
+        blendshape_helper.save_blendshapes_cfg(
+            blend_cfg_path,
+            {"Body": {"vrc.v_aa": 0.2}},
+            metadata={"avatar": "Airi"},
+            header_comments=blend_headers,
+        )
+        phys_cfg_path = tmp_root / f"{zip_base}_physbones.cfg"
+        phys_headers = blendshape_helper.build_cfg_header_comments(
+            cfg_kind="PhysBone",
+            project_path=tmp_root,
+            scene_path="",
+            fbx_paths=[tmp_root / "Manuka.fbx"],
+            archive_path=tmp_root / "Manuka_v1.2.zip",
+        )
+        physbone_helper.save_physbone_config(
+            phys_cfg_path,
+            {"hair": {"root_bone": "HairRoot", "chain_bones": ["HairRoot"], "parent_bone": "SKEL_Head"}},
+            metadata={"avatar": "Manuka"},
+            bone_mapping={"hairroot": "PB_Auto_0"},
+            header_comments=phys_headers,
+        )
+        blend_head_lines = blend_cfg_path.read_text(encoding="utf-8").splitlines()[:6]
+        phys_head_lines = phys_cfg_path.read_text(encoding="utf-8").splitlines()[:6]
+        cfg_ok = (
+            scene_base == "Airi_Custom"
+            and zip_base == "Manuka_v1.2"
+            and any(line.startswith("# Generated:") for line in blend_head_lines)
+            and any(line.startswith("# Project:") for line in blend_head_lines)
+            and any(line.startswith("# Scene:") for line in blend_head_lines)
+            and any(line.startswith("# FBX:") for line in blend_head_lines)
+            and any(line.startswith("# Archive:") for line in phys_head_lines)
+        )
+        suite_passed &= print_status_result(
+            "Scene/.zip .cfg naming & metadata comment headers",
+            cfg_ok,
+            f"scene_base={scene_base}, zip_base={zip_base}",
+        )
+
+        split_blocks = eye_blink_helper.find_blink_shape_key_group(
+            [SimpleNamespace(name=key_name) for key_name in ("Basis", "vrc.v_aa", "vrc.blink_left", "vrc.blink_right")]
+        )
+        split_keys = [blk.name for blk in split_blocks]
+        blink_split_ok = split_keys == ["vrc.blink_left", "vrc.blink_right"]
+        suite_passed &= print_status_result(
+            "Split Booth blink shape keys (vrc.blink_left + vrc.blink_right)",
+            blink_split_ok,
+            f"keys={split_keys}",
+        )
+
+        mat_dir = tmp_root / "Assets" / "BoothMat"
+        mat_dir.mkdir(parents=True, exist_ok=True)
+        base_tex = mat_dir / "SkinTex.png"
+        base_tex.write_bytes(b"PNG")
+        (mat_dir / "SkinTex.png.meta").write_text("fileFormatVersion: 2\nguid: 11112222333344445555666677778888\n", encoding="utf-8")
+        mat_file = mat_dir / "BodyMat.mat"
+        mat_file.write_text(
+            "\n".join([
+                "%YAML 1.1",
+                "Material:",
+                "  m_Name: BodyMat",
+                "  m_SavedProperties:",
+                "    m_TexEnvs:",
+                "    - _MainTex:",
+                "        m_Texture: {fileID: 0}",
+                "    - _BaseMap:",
+                "        m_Texture: {fileID: 2800000, guid: 11112222333344445555666677778888, type: 3}",
+            ]),
+            encoding="utf-8",
+        )
+        guid_lookup = {"11112222333344445555666677778888": base_tex}
+        parsed_mat = universal_atlas_builder.parse_unity_material_file(mat_file, guid_lookup)
+        decoy_hair = tmp_root / "Assets" / "iO" / "Hair23" / "FBX" / "Chocolat.fbx"
+        real_body = tmp_root / "Assets" / "Chocolat" / "FBX" / "Chocolat.fbx"
+        decoy_hair.parent.mkdir(parents=True, exist_ok=True)
+        real_body.parent.mkdir(parents=True, exist_ok=True)
+        decoy_hair.write_bytes(b"A" * 500)
+        real_body.write_bytes(b"B" * 200)
+        picked_fbx = universal_gtav_rigging_layer.select_primary_avatar_fbx(
+            [decoy_hair, real_body],
+            avatar_name="Chocolat",
+        )
+        booth_fbx_mat_ok = (
+            str(parsed_mat.get("main_tex") or "") == str(base_tex)
+            and picked_fbx is not None
+            and picked_fbx.resolve() == real_body.resolve()
+        )
+        suite_passed &= print_status_result(
+            "Empty _MainTex fallback to _BaseMap & decoy Hair FBX exclusion",
+            booth_fbx_mat_ok,
+            f"tex={parsed_mat.get('main_tex')}, fbx={picked_fbx}",
+        )
+    return suite_passed
+
+
 def run_source_only_validation_suite() -> bool:
     """Run source-only checks (syntax, templates, i18n, quality, mirrors, First-Run/MA)."""
     separator_banner = "=" * 70
@@ -1143,6 +1270,7 @@ def run_source_only_validation_suite() -> bool:
         ("MA ShapeChanger & Manual Shrink Suite", test_ma_shape_changer_and_manual_shrink()),
         (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
         ("Restore-Vanilla & Multi-Slot Suite", test_restore_and_multislot_regressions()),
+        ("Booth Cross-Avatar & CFG Header Suite", test_cross_avatar_and_cfg_naming_regressions()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),
         (i18n.translate("tests.suite_quality"), test_code_quality_and_mirror_sync()),
     ]
@@ -1171,6 +1299,7 @@ def run_full_validation_suite() -> bool:
         ("MA ShapeChanger & Manual Shrink Suite", test_ma_shape_changer_and_manual_shrink()),
         (i18n.translate("tests.suite_npc"), test_universal_npc_pipeline()),
         ("Restore-Vanilla & Multi-Slot Suite", test_restore_and_multislot_regressions()),
+        ("Booth Cross-Avatar & CFG Header Suite", test_cross_avatar_and_cfg_naming_regressions()),
         (i18n.translate("tests.suite_models"), test_compiled_drawables_and_textures()),
         (i18n.translate("tests.suite_rpf"), test_deployed_rpf_encryption_headers()),
         (i18n.translate("tests.suite_i18n"), test_i18n_catalog_integrity()),

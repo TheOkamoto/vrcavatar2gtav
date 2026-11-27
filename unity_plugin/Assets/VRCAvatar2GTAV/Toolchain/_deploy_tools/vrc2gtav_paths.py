@@ -621,10 +621,10 @@ def build_blender_command(
             "--physbones-cfg",
             "--save-physbones-cfg",
             "--face-anim",
-            "--shinano-fbx",
+            "--base-fbx",
             "--outfit-fbx",
             "--watch-fbx",
-            "--miltina-fbx",
+            "--source",
             "--outfit-blend",
             "--base-ydd",
         }
@@ -732,7 +732,7 @@ def get_rpf_paths() -> Dict[str, Path]:
 
 
 PROTAGONIST_ORDER: Tuple[str, ...] = ("michael", "franklin", "trevor")
-AVATAR_ORDER: Tuple[str, ...] = ("shinano_casual", "shinano_er", "miltina_maid")
+AVATAR_ORDER: Tuple[str, ...] = ("player_one_franklin", "player_zero_michael", "player_two_trevor")
 
 PROTAGONIST_PROFILES: Dict[str, Dict[str, Any]] = {
     "michael": {
@@ -740,7 +740,7 @@ PROTAGONIST_PROFILES: Dict[str, Dict[str, Any]] = {
         "ped_name": "player_zero",
         "prop_ped_name": "player_zero_p",
         "skeleton_filename": "player_zero.yft",
-        "default_avatar": "shinano_er",
+        "default_avatar": "player_zero_michael",
         "primary_drawable": "uppr_000_u",
         "export_drawables": ["uppr_000_r", "uppr_000_u", "uppr_001_u", "uppr_004_u"],
         "target_z_min": -0.907,
@@ -752,7 +752,7 @@ PROTAGONIST_PROFILES: Dict[str, Dict[str, Any]] = {
         "ped_name": "player_one",
         "prop_ped_name": "player_one_p",
         "skeleton_filename": "player_one.yft",
-        "default_avatar": "shinano_casual",
+        "default_avatar": "player_one_franklin",
         "primary_drawable": "uppr_008_u",
         "export_drawables": ["uppr_008_u", "uppr_000_u", "uppr_001_u"],
         "target_z_min": -0.907,
@@ -764,7 +764,7 @@ PROTAGONIST_PROFILES: Dict[str, Dict[str, Any]] = {
         "ped_name": "player_two",
         "prop_ped_name": "player_two_p",
         "skeleton_filename": "player_two.yft",
-        "default_avatar": "miltina_maid",
+        "default_avatar": "player_two_trevor",
         "primary_drawable": "uppr_000_u",
         "export_drawables": [
             "uppr_000_u",
@@ -791,57 +791,54 @@ PROTAGONIST_ALIASES: Dict[str, str] = {
 }
 
 AVATAR_PRESETS: Dict[str, Dict[str, Any]] = {
-    "shinano_casual": {
-        "avatar_id": "shinano_casual",
+    "player_one_franklin": {
+        "avatar_id": "player_one_franklin",
         "legacy_section": "franklin",
         "default_character": "franklin",
-        "character_folder": "1_Franklin_Shinano_Casual",
-        "scripts_folder": "Shinano_Casual_Franklin",
+        "character_folder": "player_one",
+        "scripts_folder": "common_tools",
         "unity_hints": ("shinano",),
         "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
-        "default_blendshapes_cfg": "configs/shinano_blendshapes.cfg",
-        "default_physbones_cfg": "configs/shinano_casual_physbones.cfg",
+        "default_blendshapes_cfg": "configs/player_one_franklin_blendshapes.cfg",
+        "default_physbones_cfg": "configs/player_one_franklin_physbones.cfg",
         "default_face_mesh": "Body",
     },
-    "shinano_er": {
-        "avatar_id": "shinano_er",
+    "player_zero_michael": {
+        "avatar_id": "player_zero_michael",
         "legacy_section": "michael",
         "default_character": "michael",
-        "character_folder": "2_Michael_Shinano_EternalReunion",
-        "scripts_folder": "Shinano_EternalReunion_Michael",
+        "character_folder": "player_zero",
+        "scripts_folder": "common_tools",
         "unity_hints": ("shinano", "reunion"),
         "default_anim_files": ("ShinanoDefAdultNewv5.anim",),
-        "default_blendshapes_cfg": "configs/shinano_er_blendshapes.cfg",
-        "default_physbones_cfg": "configs/michael_neko_mimi_physbones.cfg",
+        "default_blendshapes_cfg": "configs/player_zero_michael_blendshapes.cfg",
+        "default_physbones_cfg": "configs/player_zero_michael_physbones.cfg",
         "default_face_mesh": "Body",
     },
-    "miltina_maid": {
-        "avatar_id": "miltina_maid",
+    "player_two_trevor": {
+        "avatar_id": "player_two_trevor",
         "legacy_section": "trevor",
         "default_character": "trevor",
-        "character_folder": "3_Trevor_Miltina_Maid",
-        "scripts_folder": "Miltina_Maid_Trevor",
+        "character_folder": "player_two",
+        "scripts_folder": "common_tools",
         "unity_hints": ("milltina", "miltina"),
         "default_anim_files": ("Miltina_close eyes_Base_adult.anim",),
-        "default_blendshapes_cfg": "configs/miltina_blendshapes.cfg",
-        "default_physbones_cfg": "configs/miltina_maid_physbones.cfg",
+        "default_blendshapes_cfg": "configs/player_two_trevor_blendshapes.cfg",
+        "default_physbones_cfg": "configs/player_two_trevor_physbones.cfg",
         "default_face_mesh": "Body",
     },
 }
 
 AVATAR_ALIASES: Dict[str, str] = {
-    "shinano_casual": "shinano_casual",
-    "shinano": "shinano_casual",
-    "casual": "shinano_casual",
-    "shinano_uniform": "shinano_casual",
-    "shinano_er": "shinano_er",
-    "shinano_eternal_reunion": "shinano_er",
-    "eternal_reunion": "shinano_er",
-    "er": "shinano_er",
-    "miltina_maid": "miltina_maid",
-    "miltina": "miltina_maid",
-    "milltina": "miltina_maid",
-    "milltina_maid": "miltina_maid",
+    "player_one_franklin": "player_one_franklin",
+    "player_one": "player_one_franklin",
+    "franklin": "player_one_franklin",
+    "player_zero_michael": "player_zero_michael",
+    "player_zero": "player_zero_michael",
+    "michael": "player_zero_michael",
+    "player_two_trevor": "player_two_trevor",
+    "player_two": "player_two_trevor",
+    "trevor": "player_two_trevor",
 }
 
 _PROTAGONIST_ONLY_KEYS = frozenset(
@@ -980,7 +977,7 @@ def get_avatar_paths(
 ) -> Dict[str, Any]:
     """
     Resolve all asset, Unity, blendshape, texture, and script paths for a
-    VRChat avatar preset (`shinano_casual`, `shinano_er`, or `miltina_maid`).
+    VRChat avatar preset (`player_one_franklin`, `player_zero_michael`, or `player_two_trevor`).
 
     Reads `[avatar:<id>]` when present and falls back cleanly to legacy
     character sections for older `vrc2gtav.cfg` files.

@@ -70,6 +70,7 @@ struct VToonCharacterProfile {
     std::vector<VToonGpuMaterial> slots;
     ID3D11ShaderResourceView* lutSrv = nullptr;
     ID3D11ShaderResourceView* matcapSrv = nullptr;
+    bool matcapIsAtlas = false;
     bool texturesAttempted = false;
 };
 
@@ -183,6 +184,7 @@ inline VToonGpuMaterial MakeDefaultMaterialSlot() {
     mat.tuningC[1] = 1.0f;  // rimEnable
     mat.tuningC[2] = 0.0f;  // matcapEnable
     mat.tuningC[3] = 0.0f;  // specularIntensity
+    mat.flagsMisc[3] = 0.0f; // anisotropy
     return mat;
 }
 
@@ -305,6 +307,10 @@ inline bool LoadVToonIniConfig(const std::string& iniPath, VToonRuntimeConfig& o
             else if (keyStr == "specular_intensity") curMatPtr->tuningC[3] = std::strtof(valStr.c_str(), nullptr);
             else if (keyStr == "slot_type") curMatPtr->flagsMisc[0] = std::strtof(valStr.c_str(), nullptr);
             else if (keyStr == "double_sided") curMatPtr->flagsMisc[1] = std::strtof(valStr.c_str(), nullptr);
+            else if (keyStr == "anisotropy") {
+                float parsedAniso = std::strtof(valStr.c_str(), nullptr);
+                curMatPtr->flagsMisc[3] = (parsedAniso < 0.0f) ? 0.0f : ((parsedAniso > 1.0f) ? 1.0f : parsedAniso);
+            }
         }
     }
 
@@ -315,7 +321,8 @@ inline bool LoadVToonIniConfig(const std::string& iniPath, VToonRuntimeConfig& o
 inline ID3D11ShaderResourceView* LoadPngFileToSrv(
     ID3D11Device* d3dDevice,
     const std::string& rawRelOrAbsPath,
-    bool forcePointOrUnorm = true
+    bool forcePointOrUnorm = true,
+    UINT* outWidth = nullptr
 ) {
     if (!d3dDevice || rawRelOrAbsPath.empty()) {
         return nullptr;
@@ -359,6 +366,7 @@ inline ID3D11ShaderResourceView* LoadPngFileToSrv(
         UINT imgWidth = 0;
         UINT imgHeight = 0;
         wicConverter->GetSize(&imgWidth, &imgHeight);
+        if (outWidth) *outWidth = imgWidth;
         if (imgWidth > 0 && imgHeight > 0) {
             std::vector<uint8_t> rgbaPixels(static_cast<size_t>(imgWidth) * imgHeight * 4);
             if (SUCCEEDED(wicConverter->CopyPixels(nullptr, imgWidth * 4, static_cast<UINT>(rgbaPixels.size()), rgbaPixels.data()))) {

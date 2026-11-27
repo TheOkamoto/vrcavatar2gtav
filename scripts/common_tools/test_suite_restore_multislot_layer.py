@@ -1327,7 +1327,7 @@ def _test_vtoon_hash_sync_and_budget_tiers() -> bool:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         proj_root = tmp_path / "proj"
-        pkg_dir = proj_root / "2_Michael_Shinano_EternalReunion" / "5_rpf_package"
+        pkg_dir = proj_root / "player_zero" / "5_rpf_package"
         gtav_dir = tmp_path / "gtav"
         pkg_dir.mkdir(parents=True, exist_ok=True)
         gtav_dir.mkdir(parents=True, exist_ok=True)

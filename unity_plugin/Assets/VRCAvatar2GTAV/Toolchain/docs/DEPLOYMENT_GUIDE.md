@@ -9,9 +9,9 @@
 
 | GTA V Protagonist | In-Game Ped ID | VRChat Avatar | Outfit / Style | Character Folder |
 | :--- | :--- | :--- | :--- | :--- |
-| **Michael De Santa** | `player_zero` | **Shinano** | Eternal Reunion (Gothic Dress + Pocket Watch) | `2_Michael_Shinano_EternalReunion/` |
-| **Franklin Clinton** | `player_one` | **Shinano** | Casual / School Uniform (Red Skirt, Blue Hair) | `1_Franklin_Shinano_Casual/` |
-| **Trevor Philips** | `player_two` | **Miltina** | Classic Maid (Black/White Long Dress, Apron) | `3_Trevor_Miltina_Maid/` |
+| **Michael De Santa** | `player_zero` | `player_zero_michael` | Any BOOTH / VRChat humanoid avatar (e.g. *Shinano – Eternal Reunion*) | `player_zero/` |
+| **Franklin Clinton** | `player_one` | `player_one_franklin` | Any BOOTH / VRChat humanoid avatar (e.g. *Shinano – Casual*) | `player_one/` |
+| **Trevor Philips** | `player_two` | `player_two_trevor` | Any BOOTH / VRChat humanoid avatar (e.g. *Miltina – Classic Maid*) | `player_two/` |
 
 ---
 
@@ -36,10 +36,12 @@ vrc2gtav/
 │   ├── build_unitypackage.py                        # Packages Editor UI + Toolchain into VRCAvatar2GTAV.unitypackage
 │   └── install_unity_plugin.py                      # Non-destructive installer for existing Unity projects
 ├── README.md / README.pt-BR.md / README.ja.md       # Trilingual GitHub landing READMEs
-├── docs/                                            # Deep-dive deployment & architecture guides
+├── docs/                                            # Deep-dive deployment, architecture & Unity UI guides
 │   ├── DEPLOYMENT_GUIDE.md                          # This technical guide in English
 │   ├── DEPLOYMENT_GUIDE.pt-BR.md                    # Matching technical guide in Portuguese
-│   └── DEPLOYMENT_GUIDE.ja.md                       # Matching technical guide in Japanese
+│   ├── DEPLOYMENT_GUIDE.ja.md                       # Matching technical guide in Japanese
+│   ├── UNITY_UI_GUIDE.md / .pt-BR.md / .ja.md       # Illustrated Unity Exporter UI guides with screenshots
+│   └── images/                                      # Unity Editor UI screenshots
 │
 ├── _deploy_tools/                                   # Runtime mirror & empty dummy drawables
 │   ├── head_000_r.ydd                               # 629-byte invisible dummy body mesh
@@ -50,20 +52,17 @@ vrc2gtav/
 │   └── ...                                          # Mirrors of VToon, PhysBones, eye-blink, hair, MA, NPC, i18n, paths helpers
 │
 ├── scripts/                                         # Canonical Python/C++ source tree (English + i18n)
-│   ├── common_tools/                                # Shared helpers, manager, builders, VToon/Restore helpers, and test suite
+│   ├── common_tools/                                # Universal builders, manager, First-Run, VToon/Restore/NPC helpers, and test suite
 │   ├── physbones_asi/                               # Real-time VRChat PhysBones ASI solver (GTAVPhysBones.asi / .ini)
-│   ├── vtoon_asi/                                   # Real-time D3D11 lilToon shader ASI (GTAVVToon.asi / .ini / vtoon_profiles)
-│   ├── Shinano_Casual_Franklin/                     # Franklin texture & Blender build pipeline
-│   ├── Shinano_EternalReunion_Michael/              # Michael texture, Blender build & deploy pipeline
-│   └── Miltina_Maid_Trevor/                         # Trevor texture, Blender build & staging pipeline
+│   └── vtoon_asi/                                   # Real-time D3D11 lilToon shader ASI (GTAVVToon.asi / .ini / vtoon_profiles)
 │
-├── 1_Franklin_Shinano_Casual/                       # Execution mirrors & local outputs (gitignored)
-├── 2_Michael_Shinano_EternalReunion/                # Execution mirrors & local outputs (gitignored)
-└── 3_Trevor_Miltina_Maid/                           # Execution mirrors & local outputs (gitignored)
+├── player_zero/                                     # Execution mirror & local outputs for Michael (gitignored)
+├── player_one/                                      # Execution mirror & local outputs for Franklin (gitignored)
+└── player_two/                                      # Execution mirror & local outputs for Trevor (gitignored)
 ```
 
 ### Copyright Separation & `.gitignore` Policy
-No copyrighted GTA V game files, BOOTH assets, or local render screenshots are tracked in Git or bundled in [`VRCAvatar2GTAV.unitypackage`](../VRCAvatar2GTAV.unitypackage). Folders and configs such as `staging/`, `renders/`, `backups/`, `imported_unity_projects/`, `npcs/`, `vtoon_profiles/`, `VRCAvatar2GTAV_Work/`, `vrc2gtav.cfg`, `configs/npc_registry.json`, `configs/active_multi_slots.json`, `3_Trevor_Miltina_Maid/3_textures_gtav/custom_hair_manifest.json`, `1_Franklin_Shinano_Casual/5_rpf_package/`, `3_Trevor_Miltina_Maid/5_rpf_package/`, as well as `.zip`, `.unitypackage`, `.yft`, `.ytd`, `.dds`, `.ydd.xml`, `.backup_*`, and compiled `.ydd` files are gitignored and built locally from the user's own legal installation during **First-Run**, **Unity Export**, or **NPC conversion**.
+No copyrighted GTA V game files, BOOTH assets, or local render screenshots are tracked in Git or bundled in [`VRCAvatar2GTAV.unitypackage`](../VRCAvatar2GTAV.unitypackage). Folders and configs such as `staging/`, `renders/`, `backups/`, `imported_unity_projects/`, `npcs/`, `vtoon_profiles/`, `VRCAvatar2GTAV_Work/`, `vrc2gtav.cfg`, `configs/npc_registry.json`, `configs/active_multi_slots.json`, `player_*/3_textures_gtav/custom_hair_manifest.json`, `player_zero/5_rpf_package/`, `player_one/5_rpf_package/`, `player_two/5_rpf_package/`, as well as `.zip`, `.unitypackage`, `.yft`, `.ytd`, `.dds`, `.ydd.xml`, `.backup_*`, and compiled `.ydd` files are gitignored and built locally from the user's own legal installation during **First-Run**, **Unity Export**, or **NPC conversion**.
 
 The only `.ydd` files stored under `_deploy_tools/` are the two minimal scratch-built dummy meshes:
 - [`_deploy_tools/head_000_r.ydd`](../_deploy_tools/head_000_r.ydd) — 629-byte empty invisible body dummy.
@@ -82,9 +81,9 @@ Paths are never hardcoded in scripts. [`scripts/common_tools/vrc2gtav_paths.py`]
 4. **Cross-platform auto-detection:** detects native **Windows** vs. **Linux / WSL** execution and converts drive-letter paths (e.g., `D:/GTAV` ↔ `/mnt/d/GTAV`) via `pathlib.Path`.
 5. **Unit `1.0` default scales & `.unity` extraction (`unity_scene_helper.py`):** Clean repository defaults (`unity_scene =` blank) keep all avatar body, head, bone, and prop scales at `1.0`. Setting `unity_scene` (and optional `unity_avatar_name`) under `[franklin]`, `[michael]`, or `[trevor]` extracts customized `Transform` / `PrefabInstance` scales (canceling `PhysBone`/Marshmallow scale wrappers) and height-normalizes bones before arm/hand retargeting.
 6. **Default hair & texture fallback (`texture_calibration_helper.py`):** Blank or missing `custom_hair` / `fbx_hair` (*Neko Tied Bob hair*) or optional eye/makeup packs automatically fall back to the base avatar's built-in hair (`Hair_*` / `Shinano_hair.png` for Shinano, `Milltina_hair_*` / calibrated `Milltina_Hair.png` for Miltina) and base face texture (`Shinano_face.png`, `Milltina_Face.png`).
-7. **Unity, `.cfg`, MA `ShapeChanger`/`BlendshapeSync` & `.anim` blendshape resolution (`blendshape_helper.py`, `modular_avatar_helper.py`, `universal_gtav_rigging_layer.py`):** Per-mesh blendshapes (facial `.anim` curves, body shrinks, outfit, accessory, and hair keys) are extracted live from `unity_scene` (+ nested `.prefab`s and FBX channel tables) or loaded from portable UTF-8 `.cfg` presets (`configs/shinano_blendshapes.cfg`, `configs/shinano_er_blendshapes.cfg`, `configs/miltina_blendshapes.cfg`) according to `blendshapes_source = auto | unity | cfg` and `--blendshapes-source` / `--blendshapes-cfg` / `--face-anim` / `--save-blendshapes-cfg` / `--export-blendshapes`. When `--face-anim` is blank or all-zero, Unity scene/preset facial blendshapes are preserved instead of wiped. In [`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py), Modular Avatar `ShapeChanger` (`Delete` > `m_threshold` face deletion vs `Set` weights such as `Toe_highheels=1.0`, `Shrink_Foot=0.03`) and `BlendshapeSync` (`RemapCurve`) are separated and applied *after* base weight resets so nested outfit prefabs are preserved, while manual `Shrink_* > 0.5` keys on `Body_base`/`Body` cull fully shrunk interior faces (`all` verts) before RPF7 poly budgeting.
-8. **Universal custom Unity hair porting (`unity_hair_helper.py` + `blender_hair_helper.py`):** Any VRChat Unity hair (`.prefab`, `PrefabVariant` chains via `m_SourcePrefab`, Modular Avatar `MergeArmature`/`BoneProxy` setups, `m_Materials` overrides, or raw `.fbx` + `.mat`) can be assigned via `--hair` (`auto | default | none | <path>`), `custom_hair` in `vrc2gtav.cfg`, or interactive menu option `[8]` on `shinano_casual`, `shinano_er`, or `miltina_maid`. `unity_hair_helper.py` resolves `.fbx.meta` material maps, suppresses inactive/editor-only hair parts, preserves glass/lens transparency (`preserve_alpha`), bakes lilToon textures/`_Color`/`_MainTexHSVG` tints into UV tiles (`custom_hair_manifest.json`), and `blender_hair_helper.py` fits the mesh to the avatar skull (with `--hair-scale`, `--hair-offset`, and `_partition_component_by_z_bands`), transfers `SKEL_Head` skinning, and preserves base animal ears.
-9. **Complete multi-ped VRChat PhysBones, Auto-Importer, Spoke Unwrapping & Priority Packer ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** Custom articulated `PB_*` chains (`182` custom bones across `79` protagonist chains by default inside RAGE's `<= 63` custom / `<= 128` total `.ydd` ceiling per ped, with `0` ELF tag collisions) are injected into Blender armatures + `.yft` skeletons and driven live in-game by `GTAVPhysBones.asi` and `GTAVPhysBones.ini` across up to **32 simultaneous tracked peds (`kMaxTrackedPeds = 32`)**, filtering `[Chain_*]` and `[Blink_*]` sections by `model = <ped_name>` / `modelHash` so protagonists and custom NPCs never collide, and applying VRChat `Advanced` (`integrationType == 1`) parent-relative `stiffness` in `ComputeChainMatrices`: Michael (`configs/michael_neko_mimi_physbones.cfg`, `30` chains / `62` bones), Franklin (`configs/shinano_casual_physbones.cfg`, `24` chains / `62` bones), and Trevor (`configs/miltina_maid_physbones.cfg`, `25` chains / `58` bones — **all keeping 100% of chains / `0` discarded**). Optional `Marshmallow PB` breast overrides are off by default (`physbones_marshmallow = false`) and can be enabled via `--physbones-marshmallow` (`81` chains / `186` bones). In `physbone_scene_extractor_layer.py`, `_unwrap_container_spokes` unwraps container spokes cleanly for lower-hair strands and bows/ribbons (`effective root transform`); dual-stage orphan pruning (`prune_orphaned_physbone_chains` on scene/prefab extract plus active-vertex `active_pb_vgrps_ci` filtering in Blender after `ShapeChanger`/`Shrink_*` face deletion) strips loose/unweighted dress PhysBones, and `PHYSBONE_PRIORITY_TIERS` elevates **hair/ears (`97–100`), breasts (`94`), and skirts (`90`)** above tails/wings (`82`), outerwear (`68`), and minor frills/ribbons while binding discarded over-limit props rigidly to `parent_bone`.
+7. **Unity, `.cfg`, MA `ShapeChanger`/`BlendshapeSync` & `.anim` blendshape resolution (`blendshape_helper.py`, `modular_avatar_helper.py`, `universal_gtav_rigging_layer.py`):** Per-mesh blendshapes (facial `.anim` curves, body shrinks, outfit, accessory, and hair keys) are extracted live from `unity_scene` (+ nested `.prefab`s and FBX channel tables) or loaded from portable UTF-8 `.cfg` presets (`configs/player_zero_michael_blendshapes.cfg`, `configs/player_one_franklin_blendshapes.cfg`, `configs/player_two_trevor_blendshapes.cfg`) according to `blendshapes_source = auto | unity | cfg` and `--blendshapes-source` / `--blendshapes-cfg` / `--face-anim` / `--save-blendshapes-cfg` / `--export-blendshapes`. During automated builds for any Booth avatar, exported `.cfg` filenames automatically match the **Unity `.unity` scene name** (or `.zip`/`.unitypackage` archive stem in CLI mode) and start with `# Generated`, `# Project`, `# Scene`, and `# FBX` metadata comments. When `--face-anim` is blank or all-zero, Unity scene/preset facial blendshapes are preserved instead of wiped. In [`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py), Modular Avatar `ShapeChanger` (`Delete` > `m_threshold` face deletion vs `Set` weights such as `Toe_highheels=1.0`, `Shrink_Foot=0.03`) and `BlendshapeSync` (`RemapCurve`) are separated and applied *after* base weight resets so nested outfit prefabs are preserved, while manual `Shrink_* > 0.5` keys on `Body_base`/`Body` cull fully shrunk interior faces (`all` verts) before RPF7 poly budgeting.
+8. **Universal custom Unity hair porting (`unity_hair_helper.py` + `blender_hair_helper.py`):** Any VRChat Unity hair (`.prefab`, `PrefabVariant` chains via `m_SourcePrefab`, Modular Avatar `MergeArmature`/`BoneProxy` setups, `m_Materials` overrides, or raw `.fbx` + `.mat`) can be assigned via `--hair` (`auto | default | none | <path>`), `custom_hair` in `vrc2gtav.cfg`, or interactive menu option `[8]` for any profile (`player_zero_michael`, `player_one_franklin`, `player_two_trevor`) or arbitrary Booth avatar. `unity_hair_helper.py` resolves `.fbx.meta` material maps, suppresses inactive/editor-only hair parts, preserves glass/lens transparency (`preserve_alpha`), bakes lilToon textures/`_Color`/`_MainTexHSVG` tints into UV tiles (`custom_hair_manifest.json`), and `blender_hair_helper.py` fits the mesh to the avatar skull (with `--hair-scale`, `--hair-offset`, and `_partition_component_by_z_bands`), transfers `SKEL_Head` skinning, and preserves base animal ears.
+9. **Complete multi-ped VRChat PhysBones, Auto-Importer, Spoke Unwrapping & Priority Packer ([`physbone_helper.py`](../scripts/common_tools/physbone_helper.py) + [`scripts/physbones_asi/`](../scripts/physbones_asi/gtav_physbones.cpp)):** Custom articulated `PB_*` chains (kept inside RAGE's `<= 63` custom / `<= 128` total `.ydd` ceiling per ped, with `0` ELF tag collisions) are injected into Blender armatures + `.yft` skeletons and driven live in-game by `GTAVPhysBones.asi` and `GTAVPhysBones.ini` across up to **32 simultaneous tracked peds (`kMaxTrackedPeds = 32`)**, filtering `[Chain_*]` and `[Blink_*]` sections by `model = <ped_name>` / `modelHash` so protagonists and custom NPCs never collide, and applying VRChat `Advanced` (`integrationType == 1`) parent-relative `stiffness` in `ComputeChainMatrices` (reference presets: `configs/player_zero_michael_physbones.cfg`, `configs/player_one_franklin_physbones.cfg`, `configs/player_two_trevor_physbones.cfg`). Optional `Marshmallow PB` breast overrides are off by default (`physbones_marshmallow = false`) and can be enabled via `--physbones-marshmallow`. In `physbone_scene_extractor_layer.py`, `_unwrap_container_spokes` unwraps container spokes cleanly for lower-hair strands and bows/ribbons (`effective root transform`); dual-stage orphan pruning (`prune_orphaned_physbone_chains` on scene/prefab extract plus active-vertex `active_pb_vgrps_ci` filtering in Blender after `ShapeChanger`/`Shrink_*` face deletion) strips loose/unweighted dress PhysBones, and `PHYSBONE_PRIORITY_TIERS` elevates **hair/ears (`97–100`), breasts (`94`), and skirts (`90`)** above tails/wings (`82`), outerwear (`68`), and minor frills/ribbons while binding discarded over-limit props rigidly to `parent_bone`.
 
 ### 2.2 Trilingual Localization (`en` / `ja` / `pt`)
 [`scripts/common_tools/vrc2gtav_i18n.py`](../scripts/common_tools/vrc2gtav_i18n.py) (and [`Vrc2GtavLocalization.cs`](../unity_plugin/Assets/VRCAvatar2GTAV/Editor/Vrc2GtavLocalization.cs) in Unity) provides full runtime translations in **English (`en`)**, **Japanese (`ja`)**, and **Portuguese (`pt`)**:
@@ -108,7 +107,7 @@ Vanilla protagonist `.yft` skeletons contain dozens of helper/cloth bones that d
 2. **T-Pose to A-Pose (-55°):** VRChat arms are rotated downward into GTA V's native A-Pose before weight transfer and bone relocation.
 3. **Submesh slot alignment (`map_blender_slots_to_unity_submeshes`):** Maps Blender FBX material slot indices onto Unity `Mesh` submesh first-triangle order so Modular Avatar `m_Materials` overrides match textures 1:1 in [`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py).
 4. **RAGE `uint16` vertex split (`split_oversized_material_geometries`):** meshes exceeding `30000` vertices per chunk are split to stay within RAGE index limits, and `lod_dist_high` is set to `9998.0`.
-5. **Michael Eternal Reunion — Hip Heart, Skirt Weights & Pocket Watch ([`build_michael_er.py`](../scripts/Shinano_EternalReunion_Michael/build_michael_er.py)):** Balances waist/hip skirt & heart weights across `SKEL_Pelvis`, `SKEL_L_Thigh`, and `SKEL_R_Thigh` (`<= 4` influences/vertex), aligns `Pocket Watch` to `Pocket Watch_Root`, and maps its dedicated 4×2 atlas tile ([`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py)).
+5. **Hips, Skirt & Accessories ([`universal_gtav_builder.py`](../scripts/common_tools/universal_gtav_builder.py) + [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py)):** Balances waist/hip skirt and belt weights across `SKEL_Pelvis`, `SKEL_L_Thigh`, and `SKEL_R_Thigh` (`<= 4` influences/vertex), aligns bone-attached accessories, and maps each material onto the single external atlas.
 
 ---
 
@@ -137,7 +136,7 @@ $$\text{weight}_{\text{head}} = 1.0 - \text{weight}_{\text{jaw}}$$
 ## 5. Textures, Single-Mip `.ytd`s, Blood Decals & `GTAVVToon.asi`
 
 ### 5.1 Single-Mip (`--mips 1`) 2K `.ytd` Dictionaries, Embedded Maps & Blood Decals
-- [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py) (as well as [`generate_franklin_atlas.py`](../scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py), [`generate_er_atlas.py`](../scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py), and [`generate_miltina_atlas.py`](../scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py)) bakes VRChat/Unity `.mat` / lilToon properties into **single-texture external `.ytd`** dictionaries compressed as **DXT5 (BC3)** and locked with **`--mips 1`** (`rage textures build --mips 1`) at **2048×2048** by default (configurable via `--atlas-size` `512/1024/2048/4096`). Locking `--mips 1` prevents GTA V's texture streamer from downgrading ped mip levels when multiple custom avatars share a scene or cutscene.
+- [`universal_atlas_builder.py`](../scripts/common_tools/universal_atlas_builder.py) bakes VRChat/Unity `.mat` / lilToon properties into **single-texture external `.ytd`** dictionaries compressed as **DXT5 (BC3)** and locked with **`--mips 1`** (`rage textures build --mips 1`) at **2048×2048** by default (configurable via `--atlas-size` `512/1024/2048/4096`). Locking `--mips 1` prevents GTA V's texture streamer from downgrading ped mip levels when multiple custom avatars share a scene or cutscene.
 - Supporting normal/bump and specular maps stay saved for embedded `.ydd` materials (using valid uncompressed `A8R8G8B8` DX9 DDS helpers in `blender_hair_helper.py` when flat/neutral so `DiffuseSampler` index `0` in external `.ytd` always binds cleanly). Transparent glass/eyewear materials retain alpha cleanly (`preserve_alpha=True`).
 - Compiled meshes bind `ped.sps` with [`scripts/common_tools/ped_damage_helper.py`](../scripts/common_tools/ped_damage_helper.py) generating 6-zone cylindrical `UVMap 1` (`TexCoord1`) and vanilla ped vertex colors (`Color 1 = #FF8000FF`, `Color 2 = #00000000`) for native GTA V blood/wound decals (`--blood-decals`, enabled by default; `--no-blood-decals` switches to `ped_default.sps`). Whenever `TexCoord1` + `Tangent` push heavy outfits over RPF7's `16 MiB` (`0xFFFFFF`) entry limit, `enforce_ped_rpf7_poly_budget` automatically trims dense non-body accessories while preserving face/body geometry.
 
@@ -223,12 +222,12 @@ python scripts/common_tools/universal_gtav_builder.py --restore-all
 python run_mod_manager.py
 python run_mod_manager.py --character all
 python run_mod_manager.py --character michael --lang en
-python run_mod_manager.py --character franklin --avatar miltina_maid --save-assignment
+python run_mod_manager.py --character franklin --avatar player_two_trevor --save-assignment
 python run_mod_manager.py --character michael --hair "/path/to/CustomHair.prefab" --save-hair
 
 # Custom NPCs & street pedestrians (or interactive option [11]):
-python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Karin.zip"
-python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Karin.zip" --target-ped cs_lamardavis --deploy-npc
+python run_mod_manager.py --npc ig_lamardavis --avatar-zip "/path/to/Avatar.zip"
+python scripts/common_tools/build_universal_avatar.py --avatar-zip "/path/to/Avatar.zip" --target-ped cs_lamardavis --deploy-npc
 python run_mod_manager.py --all-npcs
 
 # Deploy / repack only & environment audit:
@@ -237,13 +236,13 @@ python run_mod_manager.py --check-env
 ```
 
 ### 8.4 Automated Validation Suite
-[`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) validates both source invariants (including Unity C# exporter bounds, `.unitypackage` build & Toolchain mirror parity, VToon watermark/INI/ALU checks, single-mip `.ytd`s, Restore-Vanilla, and multi-slot pipeline) and compiled game outputs:
+[`scripts/common_tools/test_mod_suite.py`](../scripts/common_tools/test_mod_suite.py) validates both source invariants (including Unity C# exporter bounds, `.unitypackage` build & Toolchain mirror parity, VToon watermark/INI/ALU checks, single-mip `.ytd`s, Restore-Vanilla, scene/`.zip` `.cfg` headers & Booth compatibility, and multi-slot pipeline) and compiled game outputs:
 
 ```bash
-# Full suite (14 checks; requires First-Run, build, and deploy):
+# Full suite (15 checks; requires First-Run, build, and deploy):
 python scripts/common_tools/test_mod_suite.py --lang en
 
-# Source-only suite (11 checks; runs on a fresh clone prior to First-Run):
+# Source-only suite (12 checks; runs on a fresh clone prior to First-Run):
 python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ```
 
@@ -257,20 +256,20 @@ python scripts/common_tools/test_mod_suite.py --source-only --lang en
 ## 9. Manual Step-by-Step Reference
 
 ```bash
-# Step 1: Generate 2K single-mip texture atlases (.dds and .ytd; add --hair / --hair-mat / --hair-tex to bake custom hair)
-python scripts/Shinano_Casual_Franklin/generate_franklin_atlas.py
-python scripts/Shinano_EternalReunion_Michael/generate_er_atlas.py
-python scripts/Miltina_Maid_Trevor/generate_miltina_atlas.py
+# Step 1: Generate 2K single-mip texture atlases (.dds and .ytd via universal pipeline)
+python scripts/common_tools/universal_atlas_builder.py --target-character michael --atlas-only
+python scripts/common_tools/universal_atlas_builder.py --target-character franklin --atlas-only
+python scripts/common_tools/universal_atlas_builder.py --target-character trevor --atlas-only
 
-# Step 2: Compile 3D models in Blender + Sollumz (supports --target-character, --hair / --hair-scale / --hair-offset, --mouth-open-strength)
-python scripts/Shinano_Casual_Franklin/run_build_franklin.py --target-character franklin
-python scripts/Shinano_EternalReunion_Michael/run_build_er.py --target-character michael
-python scripts/Miltina_Maid_Trevor/run_pipeline.py --target-character trevor
+# Step 2: Compile 3D models in Blender + Sollumz (reuse built atlas via --skip-atlas)
+python scripts/common_tools/universal_gtav_builder.py --target-character michael --skip-atlas --no-deploy
+python scripts/common_tools/universal_gtav_builder.py --target-character franklin --skip-atlas --no-deploy
+python scripts/common_tools/universal_gtav_builder.py --target-character trevor --skip-atlas --no-deploy
 
 # Step 3: Populate staging slots (single protagonist, optional --avatar override, or all three)
 python scripts/common_tools/apply_characters.py --character player_zero
-python scripts/common_tools/apply_characters.py --character franklin --avatar miltina_maid
-python scripts/common_tools/apply_all_characters.py
+python scripts/common_tools/apply_characters.py --character franklin --avatar player_two_trevor
+python scripts/common_tools/apply_characters.py --character all
 
 # Step 4: Repack RPFs (OPEN header + TOC fix + ASI/VToon/PhysBones sync) and install into mods/
 python scripts/common_tools/repack_and_deploy_everything.py

@@ -72,7 +72,7 @@ def _build_patchday_spec(
     ):
         legacy_work_dir = (
             project_root_dir
-            / "1_Franklin_Shinano_Casual"
+            / "player_one"
             / "5_rpf_package"
             / "patchday3_work"
         )
@@ -1050,9 +1050,9 @@ def sync_gtav_runtime_mods(
         return {"copied": installed_files}
 
     for pkg_name in (
-        "2_Michael_Shinano_EternalReunion",
-        "1_Franklin_Shinano_Casual",
-        "3_Trevor_Miltina_Maid",
+        "player_zero",
+        "player_one",
+        "player_two",
     ):
         pkg_dir = project_root / pkg_name / "5_rpf_package"
         if not pkg_dir.is_dir():

@@ -341,13 +341,32 @@ def prepare_universal_avatar_job(
     )
     work_out_dir.mkdir(parents=True, exist_ok=True)
     cfg_base_dir = work_out_dir if out_dir else (proj_root / "configs")
-    safe_avatar_slug = re.sub(r"[^A-Za-z0-9._-]+", "_", chosen_avatar_name or "universal").strip("_") or "universal"
-    save_cfg_file = cfg_base_dir / f"{safe_avatar_slug}_{chosen_target_char}_blendshapes.cfg"
+    active_fbx_list = [primary_fbx] if primary_fbx else list(all_fbx_paths)
+    cfg_base_name = blendshape_helper.resolve_cfg_base_name(
+        source_spec=avatar_zip or unity_scene or unity_project,
+        scene_or_prefab=selected_scene,
+        fbx_paths=active_fbx_list,
+        avatar_name=chosen_avatar_name,
+        fallback=chosen_target_char,
+    )
+    save_cfg_file = cfg_base_dir / f"{cfg_base_name}_blendshapes.cfg"
+    archive_for_header = (
+        avatar_zip
+        if avatar_zip and str(avatar_zip).lower().endswith((".zip", ".unitypackage"))
+        else None
+    )
+    blendshape_headers = blendshape_helper.build_cfg_header_comments(
+        cfg_kind="Blendshape",
+        project_path=ingested.get("unity_project_root") or proj_root,
+        scene_path=selected_scene or "",
+        fbx_paths=active_fbx_list,
+        archive_path=archive_for_header,
+    )
 
     with err_helper.guarded_stage("resolve_blendshapes", logger=active_logger):
         blendshape_result = blendshape_helper.resolve_character_blendshapes(
             char_cfg,
-            fbx_paths=[primary_fbx] if primary_fbx else all_fbx_paths,
+            fbx_paths=active_fbx_list,
             extra_fbx_paths=extra_outfit_fbxs,
             character_hints=[chosen_avatar_name] if chosen_avatar_name else (),
             unity_assets_root=assets_root,
@@ -356,6 +375,7 @@ def prepare_universal_avatar_job(
             override_avatar_name=chosen_avatar_name,
             override_face_anim=str(face_anim_path) if (face_anim_path and use_face) else "",
             save_cfg_path=save_cfg_file,
+            header_comments=blendshape_headers,
             fill_missing_from_fbx=True,
             import_face=use_face,
             import_body=use_body,
@@ -383,7 +403,14 @@ def prepare_universal_avatar_job(
                     resolved_blender, logger=active_logger
                 )
 
-    pb_cfg_path = cfg_base_dir / f"{chosen_target_char}_physbones.cfg"
+    pb_cfg_path = cfg_base_dir / f"{cfg_base_name}_physbones.cfg"
+    physbone_headers = blendshape_helper.build_cfg_header_comments(
+        cfg_kind="PhysBone",
+        project_path=ingested.get("unity_project_root") or proj_root,
+        scene_path=selected_scene or "",
+        fbx_paths=all_fbx_paths,
+        archive_path=archive_for_header,
+    )
     pb_cfg: Dict[str, Any] = {}
     with err_helper.guarded_stage("resolve_physbones", logger=active_logger):
         pb_cfg = physbone_helper.resolve_character_physbones(
@@ -395,7 +422,8 @@ def prepare_universal_avatar_job(
             override_unity_scene=str(selected_scene) if selected_scene else "",
             override_avatar_name=chosen_avatar_name,
             override_marshmallow=physbones_marshmallow,
-            save_cfg_path=pb_cfg_path if selected_scene else None,
+            save_cfg_path=pb_cfg_path if (selected_scene or archive_for_header) else None,
+            header_comments=physbone_headers,
             override_excluded_meshes=ma_plan.get("disabled_meshes", ()) if ma_plan else (),
             override_active_meshes=ma_plan.get("active_meshes", ()) if ma_plan else (),
             prune_orphaned=True,
@@ -505,11 +533,11 @@ def _infer_preset_or_custom_avatar_id(
     if not has_unity_scene:
         tokens = set(re.split(r"[^a-z0-9]+", low_name))
         if "shinano" in tokens and ("reunion" in tokens or "er" in tokens or "eternal" in tokens):
-            return "shinano_er"
+            return "player_zero_michael"
         if "shinano" in tokens and "casual" in tokens:
-            return "shinano_casual"
+            return "player_one_franklin"
         if "miltina" in tokens or "milltina" in tokens:
-            return "miltina_maid"
+            return "player_two_trevor"
     safe_slug = re.sub(r"[^a-z0-9_]+", "_", low_name).strip("_") or "avatar"
     return f"custom_{target_char}_{safe_slug}"
 

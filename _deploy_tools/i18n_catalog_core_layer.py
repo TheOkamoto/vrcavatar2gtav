@@ -874,19 +874,19 @@ CORE_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "Selecione qual personagem você deseja trocar/atualizar:",
     },
     "manager.menu_opt_1": {
-        "en": "  [1] Michael  (player_zero) -> Shinano Eternal Reunion",
-        "ja": "  [1] マイケル     (player_zero) -> Shinano Eternal Reunion",
-        "pt": "  [1] Michael  (player_zero) -> Shinano Eternal Reunion",
+        "en": "  [1] Michael  (player_zero -> player_zero_michael preset)",
+        "ja": "  [1] マイケル     (player_zero -> player_zero_michael プリセット)",
+        "pt": "  [1] Michael  (player_zero -> preset player_zero_michael)",
     },
     "manager.menu_opt_2": {
-        "en": "  [2] Franklin (player_one)  -> Shinano Casual / Uniform",
-        "ja": "  [2] フランクリン (player_one)  -> Shinano Casual / 制服",
-        "pt": "  [2] Franklin (player_one)  -> Shinano Casual / Uniforme",
+        "en": "  [2] Franklin (player_one  -> player_one_franklin preset)",
+        "ja": "  [2] フランクリン (player_one  -> player_one_franklin プリセット)",
+        "pt": "  [2] Franklin (player_one  -> preset player_one_franklin)",
     },
     "manager.menu_opt_3": {
-        "en": "  [3] Trevor   (player_two)  -> Miltina Maid",
-        "ja": "  [3] トレバー     (player_two)  -> Miltina Maid",
-        "pt": "  [3] Trevor   (player_two)  -> Miltina Maid",
+        "en": "  [3] Trevor   (player_two  -> player_two_trevor preset)",
+        "ja": "  [3] トレバー     (player_two  -> player_two_trevor プリセット)",
+        "pt": "  [3] Trevor   (player_two  -> preset player_two_trevor)",
     },
     "manager.menu_opt_4": {
         "en": "  [4] All 3 Characters (Full Pipeline)",

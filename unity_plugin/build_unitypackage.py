@@ -44,9 +44,9 @@ ALLOWED_STATIC_DIRS = (
     "configs",
     "docs",
     "scripts",
-    "1_Franklin_Shinano_Casual",
-    "2_Michael_Shinano_EternalReunion",
-    "3_Trevor_Miltina_Maid",
+    "player_one",
+    "player_zero",
+    "player_two",
 )
 
 ALLOWED_EXTENSIONS = frozenset(
@@ -174,7 +174,7 @@ def _should_bundle_repo_file(rel_path: Path) -> bool:
         return False
     if (
         len(parts_low) >= 3
-        and parts_low[0] in ("1_franklin_shinano_casual", "3_trevor_miltina_maid")
+        and parts_low[0] in ("player_one", "player_two")
         and parts_low[1] == "5_rpf_package"
         and not name_low.endswith(".py")
     ):

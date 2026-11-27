@@ -47,11 +47,7 @@ def _collect_ini_sync_targets(gtav_root: Optional[Path], project_root: Path, ped
         candidate_dirs.append(Path(gtav_root))
     if ped_pkg_dir is not None:
         candidate_dirs.append(Path(ped_pkg_dir))
-    for folder_name in (
-        "2_Michael_Shinano_EternalReunion",
-        "1_Franklin_Shinano_Casual",
-        "3_Trevor_Miltina_Maid",
-    ):
+    for folder_name in PROTAGONIST_PEDS:
         candidate_dirs.append(project_root / folder_name / "5_rpf_package")
 
     seen_dirs: set[str] = set()

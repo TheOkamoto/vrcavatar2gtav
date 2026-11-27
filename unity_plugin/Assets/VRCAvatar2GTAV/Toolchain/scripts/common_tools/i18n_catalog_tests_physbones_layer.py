@@ -383,46 +383,6 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "ja": "[Hair] カスタム髪 FBX を使用します ({reason}): {path}",
         "pt": "[Cabelo] Usando FBX de cabelo customizado ({reason}): {path}",
     },
-    "franklin.atlas.hair_fallback": {
-        "en": "[INFO] Custom Franklin hair texture missing; calibrating base Shinano_hair.png.",
-        "ja": "[INFO] カスタム髪テクスチャが見つからないため基本 Shinano_hair.png を調整して使用します。",
-        "pt": "[INFO] Textura de cabelo customizada ausente; calibrando Shinano_hair.png padrão.",
-    },
-    "franklin.atlas.eye_fallback": {
-        "en": "[INFO] Optional face/eye layers absent ({layers}); keeping base Shinano_face.png eyes.",
-        "ja": "[INFO] オプションの目・メイク素材不在 ({layers}) のため基本 Shinano_face.png の目を使用します。",
-        "pt": "[INFO] Camadas opcionais de rosto/olhos ausentes ({layers}); mantendo olhos de Shinano_face.png.",
-    },
-    "michael.atlas.hair_fallback": {
-        "en": "[INFO] Custom hair asset absent ({reason}); calibrating default Shinano hair in cell (2, 0).",
-        "ja": "[INFO] カスタム髪不在 ({reason}) のためセル (2, 0) に標準 Shinano 髪を調整配置します。",
-        "pt": "[INFO] Cabelo customizado ausente ({reason}); calibrando cabelo padrão da Shinano na célula (2, 0).",
-    },
-    "michael.atlas.eye_fallback": {
-        "en": "[INFO] Optional face/eye layers absent ({layers}); keeping base Shinano_face.png eyes.",
-        "ja": "[INFO] オプションの目・メイク素材不在 ({layers}) のため基本 Shinano_face.png の目を使用します。",
-        "pt": "[INFO] Camadas opcionais de rosto/olhos ausentes ({layers}); mantendo olhos de Shinano_face.png.",
-    },
-    "michael.atlas.accessory_skip": {
-        "en": "[INFO] Optional hair accessory texture absent ({key}: {path}); skipping sub-cell.",
-        "ja": "[INFO] オプション髪アクセサリ不在 ({key}: {path}) のためサブセルをスキップします。",
-        "pt": "[INFO] Textura opcional de acessório capilar ausente ({key}: {path}); ignorando subcélula.",
-    },
-    "trevor.atlas.hair_fallback": {
-        "en": "[INFO] Using Miltina default hair calibrated from Milltina_Hair.png (lilToon material).",
-        "ja": "[INFO] Milltina_Hair.png を lilToon マテリアル基準で調整した標準髪を使用します。",
-        "pt": "[INFO] Usando cabelo padrão da Miltina calibrado de Milltina_Hair.png (material lilToon).",
-    },
-    "trevor.atlas.hair_custom": {
-        "en": "[INFO] Using custom hair texture override for Miltina: {path}",
-        "ja": "[INFO] Miltina 用カスタム髪テクスチャの上書きを使用します: {path}",
-        "pt": "[INFO] Usando textura de cabelo customizada para Miltina: {path}",
-    },
-    "trevor.atlas.eye_fallback": {
-        "en": "[INFO] Optional AWEyes textures absent; keeping default Milltina_Face.png eyes.",
-        "ja": "[INFO] オプションの AWEyes 目素材が不在のため基本 Milltina_Face.png の目を使用します。",
-        "pt": "[INFO] Texturas opcionais AWEyes ausentes; mantendo os olhos padrão de Milltina_Face.png.",
-    },
     "setup.unity_scene_detected": {
         "en": "Detected optional Unity scene for {char}: {path}",
         "ja": "{char} 用のオプション Unity シーンを検出しました: {path}",
@@ -533,20 +493,20 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "ja": "トレバー・フィリップス",
         "pt": "Trevor Philips",
     },
-    "avatar.shinano_casual": {
-        "en": "Shinano Casual",
-        "ja": "しなの (カジュアル)",
-        "pt": "Shinano Casual",
+    "avatar.player_one_franklin": {
+        "en": "Player One Preset (Franklin)",
+        "ja": "Player One プリセット (Franklin)",
+        "pt": "Preset Player One (Franklin)",
     },
-    "avatar.shinano_er": {
-        "en": "Shinano Eternal Reunion",
-        "ja": "しなの (Eternal Reunion)",
-        "pt": "Shinano Eternal Reunion",
+    "avatar.player_zero_michael": {
+        "en": "Player Zero Preset (Michael)",
+        "ja": "Player Zero プリセット (Michael)",
+        "pt": "Preset Player Zero (Michael)",
     },
-    "avatar.miltina_maid": {
-        "en": "Miltina Maid",
-        "ja": "ミルティナ (メイド)",
-        "pt": "Miltina Maid",
+    "avatar.player_two_trevor": {
+        "en": "Player Two Preset (Trevor)",
+        "ja": "Player Two プリセット (Trevor)",
+        "pt": "Preset Player Two (Trevor)",
     },
     "paths.unknown_protagonist": {
         "en": "Unknown GTA V protagonist '{name}'. Expected: michael, franklin, or trevor.",
@@ -554,14 +514,14 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "Protagonista desconhecido do GTA V '{name}'. Esperado: michael, franklin ou trevor.",
     },
     "paths.unknown_avatar": {
-        "en": "Unknown VRChat avatar preset '{name}'. Expected: shinano_casual, shinano_er, or miltina_maid.",
-        "ja": "不明な VRChat アバタープリセット '{name}' です。shinano_casual, shinano_er, miltina_maid を指定してください。",
-        "pt": "Preset de avatar VRChat desconhecido '{name}'. Esperado: shinano_casual, shinano_er ou miltina_maid.",
+        "en": "Unknown VRChat avatar preset '{name}'. Expected: player_one_franklin, player_zero_michael, or player_two_trevor.",
+        "ja": "不明な VRChat アバタープリセット '{name}' です。player_one_franklin, player_zero_michael, player_two_trevor を指定してください。",
+        "pt": "Preset de avatar VRChat desconhecido '{name}'. Esperado: player_one_franklin, player_zero_michael ou player_two_trevor.",
     },
     "manager.cli_avatar": {
-        "en": "VRChat avatar preset to build/apply (shinano_casual, shinano_er, miltina_maid)",
-        "ja": "ビルド/適用する VRChat アバタープリセット (shinano_casual, shinano_er, miltina_maid)",
-        "pt": "Preset de avatar VRChat para compilar/aplicar (shinano_casual, shinano_er, miltina_maid)",
+        "en": "VRChat avatar preset to build/apply (player_one_franklin, player_zero_michael, player_two_trevor)",
+        "ja": "ビルド/適用する VRChat アバタープリセット (player_one_franklin, player_zero_michael, player_two_trevor)",
+        "pt": "Preset de avatar VRChat para compilar/aplicar (player_one_franklin, player_zero_michael, player_two_trevor)",
     },
     "manager.cli_protagonist_avatar": {
         "en": "Override VRChat avatar preset specifically for {protagonist}",
@@ -608,21 +568,6 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "ja": "{protagonist} に適用する VRChat アバタープリセットを上書き",
         "pt": "Sobrescrever preset de avatar VRChat para {protagonist}",
     },
-    "franklin.build.cli_desc": {
-        "en": "Shinano Casual to GTA V Blender compiler (interchangeable across protagonists)",
-        "ja": "Shinano Casual -> GTA V Blender コンパイラ (主人公切替対応)",
-        "pt": "Compilador Shinano Casual para GTA V no Blender (intercambiável entre protagonistas)",
-    },
-    "franklin.build.arg_target_char": {
-        "en": "Target GTA V protagonist slot (michael, franklin, trevor)",
-        "ja": "ビルド先の GTA V 主人公スロット (michael, franklin, trevor)",
-        "pt": "Protagonista alvo do GTA V (michael, franklin, trevor)",
-    },
-    "trevor.build.arg_target_char": {
-        "en": "Target GTA V protagonist slot (michael, franklin, trevor)",
-        "ja": "ビルド先の GTA V 主人公スロット (michael, franklin, trevor)",
-        "pt": "Protagonista alvo do GTA V (michael, franklin, trevor)",
-    },
     "tests.suite_interchangeability": {
         "en": "Avatar <-> Protagonist Interchangeability",
         "ja": "アバター <-> 主人公の相互切替テスト",
@@ -639,9 +584,9 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "Presets de blendshape/Unity seguem o avatar ativo ao trocar protagonistas",
     },
     "tests.interchangeability_builders": {
-        "en": "All 3 builders & runners expose --target-character across michael/franklin/trevor",
-        "ja": "全 3 ビルド/ランナースクリプトが michael/franklin/trevor 向け --target-character に対応",
-        "pt": "Todos os 3 builders e runners aceitam --target-character para michael/franklin/trevor",
+        "en": "Universal builders & mod manager expose --target-character across michael/franklin/trevor",
+        "ja": "ユニバーサルビルダーと Mod マネージャーが michael/franklin/trevor 向け --target-character に対応",
+        "pt": "Os builders universais e o gerenciador aceitam --target-character para michael/franklin/trevor",
     },
     "common.hair_custom_packed": {
         "en": "[HAIR] Packing custom Unity hair '{source}' ({tiles} tile(s)) into atlas...",
@@ -854,9 +799,9 @@ TESTS_PHYSBONES_TRANSLATION_CATALOG: Dict[str, Dict[str, str]] = {
         "pt": "Selecione qual preset de avatar atualizar com os blendshapes do FBX:",
     },
     "manager.blendshapes_opt_all": {
-        "en": "  [{opt}] All Avatars (Shinano Casual, Shinano ER, Milltina)",
-        "ja": "  [{opt}] 全アバター (Shinano Casual, Shinano ER, Milltina)",
-        "pt": "  [{opt}] Todos os Avatares (Shinano Casual, Shinano ER, Milltina)",
+        "en": "  [{opt}] All Configured Avatars (player_zero, player_one, player_two)",
+        "ja": "  [{opt}] すべての設定済みアバター (player_zero, player_one, player_two)",
+        "pt": "  [{opt}] Todos os Avatares Configurados (player_zero, player_one, player_two)",
     },
     "manager.blendshapes_prompt_choice": {
         "en": "Enter choice [0-4]: ",

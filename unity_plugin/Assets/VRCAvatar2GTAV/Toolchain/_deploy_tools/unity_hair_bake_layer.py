@@ -64,10 +64,14 @@ _USED_MATERIAL_TEX_PROPS = frozenset(
         "_Main2ndBlendMask",
         "_Main3rdBlendMask",
         "_MatCapTex",
+        "_MatCapBlendMask",
         "_MatCap2ndTex",
         "_MatCap2ndBlendMask",
         "_AlphaMask",
         "_BumpMap",
+        "_SmoothnessTex",
+        "_SpecGlossMap",
+        "_MetallicGlossMap",
         "_EmissionMap",
         "_EmissionBlendMask",
         "_Emission2ndMap",
@@ -82,6 +86,8 @@ _PRIMARY_MATERIAL_TEX_PROPS = frozenset(
         "_Main2ndTex",
         "_Main3rdTex",
         "_MatCap2ndTex",
+        "_BumpMap",
+        "_SmoothnessTex",
         "_EmissionMap",
         "_Emission2ndMap",
         "_AlphaMask",
@@ -130,6 +136,23 @@ def _normalize_guid(raw_guid: Optional[str]) -> str:
     if not raw_guid:
         return ""
     return str(raw_guid).strip().lower()
+
+
+def resolve_texture_srgb_flag(texture_path: Optional[Union[str, Path]]) -> bool:
+    """Return True when Unity imports `texture_path` with sRGBTexture enabled (default True)."""
+    if not texture_path:
+        return True
+    meta_path = Path(f"{texture_path}.meta")
+    if not meta_path.is_file():
+        return True
+    try:
+        meta_text = meta_path.read_text(encoding="utf-8", errors="ignore")[:1536]
+    except OSError:
+        return True
+    srgb_match = re.search(r"^\s*sRGBTexture:\s*(\d+)", meta_text, re.MULTILINE)
+    if not srgb_match:
+        return True
+    return int(srgb_match.group(1)) != 0
 
 
 def _extract_guid_from_meta_file(meta_path: Path) -> Optional[str]:
@@ -1022,29 +1045,39 @@ def composite_unity_material_textures(
             base_lin = numpy_mod.clip(base_lin + _srgb_vec_to_lin(rim_col)[None, None, :] * rim_alpha, 0.0, 1.0)
 
     # Apply 1st and 2nd Emission layers cleanly in linear space
-    for use_emission_key, map_emission_key, mask_emission_key, color_emission_key, blend_emission_key, mode_emission_key in (
-        ("_UseEmission", "_EmissionMap", "_EmissionBlendMask", "_EmissionColor", "_EmissionBlend", "_EmissionBlendMode"),
-        ("_UseEmission2nd", "_Emission2ndMap", "_Emission2ndBlendMask", "_Emission2ndColor", "_Emission2ndBlend", "_Emission2ndBlendMode"),
+    for use_emission_key, map_emission_key, mask_emission_key, color_emission_key, blend_emission_key, mode_emission_key, main_str_key in (
+        ("_UseEmission", "_EmissionMap", "_EmissionBlendMask", "_EmissionColor", "_EmissionBlend", "_EmissionBlendMode", "_EmissionMainStrength"),
+        ("_UseEmission2nd", "_Emission2ndMap", "_Emission2ndBlendMask", "_Emission2ndColor", "_Emission2ndBlend", "_Emission2ndBlendMode", "_Emission2ndMainStrength"),
     ):
         if floats.get(use_emission_key, 0.0) < 0.5:
             continue
-        emission_entry = tex_envs.get(map_emission_key)
-        if not emission_entry or not emission_entry.get("path") or not os.path.isfile(emission_entry["path"]):
-            continue
         emission_raw = colors.get(color_emission_key, [0.0, 0.0, 0.0, 1.0])
         emission_gain = numpy_mod.clip(numpy_mod.array(emission_raw[:3], dtype=numpy_mod.float32), 0.0, 1.55)
-        emission_img, emission_scale, emission_offset = _load_slot_rgba((map_emission_key,), (255, 255, 255, 255))
-        emission_img = _apply_uv_tile_transform(emission_img, emission_scale, emission_offset)
-        emission_arr = numpy_mod.array(emission_img, dtype=numpy_mod.float32) / 255.0
+        emission_entry = tex_envs.get(map_emission_key)
+        has_emission_map = bool(
+            emission_entry and emission_entry.get("path") and os.path.isfile(emission_entry["path"])
+        )
+        emission_alpha_base = float(floats.get(blend_emission_key, 1.0)) * float(emission_raw[3])
+        if not has_emission_map:
+            if float(emission_gain.max()) <= 0.005 or emission_alpha_base <= 0.005:
+                continue
+            emission_arr = numpy_mod.ones((target_height, target_width, 4), dtype=numpy_mod.float32)
+        else:
+            emission_img, emission_scale, emission_offset = _load_slot_rgba((map_emission_key,), (255, 255, 255, 255))
+            emission_img = _apply_uv_tile_transform(emission_img, emission_scale, emission_offset)
+            emission_arr = numpy_mod.array(emission_img, dtype=numpy_mod.float32) / 255.0
         emission_linear = numpy_mod.power(numpy_mod.clip(emission_arr[..., :3], 0.0, 1.0), 2.2)
         emission_tint = numpy_mod.power(numpy_mod.minimum(emission_gain, 1.0), 2.2) * numpy_mod.maximum(emission_gain, 1.0)
         emission_val = emission_linear * emission_tint[None, None, :]
+        main_strength = max(0.0, min(1.0, float(floats.get(main_str_key, 0.0))))
+        if main_strength > 1e-4:
+            emission_val = emission_val * (1.0 - main_strength) + (emission_val * base_lin) * main_strength
         emission_mask_val = 1.0
         if tex_envs.get(mask_emission_key, {}).get("path") and os.path.isfile(tex_envs[mask_emission_key]["path"]):
             emission_mask_img, emission_mask_scale, emission_mask_offset = _load_slot_rgba((mask_emission_key,), (255, 255, 255, 255))
             emission_mask_img = _apply_uv_tile_transform(emission_mask_img, emission_mask_scale, emission_mask_offset)
             emission_mask_val = numpy_mod.array(emission_mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
-        emission_alpha = max(0.0, min(1.0, float(floats.get(blend_emission_key, 1.0)) * float(emission_raw[3]))) * emission_arr[..., 3:4] * emission_mask_val
+        emission_alpha = max(0.0, min(1.0, emission_alpha_base)) * emission_arr[..., 3:4] * emission_mask_val
         emission_mode = int(round(floats.get(mode_emission_key, 1.0)))
         base_lin = _lil_blend_linear(base_lin, emission_val, emission_alpha, emission_mode, numpy_mod)
 
@@ -1054,7 +1087,7 @@ def composite_unity_material_textures(
         255.0,
     )
 
-    # Apply _AlphaMask (texture or unbound uniform opacity) and _Color.a cleanly while preserving cutout/translucent alpha channels
+    # Apply _AlphaMask (texture with Unity sRGBTexture decode or uniform opacity) and _Color.a cleanly
     base_col = colors.get("_Color", [1.0, 1.0, 1.0, 1.0])
     color_alpha = max(0.0, min(1.0, float(base_col[3]) if len(base_col) >= 4 else 1.0))
     alpha_channel = alpha_channel * color_alpha
@@ -1066,19 +1099,34 @@ def composite_unity_material_textures(
     )
     alpha_mask_mode = int(round(float(floats.get("_AlphaMaskMode", 1.0 if has_mask_file else 0.0))))
     shader_low = str(mat_info.get("shader_guid", "") or "").lower()
-    if preserve_alpha and alpha_mode != "opaque" and (has_mask_file or alpha_mask_mode in (1, 2)):
+    if preserve_alpha and alpha_mode != "opaque" and (has_mask_file or alpha_mask_mode in (1, 2, 3, 4)):
         alpha_mask_val = float(floats.get("_AlphaMaskValue", 0.0))
         alpha_mask_scale = float(floats.get("_AlphaMaskScale", 1.0))
         if has_mask_file:
             mask_img, mask_uv_scale, mask_uv_off = _load_slot_rgba(("_AlphaMask",), (255, 255, 255, 255))
             mask_img = _apply_uv_tile_transform(mask_img, mask_uv_scale, mask_uv_off)
             mask_val_arr = numpy_mod.array(mask_img, dtype=numpy_mod.float32)[..., 0:1] / 255.0
+            if resolve_texture_srgb_flag(alpha_mask_entry["path"]):
+                mask_val_arr = numpy_mod.where(
+                    mask_val_arr <= 0.04045,
+                    mask_val_arr / 12.92,
+                    numpy_mod.power((mask_val_arr + 0.055) / 1.055, 2.4),
+                )
         else:
-            mask_val_arr = 1.0
+            mask_val_arr = numpy_mod.ones((target_height, target_width, 1), dtype=numpy_mod.float32)
         eff_mask = numpy_mod.clip(mask_val_arr * alpha_mask_scale + alpha_mask_val, 0.0, 1.0)
         if shader_low in LILTOON_REFRACTION_SHADER_GUIDS:
             eff_mask = numpy_mod.maximum(eff_mask, 0.08)
-        alpha_channel = alpha_channel * eff_mask
+        if alpha_mask_mode == 1:
+            alpha_channel = eff_mask * 255.0
+        elif alpha_mask_mode == 3:
+            alpha_channel = numpy_mod.clip(alpha_channel + eff_mask * 255.0, 0.0, 255.0)
+        elif alpha_mask_mode == 4:
+            alpha_channel = numpy_mod.clip(alpha_channel - eff_mask * 255.0, 0.0, 255.0)
+        elif alpha_mask_mode == 2:
+            alpha_channel = alpha_channel * eff_mask
+        elif has_mask_file:
+            alpha_channel = alpha_channel * eff_mask
 
     if alpha_mode == "transparent" and not has_main_tex and float(base_rgb.max()) < 36.0:
         if float(alpha_channel.mean()) < 170.0 or shader_low in LILTOON_REFRACTION_SHADER_GUIDS:
@@ -1106,16 +1154,21 @@ def composite_unity_material_textures(
     else:
         normal_out = calibration_helper.generate_directional_hair_normal(diffuse_out.convert("L"), strength=1.15)
 
-    # Specular tile: metallic boost for pins/ribbons/metals, subtle satin highlight for hair strands
+    # Specular tile: driven dynamically by Unity metallic/reflection/specular/gloss/matcap properties
     luma = (
         0.299 * rgba_dilated[..., 0].astype(numpy_mod.float32)
         + 0.587 * rgba_dilated[..., 1].astype(numpy_mod.float32)
         + 0.114 * rgba_dilated[..., 2].astype(numpy_mod.float32)
     ) / 255.0
+    use_gloss = (floats.get("_UseReflection", 0.0) >= 0.5) or (floats.get("_UseSpecular", 0.0) >= 0.5) or (floats.get("_Specular", 0.0) >= 0.5)
+    smooth_val = max(float(floats.get("_Smoothness", 0.0)), float(floats.get("_Glossiness", 0.0)))
     if mat_info.get("is_metallic"):
         spec_val = numpy_mod.clip(185.0 + 55.0 * luma, 0.0, 255.0).astype(numpy_mod.uint8)
+    elif use_gloss or (floats.get("_UseMatCap", 0.0) >= 0.5 and int(round(floats.get("_MatCapBlendMode", 1.0))) != 3):
+        spec_scale = max(0.35, min(1.0, smooth_val if smooth_val > 0.05 else 0.65))
+        spec_val = numpy_mod.clip(125.0 * spec_scale + 75.0 * spec_scale * luma, 0.0, 255.0).astype(numpy_mod.uint8)
     else:
-        spec_val = numpy_mod.clip(28.0 + 44.0 * numpy_mod.power(luma, 1.35), 0.0, 255.0).astype(numpy_mod.uint8)
+        spec_val = numpy_mod.zeros(luma.shape, dtype=numpy_mod.uint8)
     spec_rgb = numpy_mod.stack([spec_val, spec_val, spec_val], axis=-1)
     spec_out = pil_image.fromarray(spec_rgb, mode="RGB")
 

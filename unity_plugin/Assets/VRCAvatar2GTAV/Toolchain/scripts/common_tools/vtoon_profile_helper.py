@@ -140,6 +140,78 @@ def parse_liltoon_mat_file(
     return result
 
 
+def compute_material_gloss_metrics(parsed_mat: dict | None, slot_type: int) -> dict:
+    """Derive generic PBR/VToon specular, smoothness, MatCap, and bump weights from Unity `.mat` flags."""
+    floats = (parsed_mat or {}).get("floats", {})
+    colors = (parsed_mat or {}).get("colors", {})
+    tex_guids = (parsed_mat or {}).get("tex_guids", {})
+    use_reflection = floats.get("_UseReflection", 0.0) >= 0.5
+    use_specular = (
+        floats.get("_UseSpecular", 0.0) >= 0.5
+        or floats.get("_Specular", 0.0) >= 0.5
+        or floats.get("_SpecularMode", 0.0) >= 0.5
+    )
+    metallic_val = _clamp_unit(floats.get("_Metallic", 0.0))
+    raw_smooth = max(float(floats.get("_Smoothness", 0.0)), float(floats.get("_Glossiness", 0.0)))
+    has_smooth_tex = bool(tex_guids.get("_SmoothnessTex") or tex_guids.get("_SpecGlossMap") or tex_guids.get("_MetallicGlossMap"))
+    eff_smooth = raw_smooth if (raw_smooth > 0.04 or not (use_reflection or use_specular or has_smooth_tex)) else 0.62
+    eff_smooth = _clamp_unit(max(eff_smooth, 0.72 if metallic_val >= 0.35 else eff_smooth))
+    matcap_blend_mode = int(round(float(floats.get("_MatCapBlendMode", 1.0))))
+    matcap_blend_amt = max(0.0, float(floats.get("_MatCapBlend", 1.0)))
+    matcap_alpha = _clamp_unit((colors.get("_MatCapColor") or (1.0, 1.0, 1.0, 0.5))[3])
+    cloth_mode_valid = (slot_type != SLOT_CLOTH) or (matcap_blend_mode in (1, 2))
+    use_matcap_add = (
+        floats.get("_UseMatCap", 0.0) >= 0.5
+        and matcap_blend_mode != 3
+        and cloth_mode_valid
+        and bool(tex_guids.get("_MatCapTex"))
+        and (matcap_blend_amt * matcap_alpha) >= 0.015
+    )
+    use_bump = floats.get("_UseBumpMap", 0.0) >= 0.5 and bool(tex_guids.get("_BumpMap"))
+    bump_scale = min(1.25, max(0.0, float(floats.get("_BumpScale", 0.5)))) if use_bump else 0.0
+    spec_blur = _clamp_unit(floats.get("_SpecularBlur", 0.25))
+    use_aniso = floats.get("_UseAnisotropy", 0.0) >= 0.5
+    tan_width = max(0.01, min(1.0, float(floats.get("_AnisotropyTangentWidth", 1.0))))
+    bitan_width = max(0.01, min(1.0, float(floats.get("_AnisotropyBitangentWidth", 1.0))))
+    aniso_strength = (
+        round(max(0.0, min(1.0, abs(bitan_width - tan_width) / max(bitan_width, tan_width))), 4)
+        if (use_aniso and abs(bitan_width - tan_width) > 0.05)
+        else 0.0
+    )
+
+    if slot_type in (SLOT_SKIN, SLOT_FACE):
+        has_oil = bool(use_matcap_add or use_reflection or use_specular)
+        spec_int = min(0.88, max(0.38, 0.42 + 0.40 * eff_smooth - 0.14 * spec_blur)) if (use_reflection or use_specular or (use_matcap_add and matcap_alpha >= 0.25)) else 0.0
+        use_matcap_val = 1.0 if use_matcap_add else 0.0
+        matcap_weight = _clamp_unit(matcap_blend_amt * matcap_alpha) if use_matcap_add else 0.0
+    elif slot_type in (SLOT_CLOTH, SLOT_TRANSPARENT):
+        has_gloss_cloth = bool(use_reflection or use_specular or metallic_val >= 0.35)
+        has_oil = has_gloss_cloth or (use_matcap_add and matcap_alpha >= 0.12)
+        spec_int = min(0.85, max(0.42, 0.40 + 0.42 * eff_smooth)) if has_gloss_cloth else (0.80 if slot_type == SLOT_TRANSPARENT else 0.0)
+        use_matcap_val = 1.0 if (use_matcap_add or slot_type == SLOT_TRANSPARENT) else 0.0
+        matcap_weight = min(0.75, max(0.20, matcap_blend_amt * matcap_alpha)) if use_matcap_val > 0.5 else 0.0
+    else:
+        has_oil = bool(use_reflection or use_specular or metallic_val >= 0.35 or use_matcap_add or slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA, SLOT_NAILS, SLOT_EYES, SLOT_METAL))
+        spec_int = 0.75 if slot_type == SLOT_METAL else (0.65 if slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA, SLOT_NAILS, SLOT_EYES) else 0.0)
+        use_matcap_val = 1.0 if (use_matcap_add or slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA, SLOT_NAILS, SLOT_EYES, SLOT_METAL)) else 0.0
+        matcap_weight = min(0.75, max(0.20, matcap_blend_amt * matcap_alpha)) if use_matcap_val > 0.5 else 0.0
+
+    spec_tile_luma = int(round(pow(max(0.0, min(1.0, spec_int)), 0.5) * 255.0)) if (has_oil and spec_int > 0.01) else (int(round(pow(max(0.25, matcap_weight), 0.5) * 210.0)) if (slot_type in (SLOT_SKIN, SLOT_CLOTH) and use_matcap_add) else 0)
+    smooth_tile_luma = int(round(pow(max(0.18, eff_smooth), 0.5) * 240.0)) if spec_tile_luma > 0 else 0
+    return {
+        "has_gloss": has_oil,
+        "specular_intensity": spec_int,
+        "smoothness": eff_smooth,
+        "use_matcap": use_matcap_val,
+        "matcap_weight": matcap_weight,
+        "use_bump": use_bump,
+        "bump_scale": bump_scale,
+        "anisotropy": aniso_strength,
+        "spec_tile_luma": spec_tile_luma,
+        "smooth_tile_luma": smooth_tile_luma,
+    }
+
+
 def build_vtoon_slot_from_mat(
     parsed_mat: dict | None,
     slot_type: int = SLOT_CLOTH,
@@ -180,9 +252,12 @@ def build_vtoon_slot_from_mat(
     shadow_border_range = floats.get("_ShadowBorderRange", 0.08 if slot_type in (SLOT_SKIN, SLOT_FACE) else 0.04)
     shadow_receive = floats.get("_ShadowReceive", 0.75)
 
+    gloss_info = compute_material_gloss_metrics(parsed_mat, slot_type)
+    rim_enabled_mat = floats.get("_UseRim", 0.0) >= 0.5
+
     # Calibrated lilToon defaults per surface role
     if slot_type in (SLOT_SKIN, SLOT_FACE):
-        # Skin & face: prevent chalky GTA V HDR blowout, preserve warm peach terminator
+        # Skin & face: prevent chalky GTA V HDR blowout, preserve warm peach terminator + optional oiliness
         shadow_strength = min(0.85, max(0.50, shadow_strength))
         shadow_blur = max(shadow_blur, 0.16)
         shadow_border_range = max(shadow_border_range, 0.08)
@@ -190,8 +265,8 @@ def build_vtoon_slot_from_mat(
             raw_shadow_col = (0.84, 0.68, 0.69)
         light_min = max(floats.get("_LightMinLimit", 0.08), 0.20)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.78)
-        use_rim_default = 0.25 if slot_type == SLOT_SKIN else 0.0
-        use_matcap_default = 0.0
+        use_rim_default = 1.0 if (rim_enabled_mat and gloss_info["has_gloss"] and rim_raw_alpha >= 0.25) else (0.25 if slot_type == SLOT_SKIN else 0.0)
+        use_matcap_default = gloss_info["use_matcap"]
     elif slot_type == SLOT_EYES:
         shadow_strength = min(shadow_strength, 0.25)
         light_min = max(floats.get("_LightMinLimit", 0.25), 0.48)
@@ -229,12 +304,13 @@ def build_vtoon_slot_from_mat(
     else:
         light_min = max(floats.get("_LightMinLimit", 0.06), 0.14)
         light_max = min(floats.get("_LightMaxLimit", 1.0), 0.92)
-        use_rim_default = 1.0 if floats.get("_UseRim", 0.0) >= 0.5 else 0.0
-        use_matcap_default = 1.0 if floats.get("_UseMatCap", 0.0) >= 0.5 else 0.0
+        use_rim_default = 1.0 if rim_enabled_mat else 0.0
+        use_matcap_default = gloss_info["use_matcap"]
 
     cull_mode = floats.get("_Cull", 2.0)
     double_sided = 1.0 if cull_mode < 0.5 else 0.0
-    spec_val = 0.80 if slot_type == SLOT_TRANSPARENT else (0.75 if slot_type == SLOT_METAL else (0.65 if slot_type in (SLOT_HAIR, SLOT_NAILS, SLOT_EYES) else 0.0))
+    spec_val = float(gloss_info["specular_intensity"])
+    matcap_weight = float(gloss_info["matcap_weight"]) if use_matcap_default >= 0.5 else min(0.75, max(0.20, matcap_raw_alpha))
     rim_blur_val = floats.get("_RimBlur", 0.18)
     rim_fresnel_val = floats.get("_RimFresnelPower", 3.0)
     if slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA):
@@ -255,7 +331,7 @@ def build_vtoon_slot_from_mat(
         "shadow_border_range": shadow_border_range,
         "rim_color": tuple(channel_val * rim_alpha_scale for channel_val in raw_rim_col),
         "rim_border": floats.get("_RimBorder", 0.52),
-        "matcap_color": (raw_matcap_col[0], raw_matcap_col[1], raw_matcap_col[2], min(0.75, max(0.20, matcap_raw_alpha))),
+        "matcap_color": (raw_matcap_col[0], raw_matcap_col[1], raw_matcap_col[2], matcap_weight),
         "shadow_strength": shadow_strength if use_shadow else 0.0,
         "shadow_2nd_border": shadow_2nd_border,
         "shadow_2nd_blur": shadow_2nd_blur,
@@ -264,10 +340,15 @@ def build_vtoon_slot_from_mat(
         "light_max_limit": light_max,
         "rim_blur": rim_blur_val,
         "rim_fresnel": rim_fresnel_val,
-        "rim_main_strength": floats.get("_RimMainStrength", 0.35),
+        "rim_main_strength": (
+            max(floats.get("_RimMainStrength", 0.35), 0.35)
+            if slot_type in (SLOT_HAIR, SLOT_HAIR_ALPHA)
+            else floats.get("_RimMainStrength", 0.35)
+        ),
         "use_rim": use_rim_default,
         "use_matcap": use_matcap_default,
         "specular_intensity": spec_val,
+        "anisotropy": float(gloss_info.get("anisotropy", 0.0)),
         "slot_type": float(slot_type),
         "double_sided": double_sided,
     }
@@ -313,6 +394,7 @@ def blender_uv_rect_to_lut_rect(
     shadow_mask: float = 1.0,
     rim_mask: float = 0.5,
     emission_mask: float = 0.0,
+    rim_mask_tex: Path | str | None = None,
 ) -> dict:
     """Convert Blender/manifest bottom-up UV rect into DX top-down LUT region spec."""
     u_min = max(0.0, min(1.0, float(u_offset)))
@@ -328,6 +410,7 @@ def blender_uv_rect_to_lut_rect(
         "shadow_mask": float(shadow_mask),
         "rim_mask": float(rim_mask),
         "emission_mask": float(emission_mask),
+        "rim_mask_tex": str(rim_mask_tex) if rim_mask_tex else "",
     }
 
 
@@ -367,7 +450,21 @@ def create_character_lut_image(
 
         arr[px_y0:px_y1, px_x0:px_x1, 0] = int(round((slot_id / 15.0) * 255.0))
         arr[px_y0:px_y1, px_x0:px_x1, 1] = shadow_byte
-        arr[px_y0:px_y1, px_x0:px_x1, 2] = rim_byte
+        mask_tex_raw = str(region.get("rim_mask_tex") or "").strip()
+        if mask_tex_raw and Path(mask_tex_raw).is_file():
+            try:
+                mask_img = Image.open(mask_tex_raw).convert("L").resize(
+                    (max(1, px_x1 - px_x0), max(1, px_y1 - px_y0)),
+                    Image.Resampling.LANCZOS,
+                )
+                mask_luma = numpy_mod.array(mask_img, dtype=numpy_mod.float32) / 255.0
+                arr[px_y0:px_y1, px_x0:px_x1, 2] = numpy_mod.clip(
+                    numpy_mod.round(mask_luma * float(rim_byte)), 0.0, 255.0
+                ).astype(numpy_mod.uint8)
+            except Exception:
+                arr[px_y0:px_y1, px_x0:px_x1, 2] = rim_byte
+        else:
+            arr[px_y0:px_y1, px_x0:px_x1, 2] = rim_byte
         arr[px_y0:px_y1, px_x0:px_x1, 3] = emission_byte
 
     if extra_eye_rects:
@@ -544,6 +641,38 @@ def remove_vtoon_ini_character(
     return removed_total
 
 
+def _flatten_matcap_on_black(img_rgba: Image.Image, size_px: int = 256) -> Image.Image:
+    """Compositing helper ensuring MatCap outer corners are true black for additive shading."""
+    src_rgba = img_rgba.convert("RGBA")
+    black_canvas = Image.new("RGBA", src_rgba.size, (0, 0, 0, 255))
+    composited = Image.alpha_composite(black_canvas, src_rgba)
+    if composited.size != (size_px, size_px):
+        composited = composited.resize((size_px, size_px), Image.Resampling.LANCZOS)
+
+    rgba_arr = numpy_mod.array(composited, dtype=numpy_mod.float32)
+    corner_rgb = numpy_mod.stack(
+        [
+            rgba_arr[0, 0, :3],
+            rgba_arr[0, size_px - 1, :3],
+            rgba_arr[size_px - 1, 0, :3],
+            rgba_arr[size_px - 1, size_px - 1, :3],
+        ]
+    )
+    corner_mean = corner_rgb.mean()
+    if corner_mean > 16.0:
+        corner_base = numpy_mod.median(corner_rgb, axis=0)
+        rgba_arr[:, :, :3] = numpy_mod.clip(rgba_arr[:, :, :3] - corner_base[None, None, :], 0.0, 255.0)
+        coords_axis = numpy_mod.linspace(-1.0, 1.0, size_px, dtype=numpy_mod.float32)
+        grid_y_coord, grid_x_coord = numpy_mod.meshgrid(coords_axis, coords_axis, indexing="ij")
+        radial_dist = numpy_mod.sqrt(grid_x_coord * grid_x_coord + grid_y_coord * grid_y_coord)
+        fade_param = numpy_mod.clip((0.99 - radial_dist) / 0.11, 0.0, 1.0)
+        edge_mask = fade_param * fade_param * (3.0 - 2.0 * fade_param)
+        rgba_arr[:, :, :3] *= edge_mask[:, :, None]
+
+    rgba_arr[:, :, 3] = 255.0
+    return Image.fromarray(numpy_mod.clip(numpy_mod.round(rgba_arr), 0.0, 255.0).astype(numpy_mod.uint8), mode="RGBA")
+
+
 def find_best_matcap_image_for_mats(
     mat_paths: list[Path | str | None],
     assets_root: Path | None,
@@ -568,15 +697,71 @@ def find_best_matcap_image_for_mats(
                     fallback_path = fallback_path or Path(matcap_path)
                     continue
                 try:
-                    return Image.open(matcap_path).convert("RGBA").resize((256, 256), Image.Resampling.LANCZOS)
+                    return _flatten_matcap_on_black(Image.open(matcap_path), 256)
                 except Exception:
                     pass
     if fallback_path and fallback_path.is_file():
         try:
-            return Image.open(fallback_path).convert("RGBA").resize((256, 256), Image.Resampling.LANCZOS)
+            return _flatten_matcap_on_black(Image.open(fallback_path), 256)
         except Exception:
             pass
     return create_default_studio_matcap(256)
+
+
+def create_skin_oil_matcap(size_px: int = 256) -> Image.Image:
+    """Synthesize a smooth spherical glossy skin oiliness MatCap fallback."""
+    coords = numpy_mod.linspace(-1.0, 1.0, size_px, dtype=numpy_mod.float32)
+    grid_y, grid_x = numpy_mod.meshgrid(coords, coords, indexing="ij")
+    radius_squared = grid_x * grid_x + grid_y * grid_y
+    spec_core = numpy_mod.exp(-((grid_x + 0.12) ** 2 + (grid_y + 0.25) ** 2) * 5.2) * 0.68
+    rim_gloss = numpy_mod.exp(-numpy_mod.square((numpy_mod.sqrt(numpy_mod.maximum(radius_squared, 1e-5)) - 0.88) * 5.0)) * 0.30
+    intensity = numpy_mod.where(radius_squared <= 1.02, numpy_mod.clip(spec_core + rim_gloss, 0.0, 1.0), 0.0)
+    rgb = numpy_mod.stack([intensity * 255.0, intensity * 246.0, intensity * 242.0, numpy_mod.full_like(intensity, 255.0)], axis=-1).astype(numpy_mod.uint8)
+    return Image.fromarray(rgb, mode="RGBA")
+
+
+def create_packed_matcap_atlas(
+    mat_paths_by_role: dict[str, list[Path | str | None]] | None,
+    fallback_mat_paths: list[Path | str | None],
+    assets_root: Path | None,
+) -> Image.Image:
+    """Pack role-specific MatCap quadrants (512x512): TL=Hair, TR=Skin, BL=Cloth, BR=Accent."""
+    if not mat_paths_by_role:
+        return find_best_matcap_image_for_mats(fallback_mat_paths, assets_root)
+    atlas_img = Image.new("RGBA", (512, 512), (0, 0, 0, 255))
+    black_tile = Image.new("RGBA", (256, 256), (0, 0, 0, 255))
+    role_specs = (
+        ("hair", (0, 0), create_default_studio_matcap(256)),
+        ("skin", (256, 0), create_skin_oil_matcap(256)),
+        ("cloth", (0, 256), black_tile),
+        ("accent", (256, 256), create_default_studio_matcap(256)),
+    )
+    for role_key, dest_origin, role_default in role_specs:
+        role_mats = list(mat_paths_by_role.get(role_key) or ())
+        tile_img = role_default
+        if role_mats:
+            eligible_mats = []
+            for mat_item in role_mats:
+                if not mat_item:
+                    continue
+                parsed_role = parse_liltoon_mat_file(mat_item, assets_root=assets_root)
+                role_floats = parsed_role.get("floats", {})
+                role_colors = parsed_role.get("colors", {})
+                if not parsed_role["tex_guids"].get("_MatCapTex") or role_floats.get("_UseMatCap", 0.0) < 0.5:
+                    continue
+                if role_key in ("skin", "cloth"):
+                    blend_mode_val = int(round(float(role_floats.get("_MatCapBlendMode", 1.0))))
+                    if blend_mode_val not in (1, 2):
+                        continue
+                    if role_key == "cloth":
+                        matcap_alpha = float((role_colors.get("_MatCapColor") or (1.0, 1.0, 1.0, 0.0))[3])
+                        if not (role_floats.get("_UseReflection", 0.0) >= 0.5 or role_floats.get("_Metallic", 0.0) >= 0.35 or matcap_alpha >= 0.35):
+                            continue
+                eligible_mats.append(mat_item)
+            if eligible_mats:
+                tile_img = find_best_matcap_image_for_mats(eligible_mats, assets_root)
+        atlas_img.paste(_flatten_matcap_on_black(tile_img, 256), dest_origin)
+    return atlas_img
 
 
 def generate_character_vtoon_assets(
@@ -590,6 +775,7 @@ def generate_character_vtoon_assets(
     assets_root: Path | None = None,
     sync_dirs: list[Path] | None = None,
     extra_eye_rects: list[tuple[float, float, float, float]] | None = None,
+    mat_paths_by_role: dict[str, list[Path | str | None]] | None = None,
 ) -> tuple[Path, Path]:
     """Build vtoon_lut_<slug>.png, vtoon_matcap_<slug>.png, and update GTAVVToon.ini."""
     package_dir = Path(package_dir)
@@ -604,7 +790,7 @@ def generate_character_vtoon_assets(
     lut_img = create_character_lut_image(lut_regions, lut_size=512, extra_eye_rects=extra_eye_rects)
     lut_img.save(lut_path)
 
-    matcap_img = find_best_matcap_image_for_mats(mat_paths_for_matcap or [], assets_root)
+    matcap_img = create_packed_matcap_atlas(mat_paths_by_role, mat_paths_for_matcap or [], assets_root)
     matcap_img.save(matcap_path)
 
     ini_targets = [package_dir / "GTAVVToon.ini"]

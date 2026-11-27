@@ -1134,14 +1134,49 @@ def parse_offset_triple(raw_offset: Optional[str]) -> Tuple[float, float, float]
         return (0.0, 0.0, 0.0)
 
 
+def _is_closed_thin_shell_face(
+    bvh_tree: Any,
+    face_item: Any,
+    max_shell_thickness: float = 0.004,
+) -> bool:
+    """Return True when `face_item` already has an opposite-facing wall within thin shell thickness."""
+    face_norm = face_item.normal
+    if face_norm.length_squared <= 1e-12:
+        return False
+    face_center = face_item.calc_center_median()
+    hit_loc, hit_norm, hit_idx, _hit_dist = bvh_tree.ray_cast(
+        face_center - face_norm * 2e-5, -face_norm, float(max_shell_thickness)
+    )
+    if (
+        hit_idx is not None
+        and hit_idx != face_item.index
+        and hit_norm is not None
+        and hit_norm.dot(face_norm) < -0.35
+    ):
+        return True
+    near_radius = min(0.0022, float(max_shell_thickness))
+    for near_loc, near_norm, near_idx, _near_dist in bvh_tree.find_nearest_range(
+        face_center - face_norm * 0.0008, near_radius
+    ):
+        if near_idx == face_item.index or near_norm is None:
+            continue
+        if near_norm.dot(face_norm) < -0.35 and (near_loc - face_center).dot(face_norm) < -1e-5:
+            return True
+    return False
+
+
 def duplicate_double_sided_backfaces(
     mesh_obj: Any,
     material_indices: Optional[Sequence[int]] = None,
-    normal_offset: float = 0.00035,
+    normal_offset: float = 0.00012,
+    skip_closed_shell: bool = True,
+    max_shell_thickness: float = 0.004,
+    exclude_polys: Optional[set[int]] = None,
 ) -> int:
-    """Duplicate selected double-sided faces along smooth vertex normals with flipped winding."""
+    """Duplicate open single-sided backfaces with flipped winding, skipping closed double-walled geometry."""
     import bmesh
     from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
 
     mesh_data = getattr(mesh_obj, "data", None)
     if mesh_data is None or not getattr(mesh_data, "polygons", None):
@@ -1150,12 +1185,28 @@ def duplicate_double_sided_backfaces(
     bmesh_mod = bmesh.new()
     bmesh_mod.from_mesh(mesh_data)
     bmesh_mod.faces.ensure_lookup_table()
+    bmesh_mod.faces.index_update()
     bmesh_mod.normal_update()
-    src_faces = [
+    excluded = exclude_polys or set()
+    raw_src_faces = [
         face_item
         for face_item in list(bmesh_mod.faces)
-        if target_set is None or int(face_item.material_index) in target_set
+        if int(face_item.index) not in excluded and (target_set is None or int(face_item.material_index) in target_set)
     ]
+    if not raw_src_faces:
+        bmesh_mod.free()
+        return 0
+    if skip_closed_shell:
+        bvh_tree = BVHTree.FromBMesh(bmesh_mod, epsilon=1e-6)
+        src_faces = [
+            face_item
+            for face_item in raw_src_faces
+            if not _is_closed_thin_shell_face(
+                bvh_tree, face_item, max_shell_thickness=max_shell_thickness
+            )
+        ]
+    else:
+        src_faces = raw_src_faces
     if not src_faces:
         bmesh_mod.free()
         return 0
@@ -1188,3 +1239,384 @@ def duplicate_double_sided_backfaces(
     bmesh_mod.free()
     mesh_data.update()
     return len(dup_faces)
+
+
+_NON_SKIN_ROLE_TOKENS = frozenset(
+    {
+        "hair", "kami", "eyelash", "eyebrow", "lash", "brow", "iris", "cornea",
+        "pupil", "teeth", "tooth", "tongue", "mouth", "nail", "cloth", "outfit",
+        "dress", "shirt", "pant", "panty", "panties", "short", "shorts", "skirt",
+        "bra", "bikini", "underwear", "sock", "socks", "stocking", "stockings",
+        "tight", "tights", "shoe", "shoes", "boot", "boots", "heel", "heels",
+        "slipper", "slippers", "hoodie", "jacket", "coat", "cape", "apron",
+        "choker", "collar", "ribbon", "bow", "tie", "belt", "strap", "bag",
+        "watch", "metal", "silver", "gold", "pin", "halo", "glasses", "megane",
+        "hat", "beret", "ear", "ears", "tail", "horn", "wing", "pearl",
+        "headset", "alpha", "overlay", "boxer", "boxerpants",
+    }
+)
+
+
+def is_face_mesh_or_material_candidate(
+    mesh_obj: Any,
+    strip_suffix_func: Optional[Callable[[str], str]] = None,
+) -> bool:
+    """Return True only when a mesh represents a face/head asset that may carry custom anime face normals."""
+    raw_name = str(getattr(mesh_obj, "name", mesh_obj) or "").strip()
+    clean_name = strip_suffix_func(raw_name).lower() if strip_suffix_func else strip_blender_numeric_suffix(raw_name)
+    name_tokens = {tok for tok in re.split(r"[^a-z0-9]+", clean_name) if tok}
+    if clean_name in ("face", "head", "kao") or bool(name_tokens & {"face", "head", "kao"}):
+        return True
+
+    mesh_data = getattr(mesh_obj, "data", None)
+    for mat_slot in getattr(mesh_data, "materials", ()) or ():
+        if mat_slot is None:
+            continue
+        mat_name = str(getattr(mat_slot, "name", "") or "").lower()
+        mat_u_name = str(mat_slot.get("vrc2gtav_mat_name", "") or "").lower() if hasattr(mat_slot, "get") else ""
+        for mat_label in (mat_name, mat_u_name):
+            if ("face" in mat_label or "kao" in mat_label) and "alpha" not in mat_label:
+                return True
+
+    shape_keys = getattr(mesh_data, "shape_keys", None)
+    key_blocks = getattr(shape_keys, "key_blocks", ()) or ()
+    for key_item in key_blocks:
+        low_key = str(getattr(key_item, "name", "") or "").lower()
+        if any(tok in low_key for tok in ("vrc.v_", "wink", "blink", "eye_close", "mabataki")):
+            return True
+    return False
+
+
+def classify_skin_material_role(
+    mat_name: str,
+    source_obj_name: str = "",
+    diffuse_src: str = "",
+    alpha_mode: str = "opaque",
+    is_skin_source_obj: Optional[bool] = None,
+) -> str:
+    """Classify a material slot generically into `'face'`, `'body_skin'`, or `'other'`."""
+    low_mat = str(mat_name or "").strip().lower()
+    low_obj = strip_blender_numeric_suffix(str(source_obj_name or "").strip())
+    low_tex = Path(str(diffuse_src or "").strip()).stem.lower() if diffuse_src else ""
+
+    is_face_overlay = any(
+        tok in low_mat
+        for tok in ("eyelash", "eyebrow", "highlight", "cornea", "alpha", "blush", "cheek", "tear", "decal", "overlay", "mask", "glasses", "lens", "chain")
+    )
+    if ("face" in low_mat or low_mat in ("head", "kao") or "face" in low_tex) and not is_face_overlay:
+        return "face"
+
+    if str(alpha_mode or "opaque").lower() != "opaque":
+        return "other"
+
+    mat_tokens = {tok for tok in re.split(r"[^a-z0-9]+", low_mat) if tok}
+    tex_tokens = {tok for tok in re.split(r"[^a-z0-9]+", low_tex) if tok}
+    if mat_tokens & _NON_SKIN_ROLE_TOKENS:
+        return "other"
+    if any(tok in low_mat for tok in ("hair", "cloth", "hoodie", "pant", "boxer", "headset", "shoe", "slipper", "choker", "collar", "alpha")):
+        return "other"
+
+    if (
+        "body" in mat_tokens
+        or "skin" in mat_tokens
+        or "hada" in mat_tokens
+        or "karada" in mat_tokens
+        or "body" in tex_tokens
+        or "skin" in tex_tokens
+        or "_body" in low_mat
+        or "_body" in low_tex
+    ):
+        return "body_skin"
+
+    if is_skin_source_obj:
+        return "body_skin"
+    if low_obj and is_skin_source_obj is None:
+        obj_tokens = {tok for tok in re.split(r"[^a-z0-9]+", low_obj) if tok}
+        if (low_obj in ("body", "body_base", "skin") or low_obj.startswith("body_baked")) and not (obj_tokens & _NON_SKIN_ROLE_TOKENS):
+            return "body_skin"
+    return "other"
+
+
+def compute_smooth_neck_skin_normal(
+    vert_pos: Sequence[float],
+    smooth_vert_norm: Sequence[float],
+    neck_pos: Sequence[float],
+    head_pos: Sequence[float],
+) -> Tuple[float, float, float]:
+    """Blend smooth neck skin normals smoothly into forward anime neck normals without hard seams."""
+    neck_span = max(0.06, float(head_pos[2]) - float(neck_pos[2]))
+    z_low = float(neck_pos[2]) - 0.05 * neck_span
+    z_high = float(head_pos[2]) + 0.25 * neck_span
+    side_limit = max(0.065, 0.60 * neck_span)
+    depth_limit = float(head_pos[1]) + max(0.025, 0.25 * neck_span)
+
+    if (
+        float(vert_pos[2]) < z_low
+        or float(vert_pos[2]) > z_high
+        or float(vert_pos[1]) >= depth_limit
+        or abs(float(vert_pos[0])) >= side_limit
+    ):
+        return (float(smooth_vert_norm[0]), float(smooth_vert_norm[1]), float(smooth_vert_norm[2]))
+
+    fade_z_span = max(1e-4, 0.35 * neck_span)
+    param_z = min(1.0, max(0.0, (float(vert_pos[2]) - z_low) / fade_z_span))
+    weight_z = param_z * param_z * (3.0 - 2.0 * param_z)
+
+    side_core = side_limit * 0.65
+    weight_x = 1.0 - min(1.0, max(0.0, (abs(float(vert_pos[0])) - side_core) / max(1e-4, side_limit - side_core)))
+    depth_core = float(head_pos[1]) + 0.005 * (neck_span / 0.11)
+    weight_y = 1.0 - min(1.0, max(0.0, (float(vert_pos[1]) - depth_core) / max(1e-4, depth_limit - depth_core)))
+    blend_weight = weight_z * weight_x * weight_y
+    if blend_weight <= 1e-4:
+        return (float(smooth_vert_norm[0]), float(smooth_vert_norm[1]), float(smooth_vert_norm[2]))
+
+    scale_x = 3.5 * (0.11 / neck_span)
+    raw_x = float(vert_pos[0]) * scale_x
+    raw_y = -1.0
+    raw_z = -0.08
+    target_len = math.sqrt(raw_x * raw_x + raw_y * raw_y + raw_z * raw_z) or 1.0
+    target_x = raw_x / target_len
+    target_y = raw_y / target_len
+    target_z = raw_z / target_len
+
+    inv_weight = 1.0 - blend_weight
+    blend_x = inv_weight * float(smooth_vert_norm[0]) + blend_weight * target_x
+    blend_y = inv_weight * float(smooth_vert_norm[1]) + blend_weight * target_y
+    blend_z = inv_weight * float(smooth_vert_norm[2]) + blend_weight * target_z
+    blend_len = math.sqrt(blend_x * blend_x + blend_y * blend_y + blend_z * blend_z) or 1.0
+    return (blend_x / blend_len, blend_y / blend_len, blend_z / blend_len)
+
+
+def apply_face_and_neck_split_normals(
+    mesh_obj: Any,
+    armature_obj: Any,
+    poly_roles: Sequence[str],
+) -> Dict[str, int]:
+    """
+    Apply spherical anime face normals and smooth blended neck normals dynamically anchored to
+    `SKEL_Head` / `SKEL_Neck_1`, while resetting non-face loops from smooth vertex normals so
+    corrupted FBX custom split normals on body meshes never cause creases under RAGE shaders.
+    """
+    head_bone = armature_obj.data.bones["SKEL_Head"]
+    head_world = (armature_obj.matrix_world @ head_bone.head_local).copy()
+    neck_bone = armature_obj.data.bones.get("SKEL_Neck_1")
+    if neck_bone is not None:
+        neck_world = (armature_obj.matrix_world @ neck_bone.head_local).copy()
+        neck_pos = (float(neck_world.x), float(neck_world.y), float(neck_world.z))
+    else:
+        neck_pos = (float(head_world.x), float(head_world.y) + 0.025, float(head_world.z) - 0.11)
+    head_pos = (float(head_world.x), float(head_world.y), float(head_world.z))
+    neck_span = max(0.06, head_pos[2] - neck_pos[2])
+
+    mesh_data = mesh_obj.data
+    mesh_data.calc_normals_split()
+    custom_normals = [tuple(loop_item.normal) for loop_item in mesh_data.loops]
+    mesh_verts = mesh_data.vertices
+    mesh_loops = mesh_data.loops
+    face_loops = 0
+    neck_loops = 0
+    reset_loops = 0
+
+    face_side_lim = max(0.095, 0.86 * neck_span)
+    face_depth_lim = head_pos[1] + max(0.025, 0.23 * neck_span)
+    face_center_z = head_pos[2] + 0.45 * neck_span
+
+    for poly_seq_idx, poly_item in enumerate(mesh_data.polygons):
+        role = poly_roles[poly_seq_idx] if poly_seq_idx < len(poly_roles) else "other"
+        if role == "face":
+            for loop_idx in poly_item.loop_indices:
+                vpos = mesh_verts[mesh_loops[loop_idx].vertex_index].co
+                if vpos.y < face_depth_lim and abs(vpos.x) < face_side_lim:
+                    norm_x = vpos.x * 2.2
+                    norm_y = -1.0
+                    norm_z = (vpos.z - face_center_z) * 1.4
+                    norm_len = math.sqrt(norm_x * norm_x + norm_y * norm_y + norm_z * norm_z) or 1.0
+                    custom_normals[loop_idx] = (norm_x / norm_len, norm_y / norm_len, norm_z / norm_len)
+                    face_loops += 1
+            continue
+
+        is_body_skin = role == "body_skin"
+        is_hair_alpha = role == "hair_alpha"
+        for loop_idx in poly_item.loop_indices:
+            vert_item = mesh_verts[mesh_loops[loop_idx].vertex_index]
+            smooth_norm = (float(vert_item.normal.x), float(vert_item.normal.y), float(vert_item.normal.z))
+            reset_loops += 1
+            if is_body_skin:
+                vpos = vert_item.co
+                blended = compute_smooth_neck_skin_normal(
+                    (float(vpos.x), float(vpos.y), float(vpos.z)),
+                    smooth_norm,
+                    neck_pos,
+                    head_pos,
+                )
+                if blended != smooth_norm:
+                    neck_loops += 1
+                custom_normals[loop_idx] = blended
+            elif is_hair_alpha:
+                if smooth_norm[2] < -0.35:
+                    lift_weight = min(1.0, (-0.35 - smooth_norm[2]) / 0.65)
+                    mix_x = smooth_norm[0]
+                    mix_y = smooth_norm[1] - 0.35 * lift_weight
+                    mix_z = smooth_norm[2] + (-0.25 - smooth_norm[2]) * lift_weight
+                    mix_len = math.sqrt(mix_x * mix_x + mix_y * mix_y + mix_z * mix_z) or 1.0
+                    custom_normals[loop_idx] = (mix_x / mix_len, mix_y / mix_len, mix_z / mix_len)
+                else:
+                    custom_normals[loop_idx] = smooth_norm
+            else:
+                custom_normals[loop_idx] = smooth_norm
+
+    mesh_data.normals_split_custom_set(custom_normals)
+    mesh_data.update()
+    return {
+        "face_loops": face_loops,
+        "neck_loops": neck_loops,
+        "reset_loops": reset_loops,
+    }
+
+
+def sample_uv_min_alpha(
+    uv_pairs: Sequence[Tuple[float, float]],
+    alpha_grid: Any,
+    grid_width: int,
+    grid_height: int,
+) -> float:
+    """Return the minimum alpha in [0..1] across triangle corners, edge midpoints, and centroid."""
+    if not uv_pairs or grid_width <= 0 or grid_height <= 0:
+        return 1.0
+    sample_points: List[Tuple[float, float]] = list(uv_pairs)
+    vert_count = len(uv_pairs)
+    if vert_count >= 2:
+        for pair_idx in range(vert_count):
+            next_idx = (pair_idx + 1) % vert_count
+            sample_points.append((
+                0.5 * (uv_pairs[pair_idx][0] + uv_pairs[next_idx][0]),
+                0.5 * (uv_pairs[pair_idx][1] + uv_pairs[next_idx][1]),
+            ))
+        avg_u = sum(pair[0] for pair in uv_pairs) / float(vert_count)
+        avg_v = sum(pair[1] for pair in uv_pairs) / float(vert_count)
+        sample_points.append((avg_u, avg_v))
+
+    min_alpha = 1.0
+    for u_val, v_val in sample_points:
+        clamped_u = max(0.0, min(1.0, float(u_val)))
+        clamped_v = max(0.0, min(1.0, float(v_val)))
+        px_x = max(0, min(grid_width - 1, int(round(clamped_u * float(grid_width - 1)))))
+        px_y = max(0, min(grid_height - 1, int(round(clamped_v * float(grid_height - 1)))))
+        sampled = float(alpha_grid[px_y][px_x])
+        if sampled < min_alpha:
+            min_alpha = sampled
+    return min_alpha
+
+
+def resolve_translucent_polygons_by_atlas_alpha(
+    mesh_obj: Any,
+    atlas_image: Any,
+    target_slot_indices: Sequence[int],
+    alpha_threshold: float = 0.98,
+) -> set[int]:
+    """Identify polygons in `target_slot_indices` whose baked atlas UVs touch alpha < `alpha_threshold`."""
+    import numpy as numpy_mod
+
+    mesh_data = getattr(mesh_obj, "data", None)
+    slot_set = {int(slot_idx) for slot_idx in target_slot_indices}
+    if (
+        mesh_data is None
+        or atlas_image is None
+        or not slot_set
+        or not getattr(mesh_data, "uv_layers", None)
+    ):
+        return set()
+    img_width, img_height = int(atlas_image.size[0]), int(atlas_image.size[1])
+    if img_width <= 0 or img_height <= 0:
+        return set()
+    pixel_arr = numpy_mod.array(atlas_image.pixels[:], dtype=numpy_mod.float32)
+    alpha_grid = pixel_arr.reshape((img_height, img_width, 4))[..., 3]
+    uv_layer = mesh_data.uv_layers[0]
+    uv_data = uv_layer.data
+
+    translucent_indices: set[int] = set()
+    for poly_seq_idx, poly_item in enumerate(mesh_data.polygons):
+        if int(poly_item.material_index) not in slot_set:
+            continue
+        poly_uvs = [
+            (float(uv_data[loop_idx].uv.x), float(uv_data[loop_idx].uv.y))
+            for loop_idx in poly_item.loop_indices
+        ]
+        if sample_uv_min_alpha(poly_uvs, alpha_grid, img_width, img_height) < float(alpha_threshold):
+            translucent_indices.add(poly_seq_idx)
+    return translucent_indices
+
+
+def apply_atlas_uv_and_alpha_routing(
+    joined_mesh_obj: Any,
+    slot_regions: Dict[int, Dict[str, Any]],
+    slot_roles: Dict[int, str],
+    double_sided_slots: Sequence[int],
+    transparent_orig_slots: set[int],
+    alpha_shader_mat: Any,
+    atlas_img: Any,
+    default_region: Dict[str, Any],
+) -> List[str]:
+    """Pack slot UVs, duplicate non-translucent-hair double-sided sheets, and route translucent UVs to ped_alpha."""
+    unique_mats, mat_ptr_to_idx, slot_remap = [], {}, {}
+    for old_idx, mat_ref in enumerate(list(joined_mesh_obj.data.materials)):
+        mat_key_name = mat_ref.name if mat_ref is not None else ""
+        if mat_key_name not in mat_ptr_to_idx:
+            mat_ptr_to_idx[mat_key_name] = len(unique_mats)
+            unique_mats.append(mat_ref)
+        slot_remap[old_idx] = mat_ptr_to_idx[mat_key_name]
+    uv_layer = joined_mesh_obj.data.uv_layers[0]
+    uv_layer.name = "UVMap 0"
+    for poly_item in joined_mesh_obj.data.polygons:
+        reg_spec = slot_regions.get(int(poly_item.material_index), default_region)
+        off_u, off_v = float(reg_spec["u_offset"]), float(reg_spec["v_offset"])
+        scl_u, scl_v = float(reg_spec["u_scale"]), float(reg_spec["v_scale"])
+        for loop_idx in poly_item.loop_indices:
+            uv_coord = uv_layer.data[loop_idx].uv
+            local_u = max(0.001, min(0.999, uv_coord.x % 1.0 if (uv_coord.x < 0.0 or uv_coord.x > 1.0) else uv_coord.x))
+            local_v = max(0.001, min(0.999, uv_coord.y % 1.0 if (uv_coord.y < 0.0 or uv_coord.y > 1.0) else uv_coord.y))
+            uv_coord.x = local_u * scl_u + off_u
+            uv_coord.y = local_v * scl_v + off_v
+    if double_sided_slots:
+        exclude_hair_trans: set[int] = set()
+        if transparent_orig_slots and alpha_shader_mat is not None:
+            pre_trans = resolve_translucent_polygons_by_atlas_alpha(
+                joined_mesh_obj, atlas_img, sorted(transparent_orig_slots), alpha_threshold=0.995
+            )
+            exclude_hair_trans = {
+                idx for idx in pre_trans
+                if slot_roles.get(int(joined_mesh_obj.data.polygons[idx].material_index), "other") not in ("body_skin", "face")
+            }
+        dup_faces = duplicate_double_sided_backfaces(
+            joined_mesh_obj, material_indices=double_sided_slots, normal_offset=0.00012, exclude_polys=exclude_hair_trans
+        )
+        print(f"[VToon] Duplicated {dup_faces} open-sheet double-sided faces for slots {double_sided_slots}", flush=True)
+    poly_count = len(joined_mesh_obj.data.polygons)
+    poly_orig_slots = [int(poly_item.material_index) for poly_item in joined_mesh_obj.data.polygons]
+    poly_roles = [slot_roles.get(orig_slot, "other") for orig_slot in poly_orig_slots]
+    translucent_poly_set: set[int] = set()
+    if transparent_orig_slots and alpha_shader_mat is not None:
+        translucent_poly_set = resolve_translucent_polygons_by_atlas_alpha(
+            joined_mesh_obj, atlas_img, sorted(transparent_orig_slots), alpha_threshold=0.995
+        )
+        for poly_seq_idx in translucent_poly_set:
+            if poly_seq_idx < len(poly_roles) and poly_roles[poly_seq_idx] not in ("body_skin", "face"):
+                poly_roles[poly_seq_idx] = "hair_alpha"
+        opaque_kept = sum(
+            1 for poly_seq_idx, orig_slot in enumerate(poly_orig_slots)
+            if orig_slot in transparent_orig_slots and poly_seq_idx not in translucent_poly_set
+        )
+        print(f"[VToon] Routed {len(translucent_poly_set)} translucent UV polygons to ped_alpha.sps (kept {opaque_kept} opaque polygons on ped_default).", flush=True)
+    alpha_shader_slot_idx = -1
+    if translucent_poly_set and alpha_shader_mat is not None:
+        alpha_shader_slot_idx = len(unique_mats)
+        unique_mats.append(alpha_shader_mat)
+    joined_mesh_obj.data.materials.clear()
+    for unique_mat in unique_mats:
+        joined_mesh_obj.data.materials.append(unique_mat)
+    for poly_seq_idx, poly_item in enumerate(joined_mesh_obj.data.polygons):
+        poly_item.material_index = (
+            alpha_shader_slot_idx if (poly_seq_idx in translucent_poly_set and alpha_shader_slot_idx >= 0)
+            else slot_remap.get(poly_orig_slots[poly_seq_idx], 0)
+        )
+    return poly_roles

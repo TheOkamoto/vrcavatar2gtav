@@ -129,7 +129,7 @@ def compile_vtoon_asi(
     if game_dir is not None and game_dir.is_dir():
         _sync_bundle_into(game_dir)
 
-        for pkg_folder in ("1_Franklin_Shinano_Casual", "3_Trevor_Miltina_Maid"):
+        for pkg_folder in ("player_one", "player_two"):
             _sync_bundle_into(_REPO_ROOT / pkg_folder / "5_rpf_package")
 
     return output_asi
@@ -137,7 +137,7 @@ def compile_vtoon_asi(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build GTAVVToon.asi with MSVC x64")
-    default_pkg = _REPO_ROOT / "2_Michael_Shinano_EternalReunion" / "5_rpf_package"
+    default_pkg = _REPO_ROOT / "player_zero" / "5_rpf_package"
     parser.add_argument("--output-asi", default=str(default_pkg / "GTAVVToon.asi"))
     parser.add_argument("--game-dir", default="")
     parser.add_argument("--no-deploy", action="store_true", help="Compile without copying into game or sibling packages")
